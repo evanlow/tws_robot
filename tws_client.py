@@ -112,33 +112,89 @@ class TradeApp(EWrapper, EClient):
             self._add_default_market_data()
             return
         
+        # Separate stocks from options for different handling
+        stocks = {}
+        options = {}
+        
         for symbol, position_data in active_positions.items():
-            # Set up market data request
-            req_id = self.next_market_data_id
             contract = position_data['contract']
             
-            # Update global dictionaries
-            contract_request_dictionary[req_id] = symbol
-            history_request_dictionary[self.next_historical_data_id] = symbol
-            
-            # Initialize data structures
-            self.marketdata[symbol] = {}
-            self.ohlc_data[symbol] = {}
-            
-            # Request real-time market data
-            self.reqMktData(req_id, contract, "", False, False, [])
-            
-            # Request historical data
-            self.reqHistoricalData(self.next_historical_data_id, contract, "", "1 D", "1 min", "TRADES", 1, 2, True, [])
-            
-            print(f"Requested market data for {symbol} (Position: {position_data['position']})")
-            
-            self.next_market_data_id += 1
-            self.next_historical_data_id += 1
-            
-            sleep(0.1)  # Small delay between requests
+            # Check if it's an options contract (contains put/call indicators)
+            if any(indicator in symbol for indicator in ['P00', 'C00']) or contract.secType in ['OPT', 'FOP']:
+                options[symbol] = position_data
+                print(f"Detected options contract: {symbol} (SecType: {contract.secType})")
+            else:
+                stocks[symbol] = position_data
+        
+        # Process stocks first (more reliable market data)
+        for symbol, position_data in stocks.items():
+            self._request_stock_market_data(symbol, position_data)
+        
+        # Process options with special handling
+        if options:
+            print(f"Found {len(options)} options contracts. Options market data may be limited during closed hours.")
+            for symbol, position_data in options.items():
+                self._request_options_market_data(symbol, position_data)
         
         self.market_data_requested = True
+    
+    def _request_stock_market_data(self, symbol, position_data):
+        """Request market data for stock positions"""
+        global contract_request_dictionary, history_request_dictionary
+        
+        req_id = self.next_market_data_id
+        contract = position_data['contract']
+        
+        # For stocks, ensure we have proper contract definition
+        if contract.secType == '' or contract.secType is None:
+            contract.secType = 'STK'
+        if contract.currency == '' or contract.currency is None:
+            contract.currency = 'USD'
+        if contract.exchange == '' or contract.exchange is None:
+            contract.exchange = 'SMART'  # Let IBKR route to best exchange
+        
+        # Update global dictionaries
+        contract_request_dictionary[req_id] = symbol
+        history_request_dictionary[self.next_historical_data_id] = symbol
+        
+        # Initialize data structures
+        self.marketdata[symbol] = {}
+        self.ohlc_data[symbol] = {}
+        
+        # Request real-time market data
+        self.reqMktData(req_id, contract, "", False, False, [])
+        
+        # Request historical data (only for stocks during market hours)
+        self.reqHistoricalData(self.next_historical_data_id, contract, "", "1 D", "1 min", "TRADES", 1, 2, True, [])
+        
+        print(f"Requested stock market data for {symbol} (Position: {position_data['position']})")
+        
+        self.next_market_data_id += 1
+        self.next_historical_data_id += 1
+        
+        sleep(0.1)
+    
+    def _request_options_market_data(self, symbol, position_data):
+        """Request market data for options positions with limited scope"""
+        global contract_request_dictionary, history_request_dictionary
+        
+        req_id = self.next_market_data_id
+        contract = position_data['contract']
+        
+        # Update global dictionaries
+        contract_request_dictionary[req_id] = symbol
+        
+        # Initialize data structures (no OHLC for options to reduce complexity)
+        self.marketdata[symbol] = {}
+        
+        # Only request real-time market data for options (skip historical)
+        self.reqMktData(req_id, contract, "", False, False, [])
+        
+        print(f"Requested options market data for {symbol} (Position: {position_data['position']}) - Live data only")
+        
+        self.next_market_data_id += 1
+        
+        sleep(0.2)  # Longer delay for options
 
     def _add_default_market_data(self):
         """Add default market data (SPY) when no portfolio positions exist"""
@@ -170,21 +226,52 @@ class TradeApp(EWrapper, EClient):
         self.market_data_requested = True
 
     def tickPrice(self, reqId: TickerId, tickType: TickType, price: float, attrib: TickAttrib):
-        if tickType == 1:
-            self.marketdata[contract_request_dictionary[reqId]]['bid'] = price
-        elif tickType == 2:
-            self.marketdata[contract_request_dictionary[reqId]]['ask'] = price
-        elif tickType == 4:
-            self.marketdata[contract_request_dictionary[reqId]]['last'] = price
+        symbol = contract_request_dictionary.get(reqId)
+        if not symbol:
+            return
+            
+        if tickType == 1:  # Bid
+            self.marketdata[symbol]['bid'] = price
+        elif tickType == 2:  # Ask
+            self.marketdata[symbol]['ask'] = price
+        elif tickType == 4:  # Last
+            self.marketdata[symbol]['last'] = price
 
-    def historicalData(self, reqId: int, bar: BarData):
+    def error(self, reqId: TickerId, errorTime, errorCode: int, errorString: str, advancedOrderRejectJson=""):
+        """Handle errors from the API - Correct signature with errorTime parameter"""
+        if reqId in contract_request_dictionary:
+            symbol = contract_request_dictionary[reqId]
+            # Common market data errors
+            if errorCode in [200, 162, 354]:  # No security definition, Historical market data not available, etc.
+                print(f"Market data issue for {symbol}: {errorString}")
+            elif errorCode == 10167:  # Delayed market data not enabled
+                print(f"Market data permissions needed for {symbol}: {errorString}")
+            else:
+                print(f"Error {errorCode} for {symbol}: {errorString}")
+        else:
+            # Handle general errors
+            if errorCode == 502:
+                print(f"Connection error: {errorString}")
+            elif errorCode in [1100, 1101, 1102]:
+                print(f"Connectivity issue: {errorString}")
+            else:
+                print(f"Error {errorCode}: {errorString}")
+
+    def historicalData(self, reqId: TickerId, bar: BarData):
+        symbol = history_request_dictionary.get(reqId)
+        if not symbol:
+            return
+            
         time = bar.date
-        self.ohlc_data[history_request_dictionary[reqId]][time] = {
-            'open': bar.open, 
-            'high': bar.high, 
+        if symbol not in self.ohlc_data:
+            self.ohlc_data[symbol] = {}
+            
+        self.ohlc_data[symbol][time] = {
+            'open': bar.open,
+            'high': bar.high,
             'low': bar.low,
-            'close': bar.close, 
-            'volume': decimalMaxString(bar.volume)
+            'close': bar.close,
+            'volume': bar.volume
         }
 
     def graceful_disconnect(self):
@@ -255,11 +342,24 @@ def run_with_timeout(app, timeout_seconds=None):
                 bid = data.get('bid', 'N/A')
                 ask = data.get('ask', 'N/A')
                 last = data.get('last', 'N/A')
-                print(f'  {symbol}: Bid ${bid} | Ask ${ask} | Last ${last}')
+                
+                # Check if we have any real data
+                has_data = any(val != 'N/A' for val in [bid, ask, last])
+                data_status = "✓" if has_data else "⚠️"
+                
+                # Identify contract type
+                contract_type = "Options" if any(indicator in symbol for indicator in ['P00', 'C00']) else "Stock"
+                
+                print(f'  {data_status} {symbol} ({contract_type}): Bid ${bid} | Ask ${ask} | Last ${last}')
         else:
             print('Market Data: Waiting for data...')
         
-        print('OHLC Data length:', {k: len(v) for k, v in app.ohlc_data.items()})
+        # Show OHLC data status
+        ohlc_status = {k: len(v) for k, v in app.ohlc_data.items()}
+        if any(count > 0 for count in ohlc_status.values()):
+            print('OHLC Data:', {k: f"{v} bars" for k, v in ohlc_status.items() if v > 0})
+        else:
+            print('OHLC Data: No historical data received')
         print('---\n')
         
         sleep(1)
