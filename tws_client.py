@@ -175,11 +175,23 @@ class TradeApp(EWrapper, EClient):
         sleep(0.1)
     
     def _request_options_market_data(self, symbol, position_data):
-        """Request market data for options positions with limited scope"""
+        """Request market data for options positions with proper exchange setup"""
         global contract_request_dictionary, history_request_dictionary
         
         req_id = self.next_market_data_id
         contract = position_data['contract']
+        
+        # Ensure options contracts have proper exchange and routing
+        if not contract.exchange or contract.exchange == '':
+            contract.exchange = 'SMART'  # Let IBKR route to best exchange
+        
+        # For options, ensure we have the right security type
+        if contract.secType != 'OPT':
+            contract.secType = 'OPT'
+            
+        # Ensure currency is set
+        if not contract.currency or contract.currency == '':
+            contract.currency = 'USD'
         
         # Update global dictionaries
         contract_request_dictionary[req_id] = symbol
@@ -188,6 +200,7 @@ class TradeApp(EWrapper, EClient):
         self.marketdata[symbol] = {}
         
         # Only request real-time market data for options (skip historical)
+        print(f"Requesting options data for {symbol} on exchange: {contract.exchange}")
         self.reqMktData(req_id, contract, "", False, False, [])
         
         print(f"Requested options market data for {symbol} (Position: {position_data['position']}) - Live data only")
@@ -225,6 +238,43 @@ class TradeApp(EWrapper, EClient):
         print(f"Added default market data for {symbol}")
         self.market_data_requested = True
 
+    def _parse_option_symbol(self, symbol):
+        """Parse option symbol to extract type, strike, and expiry"""
+        try:
+            # Example: "GOOG  260320P00200000" -> Put, $200 strike, 2026-03-20 expiry
+            if 'P00' in symbol:
+                option_type = "PUT"
+                parts = symbol.split('P00')
+            elif 'C00' in symbol:
+                option_type = "CALL"
+                parts = symbol.split('C00')
+            else:
+                return "UNKNOWN", "N/A", "N/A"
+            
+            # Extract expiry date (YYMMDD format)
+            date_part = parts[0].strip().split()[-1]  # Get the date part
+            if len(date_part) == 6:
+                year = "20" + date_part[:2]
+                month = date_part[2:4]
+                day = date_part[4:6]
+                expiry = f"{year}-{month}-{day}"
+            else:
+                expiry = "Unknown"
+            
+            # Extract strike price
+            strike_part = parts[1] if len(parts) > 1 else "0"
+            if len(strike_part) >= 5:
+                # Convert from format like "200000" to "200.00"
+                strike_dollars = int(strike_part) / 1000
+                strike = f"{strike_dollars:.2f}"
+            else:
+                strike = "Unknown"
+                
+            return option_type, strike, expiry
+            
+        except Exception as e:
+            return "UNKNOWN", "N/A", "N/A"
+
     def tickPrice(self, reqId: TickerId, tickType: TickType, price: float, attrib: TickAttrib):
         symbol = contract_request_dictionary.get(reqId)
         if not symbol:
@@ -246,6 +296,13 @@ class TradeApp(EWrapper, EClient):
                 print(f"Market data issue for {symbol}: {errorString}")
             elif errorCode == 10167:  # Delayed market data not enabled
                 print(f"Market data permissions needed for {symbol}: {errorString}")
+            elif errorCode == 321:  # Options exchange error
+                print(f"Options configuration issue for {symbol}: {errorString}")
+                print(f"  → Try: Enable 'Allow API initiated orders' in TWS Global Configuration")
+                print(f"  → Or: Check if {symbol} is actively trading")
+            elif errorCode in [10090, 10091]:  # Options specific errors
+                print(f"Options data error for {symbol}: {errorString}")
+                print(f"  → Your subscription includes options data, this may be a contract issue")
             else:
                 print(f"Error {errorCode} for {symbol}: {errorString}")
         else:
@@ -335,31 +392,104 @@ def run_with_timeout(app, timeout_seconds=None):
         else:
             print('Portfolio: Loading...')
         
-        # Enhanced market data display
+        # Enhanced market data display with better insights
         if app.marketdata:
             print(f'Market Data: {len(app.marketdata)} symbols')
+            
+            # Separate stocks and options for better organization
+            stocks = {}
+            options = {}
+            
             for symbol, data in app.marketdata.items():
+                if any(indicator in symbol for indicator in ['P00', 'C00']):
+                    options[symbol] = data
+                else:
+                    stocks[symbol] = data
+            
+            # Display stocks first (usually more reliable data)
+            for symbol, data in stocks.items():
                 bid = data.get('bid', 'N/A')
                 ask = data.get('ask', 'N/A')
                 last = data.get('last', 'N/A')
                 
-                # Check if we have any real data
-                has_data = any(val != 'N/A' for val in [bid, ask, last])
-                data_status = "✓" if has_data else "⚠️"
+                # Calculate bid-ask spread for stocks
+                if bid != 'N/A' and ask != 'N/A':
+                    spread = round(float(ask) - float(bid), 2)
+                    spread_pct = round((spread / float(last)) * 100, 3) if last != 'N/A' else 0
+                    spread_info = f" | Spread: ${spread} ({spread_pct}%)"
+                else:
+                    spread_info = ""
                 
-                # Identify contract type
-                contract_type = "Options" if any(indicator in symbol for indicator in ['P00', 'C00']) else "Stock"
-                
-                print(f'  {data_status} {symbol} ({contract_type}): Bid ${bid} | Ask ${ask} | Last ${last}')
+                # Show market movement context
+                if last != 'N/A':
+                    # Get portfolio position for context
+                    position_data = app.portfolio.get(symbol, {})
+                    position = position_data.get('position', '0')
+                    market_val = position_data.get('marketValue', 'N/A')
+                    
+                    print(f'  ✓ {symbol} (Stock): Bid ${bid} | Ask ${ask} | Last ${last}{spread_info}')
+                    if market_val != 'N/A':
+                        print(f'    └─ Position: {position} shares | Market Value: ${market_val}')
+                else:
+                    print(f'  ⚠️ {symbol} (Stock): No market data available')
+            
+            # Display options with better context
+            if options:
+                print(f'  \n  Options Contracts ({len(options)}):')
+                for symbol, data in options.items():
+                    # Parse option details from symbol
+                    option_type, strike, expiry = app._parse_option_symbol(symbol)
+                    
+                    # Get position context
+                    position_data = app.portfolio.get(symbol, {})
+                    position = position_data.get('position', '0')
+                    avg_cost = position_data.get('averageCost', 'N/A')
+                    unrealized_pnl = position_data.get('unrealizedPNL', 'N/A')
+                    
+                    # Market data status
+                    bid = data.get('bid', 'N/A')
+                    ask = data.get('ask', 'N/A')
+                    last = data.get('last', 'N/A')
+                    has_data = any(val != 'N/A' for val in [bid, ask, last])
+                    
+                    status_icon = "✓" if has_data else "⚠️"
+                    
+                    print(f'  {status_icon} {symbol}')
+                    print(f'    └─ {option_type} | Strike: ${strike} | Exp: {expiry} | Pos: {position} | P&L: ${unrealized_pnl}')
+                    
+                    if has_data:
+                        # Show bid/ask spread information for options
+                        bid_val = float(bid) if bid != 'N/A' else None
+                        ask_val = float(ask) if ask != 'N/A' else None
+                        
+                        if bid_val and ask_val:
+                            spread = round(ask_val - bid_val, 3)
+                            mid_price = round((bid_val + ask_val) / 2, 3)
+                            print(f'    └─ Bid: ${bid} | Ask: ${ask} | Last: ${last} | Mid: ${mid_price} | Spread: ${spread}')
+                        else:
+                            print(f'    └─ Bid: ${bid} | Ask: ${ask} | Last: ${last}')
+                        
+                        # Add context for missing last price
+                        if last == 'N/A' and bid != 'N/A' and ask != 'N/A':
+                            print(f'    └─ ℹ️ No recent trades - use bid/ask for market orders')
+                    else:
+                        print(f'    └─ No live quotes (checking exchange configuration...)')
         else:
             print('Market Data: Waiting for data...')
         
-        # Show OHLC data status
+        # Enhanced OHLC data status with time info
         ohlc_status = {k: len(v) for k, v in app.ohlc_data.items()}
         if any(count > 0 for count in ohlc_status.values()):
-            print('OHLC Data:', {k: f"{v} bars" for k, v in ohlc_status.items() if v > 0})
+            print(f'\nHistorical Data:')
+            for symbol, count in ohlc_status.items():
+                if count > 0:
+                    # Calculate time span (assuming 1-minute bars)
+                    hours = count // 60
+                    minutes = count % 60
+                    time_span = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+                    print(f'  {symbol}: {count} bars ({time_span} of data)')
         else:
-            print('OHLC Data: No historical data received')
+            print('Historical Data: No historical data received')
         print('---\n')
         
         sleep(1)
