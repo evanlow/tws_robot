@@ -87,9 +87,51 @@ class MarketStatusChecker:
         
         next_open = current_time.replace(hour=9, minute=30, second=0, microsecond=0)
         if days_ahead > 0:
-            next_open = next_open.replace(day=current_time.day + days_ahead)
+            from datetime import timedelta
+            next_open = next_open + timedelta(days=days_ahead)
         
         return next_open.strftime('%Y-%m-%d %H:%M:%S %Z')
+    
+    def _calculate_time_remaining(self, current_time, target_time_str) -> str:
+        """Calculate time remaining until target time"""
+        try:
+            # Parse the target time string back to datetime
+            if target_time_str.endswith('EST') or target_time_str.endswith('EDT'):
+                target_time_str = target_time_str[:-4].strip()
+            
+            # For same-day opens_at (like "09:30:00 EST")
+            if len(target_time_str.split()) == 1:  # Just time, no date
+                target_time = current_time.replace(
+                    hour=int(target_time_str.split(':')[0]),
+                    minute=int(target_time_str.split(':')[1]),
+                    second=int(target_time_str.split(':')[2]),
+                    microsecond=0
+                )
+            else:  # Full datetime string
+                from datetime import datetime
+                target_time = datetime.strptime(target_time_str, '%Y-%m-%d %H:%M:%S')
+                target_time = self.ny_tz.localize(target_time)
+            
+            # Calculate difference
+            time_diff = target_time - current_time
+            
+            if time_diff.total_seconds() <= 0:
+                return "Market should be open now"
+            
+            # Convert to hours and minutes
+            total_minutes = int(time_diff.total_seconds() / 60)
+            hours = total_minutes // 60
+            minutes = total_minutes % 60
+            
+            if hours == 0:
+                return f"({minutes} minutes)"
+            elif minutes == 0:
+                return f"({hours} hour{'s' if hours != 1 else ''})"
+            else:
+                return f"({hours} hour{'s' if hours != 1 else ''} and {minutes} minute{'s' if minutes != 1 else ''})"
+                
+        except Exception as e:
+            return "(time calculation error)"
     
     def print_market_status(self) -> bool:
         """Print market status and return True if open"""
@@ -105,11 +147,26 @@ class MarketStatusChecker:
             
             if status['is_open']:
                 print(f"Market closes at: {status.get('closes_at', 'N/A')}")
+                # Calculate time until close
+                now_ny = datetime.now(self.ny_tz)
+                time_to_close = self._calculate_time_remaining(now_ny, status.get('closes_at', ''))
+                if time_to_close and not time_to_close.startswith('(time'):
+                    print(f"Time until close: {time_to_close}")
             else:
                 if 'opens_at' in status:
                     print(f"Market opens at: {status['opens_at']}")
+                    # Calculate time until open
+                    now_ny = datetime.now(self.ny_tz)
+                    time_to_open = self._calculate_time_remaining(now_ny, status['opens_at'])
+                    if time_to_open and not time_to_open.startswith('(time'):
+                        print(f"Time until open: {time_to_open}")
                 elif 'next_open' in status:
                     print(f"Next market open: {status['next_open']}")
+                    # Calculate time until next open
+                    now_ny = datetime.now(self.ny_tz)
+                    time_to_open = self._calculate_time_remaining(now_ny, status['next_open'])
+                    if time_to_open and not time_to_open.startswith('(time'):
+                        print(f"Time until open: {time_to_open}")
             
             print("="*60)
             
