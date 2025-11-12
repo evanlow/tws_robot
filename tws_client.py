@@ -12,13 +12,9 @@ import argparse
 from env_config import get_config
 from market_status import check_market_status
 
-contract_request_dictionary = {
-    1: 'AAPL',
-}
-
-history_request_dictionary = {
-    4001: 'AAPL'
-}
+# Dynamic dictionaries that will be populated based on portfolio positions
+contract_request_dictionary = {}
+history_request_dictionary = {}
 
 # Global flag for graceful shutdown
 shutdown_flag = False
@@ -44,14 +40,15 @@ class TradeApp(EWrapper, EClient):
         self.account_equity = None
         self.portfolio = {}
         self.connected = False
+        self.portfolio_loaded = False
+        self.market_data_requested = False
 
         self.marketdata = {}
-        for key, val in contract_request_dictionary.items():
-            self.marketdata[val] = {}
-
         self.ohlc_data = {}
-        for key, val in history_request_dictionary.items():
-            self.ohlc_data[val] = {}
+        
+        # Request ID counters
+        self.next_market_data_id = 1
+        self.next_historical_data_id = 4001
 
     def connectAck(self):
         """Called when connection is established"""
@@ -78,14 +75,99 @@ class TradeApp(EWrapper, EClient):
 
     def updatePortfolio(self, contract: Contract, position: Decimal, marketPrice: float, marketValue: float,
                         averageCost: float, unrealizedPNL: float, realizedPNL: float, accountName: str):
-        self.portfolio[contract.localSymbol] = {
+        symbol = contract.localSymbol or contract.symbol
+        self.portfolio[symbol] = {
             'position': decimalMaxString(position),
             'marketPrice': floatMaxString(marketPrice),
             'marketValue': floatMaxString(marketValue),
             'averageCost': floatMaxString(averageCost),
             'unrealizedPNL': floatMaxString(unrealizedPNL),
-            'realizedPNL': floatMaxString(realizedPNL)
+            'realizedPNL': floatMaxString(realizedPNL),
+            'contract': contract  # Store contract for market data requests
         }
+
+    def accountDownloadEnd(self, accountName: str):
+        """Called when account update is complete"""
+        self.portfolio_loaded = True
+        print(f"Portfolio loaded with {len(self.portfolio)} positions")
+        
+        # Now request market data for portfolio positions
+        if not self.market_data_requested and self.portfolio:
+            self._request_portfolio_market_data()
+
+    def _request_portfolio_market_data(self):
+        """Request market data for all portfolio positions"""
+        global contract_request_dictionary, history_request_dictionary
+        
+        print("Requesting market data for portfolio positions...")
+        
+        # Count non-zero positions
+        active_positions = {symbol: data for symbol, data in self.portfolio.items() 
+                          if float(data['position']) != 0}
+        
+        if not active_positions:
+            print("No active positions found in portfolio.")
+            print("Adding SPY as default market data for monitoring...")
+            # Add SPY as default when no positions
+            self._add_default_market_data()
+            return
+        
+        for symbol, position_data in active_positions.items():
+            # Set up market data request
+            req_id = self.next_market_data_id
+            contract = position_data['contract']
+            
+            # Update global dictionaries
+            contract_request_dictionary[req_id] = symbol
+            history_request_dictionary[self.next_historical_data_id] = symbol
+            
+            # Initialize data structures
+            self.marketdata[symbol] = {}
+            self.ohlc_data[symbol] = {}
+            
+            # Request real-time market data
+            self.reqMktData(req_id, contract, "", False, False, [])
+            
+            # Request historical data
+            self.reqHistoricalData(self.next_historical_data_id, contract, "", "1 D", "1 min", "TRADES", 1, 2, True, [])
+            
+            print(f"Requested market data for {symbol} (Position: {position_data['position']})")
+            
+            self.next_market_data_id += 1
+            self.next_historical_data_id += 1
+            
+            sleep(0.1)  # Small delay between requests
+        
+        self.market_data_requested = True
+
+    def _add_default_market_data(self):
+        """Add default market data (SPY) when no portfolio positions exist"""
+        global contract_request_dictionary, history_request_dictionary
+        
+        # Create SPY contract
+        spy_contract = Contract()
+        spy_contract.symbol = 'SPY'
+        spy_contract.secType = 'STK'
+        spy_contract.currency = 'USD'
+        spy_contract.exchange = 'ARCA'
+        
+        req_id = self.next_market_data_id
+        symbol = 'SPY'
+        
+        # Update global dictionaries
+        contract_request_dictionary[req_id] = symbol
+        history_request_dictionary[self.next_historical_data_id] = symbol
+        
+        # Initialize data structures
+        self.marketdata[symbol] = {}
+        self.ohlc_data[symbol] = {}
+        
+        # Request market data
+        self.reqMktData(req_id, spy_contract, "", False, False, [])
+        self.reqHistoricalData(self.next_historical_data_id, spy_contract, "", "1 D", "1 min", "TRADES", 1, 2, True, [])
+        
+        print(f"Added default market data for {symbol}")
+        self.market_data_requested = True
 
     def tickPrice(self, reqId: TickerId, tickType: TickType, price: float, attrib: TickAttrib):
         if tickType == 1:
@@ -155,8 +237,28 @@ def run_with_timeout(app, timeout_seconds=None):
         print(f'Current Time: {current_time}{timeout_info}')
         print('Balance:', app.account_balance)
         print('Equity:', app.account_equity)
-        print('Portfolio:', app.portfolio)
-        print('Market Data:', app.marketdata)
+        
+        # Enhanced portfolio display
+        if app.portfolio:
+            active_positions = {symbol: data for symbol, data in app.portfolio.items() 
+                              if float(data['position']) != 0}
+            print(f'Portfolio: {len(active_positions)} active positions out of {len(app.portfolio)} total')
+            for symbol, data in active_positions.items():
+                print(f'  {symbol}: {data["position"]} shares @ ${data["marketPrice"]} (P&L: ${data["unrealizedPNL"]})')
+        else:
+            print('Portfolio: Loading...')
+        
+        # Enhanced market data display
+        if app.marketdata:
+            print(f'Market Data: {len(app.marketdata)} symbols')
+            for symbol, data in app.marketdata.items():
+                bid = data.get('bid', 'N/A')
+                ask = data.get('ask', 'N/A')
+                last = data.get('last', 'N/A')
+                print(f'  {symbol}: Bid ${bid} | Ask ${ask} | Last ${last}')
+        else:
+            print('Market Data: Waiting for data...')
+        
         print('OHLC Data length:', {k: len(v) for k, v in app.ohlc_data.items()})
         print('---\n')
         
@@ -240,23 +342,22 @@ if __name__ == '__main__':
             print("Failed to establish connection. Please check TWS/Gateway is running.")
             sys.exit(1)
 
-        # Request account updates
+        # Request account updates (this will trigger portfolio loading)
         app.reqAccountUpdates(True, config['account'])
 
-        # Define Apple contract
-        contract = Contract()
-        contract.conId = 265598  # Apple contract ID
-        contract.exchange = 'NASDAQ'
-
-        # Subscribe to market data
-        reqId = 1
-        app.reqMktData(reqId, contract, "", False, False, [])
-
-        # Subscribe to historical data
-        req_id_historical = 4001
-        app.reqHistoricalData(req_id_historical, contract, "", "1 D", "1 min", "TRADES", 1, 2, True, [])
-
-        sleep(3)  # Allow time for initial data
+        # Wait for portfolio to load
+        print("Loading portfolio positions...")
+        max_wait = 10  # Maximum wait time in seconds
+        wait_time = 0
+        while not app.portfolio_loaded and wait_time < max_wait:
+            sleep(0.5)
+            wait_time += 0.5
+            
+        if not app.portfolio_loaded:
+            print("Warning: Portfolio data not loaded within timeout")
+        
+        # Give additional time for market data requests to be processed
+        sleep(3)
 
         # Run with optional timeout
         run_with_timeout(app, timeout_seconds)
