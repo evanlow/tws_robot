@@ -40,6 +40,7 @@ class TradeApp(EWrapper, EClient):
         self.account_equity = None
         self.portfolio = {}
         self.connected = False
+        self.ready_to_trade = False  # Set when nextValidId is received
         self.portfolio_loaded = False
         self.market_data_requested = False
 
@@ -49,22 +50,77 @@ class TradeApp(EWrapper, EClient):
         # Request ID counters
         self.next_market_data_id = 1
         self.next_historical_data_id = 4001
+        
+        # Market data type configuration
+        self._setup_market_data_type()
 
     def connectAck(self):
         """Called when connection is established"""
         print("Connection established successfully!")
         self.connected = True
+    
+    def nextValidId(self, orderId):
+        """Called when TWS sends the next valid order ID - indicates full connection"""
+        print(f"Ready to trade! Next valid order ID: {orderId}")
+        self.ready_to_trade = True
+        
+        # NOW it's safe to make API requests
+        self._configure_market_data_type()
+
+    def _setup_market_data_type(self):
+        """Initialize market data type configuration"""
+        # Market data types:
+        # 1 = Live (real-time) - requires subscription
+        # 2 = Frozen (last available) - free
+        # 3 = Delayed (15-20 min delayed) - free  
+        # 4 = Delayed frozen - free
+        
+        # Start with delayed data by default, will upgrade if live is available
+        self.market_data_type = 3  # Delayed data
+    
+    def _configure_market_data_type(self):
+        """Configure market data type based on subscription status"""
+        try:
+            # Request delayed market data initially
+            # TWS will automatically upgrade to live if user has subscriptions
+            self.reqMarketDataType(self.market_data_type)
+            print(f"Configured for market data type {self.market_data_type} (3=Delayed)")
+            
+        except Exception as e:
+            print(f"Error configuring market data type: {e}")
+
+    def marketDataType(self, reqId, marketDataType):
+        """Callback when market data type changes"""
+        data_types = {
+            1: "Real-time",
+            2: "Frozen", 
+            3: "Delayed",
+            4: "Delayed-Frozen"
+        }
+        
+        data_type_name = data_types.get(marketDataType, f"Unknown({marketDataType})")
+        print(f"Market data type set to: {data_type_name} (Type {marketDataType})")
+        self.market_data_type = marketDataType
 
     def connectionClosed(self):
         """Called when connection is closed"""
-        print("Connection closed.")
+        print("⚠️  Connection closed by TWS")
+        print("   This usually means:")
+        print("   - Another client with same ID is already connected")
+        print("   - TWS API settings prevent the connection")
+        print("   - Account mismatch or permissions issue")
         self.connected = False
 
     def error(self, reqId: TickerId, errorCode: int, errorString: str, advancedOrderRejectJson="", *args):
         """Handle errors"""
-        print(f"Error {errorCode}: {errorString}")
-        if errorCode in [502, 503, 504]:  # Connection errors
+        # Only print non-informational messages (2104, 2106, 2158 are connection OK messages)
+        if errorCode not in [2104, 2106, 2158]:
+            print(f"Error {errorCode}: {errorString}")
+        
+        # Critical connection errors
+        if errorCode in [502, 503, 504, 1100, 2110]:
             self.connected = False
+            print(f"⚠️  Critical error - connection lost")
 
     # EWrapper Functions
     def updateAccountValue(self, key: str, val: str, currency: str, accountName: str):
@@ -101,6 +157,10 @@ class TradeApp(EWrapper, EClient):
         
         print("Requesting market data for portfolio positions...")
         
+        # Import rate limiter
+        from api_rate_limiter import wait_for_rate_limit, create_historical_request_signature
+        from contract_builder import create_contract_from_portfolio_data
+        
         # Count non-zero positions
         active_positions = {symbol: data for symbol, data in self.portfolio.items() 
                           if float(data['position']) != 0}
@@ -128,13 +188,15 @@ class TradeApp(EWrapper, EClient):
         
         # Process stocks first (more reliable market data)
         for symbol, position_data in stocks.items():
-            self._request_stock_market_data(symbol, position_data)
+            if wait_for_rate_limit("general"):
+                self._request_stock_market_data(symbol, position_data)
         
         # Process options with special handling
         if options:
             print(f"Found {len(options)} options contracts. Options market data may be limited during closed hours.")
             for symbol, position_data in options.items():
-                self._request_options_market_data(symbol, position_data)
+                if wait_for_rate_limit("general"):
+                    self._request_options_market_data(symbol, position_data)
         
         self.market_data_requested = True
     
@@ -142,8 +204,15 @@ class TradeApp(EWrapper, EClient):
         """Request market data for stock positions"""
         global contract_request_dictionary, history_request_dictionary
         
+        # Import rate limiter
+        from api_rate_limiter import wait_for_rate_limit, create_historical_request_signature
+        from contract_builder import create_contract_from_portfolio_data
+        
         req_id = self.next_market_data_id
         contract = position_data['contract']
+        
+        # Normalize contract for market data request
+        contract = create_contract_from_portfolio_data(contract)
         
         # For stocks, ensure we have proper contract definition
         if contract.secType == '' or contract.secType is None:
@@ -161,18 +230,27 @@ class TradeApp(EWrapper, EClient):
         self.marketdata[symbol] = {}
         self.ohlc_data[symbol] = {}
         
-        # Request real-time market data
-        self.reqMktData(req_id, contract, "", False, False, [])
+        # Request real-time market data with rate limiting
+        if wait_for_rate_limit("general"):
+            self.reqMktData(req_id, contract, "", False, False, [])
         
-        # Request historical data (only for stocks during market hours)
-        self.reqHistoricalData(self.next_historical_data_id, contract, "", "1 D", "1 min", "TRADES", 1, 2, True, [])
+        # Request historical data with rate limiting and duplicate detection
+        hist_signature = create_historical_request_signature(
+            symbol, "1 D", "1 min", "TRADES", ""
+        )
+        
+        if wait_for_rate_limit("historical", symbol, hist_signature):
+            self.reqHistoricalData(
+                self.next_historical_data_id, contract, "", "1 D", "1 min", 
+                "TRADES", 1, 2, True, []
+            )
         
         print(f"Requested stock market data for {symbol} (Position: {position_data['position']})")
         
         self.next_market_data_id += 1
         self.next_historical_data_id += 1
         
-        sleep(0.1)
+        sleep(0.11)  # Rate limit compliance: max 50 requests per second
     
     def _request_options_market_data(self, symbol, position_data):
         """Request market data for options positions with proper exchange setup"""
@@ -561,16 +639,29 @@ if __name__ == '__main__':
         # Connect to TWS
         print(f"Connecting to TWS at {config['host']}:{config['port']} with client ID {config['client_id']}")
         app.connect(config['host'], config['port'], config['client_id'])
-        sleep(2)  # Give time for connection
-
+        
         # Start the API thread
         app_thread = Thread(target=app.run, daemon=True)
         app_thread.start()
-        sleep(1)
-
-        if not app.connected:
+        
+        # Wait for full connection (nextValidId) with timeout
+        print("Waiting for connection...")
+        max_connect_wait = 10
+        connect_wait = 0
+        while not app.ready_to_trade and connect_wait < max_connect_wait:
+            sleep(0.5)
+            connect_wait += 0.5
+        
+        if not app.ready_to_trade:
             print("Failed to establish connection. Please check TWS/Gateway is running.")
+            print("Troubleshooting:")
+            print("  - Verify TWS is running and logged in")
+            print("  - Check TWS API settings (File → Global Configuration → API → Settings)")
+            print("  - Ensure 'Enable ActiveX and Socket Clients' is checked")
+            print("  - Ensure 'Read-Only API' is unchecked")
             sys.exit(1)
+        
+        print(f"Connected successfully! (took {connect_wait:.1f}s)")
 
         # Request account updates (this will trigger portfolio loading)
         app.reqAccountUpdates(True, config['account'])
