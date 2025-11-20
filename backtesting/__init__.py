@@ -14,6 +14,7 @@ from .backtest_engine import (
     BacktestTrade,
     OrderStatus
 )
+from .performance_analytics import PerformanceAnalytics, DrawdownPeriod
 
 __all__ = [
     'BarData',
@@ -23,5 +24,7 @@ __all__ = [
     'BacktestOrder',
     'BacktestPosition',
     'BacktestTrade',
-    'OrderStatus'
+    'OrderStatus',
+    'PerformanceAnalytics',
+    'DrawdownPeriod'
 ]
