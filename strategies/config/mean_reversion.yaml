@@ -1,0 +1,49 @@
+# Mean Reversion Strategy Configuration
+# 
+# Multi-symbol mean reversion strategy using RSI and moving averages
+
+name: MeanReversion_Tech
+enabled: true
+
+symbols:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - NVDA
+
+parameters:
+  # Moving Average parameters
+  sma_fast: 10                  # Fast SMA period
+  sma_slow: 50                  # Slow SMA period
+  
+  # RSI parameters
+  rsi_period: 14                # RSI lookback period
+  rsi_oversold: 25              # RSI oversold level
+  rsi_overbought: 75            # RSI overbought level
+  
+  # Entry criteria
+  min_rsi_oversold: 20          # Minimum RSI for entry
+  price_below_sma: true         # Require price below slow SMA
+
+risk_limits:
+  # Position sizing
+  max_position_size: 500        # Maximum shares per symbol
+  position_sizing: percent      # Size as % of portfolio
+  
+  # Risk management
+  max_daily_loss: 1000.0        # Maximum daily loss across all positions
+  max_trades_per_day: 10        # Maximum trades across all symbols
+  max_portfolio_allocation: 50  # Max % of portfolio
+  
+  # Stop loss / Take profit
+  stop_loss_percent: 3.0        # Stop loss at 3%
+  take_profit_percent: 8.0      # Take profit at 8%
+
+description: >
+  Mean reversion strategy for tech stocks.
+  Identifies oversold conditions using RSI and moving averages,
+  entering when price is below SMA and RSI is oversold.
+
+version: "1.0"
+author: Trading Team
+created: 2025-11-20

@@ -1,0 +1,48 @@
+# Bollinger Bands Strategy Configuration
+# 
+# This strategy trades based on Bollinger Band breakouts,
+# buying when price touches the lower band and selling at the upper band.
+
+name: BollingerBands_AAPL
+enabled: true
+
+symbols:
+  - AAPL
+
+parameters:
+  # Bollinger Bands parameters
+  period: 20                    # Moving average period
+  std_dev: 2.0                  # Standard deviation multiplier
+  
+  # RSI confirmation
+  rsi_period: 14                # RSI period
+  rsi_oversold: 30              # RSI oversold threshold
+  rsi_overbought: 70            # RSI overbought threshold
+  
+  # Entry/Exit
+  entry_threshold: 0.95         # Enter when price is at X% of lower band
+  exit_threshold: 0.95          # Exit when price is at X% of upper band
+
+risk_limits:
+  # Position sizing
+  max_position_size: 1000       # Maximum shares per position
+  position_sizing: fixed        # Options: fixed, percent, risk_based
+  
+  # Risk management
+  max_daily_loss: 500.0         # Maximum daily loss in USD
+  max_trades_per_day: 5         # Maximum number of trades per day
+  max_portfolio_allocation: 25  # Maximum % of portfolio for this strategy
+  
+  # Stop loss / Take profit
+  stop_loss_percent: 2.0        # Stop loss at 2% below entry
+  take_profit_percent: 5.0      # Take profit at 5% above entry
+
+# Strategy metadata
+description: >
+  Mean reversion strategy using Bollinger Bands.
+  Buys when price touches lower band with RSI confirmation,
+  exits when price reaches upper band or stops are hit.
+
+version: "1.0"
+author: Trading Team
+created: 2025-11-20

@@ -1,0 +1,60 @@
+# Default Strategy Configuration Template
+# 
+# This file contains default values for all strategy parameters.
+# Copy this file and customize for your specific strategy.
+
+name: StrategyTemplate
+enabled: false
+
+symbols:
+  - SYMBOL  # Replace with actual symbol(s)
+
+parameters:
+  # Technical indicator parameters
+  period: 20                    # Default lookback period
+  std_dev: 2.0                  # Standard deviation multiplier
+  
+  rsi_period: 14                # RSI period
+  rsi_oversold: 30              # RSI oversold threshold
+  rsi_overbought: 70            # RSI overbought threshold
+  
+  sma_fast: 10                  # Fast moving average
+  sma_slow: 50                  # Slow moving average
+  
+  atr_period: 14                # ATR period for volatility
+  atr_multiplier: 2.0           # ATR multiplier for stops
+  
+  # Entry/Exit parameters
+  entry_threshold: 1.0          # Entry signal threshold
+  exit_threshold: 1.0           # Exit signal threshold
+  min_hold_bars: 5              # Minimum bars to hold position
+
+risk_limits:
+  # Position sizing
+  max_position_size: 1000       # Maximum position size (shares or contracts)
+  position_sizing: fixed        # Options: fixed, percent, risk_based
+  
+  # Risk management
+  max_daily_loss: 500.0         # Maximum daily loss in USD
+  max_trades_per_day: 5         # Maximum trades per day
+  max_portfolio_allocation: 25  # Maximum % of portfolio
+  
+  # Stop loss / Take profit
+  stop_loss_percent: 2.0        # Stop loss percentage
+  take_profit_percent: 5.0      # Take profit percentage
+  trailing_stop: false          # Use trailing stop
+  
+  # Time-based rules
+  no_trade_first_30min: true    # Avoid first 30 minutes of trading
+  no_trade_last_30min: true     # Avoid last 30 minutes of trading
+
+# Strategy metadata (optional)
+description: Template configuration for new strategies
+version: "1.0"
+author: Your Name
+created: 2025-11-20
+
+# Notes:
+# - All parameters can be customized per strategy
+# - Risk limits should be adjusted based on account size
+# - Test thoroughly in paper trading before going live
