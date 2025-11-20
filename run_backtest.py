@@ -23,6 +23,7 @@ from backtesting import (
     PerformanceAnalytics,
     RiskManager
 )
+from backtesting.visualizer import BacktestVisualizer
 from strategies import BollingerBandsStrategy
 from strategies.base_strategy import StrategyState
 
@@ -278,9 +279,9 @@ class BacktestRunner:
         print(f"Total Trades:       {results.total_trades:>12}")
         
         if results.total_trades > 0 and results.metrics:
-            print(f"Win Rate:           {results.metrics.get('win_rate', 0):>12.2f}%")
+            print(f"Win Rate:           {results.metrics.get('win_rate_pct', 0):>12.2f}%")
             print(f"Profit Factor:      {results.metrics.get('profit_factor', 0):>12.2f}")
-            print(f"Avg Trade:          ${results.metrics.get('avg_trade', 0):>12,.2f}")
+            print(f"Avg Trade:          ${results.metrics.get('avg_trade_pnl', 0):>12,.2f}")
         
         # Advanced metrics
         if results.metrics:
@@ -324,7 +325,7 @@ class BacktestRunner:
         )
         
         avg_win_rate = sum(
-            r['results'].metrics.get('win_rate', 0.0) 
+            r['results'].metrics.get('win_rate_pct', 0.0) 
             for r in all_results.values() 
             if r['results'].total_trades > 0
         ) / len([r for r in all_results.values() if r['results'].total_trades > 0]) if any(r['results'].total_trades > 0 for r in all_results.values()) else 0.0
@@ -413,6 +414,19 @@ def main():
         help='Disable risk management'
     )
     
+    parser.add_argument(
+        '--charts',
+        action='store_true',
+        help='Generate performance charts'
+    )
+    
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='reports',
+        help='Output directory for charts (default: reports)'
+    )
+    
     args = parser.parse_args()
     
     # Create runner
@@ -436,6 +450,22 @@ def main():
             days=args.days,
             strategy_params=strategy_params
         )
+        
+        # Generate charts if requested
+        if args.charts:
+            logger.info(f"\nGenerating performance charts...")
+            visualizer = BacktestVisualizer()
+            
+            for symbol, result_data in results.items():
+                logger.info(f"Creating charts for {symbol}...")
+                charts = visualizer.generate_full_report(
+                    results=result_data['results'],
+                    output_dir=args.output_dir,
+                    symbol=symbol
+                )
+                logger.info(f"Generated {len(charts)} charts for {symbol}")
+            
+            logger.info(f"\n✅ Charts saved to {args.output_dir}/")
         
         logger.info("Backtest completed successfully")
         return 0

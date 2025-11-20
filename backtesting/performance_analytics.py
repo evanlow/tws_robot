@@ -398,6 +398,12 @@ class PerformanceAnalytics:
         """
         if not trades:
             return {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0.0,
+                'win_rate_pct': 0.0,
+                'profit_factor': 0.0,
                 'avg_trade_pnl': 0.0,
                 'avg_trade_pnl_pct': 0.0,
                 'best_trade': 0.0,
@@ -414,6 +420,16 @@ class PerformanceAnalytics:
         winning_trades = [t for t in trades if t.pnl > 0]
         losing_trades = [t for t in trades if t.pnl < 0]
         
+        # Calculate win rate
+        win_count = len(winning_trades)
+        total_count = len(trades)
+        win_rate = win_count / total_count if total_count > 0 else 0.0
+        
+        # Calculate profit factor (gross profit / gross loss)
+        gross_profit = sum(t.pnl for t in winning_trades) if winning_trades else 0.0
+        gross_loss = abs(sum(t.pnl for t in losing_trades)) if losing_trades else 0.0
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
+        
         # Calculate durations
         durations = [(t.exit_time - t.entry_time).total_seconds() / 3600 for t in trades]  # in hours
         
@@ -421,6 +437,12 @@ class PerformanceAnalytics:
         expectancy = sum(pnls) / len(pnls) if pnls else 0.0
         
         return {
+            'total_trades': total_count,
+            'winning_trades': win_count,
+            'losing_trades': len(losing_trades),
+            'win_rate': win_rate,
+            'win_rate_pct': win_rate * 100,
+            'profit_factor': profit_factor,
             'avg_trade_pnl': np.mean(pnls),
             'avg_trade_pnl_pct': np.mean([t.pnl_percent for t in trades]),
             'best_trade': max(pnls) if pnls else 0.0,
