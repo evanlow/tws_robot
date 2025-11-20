@@ -353,7 +353,9 @@ class HistoricalDataManager:
             current += delta
         
         # Generate prices using random walk
-        np.random.seed(42)  # For reproducibility
+        # Use symbol-specific seed for reproducibility while allowing different data per symbol
+        seed = 42 + hash(symbol) % 1000
+        np.random.seed(seed)
         n_bars = len(timestamps)
         
         # Generate returns

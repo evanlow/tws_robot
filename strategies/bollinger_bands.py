@@ -113,6 +113,9 @@ class BollingerBandsStrategy(BaseStrategy):
         self.prev_upper: Dict[str, float] = {}
         self.prev_lower: Dict[str, float] = {}
         
+        # Track last signal type to prevent duplicates
+        self.last_signal: Dict[str, Optional[SignalType]] = {}
+        
         # Signals for backtesting
         self.signals_to_emit: List[Signal] = []
         
@@ -188,10 +191,21 @@ class BollingerBandsStrategy(BaseStrategy):
             logger.debug(f"{symbol}: Volume too low ({volume} < {self.min_volume})")
             return
         
-        # Generate signals based on band crosses
-        # For backtesting, emit all signals and let the engine manage positions
+        # Initialize last signal if needed
+        if symbol not in self.last_signal:
+            self.last_signal[symbol] = None
+        
+        # Reset signal cooldown if price crosses middle band
+        # This allows new signals after mean reversion
+        if self.last_signal[symbol] == SignalType.BUY and close >= sma:
+            self.last_signal[symbol] = None
+            logger.debug(f"{symbol}: Long cooldown reset at middle band")
+        elif self.last_signal[symbol] == SignalType.SELL and close <= sma:
+            self.last_signal[symbol] = None
+            logger.debug(f"{symbol}: Short cooldown reset at middle band")
+        
+        # Check for entry signals
         self._check_entry_signals(symbol, close, upper, lower, timestamp)
-        self._check_exit_signals(symbol, close, sma, timestamp)
         
         # Store previous values for next bar
         self.prev_close[symbol] = close
@@ -225,7 +239,7 @@ class BollingerBandsStrategy(BaseStrategy):
         prev_upper = self.prev_upper.get(symbol, upper)
         
         # Long signal: Price crosses below lower band (oversold)
-        if prev_close >= prev_lower and close < lower:
+        if prev_close >= prev_lower and close < lower and self.last_signal.get(symbol) != SignalType.BUY:
             logger.info(
                 f"{symbol}: LONG signal at {close:.2f} "
                 f"(lower band: {lower:.2f})"
@@ -249,9 +263,10 @@ class BollingerBandsStrategy(BaseStrategy):
                 confidence=0.85
             )
             self.generate_signal(signal)
+            self.last_signal[symbol] = SignalType.BUY
         
         # Short signal: Price crosses above upper band (overbought)
-        elif prev_close <= prev_upper and close > upper:
+        elif prev_close <= prev_upper and close > upper and self.last_signal.get(symbol) != SignalType.SELL:
             logger.info(
                 f"{symbol}: SHORT signal at {close:.2f} "
                 f"(upper band: {upper:.2f})"
@@ -275,68 +290,7 @@ class BollingerBandsStrategy(BaseStrategy):
                 confidence=0.85
             )
             self.generate_signal(signal)
-    
-    def _check_exit_signals(
-        self,
-        symbol: str,
-        close: float,
-        middle: float,
-        timestamp: datetime
-    ) -> None:
-        """
-        Check for exit signals.
-        
-        Args:
-            symbol: Trading symbol
-            close: Current close price
-            middle: Middle band (SMA)
-            timestamp: Current timestamp
-        """
-        # Exit long when price reaches middle band (emit signal regardless of current position)
-        # The backtest engine will determine if the signal is valid based on actual positions
-        if close >= middle:
-            logger.info(
-                f"{symbol}: EXIT LONG at {close:.2f} "
-                f"(middle band: {middle:.2f})"
-            )
-            signal = Signal(
-                symbol=symbol,
-                signal_type=SignalType.SELL,
-                strength=SignalStrength.MODERATE,
-                timestamp=timestamp,
-                target_price=close,
-                stop_loss=None,
-                take_profit=None,
-                quantity=None,
-                reason='mean_reversion_long',
-                indicators={'middle_band': middle},
-                strategy_name=self.config.name,
-                confidence=0.75
-            )
-            self.generate_signal(signal)
-        
-        # Exit short when price reaches middle band (emit signal regardless of current position)
-        # The backtest engine will determine if the signal is valid based on actual positions
-        if close <= middle:
-            logger.info(
-                f"{symbol}: EXIT SHORT at {close:.2f} "
-                f"(middle band: {middle:.2f})"
-            )
-            signal = Signal(
-                symbol=symbol,
-                signal_type=SignalType.BUY,
-                strength=SignalStrength.MODERATE,
-                timestamp=timestamp,
-                target_price=close,
-                stop_loss=None,
-                take_profit=None,
-                quantity=None,
-                reason='mean_reversion_short',
-                indicators={'middle_band': middle},
-                strategy_name=self.config.name,
-                confidence=0.75
-            )
-            self.generate_signal(signal)
+            self.last_signal[symbol] = SignalType.SELL
     
     def get_indicator_values(self, symbol: str) -> Dict:
         """
@@ -394,7 +348,6 @@ class BollingerBandsStrategy(BaseStrategy):
     
     def reset(self) -> None:
         """Reset strategy state"""
-        super().reset()
         self.price_history.clear()
         self.volume_history.clear()
         self.upper_band.clear()
@@ -403,5 +356,6 @@ class BollingerBandsStrategy(BaseStrategy):
         self.prev_close.clear()
         self.prev_upper.clear()
         self.prev_lower.clear()
+        self.last_signal.clear()
         self.signals_to_emit.clear()
         logger.info(f"Strategy {self.config.name} reset")

@@ -301,7 +301,7 @@ class BacktestEngine:
                 self.risk_manager.update(self.equity, bar.timestamp)
             
             # Process pending orders
-            self._process_orders(bar)
+            self._process_orders(symbol, bar)
             
             # Feed bar to strategy
             bar_data = {
@@ -339,7 +339,9 @@ class BacktestEngine:
                         symbol=signal.symbol,
                         signal_type=signal.signal_type,
                         quantity=100,  # Default quantity for backtest
-                        timestamp=signal.timestamp
+                        timestamp=signal.timestamp,
+                        stop_loss=signal.stop_loss,
+                        take_profit=signal.take_profit
                     )
                 strategy.signals_to_emit.clear()
             
@@ -458,31 +460,34 @@ class BacktestEngine:
         
         return 100  # Default fallback
     
-    def _process_orders(self, bar: BarData):
+    def _process_orders(self, symbol: str, bar: BarData):
         """
         Process pending orders against current bar.
         
         Args:
+            symbol: Trading symbol
             bar: Current bar data
         """
         for order in self.orders:
             if order.status != OrderStatus.PENDING:
                 continue
             
-            if order.symbol != bar.timestamp:  # Match symbol
-                # Simple market order execution
-                fill_price = self._calculate_fill_price(order, bar)
-                
-                if fill_price is None:
-                    continue
-                
-                # Execute order
-                success = self._execute_order(order, fill_price, bar.timestamp)
-                
-                if success:
-                    order.status = OrderStatus.FILLED
-                    order.fill_price = fill_price
-                    order.fill_timestamp = bar.timestamp
+            if order.symbol != symbol:  # Skip orders for other symbols
+                continue
+            
+            # Simple market order execution
+            fill_price = self._calculate_fill_price(order, bar)
+            
+            if fill_price is None:
+                continue
+            
+            # Execute order
+            success = self._execute_order(order, fill_price, bar.timestamp)
+            
+            if success:
+                order.status = OrderStatus.FILLED
+                order.fill_price = fill_price
+                order.fill_timestamp = bar.timestamp
     
     def _calculate_fill_price(
         self,
@@ -705,6 +710,11 @@ class BacktestEngine:
                         # Update position
                         qty_change = exit_quantity if exit_signal_type == SignalType.BUY else -exit_quantity
                         realized_pnl = position.add_shares(qty_change, exit_price)
+                        
+                        # Record the completed trade
+                        if realized_pnl != 0:
+                            commission_cost = exit_price * exit_quantity * self.commission
+                            self._record_trade(exit_order, exit_price, realized_pnl, commission_cost)
                         
                         logger.info(f"{exit_reason} triggered for {symbol} @ ${exit_price:.2f}, P&L: ${realized_pnl:.2f}")
     

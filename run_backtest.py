@@ -24,6 +24,7 @@ from backtesting import (
     RiskManager
 )
 from strategies import BollingerBandsStrategy
+from strategies.base_strategy import StrategyState
 
 # Configure logging
 logging.basicConfig(
@@ -89,9 +90,9 @@ class BacktestRunner:
         self.data_manager = HistoricalDataManager()
         
         # Create risk manager if enabled
-        risk_manager = None
+        self.risk_manager = None
         if use_risk_manager:
-            risk_manager = RiskManager(
+            self.risk_manager = RiskManager(
                 max_positions=10,
                 max_drawdown_pct=0.20,
                 daily_loss_limit=0.05,
@@ -107,7 +108,7 @@ class BacktestRunner:
             position_size_pct=position_size_pct,
             risk_per_trade=risk_per_trade,
             max_position_size=0.25,
-            risk_manager=risk_manager
+            risk_manager=self.risk_manager
         )
         
         logger.info(
@@ -167,6 +168,32 @@ class BacktestRunner:
             logger.info(f"{'='*60}\n")
             
             try:
+                # Reset strategy state for new symbol
+                strategy.reset()
+                strategy.state = StrategyState.READY
+                
+                # Create fresh risk manager and backtest engine for each symbol
+                risk_manager = None
+                if self.use_risk_manager:
+                    risk_manager = RiskManager(
+                        max_positions=10,
+                        max_drawdown_pct=0.20,
+                        daily_loss_limit=0.05,
+                        max_position_pct=0.25,
+                        max_leverage=1.0
+                    )
+                
+                engine = BacktestEngine(
+                    initial_capital=self.initial_capital,
+                    commission=self.commission,
+                    slippage=self.slippage,
+                    position_sizing=self.position_sizing,
+                    position_size_pct=self.position_size_pct,
+                    risk_per_trade=self.risk_per_trade,
+                    max_position_size=0.25,
+                    risk_manager=risk_manager
+                )
+                
                 # Get historical data
                 bars = self.data_manager.get_historical_data(
                     symbol=symbol,
@@ -194,7 +221,7 @@ class BacktestRunner:
                 logger.info(f"Loaded {len(bars)} bars for {symbol}")
                 
                 # Run backtest
-                results = self.engine.run_backtest(strategy, bars, symbol)
+                results = engine.run_backtest(strategy, bars, symbol)
                 
                 # Print results
                 self._print_results(symbol, results)
