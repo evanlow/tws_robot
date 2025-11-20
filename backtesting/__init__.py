@@ -15,6 +15,7 @@ from .backtest_engine import (
     OrderStatus
 )
 from .performance_analytics import PerformanceAnalytics, DrawdownPeriod
+from .risk_manager import RiskManager
 
 __all__ = [
     'BarData',
@@ -26,5 +27,6 @@ __all__ = [
     'BacktestTrade',
     'OrderStatus',
     'PerformanceAnalytics',
-    'DrawdownPeriod'
+    'DrawdownPeriod',
+    'RiskManager'
 ]
