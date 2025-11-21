@@ -91,34 +91,45 @@ Continuous Monitoring & Updates
 ### Basic Setup
 
 ```python
+from datetime import datetime
 from risk import (
-    RiskManager, PositionSizer, DrawdownMonitor,
-    CorrelationAnalyzer, RiskMonitor, EmergencyController
+    RiskManager, PositionSizerFactory, DrawdownMonitor,
+    CorrelationAnalyzer, RiskMonitor, EmergencyController,
+    Position, PositionInfo
 )
 
 # Initialize core components
 risk_manager = RiskManager(
-    max_portfolio_heat=0.06,      # 6% max total risk
-    max_position_size=0.02,       # 2% per position
-    max_daily_loss=0.03,          # 3% daily loss limit
-    max_sector_concentration=0.30  # 30% per sector
+    initial_capital=100000.0,
+    max_positions=10,              # Max 10 concurrent positions
+    max_position_pct=0.02,         # 2% max per position
+    max_drawdown_pct=0.20,         # 20% max drawdown
+    daily_loss_limit_pct=0.03,     # 3% daily loss limit
+    concentration_limit=0.30       # 30% max sector concentration
 )
 
-position_sizer = PositionSizer(
-    default_method='volatility',
-    max_leverage=2.0
+# Use PositionSizerFactory to create sizers
+position_sizer = PositionSizerFactory.create(
+    'risk_based',                  # 'fixed', 'kelly', 'risk_based', 'risk_parity'
+    risk_pct=0.02,                 # Risk 2% per trade
+    max_position_pct=0.25
 )
 
 drawdown_monitor = DrawdownMonitor(
-    protection_threshold=0.10,     # Enter protection at 10% DD
-    max_drawdown=0.20,            # Hard stop at 20% DD
-    recovery_threshold=0.05        # Exit protection at 5% DD
+    initial_equity=100000.0,
+    max_drawdown_pct=0.20,         # Hard stop at 20% DD
+    daily_loss_limit_pct=0.05,     # 5% daily loss limit
+    scale_positions_on_drawdown=True,
+    minor_drawdown_threshold=0.05, # Minor DD at 5%
+    moderate_drawdown_threshold=0.10, # Moderate DD at 10%
+    severe_drawdown_threshold=0.15 # Severe DD at 15%
 )
 
 correlation_analyzer = CorrelationAnalyzer(
-    window=60,                     # 60-period rolling window
-    max_correlation=0.70,          # Max 0.70 correlation
-    max_concentration=0.40         # Max 40% in one position
+    concentration_threshold=0.25,  # HHI threshold
+    high_correlation_threshold=0.8, # High correlation warning
+    max_sector_concentration=0.50, # 50% max per sector
+    max_industry_concentration=0.35 # 35% max per industry
 )
 
 risk_monitor = RiskMonitor(
@@ -129,6 +140,7 @@ risk_monitor = RiskMonitor(
 
 emergency_controller = EmergencyController(
     max_drawdown_pct=0.20,        # 20% max drawdown
+    critical_drawdown_pct=0.15,   # 15% triggers circuit breaker
     max_daily_loss_pct=0.05,      # 5% max daily loss
     cooldown_minutes=30,          # 30-min cooldown after emergency
     require_manual_review=True    # Require approval to resume
@@ -138,29 +150,36 @@ emergency_controller = EmergencyController(
 ### Basic Usage
 
 ```python
+from datetime import datetime
+from risk import Position
+
+# Current positions dict (symbol -> Position)
+positions = {}
+
 # 1. Calculate position size
-position_size = position_sizer.calculate_size(
+result = position_sizer.calculate(
     symbol='AAPL',
     price=150.0,
-    stop_loss=145.0,
-    account_equity=100000.0,
-    method='volatility',
-    volatility=0.02
+    equity=100000.0,
+    stop_loss_pct=0.033  # 5/150 = 3.3% stop
 )
+
+print(f"Position size: {result.shares} shares")
+print(f"Position value: ${result.position_value:,.2f}")
+print(f"Position %: {result.position_pct:.2%}")
 
 # 2. Validate with risk manager
-validation = risk_manager.validate_trade(
+allowed, reason = risk_manager.check_trade_risk(
     symbol='AAPL',
-    shares=position_size,
+    side='LONG',
+    quantity=result.shares,
     price=150.0,
-    side='BUY',
-    current_positions=positions,
-    account_equity=100000.0
+    positions=positions
 )
 
-if not validation['allowed']:
-    print(f"Trade rejected: {validation['reason']}")
-    return
+if not allowed:
+    print(f"Trade rejected: {reason}")
+    exit()
 
 # 3. Check emergency conditions
 emergency_status = emergency_controller.check_emergency_conditions(
@@ -172,36 +191,37 @@ emergency_status = emergency_controller.check_emergency_conditions(
     timestamp=datetime.now()
 )
 
-if not emergency_status.can_trade:
+if not emergency_status.trading_allowed:
     print(f"Trading blocked: {emergency_status.level}")
-    return
+    exit()
 
 # 4. Execute trade
-# ... your trade execution code ...
+# ... your broker API call here ...
+
+# Add position to tracking
+positions['AAPL'] = Position(
+    symbol='AAPL',
+    quantity=result.shares,
+    entry_price=150.0,
+    current_price=150.0,
+    side='LONG'
+)
 
 # 5. Update risk tracking
-risk_manager.update(
-    current_positions=positions,
-    account_equity=100000.0,
-    timestamp=datetime.now()
-)
-
-drawdown_monitor.update(
-    current_equity=100000.0,
-    timestamp=datetime.now()
-)
-
-# 6. Monitor overall health
-risk_status = risk_monitor.check_all_risks(
+risk_metrics = risk_manager.update(
     equity=100000.0,
     positions=positions,
-    returns=returns_series,
-    timestamp=datetime.now()
+    current_date=datetime.now()
 )
 
-print(f"Health Score: {risk_status.health_score}/100")
-for alert in risk_status.active_alerts:
-    print(f"[{alert.level}] {alert.message}")
+dd_metrics = drawdown_monitor.update(
+    current_equity=100000.0,
+    current_date=datetime.now()
+)
+
+print(f"Risk Status: {risk_metrics.risk_status}")
+print(f"Drawdown: {dd_metrics.drawdown_pct:.2%}")
+print(f"Position Scaling: {dd_metrics.position_scale_factor:.0%}")
 ```
 
 ---
@@ -210,28 +230,51 @@ for alert in risk_status.active_alerts:
 
 ### 1. RiskManager
 
-**Purpose**: Core risk management engine that enforces position limits, portfolio heat, and daily loss limits.
+**Purpose**: Core risk management engine that enforces position limits, drawdown limits, and daily loss limits.
 
 **Key Methods**:
-- `validate_trade()` - Validates if a trade meets risk limits
-- `update()` - Updates current risk metrics
-- `can_open_new_position()` - Checks if new positions are allowed
-- `get_remaining_capacity()` - Returns available risk capacity
-- `check_sector_limit()` - Validates sector concentration
+- `check_trade_risk(symbol, side, quantity, price, positions)` → `Tuple[bool, str]` - Validates trade
+- `update(equity, positions, current_date)` → `RiskMetrics` - Updates risk state
+- `calculate_position_size(symbol, price, strategy, **kwargs)` → `int` - Calculates shares
+- `trigger_emergency_stop(reason)` - Activate emergency stop
+- `release_emergency_stop(reason)` - Release emergency stop
+- `get_risk_summary()` → `Dict` - Get current risk status
 
 **Configuration**:
 ```python
 RiskManager(
-    max_portfolio_heat=0.06,        # Max 6% total portfolio risk
-    max_position_size=0.02,         # Max 2% per position
-    max_daily_loss=0.03,            # Max 3% daily loss
-    max_correlated_risk=0.08,       # Max 8% correlated positions
-    max_sector_concentration=0.30,  # Max 30% per sector
-    position_limit=10               # Max 10 positions
+    initial_capital=100000.0,
+    max_positions=10,               # Max 10 concurrent positions
+    max_position_pct=0.25,          # Max 25% per position
+    max_drawdown_pct=0.20,          # Max 20% drawdown
+    daily_loss_limit_pct=0.05,      # Max 5% daily loss
+    max_leverage=1.0,               # No leverage by default
+    concentration_limit=0.50,       # Max 50% sector concentration
+    emergency_stop_enabled=True
 )
 ```
 
-**See Also**: [API Reference](#api-reference) for complete method documentation.
+**Usage Example**:
+```python
+# Check if trade is allowed
+allowed, reason = risk_manager.check_trade_risk(
+    symbol='AAPL',
+    side='LONG',
+    quantity=100,
+    price=150.0,
+    positions=current_positions
+)
+
+# Update risk state
+metrics = risk_manager.update(
+    equity=100000.0,
+    positions=current_positions,
+    current_date=datetime.now()
+)
+
+print(f"Leverage: {metrics.leverage:.2f}x")
+print(f"Drawdown: {metrics.drawdown_pct:.2%}")
+```
 
 ---
 
@@ -239,213 +282,297 @@ RiskManager(
 
 **Purpose**: Calculate optimal position sizes using various algorithms based on risk tolerance and market conditions.
 
+**Important**: Use `PositionSizerFactory` to create position sizers - `PositionSizer` is an abstract base class.
+
 **Sizing Methods**:
 
-1. **Fixed Fractional** - Fixed percentage of capital
+1. **Fixed Percent** - Fixed percentage of capital
    ```python
-   size = position_sizer.calculate_size(
-       symbol='AAPL', price=150.0, stop_loss=145.0,
-       account_equity=100000.0, method='fixed_fractional',
-       risk_per_trade=0.01  # 1% risk
+   sizer = PositionSizerFactory.create(
+       'fixed',
+       fixed_pct=0.05,            # 5% per position
+       max_position_pct=0.25
+   )
+   
+   result = sizer.calculate(
+       symbol='AAPL',
+       price=150.0,
+       equity=100000.0
+   )
+   print(f"Shares: {result.shares}")
+   ```
+
+2. **Kelly Criterion** - Optimal sizing based on win rate
+   ```python
+   sizer = PositionSizerFactory.create(
+       'kelly',
+       kelly_fraction=0.5,        # Half-Kelly for safety
+       max_position_pct=0.25
+   )
+   
+   result = sizer.calculate(
+       symbol='AAPL',
+       price=150.0,
+       equity=100000.0,
+       win_rate=0.55,             # 55% win rate
+       avg_win=0.05,              # 5% average win
+       avg_loss=0.03              # 3% average loss
    )
    ```
 
-2. **Kelly Criterion** - Optimal sizing based on win rate and profit factor
+3. **Risk-Based** - Size based on risk per trade and stop loss
    ```python
-   size = position_sizer.calculate_size(
-       symbol='AAPL', price=150.0, stop_loss=145.0,
-       account_equity=100000.0, method='kelly',
-       win_rate=0.55, profit_factor=1.8
+   sizer = PositionSizerFactory.create(
+       'risk_based',
+       risk_pct=0.02,             # Risk 2% per trade
+       max_position_pct=0.25
+   )
+   
+   result = sizer.calculate(
+       symbol='AAPL',
+       price=150.0,
+       equity=100000.0,
+       stop_loss_pct=0.033        # 3.3% stop (5 points / 150)
    )
    ```
 
-3. **Volatility-Based** - Size based on asset volatility
+4. **Risk Parity** - Equal risk contribution
    ```python
-   size = position_sizer.calculate_size(
-       symbol='AAPL', price=150.0, stop_loss=145.0,
-       account_equity=100000.0, method='volatility',
-       volatility=0.02, target_volatility=0.15
+   sizer = PositionSizerFactory.create(
+       'risk_parity',
+       target_risk_pct=0.10,      # 10% target portfolio risk
+       max_position_pct=0.25
+   )
+   
+   result = sizer.calculate(
+       symbol='AAPL',
+       price=150.0,
+       equity=100000.0,
+       volatility=0.02,           # 2% daily volatility
+       num_positions=5
    )
    ```
 
-4. **ATR-Based** - Size using Average True Range
-   ```python
-   size = position_sizer.calculate_size(
-       symbol='AAPL', price=150.0, stop_loss=145.0,
-       account_equity=100000.0, method='atr',
-       atr=2.5, atr_multiplier=2.0
-   )
-   ```
-
-5. **Risk Parity** - Equal risk contribution across positions
-   ```python
-   size = position_sizer.calculate_size(
-       symbol='AAPL', price=150.0, stop_loss=145.0,
-       account_equity=100000.0, method='risk_parity',
-       volatility=0.02, num_positions=5
-   )
-   ```
-
-**Configuration**:
+**Factory Methods**:
 ```python
-PositionSizer(
-    default_method='volatility',
-    max_leverage=2.0,
-    kelly_fraction=0.25  # Use 25% of full Kelly
-)
+# List available strategies
+strategies = PositionSizerFactory.list_strategies()
+# Returns: ['fixed_percent', 'kelly', 'risk_based', 'risk_parity']
+
+# Create specific sizer
+sizer = PositionSizerFactory.create('risk_based', risk_pct=0.02)
 ```
 
 ---
 
 ### 3. DrawdownMonitor
 
-**Purpose**: Track drawdowns in real-time and activate protection mode when thresholds are breached.
+**Purpose**: Track drawdowns in real-time and implement protection measures including position scaling and trading halts.
 
 **Key Features**:
 - Real-time drawdown calculation from peak equity
-- Automatic protection mode activation
-- Recovery protocols with hysteresis
-- Historical drawdown tracking
+- Daily and weekly loss tracking
+- Automatic position scaling during drawdowns
+- Trading halt triggers based on severity
+- Detailed drawdown event logging
 
-**Protection Modes**:
-- **NORMAL**: No drawdown restrictions
-- **PROTECTION**: Reduce position sizing, close losing positions
-- **MAXIMUM**: Hard stop - close all positions
+**Drawdown Severity Levels**:
+- **NORMAL**: No significant drawdown
+- **MINOR**: 5-10% drawdown
+- **MODERATE**: 10-15% drawdown
+- **SEVERE**: 15-20% drawdown
+- **CRITICAL**: >20% drawdown
 
 **Usage**:
 ```python
 # Update with current equity
-status = drawdown_monitor.update(
+metrics = drawdown_monitor.update(
     current_equity=95000.0,
-    timestamp=datetime.now()
+    current_date=datetime.now()
 )
 
-if status.protection_mode:
-    print(f"Protection active: {status.current_drawdown_pct:.1%} drawdown")
-    # Reduce position sizes or close positions
+print(f"Drawdown: {metrics.drawdown_pct:.2%}")
+print(f"Severity: {metrics.severity}")
+print(f"Position scale: {metrics.position_scale_factor:.0%}")
+print(f"Trading halted: {metrics.is_trading_halted}")
 
-# Check if can open new positions
-if not drawdown_monitor.can_open_position():
-    print("Cannot open new positions - drawdown protection active")
+if metrics.is_trading_halted:
+    print(f"Halt reason: {metrics.halt_reason}")
+    
+# Use scaling factor for position sizing
+if metrics.position_scale_factor < 1.0:
+    # Reduce all position sizes by scale factor
+    scaled_size = base_size * metrics.position_scale_factor
 ```
 
 **Configuration**:
 ```python
 DrawdownMonitor(
-    protection_threshold=0.10,   # Enter protection at 10% DD
-    max_drawdown=0.20,          # Hard stop at 20% DD
-    recovery_threshold=0.05,     # Exit protection at 5% DD
-    lookback_days=90            # Track last 90 days
+    initial_equity=100000.0,
+    max_drawdown_pct=0.20,          # Hard stop at 20% DD
+    daily_loss_limit_pct=0.05,      # 5% daily loss limit
+    weekly_loss_limit_pct=0.10,     # 10% weekly loss limit
+    scale_positions_on_drawdown=True, # Auto-scale positions
+    minor_drawdown_threshold=0.05,  # 5% minor threshold
+    moderate_drawdown_threshold=0.10, # 10% moderate threshold
+    severe_drawdown_threshold=0.15  # 15% severe threshold
 )
 ```
+
+**Key Methods**:
+- `update(current_equity, current_date)` → `DrawdownMetrics`
+- `get_current_metrics()` → `DrawdownMetrics`
+- `reset_to_peak(new_peak)` - Reset peak equity
+- `get_drawdown_events()` → `List[DrawdownEvent]` - Historical events
 
 ---
 
 ### 4. CorrelationAnalyzer
 
-**Purpose**: Monitor portfolio diversification by tracking correlations, concentration, and sector exposure.
+**Purpose**: Monitor portfolio diversification through correlation analysis, concentration metrics, and sector/industry exposure tracking.
 
 **Key Features**:
-- Rolling correlation calculation across all positions
-- Position concentration analysis
-- Sector exposure tracking
-- Diversification scoring
-- Highly correlated position detection
+- Correlation matrix calculation between positions
+- Portfolio concentration metrics (Herfindahl Index)
+- Sector and industry exposure tracking
+- Diversification scoring (0-100)
+- High correlation pair identification
 
 **Usage**:
 ```python
-# Update with current positions and returns
-metrics = correlation_analyzer.update(
-    positions=current_positions,
-    returns=returns_series,
+from risk import PositionInfo
+
+# Create position info list
+positions = [
+    PositionInfo(
+        symbol='AAPL',
+        quantity=100,
+        market_value=15000.0,
+        weight=0.15,
+        sector='Technology',
+        industry='Consumer Electronics',
+        returns=[0.01, -0.005, 0.02, ...]  # Optional historical returns
+    ),
+    PositionInfo(
+        symbol='MSFT',
+        quantity=50,
+        market_value=18000.0,
+        weight=0.18,
+        sector='Technology',
+        industry='Software'
+    )
+]
+
+# Analyze portfolio
+metrics = correlation_analyzer.analyze(
+    positions=positions,
     timestamp=datetime.now()
 )
 
-# Check correlation before adding new position
-correlated = correlation_analyzer.get_correlated_positions(
-    symbol='AAPL',
-    threshold=0.70
-)
+print(f"HHI: {metrics.herfindahl_index:.3f}")  # 0-1, lower is better
+print(f"Avg correlation: {metrics.avg_correlation:.2f}")
+print(f"Diversification score: {metrics.diversification_score:.0f}")  # 0-100
+print(f"Top sector: {max(metrics.sector_concentration, key=metrics.sector_concentration.get)}")
+print(f"Concentrated: {metrics.is_concentrated}")
+print(f"High correlations: {metrics.has_high_correlations}")
 
-if correlated:
-    print(f"Warning: High correlation with {correlated}")
-
-# Check concentration
-concentration = correlation_analyzer.get_concentration_metrics(
-    positions=current_positions,
-    account_equity=100000.0
-)
-
-print(f"Top 3 concentration: {concentration['top_3_concentration']:.1%}")
+# Get high correlation pairs
+pairs = correlation_analyzer.get_high_correlation_pairs(positions)
+for pair in pairs:
+    print(f"{pair.symbol1}-{pair.symbol2}: {pair.correlation:.2f} ({pair.risk_level})")
 ```
 
 **Configuration**:
 ```python
 CorrelationAnalyzer(
-    window=60,                    # 60-period rolling window
-    min_periods=20,               # Min 20 periods for calculation
-    max_correlation=0.70,         # Flag correlations > 0.70
-    max_concentration=0.40,       # Max 40% in single position
-    max_sector_concentration=0.50 # Max 50% in single sector
+    concentration_threshold=0.25,       # HHI threshold
+    high_correlation_threshold=0.8,     # High correlation warning
+    critical_correlation_threshold=0.9, # Critical correlation
+    max_sector_concentration=0.50,      # 50% max per sector
+    max_industry_concentration=0.35,    # 35% max per industry
+    min_diversification_score=60.0      # Minimum acceptable score
 )
 ```
+
+**Key Metrics**:
+- **Herfindahl Index (HHI)**: 0-1, measures concentration (lower = more diversified)
+- **Diversification Score**: 0-100 (higher = better diversification)
+- **Effective Positions**: Number of truly independent positions
 
 ---
 
 ### 5. RiskMonitor
 
-**Purpose**: Integration hub that monitors all risk components in real-time and generates alerts.
+**Purpose**: Real-time unified monitoring across all risk components with multi-level alert system and health scoring.
 
 **Alert Levels**:
-- **INFO**: Informational notices
-- **WARNING**: Attention required
-- **CRITICAL**: Immediate action needed
+- **INFO**: Informational notices (no action required)
+- **WARNING**: Caution required (monitor closely)
+- **CRITICAL**: Immediate attention required
 
 **Alert Categories**:
-- Position Size, Portfolio Risk, Drawdown, Correlation, Concentration, Sector Risk, Daily Loss
+- `POSITION_SIZE`, `PORTFOLIO_RISK`, `DRAWDOWN`, `CORRELATION`, `CONCENTRATION`, `SECTOR_RISK`, `DAILY_LOSS`
 
 **Usage**:
 ```python
+from risk import RiskMonitor, PositionInfo
+
+# Create monitor with all components
+monitor = RiskMonitor(
+    risk_manager=risk_manager,
+    drawdown_monitor=drawdown_monitor,
+    correlation_analyzer=correlation_analyzer
+)
+
 # Comprehensive risk check
-risk_status = risk_monitor.check_all_risks(
-    equity=100000.0,
-    positions=current_positions,
-    returns=returns_series,
+status = monitor.check_all_risks(
+    current_equity=105000.0,
+    positions=[
+        PositionInfo(symbol='AAPL', quantity=100, market_value=15000.0, weight=0.15),
+        PositionInfo(symbol='MSFT', quantity=50, market_value=18000.0, weight=0.18)
+    ],
+    returns_data={'AAPL': [0.01, -0.005], 'MSFT': [0.02, 0.01]},
     timestamp=datetime.now()
 )
 
-# Check overall health (0-100 score)
-print(f"Health Score: {risk_status.health_score}/100")
-print(f"Status: {risk_status.overall_health}")
+# Check overall health
+print(f"Health: {status.overall_health}")  # "HEALTHY", "CAUTION", or "CRITICAL"
+print(f"Score: {status.health_score:.0f}/100")
 
-# Review active alerts
-for alert in risk_status.active_alerts:
-    if alert.level == AlertLevel.CRITICAL:
-        print(f"🚨 CRITICAL: {alert.message}")
-    elif alert.level == AlertLevel.WARNING:
-        print(f"⚠️  WARNING: {alert.message}")
+# Review alerts
+if status.has_critical_issues():
+    for alert in status.get_critical_alerts():
+        print(f"CRITICAL: {alert.category.value}: {alert.message}")
 
-# Get dashboard data for visualization
-dashboard = risk_monitor.get_dashboard_data()
+# Check limits status
+for limit_name, limit_info in status.limits_status.items():
+    usage_pct = (limit_info['usage'] / limit_info['limit']) * 100
+    print(f"{limit_name}: {usage_pct:.1f}% used")
+
+# Get dashboard data
+dashboard = monitor.get_dashboard_data()
 ```
 
 **Health Score Calculation**:
-```
-Score = 100
-  - (portfolio_heat / max_heat * 20)
-  - (daily_loss_pct * 400)
-  - (drawdown_pct * 100)
-  - (poor_diversification / 5)
-  - (critical_alerts * 5)
-```
+- **90-100**: HEALTHY (all systems normal)
+- **70-89**: CAUTION (monitor closely)
+- **<70**: CRITICAL (immediate action required)
 
 **Configuration**:
 ```python
 RiskMonitor(
     risk_manager=risk_manager,
-    drawdown_monitor=drawdown_monitor,
-    correlation_analyzer=correlation_analyzer,
-    alert_cooldown_minutes=15  # Prevent alert spam
+    drawdown_monitor=drawdown_monitor,           # Optional
+    correlation_analyzer=correlation_analyzer,   # Optional
+    critical_drawdown_threshold=0.15,            # 15% drawdown → critical
+    warning_drawdown_threshold=0.10,             # 10% drawdown → warning
+    critical_daily_loss_threshold=0.05,          # 5% daily loss → critical
+    warning_daily_loss_threshold=0.03,           # 3% daily loss → warning
+    critical_position_size_threshold=0.25,       # 25% position → critical
+    warning_position_size_threshold=0.20,        # 20% position → warning
+    critical_correlation_threshold=0.90,         # 0.90 correlation → critical
+    warning_correlation_threshold=0.80,          # 0.80 correlation → warning
+    alert_retention_hours=24                     # Keep alerts 24 hours
 )
 ```
 
@@ -453,77 +580,90 @@ RiskMonitor(
 
 ### 6. EmergencyController
 
-**Purpose**: Provide circuit breaker protection and emergency controls for catastrophic scenarios.
+**Purpose**: Circuit breaker protection system that halts trading during catastrophic scenarios with manual resume controls.
 
 **Emergency Levels**:
-1. **NONE** - Normal operation
-2. **WARNING** - Minor concern (10-12% drawdown)
-3. **ALERT** - Elevated risk (12-15% drawdown)
-4. **CRITICAL** - Circuit breaker triggered (15-20% drawdown)
-5. **SHUTDOWN** - Maximum drawdown exceeded (>20% drawdown)
+- **NONE**: Normal operation
+- **WARNING**: Minor concern (configurable threshold)
+- **ALERT**: Elevated risk (requires monitoring)
+- **CRITICAL**: Circuit breaker activated (trading halted)
+- **SHUTDOWN**: Complete system shutdown
 
-**Circuit Breakers**:
-
-1. **Drawdown Breaker** - Trips on excessive drawdown
-2. **Daily Loss Breaker** - Trips on daily loss limit
-3. **Position Loss Breaker** - Trips on single position loss
-4. **Volatility Breaker** - Trips on market volatility spike
-
-**Key Features**:
-- Automatic circuit breaker activation
-- Kill switch for immediate shutdown
-- Panic button for emergencies
-- Cooldown periods (default 30 minutes)
-- Manual approval required for resume
-- Daily trip limits per breaker
+**Circuit Breakers** (auto-trigger trading halts):
+1. **Drawdown Breaker**: Trips on portfolio drawdown threshold
+2. **Daily Loss Breaker**: Trips on daily loss limit
+3. **Position Loss Breaker**: Trips on single large position loss
+4. **Volatility Breaker**: Trips on market volatility spike
 
 **Usage**:
 ```python
-# Regular emergency check
-emergency_status = emergency_controller.check_emergency_conditions(
-    current_equity=95000.0,
+from risk import EmergencyController, Position
+
+# Check emergency conditions
+status = emergency_controller.check_emergency_conditions(
+    current_equity=92000.0,
     starting_equity=100000.0,
-    daily_starting_equity=98000.0,
-    peak_equity=105000.0,
-    positions=current_positions,
+    daily_starting_equity=95000.0,
+    peak_equity=108000.0,
+    positions=[
+        Position(symbol='AAPL', quantity=100, average_cost=150.0, current_price=145.0)
+    ],
     timestamp=datetime.now()
 )
 
-if emergency_status.level >= EmergencyLevel.CRITICAL:
-    print(f"🚨 EMERGENCY: {emergency_status.level}")
-    # Close all positions, cancel orders
+# Check status
+print(f"Trading allowed: {status.trading_allowed}")
+print(f"New positions allowed: {status.new_positions_allowed}")
+print(f"Position increases allowed: {status.position_increases_allowed}")
+print(f"Emergency level: {status.level.value}")
 
-# Manual emergency stop
-if market_crash_detected():
-    emergency_controller.panic_button()
+# Triggered breakers
+for breaker in status.active_breakers:
+    print(f"Breaker: {breaker.breaker_type.value}")
+    print(f"Reason: {breaker.reason}")
+    print(f"Cooldown until: {breaker.cooldown_until}")
 
-# Kill switch activation
-if system_error():
-    emergency_controller.activate_kill_switch("System error detected")
+# Manual controls
+if crisis_detected:
+    emergency_controller.panic_button()  # Immediate halt
 
-# Resume after cooldown
-if emergency_status.in_cooldown:
-    print(f"Cooldown ends: {emergency_status.cooldown_ends_at}")
+if system_failure:
+    emergency_controller.activate_kill_switch("Database connection lost")
+
+# Resume after review
+if status.in_cooldown:
+    print(f"Cooldown ends: {status.cooldown_until}")
 else:
     success = emergency_controller.request_resume(
         approved_by="Risk Manager",
-        reason="Market stabilized, ready to resume",
+        reason="Conditions stabilized, reviewed and approved",
         timestamp=datetime.now()
     )
+    print(f"Resume approved: {success}")
 ```
 
 **Configuration**:
 ```python
 EmergencyController(
-    max_drawdown_pct=0.20,           # 20% max drawdown
-    critical_drawdown_pct=0.15,      # 15% critical level
+    max_drawdown_pct=0.20,           # 20% max portfolio drawdown
+    critical_drawdown_pct=0.15,      # 15% triggers critical alert
     max_daily_loss_pct=0.05,         # 5% max daily loss
-    max_position_loss_pct=0.10,      # 10% max single position loss
-    cooldown_minutes=30,             # 30-min cooldown
-    auto_resume_enabled=False,       # Require manual approval
-    require_manual_review=True       # Require review before resume
+    max_position_loss_pct=0.10,      # 10% max loss on single position
+    volatility_threshold=2.5,        # 2.5x normal volatility
+    cooldown_minutes=30,             # 30-minute cooldown after trip
+    auto_resume_enabled=False,       # Manual approval required
+    require_manual_review=True,      # Require explicit resume call
+    max_daily_breaker_trips=3        # Max 3 trips per breaker per day
 )
 ```
+
+**Key Methods**:
+- `check_emergency_conditions()`: Regular status check
+- `panic_button()`: Immediate emergency halt
+- `activate_kill_switch(reason)`: System-level shutdown
+- `request_resume(approved_by, reason)`: Manual resume after review
+- `reset_breaker(breaker_type)`: Reset specific breaker
+- `get_active_breakers()`: List currently triggered breakers
 
 ---
 
@@ -536,33 +676,43 @@ EmergencyController(
 ```python
 # Risk Manager - Conservative
 risk_manager = RiskManager(
-    max_portfolio_heat=0.04,        # 4% total risk
-    max_position_size=0.01,         # 1% per position
-    max_daily_loss=0.02,            # 2% daily loss limit
-    max_sector_concentration=0.25,  # 25% per sector
-    position_limit=8
+    initial_capital=100000.0,
+    max_positions=8,                # Max 8 concurrent positions
+    max_position_pct=0.01,          # 1% max per position
+    max_drawdown_pct=0.10,          # 10% max drawdown
+    daily_loss_limit_pct=0.02,      # 2% daily loss limit
+    max_leverage=1.0,               # No leverage
+    concentration_limit=0.25        # 25% max in single position
 )
 
-# Position Sizer - Conservative
-position_sizer = PositionSizer(
-    default_method='fixed_fractional',
-    max_leverage=1.0,               # No leverage
-    kelly_fraction=0.125            # 1/8 Kelly
+# Position Sizer - Conservative (using Factory)
+position_sizer = PositionSizerFactory.create(
+    'risk_based',
+    capital=100000.0,
+    risk_per_trade=0.005,           # 0.5% risk per trade
+    max_position_pct=0.01           # 1% max position size
 )
 
 # Drawdown Monitor - Conservative
 drawdown_monitor = DrawdownMonitor(
-    protection_threshold=0.05,      # Enter protection at 5% DD
-    max_drawdown=0.10,             # Hard stop at 10% DD
-    recovery_threshold=0.03        # Exit protection at 3% DD
+    initial_equity=100000.0,
+    max_drawdown_pct=0.10,          # 10% max drawdown
+    daily_loss_limit_pct=0.02,      # 2% daily loss
+    weekly_loss_limit_pct=0.05,     # 5% weekly loss
+    scale_positions_on_drawdown=True,
+    minor_drawdown_threshold=0.03,  # 3% minor
+    moderate_drawdown_threshold=0.05, # 5% moderate
+    severe_drawdown_threshold=0.08  # 8% severe
 )
 
 # Emergency Controller - Conservative
 emergency_controller = EmergencyController(
-    max_drawdown_pct=0.10,         # 10% max drawdown
-    critical_drawdown_pct=0.08,    # 8% critical level
-    max_daily_loss_pct=0.03,       # 3% max daily loss
-    cooldown_minutes=60            # 1-hour cooldown
+    max_drawdown_pct=0.10,          # 10% max drawdown
+    critical_drawdown_pct=0.08,     # 8% critical level
+    max_daily_loss_pct=0.02,        # 2% max daily loss
+    max_position_loss_pct=0.05,     # 5% max single position loss
+    cooldown_minutes=60,            # 1-hour cooldown
+    auto_resume_enabled=False       # Manual approval required
 )
 ```
 
@@ -573,33 +723,44 @@ emergency_controller = EmergencyController(
 ```python
 # Risk Manager - Moderate
 risk_manager = RiskManager(
-    max_portfolio_heat=0.06,        # 6% total risk
-    max_position_size=0.02,         # 2% per position
-    max_daily_loss=0.03,            # 3% daily loss limit
-    max_sector_concentration=0.30,  # 30% per sector
-    position_limit=10
+    initial_capital=100000.0,
+    max_positions=10,               # Max 10 concurrent positions
+    max_position_pct=0.02,          # 2% max per position
+    max_drawdown_pct=0.20,          # 20% max drawdown
+    daily_loss_limit_pct=0.03,      # 3% daily loss limit
+    max_leverage=1.5,               # 1.5x leverage allowed
+    concentration_limit=0.30        # 30% max in single position
 )
 
-# Position Sizer - Moderate
-position_sizer = PositionSizer(
-    default_method='volatility',
-    max_leverage=1.5,
-    kelly_fraction=0.25            # 1/4 Kelly
+# Position Sizer - Moderate (using Factory)
+position_sizer = PositionSizerFactory.create(
+    'volatility_adjusted',
+    capital=100000.0,
+    risk_per_trade=0.01,            # 1% risk per trade
+    max_position_pct=0.02,          # 2% max position size
+    target_volatility=0.15          # 15% target volatility
 )
 
 # Drawdown Monitor - Moderate
 drawdown_monitor = DrawdownMonitor(
-    protection_threshold=0.10,      # Enter protection at 10% DD
-    max_drawdown=0.20,             # Hard stop at 20% DD
-    recovery_threshold=0.05        # Exit protection at 5% DD
+    initial_equity=100000.0,
+    max_drawdown_pct=0.20,          # 20% max drawdown
+    daily_loss_limit_pct=0.03,      # 3% daily loss
+    weekly_loss_limit_pct=0.10,     # 10% weekly loss
+    scale_positions_on_drawdown=True,
+    minor_drawdown_threshold=0.05,  # 5% minor
+    moderate_drawdown_threshold=0.10, # 10% moderate
+    severe_drawdown_threshold=0.15  # 15% severe
 )
 
 # Emergency Controller - Moderate
 emergency_controller = EmergencyController(
-    max_drawdown_pct=0.20,         # 20% max drawdown
-    critical_drawdown_pct=0.15,    # 15% critical level
-    max_daily_loss_pct=0.05,       # 5% max daily loss
-    cooldown_minutes=30            # 30-min cooldown
+    max_drawdown_pct=0.20,          # 20% max drawdown
+    critical_drawdown_pct=0.15,     # 15% critical level
+    max_daily_loss_pct=0.03,        # 3% max daily loss
+    max_position_loss_pct=0.10,     # 10% max single position loss
+    cooldown_minutes=30,            # 30-min cooldown
+    auto_resume_enabled=False       # Manual approval required
 )
 ```
 
@@ -610,33 +771,46 @@ emergency_controller = EmergencyController(
 ```python
 # Risk Manager - Aggressive
 risk_manager = RiskManager(
-    max_portfolio_heat=0.10,        # 10% total risk
-    max_position_size=0.03,         # 3% per position
-    max_daily_loss=0.05,            # 5% daily loss limit
-    max_sector_concentration=0.40,  # 40% per sector
-    position_limit=15
+    initial_capital=100000.0,
+    max_positions=15,               # Max 15 concurrent positions
+    max_position_pct=0.03,          # 3% max per position
+    max_drawdown_pct=0.30,          # 30% max drawdown
+    daily_loss_limit_pct=0.05,      # 5% daily loss limit
+    max_leverage=2.0,               # 2x leverage allowed
+    concentration_limit=0.40        # 40% max in single position
 )
 
-# Position Sizer - Aggressive
-position_sizer = PositionSizer(
-    default_method='kelly',
-    max_leverage=2.0,
-    kelly_fraction=0.5             # 1/2 Kelly
+# Position Sizer - Aggressive (using Factory)
+position_sizer = PositionSizerFactory.create(
+    'kelly',
+    capital=100000.0,
+    win_rate=0.55,                  # 55% win rate
+    avg_win=0.02,                   # 2% avg win
+    avg_loss=0.01,                  # 1% avg loss
+    kelly_fraction=0.5,             # Use 1/2 Kelly
+    max_position_pct=0.03           # 3% max position size
 )
 
 # Drawdown Monitor - Aggressive
 drawdown_monitor = DrawdownMonitor(
-    protection_threshold=0.15,      # Enter protection at 15% DD
-    max_drawdown=0.30,             # Hard stop at 30% DD
-    recovery_threshold=0.08        # Exit protection at 8% DD
+    initial_equity=100000.0,
+    max_drawdown_pct=0.30,          # 30% max drawdown
+    daily_loss_limit_pct=0.05,      # 5% daily loss
+    weekly_loss_limit_pct=0.15,     # 15% weekly loss
+    scale_positions_on_drawdown=True,
+    minor_drawdown_threshold=0.08,  # 8% minor
+    moderate_drawdown_threshold=0.15, # 15% moderate
+    severe_drawdown_threshold=0.22  # 22% severe
 )
 
 # Emergency Controller - Aggressive
 emergency_controller = EmergencyController(
-    max_drawdown_pct=0.30,         # 30% max drawdown
-    critical_drawdown_pct=0.25,    # 25% critical level
-    max_daily_loss_pct=0.08,       # 8% max daily loss
-    cooldown_minutes=15            # 15-min cooldown
+    max_drawdown_pct=0.30,          # 30% max drawdown
+    critical_drawdown_pct=0.25,     # 25% critical level
+    max_daily_loss_pct=0.05,        # 5% max daily loss
+    max_position_loss_pct=0.15,     # 15% max single position loss
+    cooldown_minutes=15,            # 15-min cooldown
+    auto_resume_enabled=False       # Manual approval required
 )
 ```
 
@@ -651,32 +825,45 @@ emergency_controller = EmergencyController(
 ```python
 from datetime import datetime
 from risk import (
-    RiskManager, PositionSizer, DrawdownMonitor,
-    CorrelationAnalyzer, RiskMonitor, EmergencyController
+    RiskManager, PositionSizerFactory, DrawdownMonitor,
+    CorrelationAnalyzer, RiskMonitor, EmergencyController,
+    Position, PositionInfo
 )
 
 class TradingBot:
     def __init__(self):
-        # Initialize all risk components
+        # Initialize all risk components with actual APIs
         self.risk_manager = RiskManager(
-            max_portfolio_heat=0.06,
-            max_position_size=0.02,
-            max_daily_loss=0.03
+            initial_capital=100000.0,
+            max_positions=10,
+            max_position_pct=0.02,
+            max_drawdown_pct=0.20,
+            daily_loss_limit_pct=0.03,
+            max_leverage=1.5,
+            concentration_limit=0.30
         )
         
-        self.position_sizer = PositionSizer(
-            default_method='volatility',
-            max_leverage=1.5
+        # Use factory to create position sizer
+        self.position_sizer = PositionSizerFactory.create(
+            'volatility_adjusted',
+            capital=100000.0,
+            risk_per_trade=0.01,
+            max_position_pct=0.02,
+            target_volatility=0.15
         )
         
         self.drawdown_monitor = DrawdownMonitor(
-            protection_threshold=0.10,
-            max_drawdown=0.20
+            initial_equity=100000.0,
+            max_drawdown_pct=0.20,
+            daily_loss_limit_pct=0.03,
+            weekly_loss_limit_pct=0.10,
+            scale_positions_on_drawdown=True
         )
         
         self.correlation_analyzer = CorrelationAnalyzer(
-            window=60,
-            max_correlation=0.70
+            concentration_threshold=0.25,
+            high_correlation_threshold=0.8,
+            max_sector_concentration=0.50
         )
         
         self.risk_monitor = RiskMonitor(
@@ -687,12 +874,16 @@ class TradingBot:
         
         self.emergency_controller = EmergencyController(
             max_drawdown_pct=0.20,
-            max_daily_loss_pct=0.05
+            critical_drawdown_pct=0.15,
+            max_daily_loss_pct=0.03,
+            cooldown_minutes=30
         )
         
         self.account_equity = 100000.0
         self.daily_starting_equity = 100000.0
-        self.positions = {}
+        self.starting_equity = 100000.0
+        self.peak_equity = 100000.0
+        self.positions_dict = {}  # symbol -> Position
     
     def evaluate_trade(self, symbol, price, stop_loss, volatility):
         """Complete trade evaluation with all risk checks."""
@@ -700,86 +891,92 @@ class TradingBot:
         timestamp = datetime.now()
         
         # 1. Check emergency conditions first
+        positions_list = [Position(
+            symbol=s,
+            quantity=p.quantity,
+            average_cost=p.average_cost,
+            current_price=p.current_price
+        ) for s, p in self.positions_dict.items()]
+        
         emergency_status = self.emergency_controller.check_emergency_conditions(
             current_equity=self.account_equity,
-            starting_equity=100000.0,
+            starting_equity=self.starting_equity,
             daily_starting_equity=self.daily_starting_equity,
-            peak_equity=max(self.account_equity, 100000.0),
-            positions=self.positions,
+            peak_equity=self.peak_equity,
+            positions=positions_list,
             timestamp=timestamp
         )
         
-        if not emergency_status.can_trade:
+        if not emergency_status.trading_allowed:
             return {
                 'allowed': False,
-                'reason': f'Emergency level: {emergency_status.level}',
+                'reason': f'Emergency level: {emergency_status.level.value}',
                 'emergency': True
             }
         
         # 2. Check drawdown status
-        dd_status = self.drawdown_monitor.update(
+        dd_metrics = self.drawdown_monitor.update(
             current_equity=self.account_equity,
-            timestamp=timestamp
+            current_date=timestamp
         )
         
-        if dd_status.protection_mode and not self.drawdown_monitor.can_open_position():
+        if dd_metrics.is_trading_halted:
             return {
                 'allowed': False,
-                'reason': f'Drawdown protection active: {dd_status.current_drawdown_pct:.1%}',
+                'reason': f'Trading halted: {dd_metrics.halt_reason}',
                 'drawdown': True
             }
         
-        # 3. Check correlation
-        correlated = self.correlation_analyzer.get_correlated_positions(
-            symbol=symbol,
-            threshold=0.70
+        # 3. Calculate position size (accounting for drawdown scaling)
+        risk_amount = abs(price - stop_loss)
+        base_size = self.position_sizer.calculate(
+            price=price,
+            risk_per_share=risk_amount,
+            volatility=volatility,
+            current_equity=self.account_equity
         )
         
-        if correlated:
+        # Apply drawdown scaling
+        position_size = int(base_size * dd_metrics.position_scale_factor)
+        
+        # 4. Validate with risk manager
+        allowed, reason = self.risk_manager.check_trade_risk(
+            symbol=symbol,
+            side='BUY',
+            quantity=position_size,
+            price=price,
+            positions=self.positions_dict
+        )
+        
+        if not allowed:
             return {
                 'allowed': False,
-                'reason': f'High correlation with existing positions: {correlated}',
-                'correlation': True
+                'reason': reason,
+                'risk_manager': True
             }
         
-        # 4. Calculate position size
-        position_size = self.position_sizer.calculate_size(
-            symbol=symbol,
-            price=price,
-            stop_loss=stop_loss,
-            account_equity=self.account_equity,
-            method='volatility',
-            volatility=volatility
-        )
+        # 5. Check overall risk health
+        position_info_list = [
+            PositionInfo(
+                symbol=s,
+                quantity=p.quantity,
+                market_value=p.quantity * p.current_price,
+                weight=(p.quantity * p.current_price) / self.account_equity
+            ) for s, p in self.positions_dict.items()
+        ]
         
-        # 5. Validate with risk manager
-        validation = self.risk_manager.validate_trade(
-            symbol=symbol,
-            shares=position_size,
-            price=price,
-            side='BUY',
-            current_positions=self.positions,
-            account_equity=self.account_equity
-        )
-        
-        if not validation['allowed']:
-            return validation
-        
-        # 6. Check overall risk health
         risk_status = self.risk_monitor.check_all_risks(
-            equity=self.account_equity,
-            positions=self.positions,
-            returns=None,  # Would pass returns series here
+            current_equity=self.account_equity,
+            positions=position_info_list,
+            returns_data=None,  # Optional: pass historical returns
             timestamp=timestamp
         )
         
         # Alert on critical issues
-        critical_alerts = [a for a in risk_status.active_alerts 
-                          if a.level == 'CRITICAL']
-        
-        if critical_alerts:
-            print(f"⚠️  {len(critical_alerts)} critical alerts active")
-            for alert in critical_alerts:
+        if risk_status.has_critical_issues():
+            critical = risk_status.get_critical_alerts()
+            print(f"⚠️  {len(critical)} critical alerts active:")
+            for alert in critical:
                 print(f"   - {alert.message}")
         
         # Trade approved
@@ -787,7 +984,9 @@ class TradingBot:
             'allowed': True,
             'position_size': position_size,
             'health_score': risk_status.health_score,
-            'active_alerts': len(risk_status.active_alerts)
+            'health_status': risk_status.overall_health,
+            'active_alerts': len(risk_status.active_alerts),
+            'position_scale_factor': dd_metrics.position_scale_factor
         }
     
     def execute_trade(self, symbol, price, stop_loss, volatility):
