@@ -283,13 +283,59 @@ def get_stock_info(symbol: str) -> Dict:
         return {'symbol': symbol, 'error': str(e)}
 
 
-if __name__ == "__main__":
-    # Default symbols to download
-    symbols = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'SPY', 'QQQ', 'AMZN', 'NVDA']
+def get_symbols_from_tws_portfolio() -> List[str]:
+    """
+    Get symbols from TWS account portfolio
     
+    Returns:
+        List of symbols in portfolio, or empty list if connection fails
+    """
+    try:
+        print("\nAttempting to connect to TWS to get portfolio symbols...")
+        
+        from tws_client import TWSClient
+        
+        # Try to connect
+        client = TWSClient()
+        client.connect("127.0.0.1", 7497, clientId=999)  # Paper trading port
+        
+        # Wait for portfolio to load
+        import time
+        timeout = 10
+        start_time = time.time()
+        
+        while not client.portfolio_loaded and (time.time() - start_time) < timeout:
+            time.sleep(0.5)
+        
+        if client.portfolio:
+            symbols = list(client.portfolio.keys())
+            print(f"✓ Found {len(symbols)} symbols in TWS portfolio: {', '.join(symbols)}")
+            client.disconnect()
+            return symbols
+        else:
+            print("✗ No positions found in portfolio")
+            client.disconnect()
+            return []
+            
+    except Exception as e:
+        print(f"✗ Could not connect to TWS: {e}")
+        print("  Make sure TWS/IB Gateway is running")
+        return []
+
+
+if __name__ == "__main__":
+    # Try to get symbols from TWS portfolio first
     print("\n" + "="*70)
     print("Real Historical Data Downloader")
     print("="*70)
+    
+    symbols = get_symbols_from_tws_portfolio()
+    
+    # Fallback to default symbols if TWS not available
+    if not symbols:
+        print("\nUsing default symbols (TWS not connected)")
+        symbols = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'SPY', 'QQQ', 'AMZN', 'NVDA']
+    
     print("\nThis will download REAL market data from Yahoo Finance")
     print(f"Symbols: {', '.join(symbols)}")
     print("Period: Last 2 years")
