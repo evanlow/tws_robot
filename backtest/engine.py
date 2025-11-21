@@ -101,6 +101,9 @@ class BacktestResult:
     # All trades
     trades: List[Trade] = field(default_factory=list)
     
+    # Performance metrics (optional, for comparison)
+    metrics: Optional['PerformanceMetrics'] = None
+    
     def get_return_pct(self) -> float:
         """Get total return percentage"""
         return self.total_return * 100
