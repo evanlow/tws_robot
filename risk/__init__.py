@@ -33,6 +33,13 @@ from .correlation_analyzer import (
     CorrelationPair,
     PositionInfo
 )
+from .monitoring import (
+    RiskMonitor,
+    RiskStatus as MonitoringRiskStatus,
+    Alert,
+    AlertLevel,
+    AlertCategory
+)
 
 __all__ = [
     'RiskManager',
@@ -54,4 +61,9 @@ __all__ = [
     'CorrelationMetrics',
     'CorrelationPair',
     'PositionInfo',
+    'RiskMonitor',
+    'MonitoringRiskStatus',
+    'Alert',
+    'AlertLevel',
+    'AlertCategory',
 ]
