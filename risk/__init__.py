@@ -21,6 +21,12 @@ from .position_sizer import (
     RiskParitySizer,
     PositionSizerFactory
 )
+from .drawdown_control import (
+    DrawdownMonitor,
+    DrawdownMetrics,
+    DrawdownEvent,
+    DrawdownSeverity
+)
 
 __all__ = [
     'RiskManager',
@@ -34,4 +40,8 @@ __all__ = [
     'RiskBasedSizer',
     'RiskParitySizer',
     'PositionSizerFactory',
+    'DrawdownMonitor',
+    'DrawdownMetrics',
+    'DrawdownEvent',
+    'DrawdownSeverity',
 ]
