@@ -9,12 +9,13 @@ Components:
 - MarketSimulator: Replay historical market conditions
 - Strategy: Base class for strategy implementation
 - BacktestEngine: Execute backtests with risk system integration
-- PerformanceMetrics: Calculate comprehensive performance statistics
+- PerformanceAnalyzer: Calculate comprehensive performance statistics
+- PerformanceVisualizer: Create performance charts and dashboards
 - ProfileManager: Multi-profile comparison and optimization
 
 Author: TWS Robot Development Team
 Date: November 2025
-Week 4 Day 1-2: Backtesting Foundation & Engine Core
+Week 4 Day 1-3: Backtesting Foundation, Engine Core & Performance Analytics
 """
 
 from .data_models import Bar, MarketData, BarSeries, TimeFrame, Trade, Position
@@ -22,6 +23,14 @@ from .data_manager import HistoricalDataManager
 from .market_simulator import MarketSimulator, FillSimulator, Order
 from .strategy import Strategy, StrategyConfig, StrategyState
 from .engine import BacktestEngine, BacktestConfig, BacktestResult, EquityPoint
+from .performance import (
+    TradeDirection,
+    DrawdownPeriod,
+    PerformanceMetrics,
+    PerformanceAnalyzer,
+    ReportGenerator
+)
+from .visualization import PerformanceVisualizer
 
 __all__ = [
     # Data models
@@ -50,6 +59,14 @@ __all__ = [
     'BacktestConfig',
     'BacktestResult',
     'EquityPoint',
+    
+    # Performance Analytics (Day 3)
+    'TradeDirection',
+    'DrawdownPeriod',
+    'PerformanceMetrics',
+    'PerformanceAnalyzer',
+    'ReportGenerator',
+    'PerformanceVisualizer',
 ]
 
-__version__ = '1.1.0'
+__version__ = '1.2.0'
