@@ -27,6 +27,12 @@ from .drawdown_control import (
     DrawdownEvent,
     DrawdownSeverity
 )
+from .correlation_analyzer import (
+    CorrelationAnalyzer,
+    CorrelationMetrics,
+    CorrelationPair,
+    PositionInfo
+)
 
 __all__ = [
     'RiskManager',
@@ -44,4 +50,8 @@ __all__ = [
     'DrawdownMetrics',
     'DrawdownEvent',
     'DrawdownSeverity',
+    'CorrelationAnalyzer',
+    'CorrelationMetrics',
+    'CorrelationPair',
+    'PositionInfo',
 ]
