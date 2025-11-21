@@ -40,6 +40,15 @@ from .monitoring import (
     AlertLevel,
     AlertCategory
 )
+from .emergency_controls import (
+    EmergencyController,
+    EmergencyStatus,
+    EmergencyEvent,
+    EmergencyLevel,
+    TriggerReason,
+    CircuitBreaker,
+    CircuitBreakerConfig
+)
 
 __all__ = [
     'RiskManager',
@@ -66,4 +75,11 @@ __all__ = [
     'Alert',
     'AlertLevel',
     'AlertCategory',
+    'EmergencyController',
+    'EmergencyStatus',
+    'EmergencyEvent',
+    'EmergencyLevel',
+    'TriggerReason',
+    'CircuitBreaker',
+    'CircuitBreakerConfig',
 ]
