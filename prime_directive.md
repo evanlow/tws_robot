@@ -1,13 +1,37 @@
 # Prime Directive: Development Guidelines
 
-**Last Updated:** November 21, 2025  
+**Last Updated:** November 22, 2025  
 **Purpose:** Ensure high-quality, maintainable code by learning from past experiences and establishing best practices for all team members, AI agents, and contributors.
 
 ---
 
 ## 🎯 Core Principles
 
-### 1. **Verify First, Code Second**
+### 0. **100% Test Pass Rate - Non-Negotiable**
+All tests must pass before AND after ANY code changes. No exceptions.
+
+**The Protocol:**
+1. ✅ Verify baseline - run full test suite BEFORE any changes
+2. 🔄 Make changes (one logical step at a time)
+3. ✅ Verify again - run full test suite AFTER changes
+4. ❌ If tests fail - fix immediately or revert
+5. ✅ Only commit when all tests pass
+
+**❌ Never:**
+- Skip baseline verification
+- Make multiple unrelated changes at once
+- Commit with failing tests
+- Defer fixing test failures
+- Delete code without verifying impact
+
+**✅ Always:**
+- Run tests before starting work (establish baseline)
+- Run tests after each logical change
+- Maintain 100% pass rate throughout
+- Document test count in commits (e.g., "138/138 passing")
+- Preserve git history when removing code
+
+### 1. **Verify First, Code Second**  
 Never assume how existing code works. Always verify before implementing.
 
 **❌ Don't:**
@@ -28,7 +52,7 @@ timeframe=TimeFrame.DAY_1
 def on_bar(self, market_data):  # Matches base class signature
 ```
 
-### 2. **Defensive Programming Always**
+### 2. **Defensive Programming Always**  
 Assume nothing. Handle None, validate inputs, check bounds.
 
 **❌ Don't:**
@@ -50,7 +74,7 @@ if position is None:
     position = 0
 ```
 
-### 3. **Test Incrementally, Not All At Once**
+### 3. **Test Incrementally, Not All At Once**  
 Build and verify in small steps. Don't write 300 lines before testing.
 
 **✅ Development Flow:**
@@ -303,6 +327,79 @@ def on_bar(self, market_data):
 
 ## 🎓 Learning from Errors
 
+### Week 4 Day 4 Lessons Learned (November 22, 2025)
+
+#### Lesson 1: Delete Systematically with Test Verification
+**Context:** Cleaning up duplicate backtesting modules and legacy scripts
+- **What we did right:**
+  1. Verified baseline: 138/138 tests passing
+  2. Made one logical change (rename backtesting → backtesting_old)
+  3. Verified tests still pass: 138/138
+  4. Committed with clear message
+  5. Made second change (delete backtesting_old/)
+  6. Verified tests still pass: 138/138
+  7. Committed with clear message
+  8. Made third change (delete legacy scripts)
+  9. Verified tests still pass: 138/138
+  10. Ready to commit
+
+- **Why this matters:** 
+  - Each checkpoint provides safety net
+  - Can pinpoint exact change if something breaks
+  - Git history preserves deleted code
+  - 100% confidence in each step
+
+- **Key insight:** "Delete with confidence, verify with discipline"
+
+#### Lesson 2: Legacy Code Cleanup Strategy
+**Context:** Found 5 legacy scripts importing deleted module
+- **The right way:**
+  1. Search for all imports: `grep_search(query="from backtesting|import backtesting", isRegexp=True)`
+  2. Analyze each file (is it part of core system?)
+  3. Verify none are in current test suite
+  4. Delete all at once (they're related)
+  5. Verify test suite still passes
+  
+- **Files deleted:**
+  - `optimize_strategy.py` - used deleted optimizer
+  - `run_backtest.py` - used deleted visualizer
+  - `tests/test_risk_manager.py` - tested deleted component
+  - `tests/test_performance_analytics.py` - tested deleted component
+  - `tests/test_backtesting.py` - tested deleted module
+  
+- **Why delete instead of rewrite:** 
+  - Week 4 backtest/ module is superior and complete
+  - These were superseded, not complementary
+  - Maintaining two implementations creates confusion
+  - Can recreate if needed (git history preserved)
+
+#### Lesson 3: Module Consolidation
+**Context:** Had two backtesting directories causing import confusion
+- **Problem indicators:**
+  - Developers confused about which to import
+  - Duplicate functionality
+  - Import errors in new code
+  
+- **Solution:**
+  - Keep the superior, complete implementation (backtest/)
+  - Delete the legacy, incomplete implementation (backtesting/)
+  - Update all imports (but in this case, old imports were in dead code)
+  
+- **Lesson:** "One authoritative implementation per concept"
+
+#### Lesson 4: Git History as Safety Net
+**Context:** Deleting 13 files totaling 3,000+ lines
+- **Why we could delete confidently:**
+  - All code preserved in git history (commits da9a714, 8206109)
+  - Can retrieve if needed: `git show da9a714:backtesting_old/optimizer.py`
+  - Clear commit messages document what was deleted and why
+  
+- **Best practices:**
+  - Commit before major deletions
+  - Write detailed commit messages
+  - Reference commit hashes in documentation
+  - Never force-push deleted code (preserve history)
+
 ### Week 4 Day 3 Lessons Learned
 
 #### Error 1: TimeFrame.DAILY
@@ -398,7 +495,8 @@ Gotchas:
 
 ### Before Considering Code "Done"
 
-- [ ] All unit tests passing (100%)
+- [ ] All unit tests passing (100%) - baseline verified
+- [ ] All unit tests passing (100%) - after changes verified
 - [ ] No compiler/linter warnings
 - [ ] No None-type errors
 - [ ] All edge cases handled
@@ -406,16 +504,31 @@ Gotchas:
 - [ ] Documentation complete
 - [ ] Integration tested
 - [ ] Performance acceptable
+- [ ] Git commit with clear message
 
 ### Definition of "Done"
 
 Code is only done when:
-1. ✅ Tests pass
-2. ✅ No warnings
-3. ✅ Error handling complete
-4. ✅ Integrated and verified
-5. ✅ Documented
-6. ✅ Committed with clear message
+1. ✅ Baseline tests verified (before changes)
+2. ✅ Changes implemented
+3. ✅ Tests pass after changes (verify again)
+4. ✅ No warnings
+5. ✅ Error handling complete
+6. ✅ Integrated and verified
+7. ✅ Documented
+8. ✅ Committed with test count in message (e.g., "138/138 passing")
+
+### Deletion Protocol (Additional Requirements)
+
+When deleting code:
+1. ✅ Verify baseline tests pass
+2. ✅ Search for all usages: `grep_search(query="module_name", isRegexp=True)`
+3. ✅ Analyze impact (is it in test suite? imported elsewhere?)
+4. ✅ Delete in logical groups (related files together)
+5. ✅ Verify tests still pass after deletion
+6. ✅ Commit with detailed message explaining what and why
+7. ✅ Reference commit hash in documentation if significant
+8. ✅ Never force-push (preserve git history)
 
 ---
 
@@ -490,18 +603,54 @@ Code is only done when:
 
 ## 💡 Remember
 
+> **"100% test pass rate is not a goal - it's a requirement."**
+
 > **"The best code is code that works correctly the first time because you took the time to verify before implementing."**
 
 > **"Tests are not overhead - they're proof your code works."**
 
 > **"Defensive programming isn't paranoia - it's professionalism."**
 
+> **"Delete with confidence when you verify with discipline."**
+
+> **"One authoritative implementation per concept - no duplicates."**
+
+---
+
+## 📊 Project Metrics (Week 4)
+
+### Current Test Suite Status
+- **Total Tests:** 138
+- **Pass Rate:** 100%
+- **Last Verified:** 2025-11-22
+- **Test Files:**
+  - test_backtest_engine.py (18 tests)
+  - test_backtest_data.py (18 tests)
+  - test_profiles.py (36 tests)
+  - test_profile_comparison.py (20 tests)
+  - test_strategy_templates.py (46 tests)
+
+### Cleanup History
+- **2025-11-22:** Deleted legacy backtesting module (8 files, 3,070 lines)
+  - Commit da9a714: Archive step (backtesting → backtesting_old)
+  - Commit 8206109: Deletion step (removed backtesting_old/)
+  - Commit [pending]: Legacy scripts cleanup (5 files)
+- **Tests maintained:** 138/138 (100%) throughout all deletions
+
+### Code Quality Standards Achieved
+✅ Single authoritative backtest module (backtest/)  
+✅ No duplicate implementations  
+✅ 100% test pass rate maintained  
+✅ Clear git history with detailed commit messages  
+✅ Zero breaking changes to production code
+
 ---
 
 **Revision History:**
+- 2025-11-22: Added Prime Directive Principle 0 (100% Test Pass Rate), Week 4 Day 4 lessons, Deletion Protocol, Project Metrics
 - 2025-11-21: Initial creation based on Week 4 Day 3 lessons learned
 
-**Next Review:** 2025-12-21
+**Next Review:** 2025-12-22
 
 ---
 
