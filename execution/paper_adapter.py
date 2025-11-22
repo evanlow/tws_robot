@@ -153,8 +153,17 @@ class PaperTradingAdapter(EWrapper, EClient):
         self.ready = True
         logger.info(f"Ready to trade - next valid order ID: {orderId}")
     
-    def error(self, reqId: int, errorCode: int, errorString: str):
-        """Handle errors from TWS"""
+    def error(self, reqId: int, errorCode: int, errorString: str, advancedOrderRejectJson: str = ""):
+        """Handle errors from TWS
+        
+        Note: TWS API v176+ calls error() with 4 parameters:
+        - reqId: Request ID (order ID for order errors)
+        - errorCode: Error code
+        - errorString: Error message
+        - advancedOrderRejectJson: JSON string with rejection details (v176+)
+        
+        We maintain backward compatibility by making the 4th parameter optional.
+        """
         # Informational codes (2100-2199) are not errors
         if 2100 <= errorCode < 2200:
             logger.info(f"TWS Info [{errorCode}]: {errorString}")
