@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 
 from backtest.strategy import Strategy, StrategyConfig
 from backtest.data_models import Bar
-from backtest.market_simulator import Order
 
 
 # ============================================================================
@@ -156,14 +155,7 @@ class MovingAverageCrossStrategy(Strategy):
         
         if position_size > 0:
             # Place market buy order
-            order = Order(
-                symbol=symbol,
-                quantity=position_size,
-                order_type='MKT',
-                action='BUY',
-                timestamp=bar.timestamp
-            )
-            self.submit_order(order)
+            self.buy(symbol, position_size)
     
     def _handle_sell_signal(self, symbol: str, bar: Bar):
         """Handle death cross sell signal"""
@@ -174,14 +166,7 @@ class MovingAverageCrossStrategy(Strategy):
         position = self.get_position(symbol)
         
         # Place market sell order to close position
-        order = Order(
-            symbol=symbol,
-            quantity=position.quantity,
-            order_type='MKT',
-            action='SELL',
-            timestamp=bar.timestamp
-        )
-        self.submit_order(order)
+        self.sell(symbol, position.quantity)
 
 
 # ============================================================================
@@ -369,14 +354,7 @@ class MeanReversionStrategy(Strategy):
         position_size = self.calculate_position_size(symbol, bar.close)
         
         if position_size > 0:
-            order = Order(
-                symbol=symbol,
-                quantity=position_size,
-                order_type='MKT',
-                action='BUY',
-                timestamp=bar.timestamp
-            )
-            self.submit_order(order)
+            self.buy(symbol, position_size)
     
     def _handle_sell_signal(self, symbol: str, bar: Bar):
         """Handle overbought sell signal"""
@@ -386,14 +364,7 @@ class MeanReversionStrategy(Strategy):
         
         position = self.get_position(symbol)
         
-        order = Order(
-            symbol=symbol,
-            quantity=position.quantity,
-            order_type='MKT',
-            action='SELL',
-            timestamp=bar.timestamp
-        )
-        self.submit_order(order)
+        self.sell(symbol, position.quantity)
 
 
 # ============================================================================
@@ -591,14 +562,7 @@ class MomentumStrategy(Strategy):
         position_size = self.calculate_position_size(symbol, bar.close)
         
         if position_size > 0:
-            order = Order(
-                symbol=symbol,
-                quantity=position_size,
-                order_type='MKT',
-                action='BUY',
-                timestamp=bar.timestamp
-            )
-            self.submit_order(order)
+            self.buy(symbol, position_size)
     
     def _handle_sell_signal(self, symbol: str, bar: Bar):
         """Handle bearish momentum signal"""
@@ -608,14 +572,7 @@ class MomentumStrategy(Strategy):
         
         position = self.get_position(symbol)
         
-        order = Order(
-            symbol=symbol,
-            quantity=position.quantity,
-            order_type='MKT',
-            action='SELL',
-            timestamp=bar.timestamp
-        )
-        self.submit_order(order)
+        self.sell(symbol, position.quantity)
 
 
 # ============================================================================
