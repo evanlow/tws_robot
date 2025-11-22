@@ -262,15 +262,20 @@ class TestWeek1CoreModules:
         """Verify Rate Limiter enforces request limits"""
         from core.rate_limiter import APIRateLimiter
         
-        limiter = APIRateLimiter(max_requests_per_second=10)
+        # APIRateLimiter uses market_data_lines (default 100 lines = 50 req/sec)
+        limiter = APIRateLimiter(market_data_lines=100)
         
         # Test request acceptance
         for i in range(10):
-            can_make_request = limiter.check_rate_limit()
+            can_make_request = limiter.can_make_request(request_type="general")
             if can_make_request:
-                limiter.record_request()
+                limiter.record_request(request_type="general")
         
-        assert limiter.requests_made > 0
+        # Verify requests were recorded (check the general_requests deque)
+        assert len(limiter.general_requests) == 10
+        
+        # Verify rate limit is enforced (50 req/sec for 100 market data lines)
+        assert limiter.max_requests_per_second == 50
     
     def test_contract_builder_creates_contracts(self):
         """Verify Contract Builder can create various contract types"""
@@ -283,10 +288,12 @@ class TestWeek1CoreModules:
         assert stock.symbol == "AAPL"
         assert stock.secType == "STK"
         
-        # Test futures contract
-        futures = builder.create_futures_contract("ES", "202512")
+        # Test futures contract (symbol, exchange, lastTradeDateOrContractMonth)
+        futures = builder.create_futures_contract("ES", "CME", "202512")
         assert futures.symbol == "ES"
         assert futures.secType == "FUT"
+        assert futures.exchange == "CME"
+        assert futures.lastTradeDateOrContractMonth == "202512"
 
 
 class TestWeek1TestingFramework:

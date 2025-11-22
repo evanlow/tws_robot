@@ -24,10 +24,12 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 ```
 
 ### Prime Directive Compliance
-- ✅ 100% test pass rate before AND after changes
+- ✅ 100% test pass rate before AND after changes (ALL tests, no exceptions)
 - ✅ Verify baseline → Make change → Verify again
 - ✅ Document test count in all commits
 - ✅ No exceptions, no shortcuts
+- ✅ Pre-existing failures must be fixed BEFORE starting new work
+- ✅ "It was already broken" is NOT a valid excuse
 
 ---
 
@@ -45,10 +47,14 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 - **Sprint 1 Task 3:** Real-time Market Data Pipeline (17 tests, commit cb1274d)
 
 ### In Progress 🔄
-- **Sprint 1 Task 4:** Paper Trading Monitor
+- **Sprint 1 Task 3.1:** Fix Pre-existing Test Failures (CRITICAL)
 
 ### Blockers ❌
-- None identified
+- ❌ **CRITICAL:** 2 pre-existing test failures violate Prime Directive
+  - `test_rate_limiter_functionality` - APIRateLimiter API mismatch
+  - `test_contract_builder_creates_contracts` - ContractBuilder missing argument
+  - **Impact:** Test suite integrity compromised, CI/CD blocked
+  - **Action:** Must fix before proceeding to Task 4
 
 ---
 
