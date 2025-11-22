@@ -40,9 +40,11 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 - **TWS Client:** Paper/live configs with market status checks
 - **Prime Directive:** Enhanced with systematic deletion protocol
 - **Module Cleanup:** Single authoritative backtest/ module
+- **Sprint 1 Task 1:** Strategy Lifecycle (29 tests, commit f701d37)
+- **Sprint 1 Task 2:** Paper Trading Adapter (32 tests, commit a3a3ff3)
 
 ### In Progress 🔄
-- None (clean slate for sprint start)
+- **Sprint 1 Task 3:** Real-time Market Data Pipeline
 
 ### Blockers ❌
 - None identified
@@ -55,8 +57,8 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 **Goal:** Build the bridge from backtesting to paper trading
 
 **Deliverables:**
-- [ ] Strategy lifecycle state machine
-- [ ] Paper trading adapter for TWS client
+- [x] Strategy lifecycle state machine
+- [x] Paper trading adapter for TWS client
 - [ ] Real-time market data pipeline
 - [ ] Paper trading monitor dashboard
 - [ ] Integration tests (maintain 100% pass rate)
@@ -393,8 +395,9 @@ CONNECTION_LOSS:
 
 ### Sprint 1 Progress (Update Daily)
 **Day 1:**
-- [ ] Task 1: Strategy lifecycle state machine
-- [ ] Task 2: Paper trading adapter (started)
+- [x] Task 1: Strategy lifecycle state machine (29 tests)
+- [x] Task 2: Paper trading adapter (32 tests)
+- [ ] Task 3: Real-time data pipeline (in progress)
 
 **Day 2:**
 - [ ] Task 2: Paper trading adapter (completed)

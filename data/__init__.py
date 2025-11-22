@@ -13,9 +13,11 @@ from .models import (
     Trade, Position, Order, Strategy, 
     MarketData, PerformanceMetric
 )
+from .realtime_pipeline import RealtimeDataManager, DataSubscription
 
 __all__ = [
     'Database', 'get_database',
     'Trade', 'Position', 'Order', 'Strategy',
-    'MarketData', 'PerformanceMetric'
+    'MarketData', 'PerformanceMetric',
+    'RealtimeDataManager', 'DataSubscription'
 ]
