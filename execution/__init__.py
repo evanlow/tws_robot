@@ -5,5 +5,11 @@ Provides adapters for connecting strategies to live/paper trading.
 """
 
 from .paper_adapter import PaperTradingAdapter
+from .risk_monitor import RealTimeRiskMonitor, PortfolioRisk, RiskAlert
 
-__all__ = ['PaperTradingAdapter']
+__all__ = [
+    'PaperTradingAdapter',
+    'RealTimeRiskMonitor',
+    'PortfolioRisk',
+    'RiskAlert'
+]
