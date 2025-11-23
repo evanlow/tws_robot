@@ -49,9 +49,12 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 - **Sprint 1 Task 4:** Paper Trading Monitor (28 tests, commit d9f3c86)
 - **Sprint 1 Task 5:** Integration Testing (26 tests, commit 1f1b846)
 - **SPRINT 1 COMPLETE:** 231/231 tests passing (100%) ✅
+- **Sprint 2 Task 1:** Real-time Risk Monitor (28 tests, commit ea33654)
+- **Sprint 2 Task 2:** Paper Trading Metrics Tracker (34 tests, commit cf9006a)
 
 ### In Progress 🔄
-- Sprint 1 Retrospective
+- **Sprint 2:** Risk & Validation Framework (Days 5-7)
+- **Sprint 2 Task 3:** Validation Criteria Enforcer
 
 ### Blockers ❌
 - None identified
@@ -81,9 +84,9 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 **Goal:** Implement paper trading validation and risk controls
 
 **Deliverables:**
-- [ ] Risk profiles integrated with live execution
-- [ ] Real-time risk monitoring and enforcement
-- [ ] Paper trading validation metrics tracker
+- [x] Risk profiles integrated with live execution
+- [x] Real-time risk monitoring and enforcement
+- [x] Paper trading validation metrics tracker
 - [ ] Strategy promotion workflow and checklist
 - [ ] Automated validation dashboard
 
@@ -297,6 +300,233 @@ Display Components:
 - `tests/test_paper_trading_integration.py`
 - `tests/test_realtime_data_pipeline.py`
 - `tests/test_strategy_lifecycle.py`
+
+---
+
+## 📋 Sprint 2 Detailed Backlog
+
+### Task 1: Real-time Risk Monitor Integration (Est: 2-3 hours)
+**Priority:** Critical  
+**Dependencies:** Sprint 1 Task 4 (PaperMonitor)
+
+**Implementation:**
+```python
+# File: execution/risk_monitor.py
+
+Class: RealTimeRiskMonitor
+- Monitor positions against RiskProfile limits
+- Calculate portfolio risk metrics in real-time
+- Enforce position size limits
+- Track drawdown and margin usage
+- Generate risk alerts
+
+Features:
+- Position-level risk checks (before order placement)
+- Portfolio-level risk aggregation
+- Real-time P&L and drawdown tracking
+- Risk limit breach detection
+- Integration with PaperTradingAdapter
+```
+
+**Integration Points:**
+- `backtest/profiles.py` RiskProfile → Risk limits
+- `execution/paper_adapter.py` → Pre-order risk checks
+- `monitoring/paper_monitor.py` → Risk display
+- `strategy/lifecycle.py` → Auto-pause on breach
+
+**Tests Required:**
+- Position size limit enforcement
+- Portfolio risk calculation
+- Drawdown tracking accuracy
+- Breach detection and alerts
+- Integration with adapter (order rejection)
+
+---
+
+### Task 2: Paper Trading Metrics Tracker (Est: 2-3 hours)
+**Priority:** Critical  
+**Dependencies:** Sprint 1 Task 2 (PaperTradingAdapter)
+
+**Implementation:**
+```python
+# File: strategy/metrics_tracker.py
+
+Class: PaperMetricsTracker
+- Track strategy performance metrics over time
+- Calculate validation criteria (Sharpe, win rate, etc.)
+- Store time-series data (daily snapshots)
+- Generate validation reports
+
+Metrics Tracked:
+- Days running (calendar days in PAPER state)
+- Total trades executed
+- Win rate (winning trades / total trades)
+- Sharpe ratio (rolling calculation)
+- Maximum drawdown (peak-to-trough)
+- Profit factor (gross profit / gross loss)
+- Consecutive losses (current streak)
+- Average win/loss size
+```
+
+**Storage:** 
+- SQLite: `strategy_metrics` table
+- Daily snapshots: `strategy_snapshots` table
+
+**Integration Points:**
+- `execution/paper_adapter.py` → Trade execution data
+- `strategy/lifecycle.py` → Metrics for validation
+- `monitoring/paper_monitor.py` → Display metrics
+
+**Tests Required:**
+- Metric calculation accuracy
+- Time-series data integrity
+- Sharpe ratio calculation (rolling window)
+- Drawdown calculation
+- Win rate and profit factor
+
+---
+
+### Task 3: Validation Criteria Enforcer (Est: 2 hours)
+**Priority:** Critical  
+**Dependencies:** Task 2 (MetricsTracker)
+
+**Implementation:**
+```python
+# File: strategy/validation.py
+
+Class: ValidationEnforcer
+- Check if strategy meets validation criteria
+- Prevent premature promotion to VALIDATED state
+- Generate validation reports with pass/fail reasons
+- Track validation progress over time
+
+Validation Checks:
+1. Minimum trading days (30+)
+2. Minimum trades (20+)
+3. Sharpe ratio (>1.0)
+4. Maximum drawdown (<10%)
+5. Win rate (>50%)
+6. Profit factor (>1.5)
+7. Consecutive losses (<5)
+
+Report Format:
+- Pass/Fail status per criterion
+- Current value vs. required value
+- Days until minimum trading period
+- Recommendation (ready/not ready)
+```
+
+**Integration Points:**
+- `strategy/lifecycle.py` → PAPER → VALIDATED transition
+- `strategy/metrics_tracker.py` → Current metrics
+- `monitoring/paper_monitor.py` → Display validation status
+
+**Tests Required:**
+- Each validation criterion individually
+- Combined validation logic
+- Edge cases (exactly at threshold)
+- Report generation
+
+---
+
+### Task 4: Strategy Promotion Workflow (Est: 2-3 hours)
+**Priority:** High  
+**Dependencies:** Task 3 (ValidationEnforcer)
+
+**Implementation:**
+```python
+# File: strategy/promotion.py
+
+Class: PromotionWorkflow
+- Implement multi-gate approval process
+- Enforce validation checklist
+- Require manual approval at each gate
+- Document approval trail
+
+Workflow States:
+1. PAPER: Running on paper account
+2. VALIDATION_PENDING: Criteria met, awaiting review
+3. VALIDATED: Automated validation passed
+4. APPROVAL_PENDING: Awaiting manual approval
+5. LIVE_APPROVED: Approved for live trading
+6. LIVE_ACTIVE: Running on live account
+
+Manual Gates:
+- Gate 1: PAPER → VALIDATED (automated checks + manual review)
+- Gate 2: VALIDATED → LIVE_APPROVED (manual approval + checklist)
+- Gate 3: LIVE_APPROVED → LIVE_ACTIVE (final confirmation)
+
+Checklist (Gate 2):
+- [ ] Strategy code reviewed
+- [ ] Risk parameters verified
+- [ ] Position sizing confirmed
+- [ ] Emergency procedures tested
+- [ ] Monitoring alerts configured
+- [ ] Historical performance reviewed
+- [ ] Market conditions assessed
+```
+
+**Storage:**
+- SQLite: `approval_history` table
+- Fields: strategy_name, gate, approved_by, approved_at, notes
+
+**Integration Points:**
+- `strategy/lifecycle.py` → State transitions
+- `strategy/validation.py` → Automated checks
+- UI (future): Manual approval interface
+
+**Tests Required:**
+- Workflow state transitions
+- Checklist enforcement
+- Approval trail persistence
+- Rollback capability
+
+---
+
+### Task 5: Validation Dashboard Enhancement (Est: 2 hours)
+**Priority:** Medium  
+**Dependencies:** Task 2, Task 3, Task 4
+
+**Implementation:**
+```python
+# File: monitoring/validation_monitor.py
+
+Extend PaperMonitor with:
+
+5. Validation Status Panel
+   - Validation criteria progress bars
+   - Pass/Fail indicators per criterion
+   - Days until minimum trading period
+   - Promotion workflow state
+   
+6. Performance Charts (Terminal-based)
+   - Equity curve (simplified sparkline)
+   - Drawdown chart
+   - Win/loss distribution
+   
+7. Alerts Panel
+   - Risk limit breaches
+   - Validation milestones reached
+   - Manual actions required
+```
+
+**Display Updates:**
+- Real-time validation progress
+- Color-coded status (green=pass, yellow=pending, red=fail)
+- Countdown to validation eligibility
+- Next action required
+
+**Integration Points:**
+- `monitoring/paper_monitor.py` → Additional panels
+- `strategy/metrics_tracker.py` → Metrics data
+- `strategy/validation.py` → Validation status
+- `execution/risk_monitor.py` → Risk alerts
+
+**Tests Required:**
+- Display accuracy
+- Real-time updates
+- Alert visibility
+- Edge cases (no data, errors)
 
 ---
 
