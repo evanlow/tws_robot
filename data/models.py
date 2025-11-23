@@ -14,8 +14,7 @@ from sqlalchemy import (
     Column, Integer, String, Float, DateTime, 
     Boolean, ForeignKey, Text, JSON, Enum as SQLEnum
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 from enum import Enum
 

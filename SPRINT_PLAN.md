@@ -33,29 +33,31 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 
 ---
 
-## 📊 Current Status (November 22, 2025)
+## 📊 Current Status (November 24, 2025)
 
 ### Completed ✅
 - **Backtest Engine:** 138/138 tests passing (100%)
 - **Strategy Templates:** MA Cross, Mean Reversion, Momentum
 - **Risk Profiles:** Conservative, Moderate, Aggressive
 - **TWS Client:** Paper/live configs with market status checks
-- **Prime Directive:** Enhanced with systematic deletion protocol
+- **Prime Directive:** Enhanced with Sprint 2 lessons (multi-dimensional validation, two-layer risk management)
 - **Module Cleanup:** Single authoritative backtest/ module
-- **Sprint 1 Task 1:** Strategy Lifecycle (29 tests, commit f701d37)
-- **Sprint 1 Task 2:** Paper Trading Adapter (32 tests, commit a3a3ff3)
-- **Sprint 1 Task 3:** Real-time Market Data Pipeline (17 tests, commit cb1274d)
-- **Sprint 1 Task 3.1:** Fix Pre-existing Test Failures (2 tests fixed, commit fdf2ced)
-- **Sprint 1 Task 4:** Paper Trading Monitor (28 tests, commit d9f3c86)
-- **Sprint 1 Task 5:** Integration Testing (26 tests, commit 1f1b846)
-- **SPRINT 1 COMPLETE:** 231/231 tests passing (100%) ✅
-- **Sprint 2 Task 1:** Real-time Risk Monitor (28 tests, commit ea33654)
-- **Sprint 2 Task 2:** Paper Trading Metrics Tracker (34 tests, commit cf9006a)
-- **Sprint 2 Task 3:** Validation Criteria Enforcer (35 tests, commit aa6f3a1)
+- **SPRINT 1 COMPLETE (Days 1-4):** 231/231 tests passing (100%) ✅
+  - Task 1: Strategy Lifecycle (29 tests, commit f701d37)
+  - Task 2: Paper Trading Adapter (32 tests, commit a3a3ff3)
+  - Task 3: Real-time Market Data Pipeline (17 tests, commit cb1274d)
+  - Task 3.1: Fix Pre-existing Test Failures (2 tests fixed, commit fdf2ced)
+  - Task 4: Paper Trading Monitor (28 tests, commit d9f3c86)
+  - Task 5: Integration Testing (26 tests, commit 1f1b846)
+- **SPRINT 2 COMPLETE (Days 5-7):** 393/393 tests passing (100%) ✅
+  - Task 1: Real-time Risk Monitor (28 tests, commit ea33654)
+  - Task 2: Paper Trading Metrics Tracker (34 tests, commit cf9006a)
+  - Task 3: Validation Criteria Enforcer (35 tests, commit aa6f3a1)
+  - Task 4: Strategy Promotion Workflow (27 tests, commit 208a298)
+  - Task 5: Validation Dashboard Enhancement (38 tests, commit fba239b)
 
 ### In Progress 🔄
-- **Sprint 2:** Risk & Validation Framework (Days 5-7)
-- **Sprint 2 Task 4:** Strategy Promotion Workflow
+- **Sprint 3 Planning:** Strategy Development Pipeline (Days 8-10)
 
 ### Blockers ❌
 - None identified
@@ -81,40 +83,57 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 - ✅ All 205 baseline tests still passing (100%)
 - ✅ New integration tests 26/26 passing (100%)
 
-### Sprint 2: Risk & Validation Framework (Days 5-7)
+### Sprint 2: Risk & Validation Framework (Days 5-7) ✅ COMPLETE
 **Goal:** Implement paper trading validation and risk controls
 
 **Deliverables:**
-- [x] Risk profiles integrated with live execution
-- [x] Real-time risk monitoring and enforcement
-- [x] Paper trading validation metrics tracker
-- [x] Validation criteria enforcer (ValidationEnforcer class)
-- [ ] Strategy promotion workflow and checklist
-- [ ] Automated validation dashboard
+- [x] Risk profiles integrated with live execution ✅
+- [x] Real-time risk monitoring and enforcement ✅
+- [x] Paper trading validation metrics tracker ✅
+- [x] Validation criteria enforcer (ValidationEnforcer class) ✅
+- [x] Strategy promotion workflow and checklist ✅
+- [x] Automated validation dashboard ✅
 
 **Success Criteria:**
-- ✅ Risk limits enforced in real-time
-- ✅ Paper trading metrics tracked (Sharpe, DD, win rate)
-- ✅ Promotion workflow prevents premature live deployment
-- ✅ Emergency stop functionality tested
-- ✅ All tests passing with risk integration
+- ✅ Risk limits enforced in real-time (pre & post trade checks)
+- ✅ Paper trading metrics tracked (Sharpe, DD, win rate, profit factor, consecutive losses)
+- ✅ Promotion workflow prevents premature live deployment (3 gates enforced)
+- ✅ Emergency stop functionality tested (integrated with lifecycle)
+- ✅ All tests passing with risk integration (393/393 = 100%)
+
+**Completion Summary:**
+- **Date Completed:** November 24, 2025
+- **Tests Added:** 162 (28+34+35+27+38)
+- **Code Added:** 3,667 lines (2,310 production + 1,357 tests)
+- **Velocity:** 54 tests/day (64% increase over Sprint 1)
+- **Test Pass Rate:** 100% maintained throughout
+- **Documentation:** SPRINT2_COMPLETE.md created
+- **Prime Directive Updates:** 8 new lessons added
 
 ### Sprint 3: Strategy Development Pipeline (Days 8-10)
-**Goal:** Enable multi-strategy concurrent execution
+**Goal:** Enable multi-strategy concurrent execution and dynamic management
 
 **Deliverables:**
-- [ ] Hot-reload strategy parameters
-- [ ] Strategy comparison dashboard
-- [ ] Multi-strategy concurrent execution
-- [ ] Performance attribution system
-- [ ] Strategy health monitoring
+- [ ] Hot-reload strategy parameters (without restart)
+- [ ] Strategy comparison dashboard (side-by-side metrics)
+- [ ] Multi-strategy concurrent execution (orchestration)
+- [ ] Performance attribution system (per-strategy tracking)
+- [ ] Strategy health monitoring (real-time health scores)
+- [ ] Strategy allocation management (capital distribution)
 
 **Success Criteria:**
 - ✅ 3+ strategies running concurrently on paper
-- ✅ Parameter changes without restart
-- ✅ Side-by-side strategy comparison
-- ✅ Attribution tracking per strategy
-- ✅ All tests passing with multi-strategy support
+- ✅ Parameter changes without restart (hot-reload working)
+- ✅ Side-by-side strategy comparison (comparison dashboard)
+- ✅ Attribution tracking per strategy (P&L, trades, metrics)
+- ✅ All tests passing with multi-strategy support (target: 500+ tests)
+- ✅ Dynamic allocation working (rebalance without restart)
+
+**Estimated Effort:**
+- **Tests to Add:** 120-150 tests
+- **Code to Add:** 3,000-3,500 lines
+- **Duration:** 3 days (Nov 25-27, 2025)
+- **Target Velocity:** 50+ tests/day
 
 ---
 
@@ -685,11 +704,479 @@ CONNECTION_LOSS:
 
 ---
 
+## 📋 Sprint 3 Detailed Backlog
+
+### Task 1: Strategy Configuration Hot-Reload (Est: 3-4 hours)
+**Priority:** Critical  
+**Dependencies:** Sprint 1 (lifecycle), Sprint 2 (metrics tracker)
+
+**Implementation:**
+```python
+# File: strategies/config/config_watcher.py
+
+Class: ConfigWatcher
+- Monitor strategy config files for changes
+- Detect file modifications (polling or file system events)
+- Validate new configuration before applying
+- Notify strategy instances of config updates
+- Rollback on validation failure
+
+# File: strategies/config/config_loader.py
+
+Class: ConfigLoader
+- Load strategy parameters from YAML/JSON files
+- Validate parameter types and ranges
+- Merge with defaults
+- Version tracking for config changes
+
+# Integration with existing Strategy base class:
+Strategy.update_parameters(new_params)
+```
+
+**Configuration Format:**
+```yaml
+# config/strategies/ma_cross_conservative.yaml
+strategy:
+  name: MA_Cross_Conservative
+  type: MovingAverageCross
+  parameters:
+    fast_period: 10
+    slow_period: 20
+    symbols:
+      - AAPL
+      - MSFT
+    risk_profile: Conservative
+  allocation: 0.33  # 33% of capital
+  
+# Config versioning
+version: 1.2
+last_updated: 2025-11-24T10:30:00
+```
+
+**Hot-Reload Features:**
+- File system watcher (detect changes within 1 second)
+- Parameter validation (type checking, range checking)
+- Graceful parameter update (mid-session, no restart)
+- Rollback on failure (revert to previous config)
+- Config change audit trail (who changed what when)
+
+**Tests Required:**
+- Config file loading and validation
+- Parameter update without restart
+- Invalid config rejection
+- Rollback on error
+- Multiple strategy hot-reload
+- File watcher responsiveness
+- Integration with strategy lifecycle
+
+**Estimated Tests:** 25-30
+
+---
+
+### Task 2: Multi-Strategy Orchestration (Est: 4-5 hours)
+**Priority:** Critical  
+**Dependencies:** Task 1, Sprint 1 (paper adapter)
+
+**Implementation:**
+```python
+# File: strategies/strategy_orchestrator.py
+
+Class: StrategyOrchestrator
+- Manage multiple strategies simultaneously
+- Coordinate market data distribution
+- Aggregate signals from all strategies
+- Enforce portfolio-level constraints
+- Handle strategy lifecycle events
+- Capital allocation management
+
+Features:
+- Register/unregister strategies dynamically
+- Distribute market data to active strategies
+- Collect and prioritize signals
+- Detect signal conflicts (same symbol, opposite directions)
+- Apply portfolio-level risk limits
+- Track per-strategy attribution
+```
+
+**Orchestration Logic:**
+```python
+class StrategyOrchestrator:
+    def __init__(self, risk_manager, paper_adapter):
+        self.strategies = {}  # name -> Strategy instance
+        self.allocations = {}  # name -> allocation %
+        self.active = {}  # name -> active status
+        
+    def register_strategy(self, strategy, allocation):
+        """Add strategy with capital allocation"""
+        
+    def on_market_data(self, market_data):
+        """Distribute data to all active strategies"""
+        for strategy in self.active_strategies:
+            signals = strategy.generate_signals(market_data)
+            self.process_signals(strategy.name, signals)
+            
+    def process_signals(self, strategy_name, signals):
+        """Handle signals with attribution and risk checks"""
+        for signal in signals:
+            # Check portfolio risk limits
+            # Check strategy allocation remaining
+            # Execute if approved
+            # Track attribution
+            
+    def rebalance_allocations(self, new_allocations):
+        """Update capital allocations without restart"""
+```
+
+**Signal Conflict Resolution:**
+```python
+Conflict Resolution Rules:
+1. Same symbol, same direction → Aggregate (sum quantities)
+2. Same symbol, opposite directions → Higher priority wins
+3. Portfolio heat exceeded → Reject all signals
+4. Strategy allocation exhausted → Reject strategy signals
+```
+
+**Tests Required:**
+- Multi-strategy registration
+- Market data distribution
+- Signal aggregation
+- Conflict resolution
+- Portfolio constraint enforcement
+- Dynamic allocation rebalancing
+- Strategy add/remove without restart
+- Attribution tracking
+
+**Estimated Tests:** 30-35
+
+---
+
+### Task 3: Strategy Comparison Dashboard (Est: 3-4 hours)
+**Priority:** High  
+**Dependencies:** Task 2, Sprint 2 (metrics tracker, validation monitor)
+
+**Implementation:**
+```python
+# File: monitoring/strategy_comparator.py
+
+Class: StrategyComparator
+- Display multiple strategies side-by-side
+- Compare performance metrics
+- Visualize relative performance
+- Highlight best/worst performers
+- Show allocation and utilization
+
+# File: monitoring/comparison_dashboard.py
+
+Class: ComparisonDashboard
+- Terminal-based comparison view
+- Real-time updates
+- Sortable by any metric
+- Color-coded performance
+- Sparklines for trend comparison
+```
+
+**Dashboard Layout:**
+```
+╔══════════════════════════════════════════════════════════════════╗
+║              Strategy Comparison Dashboard                       ║
+║                     Live: 3 Active Strategies                    ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Strategy            Alloc  Status  P&L      Sharpe  DD     Trades║
+║──────────────────────────────────────────────────────────────────║
+║ MA_Cross_Cons       33%    PAPER   +$2.5k   1.4    -3%    45    ║
+║   Equity: ▁▂▃▄▅▆▇█  Capital: $33k  Win%: 62%  PF: 2.1           ║
+║──────────────────────────────────────────────────────────────────║
+║ MeanRev_Mod         33%    PAPER   +$1.8k   1.2    -5%    38    ║
+║   Equity: ▁▃▅▄▅▇▆█  Capital: $33k  Win%: 58%  PF: 1.8           ║
+║──────────────────────────────────────────────────────────────────║
+║ Momentum_Agg        34%    PAPER   +$3.2k   1.6    -7%    52    ║
+║   Equity: ▁▂▄▆█▇▆▇  Capital: $34k  Win%: 54%  PF: 2.4           ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Portfolio Total              P&L: +$7.5k  Sharpe: 1.5  DD: -4%  ║
+║   Equity: ▁▂▃▄▅▆▇█  Value: $107.5k  Win%: 58%  Trades: 135     ║
+╠══════════════════════════════════════════════════════────════════╣
+║ Performance Ranking:                                             ║
+║   1. 🥇 Momentum_Agg   (+3.2%)  Best Sharpe: 1.6               ║
+║   2. 🥈 MA_Cross_Cons  (+2.5%)  Best Win Rate: 62%             ║
+║   3. 🥉 MeanRev_Mod    (+1.8%)  Lowest DD: -3%                 ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Correlation Matrix:                                              ║
+║              MA_Cross  MeanRev  Momentum                         ║
+║   MA_Cross      1.00     0.45     0.62                          ║
+║   MeanRev       0.45     1.00     0.38                          ║
+║   Momentum      0.62     0.38     1.00                          ║
+╠══════════════════════════════════════════════════════════════════╣
+║ [S]ort  [F]ilter  [D]etails  [R]efresh  [Q]uit                  ║
+╚══════════════════════════════════════════════════════════════════╝
+```
+
+**Comparison Features:**
+- Side-by-side metrics display
+- Sortable by any column
+- Color-coded performance (green/yellow/red)
+- Sparklines for visual comparison
+- Correlation matrix
+- Performance ranking
+- Drill-down to strategy details
+- Export comparison report
+
+**Tests Required:**
+- Multi-strategy display
+- Metric calculation and comparison
+- Sorting functionality
+- Color coding logic
+- Sparkline generation
+- Correlation calculation
+- Real-time updates
+- Layout rendering
+
+**Estimated Tests:** 25-30
+
+---
+
+### Task 4: Performance Attribution System (Est: 3-4 hours)
+**Priority:** High  
+**Dependencies:** Task 2, Sprint 2 (metrics tracker)
+
+**Implementation:**
+```python
+# File: monitoring/attribution.py
+
+Class: PerformanceAttribution
+- Track P&L per strategy
+- Track trades per strategy
+- Track risk contribution per strategy
+- Calculate strategy-level metrics
+- Generate attribution reports
+
+Attribution Metrics:
+- Absolute P&L contribution
+- Risk-adjusted P&L (Sharpe contribution)
+- Trade count contribution
+- Win rate by strategy
+- Drawdown contribution
+- Capital utilization by strategy
+```
+
+**Attribution Tracking:**
+```python
+class AttributionTracker:
+    def record_trade(self, strategy_name, trade):
+        """Record trade with strategy attribution"""
+        
+    def record_pnl(self, strategy_name, pnl, timestamp):
+        """Record P&L with timestamp"""
+        
+    def get_strategy_metrics(self, strategy_name):
+        """Get all metrics for specific strategy"""
+        
+    def get_portfolio_breakdown(self):
+        """Get attribution breakdown across all strategies"""
+        
+    def generate_attribution_report(self, start_date, end_date):
+        """Detailed attribution report for period"""
+```
+
+**Database Schema:**
+```sql
+CREATE TABLE strategy_attribution (
+    id INTEGER PRIMARY KEY,
+    strategy_name TEXT,
+    timestamp DATETIME,
+    trade_id INTEGER,
+    pnl REAL,
+    symbol TEXT,
+    quantity INTEGER,
+    FOREIGN KEY (trade_id) REFERENCES strategy_trades(id)
+);
+
+CREATE TABLE strategy_daily_attribution (
+    id INTEGER PRIMARY KEY,
+    strategy_name TEXT,
+    date DATE,
+    daily_pnl REAL,
+    cumulative_pnl REAL,
+    trade_count INTEGER,
+    win_count INTEGER,
+    sharpe_contribution REAL,
+    UNIQUE(strategy_name, date)
+);
+```
+
+**Attribution Report:**
+```
+╔══════════════════════════════════════════════════════════════╗
+║         Performance Attribution Report                       ║
+║         Period: Nov 1-24, 2025 (24 days)                    ║
+╠══════════════════════════════════════════════════════════════╣
+║ Strategy           P&L      % Total  Sharpe  Trades  Win%  ║
+║──────────────────────────────────────────────────────────────║
+║ Momentum_Agg      $3,200    42.7%    1.6     52      54%   ║
+║ MA_Cross_Cons     $2,500    33.3%    1.4     45      62%   ║
+║ MeanRev_Mod       $1,800    24.0%    1.2     38      58%   ║
+║──────────────────────────────────────────────────────────────║
+║ Portfolio Total   $7,500    100.0%   1.5     135     58%   ║
+╠══════════════════════════════════════════════════════════════╣
+║ Risk-Adjusted Performance:                                  ║
+║   Sharpe-weighted: Momentum_Agg contributes 45% of value   ║
+║   Best risk/return: MA_Cross_Cons (lowest DD, good return)║
+╠══════════════════════════════════════════════════════════════╣
+║ Recommendations:                                             ║
+║   • Consider increasing Momentum_Agg allocation (strong)    ║
+║   • MeanRev_Mod underperforming - review parameters        ║
+║   • MA_Cross_Cons: Excellent risk control, keep current    ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+**Tests Required:**
+- Trade attribution recording
+- P&L calculation per strategy
+- Daily attribution aggregation
+- Portfolio breakdown calculation
+- Report generation
+- Time period filtering
+- Database persistence
+- Integration with orchestrator
+
+**Estimated Tests:** 20-25
+
+---
+
+### Task 5: Strategy Health Monitoring (Est: 2-3 hours)
+**Priority:** Medium  
+**Dependencies:** Task 2, Task 4, Sprint 2 (risk monitor, validation)
+
+**Implementation:**
+```python
+# File: monitoring/strategy_health.py
+
+Class: StrategyHealthMonitor
+- Calculate per-strategy health scores
+- Monitor strategy vitals in real-time
+- Detect strategy degradation
+- Generate health alerts
+- Recommend actions (pause, parameter adjustment)
+
+Health Score Components:
+1. Recent performance (30% weight)
+   - Last 10 trades P&L trend
+   - Recent win rate
+2. Risk metrics (30% weight)
+   - Current drawdown
+   - Volatility of returns
+3. Execution quality (20% weight)
+   - Fill quality
+   - Slippage vs expected
+4. Consistency (20% weight)
+   - Consecutive losses
+   - Performance stability
+```
+
+**Health Monitoring:**
+```python
+class StrategyHealthMonitor:
+    def calculate_health_score(self, strategy_name):
+        """Calculate 0-100 health score"""
+        
+    def check_vital_signs(self, strategy_name):
+        """Check critical health indicators"""
+        
+    def detect_degradation(self, strategy_name):
+        """Detect performance degradation"""
+        
+    def generate_health_alert(self, strategy_name, issue):
+        """Create health alert with severity"""
+        
+    def recommend_action(self, strategy_name, health_score):
+        """Recommend action based on health"""
+```
+
+**Health Alerts:**
+```
+Health Score Ranges:
+90-100: Excellent (✅ green) - No action needed
+70-89:  Good (✅ green) - Monitor
+50-69:  Fair (⚠ yellow) - Review parameters
+30-49:  Poor (⚠ orange) - Consider pausing
+0-29:   Critical (❌ red) - Pause immediately
+
+Alert Types:
+- DEGRADATION: Performance declining over time
+- HIGH_DD: Drawdown exceeding threshold
+- CONSECUTIVE_LOSSES: Too many losses in a row
+- LOW_WIN_RATE: Win rate below acceptable
+- EXECUTION_ISSUES: Slippage or fill problems
+```
+
+**Integration with Dashboard:**
+```
+╔══════════════════════════════════════════════════════╗
+║           Strategy Health Dashboard                  ║
+╠══════════════════════════════════════════════════════╣
+║ Strategy: MA_Cross_Conservative                      ║
+║ Health Score: 87/100 ✅ GOOD                         ║
+║──────────────────────────────────────────────────────║
+║ Recent Performance:    ████████░░ 85/100            ║
+║ Risk Metrics:          █████████░ 90/100            ║
+║ Execution Quality:     ████████░░ 88/100            ║
+║ Consistency:           ███████░░░ 82/100            ║
+║──────────────────────────────────────────────────────║
+║ Vital Signs:                                         ║
+║   ✓ Last 10 trades: 7 wins, 3 losses               ║
+║   ✓ Current DD: -3.2% (within limit)               ║
+║   ✓ Win rate: 62% (above target)                   ║
+║   ⚠ Consecutive wins: 0 (just had loss)            ║
+║──────────────────────────────────────────────────────║
+║ Recommendation: CONTINUE - Strategy healthy         ║
+╚══════════════════════════════════════════════════════╝
+```
+
+**Tests Required:**
+- Health score calculation
+- Component scoring (performance, risk, execution, consistency)
+- Degradation detection
+- Alert generation
+- Action recommendations
+- Integration with orchestrator
+- Real-time updates
+
+**Estimated Tests:** 20-25
+
+---
+
+### Sprint 3 Testing Strategy
+
+**Unit Tests (50-60 tests):**
+- Config loading and validation
+- Parameter hot-reload
+- Signal aggregation and conflict resolution
+- Attribution calculation
+- Health score calculation
+
+**Integration Tests (40-50 tests):**
+- Multi-strategy orchestration
+- End-to-end hot-reload
+- Dashboard rendering with real data
+- Attribution tracking across strategies
+- Health monitoring integration
+
+**System Tests (20-30 tests):**
+- 3+ strategies running concurrently
+- Dynamic allocation rebalancing
+- Config changes without restart
+- Complete attribution chain
+- Dashboard with all features
+
+**Total Sprint 3 Target:** 120-150 tests
+
+---
+
 ## 📚 Reference Documents
 
 ### Existing Documentation
 - `PROJECT_PLAN.md` - 7-week master plan
-- `PRIME_DIRECTIVE.md` - Development guidelines
+- `PRIME_DIRECTIVE.md` - Development guidelines (updated with Sprint 2 lessons)
+- `SPRINT2_COMPLETE.md` - Sprint 2 completion summary
 - `WEEK4_DOCUMENTATION.md` - Backtest system docs
 - `README.md` - Project overview
 
