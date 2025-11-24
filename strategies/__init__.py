@@ -22,6 +22,13 @@ from .comparison_dashboard import (
     MetricType,
     RankingCriteria
 )
+from .performance_attribution import (
+    PerformanceAttribution,
+    AttributionBreakdown,
+    TradeAttribution,
+    AttributionMetric,
+    AttributionPeriod
+)
 
 __all__ = [
     'Signal',
@@ -40,5 +47,10 @@ __all__ = [
     'ComparisonMetrics',
     'ComparisonDashboard',
     'MetricType',
-    'RankingCriteria'
+    'RankingCriteria',
+    'PerformanceAttribution',
+    'AttributionBreakdown',
+    'TradeAttribution',
+    'AttributionMetric',
+    'AttributionPeriod'
 ]
