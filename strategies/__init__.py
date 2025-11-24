@@ -29,6 +29,14 @@ from .performance_attribution import (
     AttributionMetric,
     AttributionPeriod
 )
+from .health_monitor import (
+    HealthMonitor,
+    HealthMetrics,
+    HealthStatus,
+    HealthAlert,
+    AlertLevel,
+    DegradationDetector
+)
 
 __all__ = [
     'Signal',
@@ -52,5 +60,11 @@ __all__ = [
     'AttributionBreakdown',
     'TradeAttribution',
     'AttributionMetric',
-    'AttributionPeriod'
+    'AttributionPeriod',
+    'HealthMonitor',
+    'HealthMetrics',
+    'HealthStatus',
+    'HealthAlert',
+    'AlertLevel',
+    'DegradationDetector'
 ]
