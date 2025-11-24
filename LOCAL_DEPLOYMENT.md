@@ -219,7 +219,7 @@ python tws_client.py
 
 ```powershell
 # Manual backup
-.\scripts\backup_database.ps1
+.\deployment_scripts\backup_database.ps1
 
 # Automatic: Runs daily via backup script
 ```
