@@ -1,88 +1,49 @@
-# Local Production Deployment - Quick Start Guide
+# TWS Robot - Deployment Guide
 
-## 🎯 Overview
+## Overview
 
-This guide walks you through deploying TWS Robot on your local Windows machine for the **30-day paper trading validation period**.
-
-**Prerequisites:**
-- ✅ Windows machine with TWS installed and running
-- ✅ Python 3.12+ with virtual environment
-- ✅ Docker Desktop installed and running
-- ✅ All 647 tests passing
+This guide covers running TWS Robot with your Interactive Brokers accounts:
+- **Paper Account (DU2746208, port 7497)**: For testing and 30-day validation
+- **Live Account (U6801816, port 7496)**: For production trading after validation
 
 ---
 
-## 📋 Step-by-Step Deployment
+## Prerequisites
 
-### **Step 1: Verify Prerequisites** (5 min)
+- ✅ TWS (Trader Workstation) installed and running
+- ✅ Paper trading account active in TWS (port 7497)
+- ✅ Python 3.12+ virtual environment activated
+- ✅ All dependencies installed: `pip install -r requirements.txt`
+- ✅ All 647 tests passing: `pytest`
+- ✅ `.env` file configured
+
+---
+
+## Quick Start - Paper Trading (30-Day Validation)
+
+### 1. Verify TWS Running
 
 ```powershell
-# Check Docker is running
-docker --version
-docker ps
-
-# Check TWS is running (should see TWS window)
-# Verify TWS API is enabled:
-# - TWS → Configure → API → Settings
-# - "Enable ActiveX and Socket Clients" = checked
-# - Socket port = 7497 (for paper trading)
-# - Trusted IP addresses includes 127.0.0.1
-
-# Verify Python environment
-python --version  # Should be 3.12+
+# TWS should be running with:
+# - API enabled (Configure → API → Settings)
+# - Socket port 7497 (paper trading)
+# - Paper account DU2746208 logged in
 ```
 
----
-
-### **Step 2: Configure Production Environment** (10 min)
+### 2. Check Your .env Configuration
 
 ```powershell
-# 1. Copy environment template
-Copy-Item .env.production.example .env.production
+# Verify .env has paper account settings:
+notepad .env
 
-# 2. Edit .env.production (already pre-configured for local deployment)
-# Review and adjust if needed:
-#   - TWS_PORT=7497 (paper trading)
-#   - IB_ACCOUNT=DU2746208 (your account)
-#   - Database password (optional, default is fine for local)
-
-notepad .env.production
+# Should contain:
+# TRADING_ENV=paper
+# PAPER_HOST=127.0.0.1
+# PAPER_PORT=7497
+# PAPER_ACCOUNT=DU2746208
 ```
 
-**Key Settings to Verify:**
-```bash
-TWS_HOST=127.0.0.1
-TWS_PORT=7497              # Paper trading port
-IB_ACCOUNT=DU2746208       # Your IB paper account
-PAPER_TRADING=true         # Keep true for 30-day validation
-EMERGENCY_STOP=false       # Set true to halt all trading
-```
-
----
-
-### **Step 3: Start Infrastructure Services** (5 min)
-
-```powershell
-# Start PostgreSQL and Redis in Docker
-docker-compose -f docker-compose.local.yml up -d
-
-# Verify services are running
-docker ps
-# Should see: tws-robot-postgres and tws-robot-redis
-
-# Check database health
-docker exec tws-robot-postgres pg_isready -U tws_user -d tws_robot_prod
-# Should output: accepting connections
-```
-
-**Troubleshooting:**
-- If PostgreSQL won't start: Check port 5432 isn't already in use
-- If Redis won't start: Check port 6379 isn't already in use
-- View logs: `docker logs tws-robot-postgres` or `docker logs tws-robot-redis`
-
----
-
-### **Step 4: Initialize Database** (2 min)
+### 3. Initialize Database
 
 ```powershell
 # Activate virtual environment
@@ -90,280 +51,320 @@ docker exec tws-robot-postgres pg_isready -U tws_user -d tws_robot_prod
 
 # Initialize database schema
 python init_database.py
-
-# Verify database tables created
-docker exec tws-robot-postgres psql -U tws_user -d tws_robot_prod -c "\dt"
 ```
 
----
-
-### **Step 5: Run Production Validation Tests** (2 min)
+### 4. Run Tests
 
 ```powershell
-# Run all tests to verify production environment
-pytest --tb=no -q
+# Validate everything works
+pytest --tb=short
 
 # Expected: 647/647 tests passing (100%)
 ```
 
-**If tests fail:**
-- Review error messages
-- Check TWS is running and API is enabled
-- Verify database connection
-- Check all environment variables in .env.production
+### 5. Start TWS Robot
 
----
-
-### **Step 6: Start TWS Robot Production** (1 min)
-
-**Option A: Using the startup script (recommended)**
 ```powershell
-.\scripts\start_production.ps1
+# Run main application
+python tws_client.py
+
+# Or use your preferred entry point
+# python main.py
 ```
 
-**Option B: Manual start**
+### 6. Monitor Operation
+
 ```powershell
-.\Scripts\Activate.ps1
-python production_main.py
-```
+# Check logs
+Get-Content .\logs\*.log -Tail 50
 
-**What you should see:**
-```
-========================================
-  TWS Robot Production - Starting
-========================================
-✓ Production configuration loaded
-Environment: production
-Paper Trading: true
-TWS Connection: 127.0.0.1:7497
-IB Account: DU2746208
-========================================
-  TWS Robot Production - Running
-========================================
-Press Ctrl+C to stop gracefully
+# Monitor TWS connection in TWS window
+# Verify strategies executing (if implemented)
 ```
 
 ---
 
-### **Step 7: Verify Everything is Working** (10 min)
+## 30-Day Validation Period
 
-**7.1 Check TWS Connection:**
+### Daily Checks (10-15 min/day)
+
 ```powershell
-# In another terminal, check logs
-Get-Content .\logs\tws_robot_*.log -Tail 50
-```
-
-**7.2 Monitor Database:**
-```powershell
-# Optional: Start pgAdmin for database management
-docker-compose -f docker-compose.local.yml --profile tools up -d pgadmin
-
-# Access pgAdmin at: http://localhost:5050
-# Login: admin@tws-robot.local / admin
-```
-
-**7.3 Verify Paper Trading:**
-- Check TWS window for API connection indicator
-- Verify account shows paper trading balance
-- Monitor for any error messages
-
----
-
-## 🎯 30-Day Validation Period Starts Now!
-
-Your production deployment is complete. The **30-day validation clock** has started.
-
-### **What Happens During Validation:**
-
-**Daily Monitoring:**
-- Check system is running: `Get-Process python`
-- Review logs: `Get-Content .\logs\tws_robot_*.log -Tail 100`
-- Monitor TWS connection status
-- Verify strategies are executing
-
-**Weekly Tasks:**
-- Review performance metrics (Sharpe ratio, drawdown, win rate)
-- Check database backups: `.\scripts\backup_database.ps1`
-- Verify risk limits are being enforced
-- Document any issues or observations
-
-**Validation Gates (Must Meet for Live Trading):**
-- ✅ 30+ days continuous operation
-- ✅ Sharpe Ratio > 1.0
-- ✅ Max Drawdown < 10%
-- ✅ Win Rate > 50%
-- ✅ Zero risk limit violations
-- ✅ No system crashes or data loss
-
----
-
-## 🛠️ Daily Operations
-
-### **Start Production:**
-```powershell
-.\scripts\start_production.ps1
-```
-
-### **Stop Production (Graceful Shutdown):**
-```powershell
-# Press Ctrl+C in the running terminal, OR:
-.\scripts\stop_production.ps1
-```
-
-### **Emergency Stop (Immediate Halt):**
-```powershell
-# Edit .env.production, set:
-EMERGENCY_STOP=true
-
-# Or press Ctrl+C and restart
-```
-
-### **Backup Database:**
-```powershell
-.\scripts\backup_database.ps1
-```
-
-### **View Logs:**
-```powershell
-# Real-time tail
-Get-Content .\logs\tws_robot_*.log -Wait -Tail 50
-
-# Search for errors
-Get-Content .\logs\tws_robot_*.log | Select-String -Pattern "ERROR"
-```
-
-### **Check System Status:**
-```powershell
-# Check if running
+# 1. Verify system running
 Get-Process python
 
-# Check Docker services
-docker ps
+# 2. Check logs for errors
+Get-Content .\logs\*.log -Tail 100
 
-# Check database
-docker exec tws-robot-postgres pg_isready -U tws_user -d tws_robot_prod
+# 3. Monitor TWS connection
+# - Check TWS window for connection status
+# - Verify no error messages
+
+# 4. Review performance (if strategies active)
+# - Check positions in TWS
+# - Review trade history
+```
+
+### Weekly Checks (30-60 min/week)
+
+- Review performance metrics:
+  - Sharpe Ratio (target > 1.0)
+  - Max Drawdown (target < 10%)
+  - Win Rate (target > 50%)
+- Backup database: `.\scripts\backup_database.ps1`
+- Document any issues or observations
+- Verify risk limits are being enforced
+
+### Validation Success Criteria
+
+After 30 days, verify:
+- ✅ **30+ days** continuous operation
+- ✅ **Sharpe Ratio** > 1.0
+- ✅ **Max Drawdown** < 10%
+- ✅ **Win Rate** > 50%
+- ✅ **Zero** risk limit violations
+- ✅ **No** system crashes
+
+**Validation Period:** November 24 - December 24, 2025
+
+---
+
+## Switching to Live Trading
+
+⚠️ **ONLY PROCEED AFTER SUCCESSFUL 30-DAY VALIDATION** ⚠️
+
+### Before Going Live
+
+1. **Review Validation Results**
+   - Confirm all success criteria met
+   - Review all trades and decisions
+   - Document lessons learned
+
+2. **Verify Live Account Setup**
+   - Live account U6801816 active in TWS
+   - TWS configured for live trading (port 7496)
+   - Risk controls in place
+   - Emergency procedures documented
+
+3. **Update Configuration**
+
+```powershell
+# Edit .env
+notepad .env
+
+# Change these settings:
+# TRADING_ENV=live
+# LIVE_HOST=127.0.0.1
+# LIVE_PORT=7496        # ← Change from 7497 to 7496
+# LIVE_ACCOUNT=U6801816
+
+# ⚠️ CRITICAL: Verify risk limits are appropriate for live capital
+```
+
+4. **Start with Small Capital**
+   - Begin with minimal position sizes
+   - Gradually increase as confidence grows
+   - Monitor closely for first week
+
+5. **Launch Live Trading**
+
+```powershell
+# Restart TWS with live account (port 7496)
+# Run full test suite
+pytest
+
+# Start TWS Robot
+python tws_client.py
+
+# Monitor closely!
 ```
 
 ---
 
-## 🔍 Troubleshooting
+## Daily Operations
 
-### **Issue: TWS Connection Fails**
+### Starting the System
+
 ```powershell
-# Verify TWS is running and API enabled
-# Check TWS logs
-# Verify port 7497 in .env.production
-# Test connection: python -c "import socket; socket.create_connection(('127.0.0.1', 7497), timeout=5)"
+# 1. Start TWS (paper or live)
+# 2. Activate Python environment
+.\Scripts\Activate.ps1
+
+# 3. Start TWS Robot
+python tws_client.py
 ```
 
-### **Issue: Database Connection Fails**
+### Stopping the System
+
 ```powershell
-# Check PostgreSQL is running
-docker ps | Select-String postgres
+# Graceful shutdown: Press Ctrl+C in terminal
+# Or close TWS Robot window
 
-# Check database logs
-docker logs tws-robot-postgres
-
-# Test connection
-docker exec tws-robot-postgres psql -U tws_user -d tws_robot_prod -c "SELECT 1;"
+# Always verify:
+# - All positions closed (if end of day)
+# - No pending orders
+# - Logs saved
 ```
 
-### **Issue: Tests Failing**
+### Emergency Stop
+
 ```powershell
-# Run tests with full output
-pytest -vv
+# If something goes wrong:
+# 1. Press Ctrl+C to stop Python application
+# 2. In TWS: Manually close all positions
+# 3. Review logs to understand what happened
+# 4. Fix issue before restarting
+```
 
-# Run specific test
-pytest tests/test_specific.py -vv
+### Database Backup
 
-# Check test logs
-Get-Content .\logs\pytest.log
+```powershell
+# Manual backup
+.\scripts\backup_database.ps1
+
+# Automatic: Runs daily via backup script
 ```
 
 ---
 
-## 📊 Monitoring & Metrics
+## Troubleshooting
 
-### **Performance Metrics Location:**
-- Database: `tws_robot_prod` → `strategy_metrics` table
-- Logs: `./logs/tws_robot_YYYYMMDD.log`
-- Backups: `./backups/`
+### TWS Connection Issues
 
-### **Key Metrics to Track:**
-- Daily P&L
-- Sharpe Ratio (target: > 1.0)
-- Max Drawdown (target: < 10%)
-- Win Rate (target: > 50%)
-- Number of trades
-- Risk limit violations (target: 0)
+**Problem:** Can't connect to TWS
 
-### **Query Metrics from Database:**
-```powershell
-docker exec tws-robot-postgres psql -U tws_user -d tws_robot_prod -c "
+**Solutions:**
+1. Verify TWS is running
+2. Check API settings enabled (Configure → API → Settings)
+3. Verify port number (7497 paper, 7496 live)
+4. Check trusted IP includes 127.0.0.1
+5. Restart TWS and try again
+
+### Database Connection Issues
+
+**Problem:** Can't connect to database
+
+**Solutions:**
+1. Verify DATABASE_URL in .env is correct
+2. Check database server is running
+3. Verify credentials are correct
+4. Run `python init_database.py` to reinitialize
+5. Check firewall isn't blocking connection
+
+### Tests Failing
+
+**Problem:** Tests not passing
+
+**Solutions:**
+1. Check TWS is running for API tests
+2. Verify database is accessible
+3. Run with verbose output: `pytest -v`
+4. Check specific failing test: `pytest tests/test_xxx.py -v`
+5. Review logs for error details
+
+### Performance Issues
+
+**Problem:** System running slow
+
+**Solutions:**
+1. Check system resources (CPU, memory)
+2. Review logs for excessive API calls
+3. Verify database query performance
+4. Check for memory leaks
+5. Consider optimizing strategies
+
+---
+
+## Monitoring & Metrics
+
+### Key Performance Indicators
+
+```sql
+-- Query database for metrics (if implemented)
 SELECT 
     strategy_name,
-    total_trades,
-    win_rate,
-    sharpe_ratio,
-    max_drawdown,
-    total_pnl
-FROM strategy_metrics
-ORDER BY created_at DESC
-LIMIT 10;
-"
+    COUNT(*) as total_trades,
+    SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rate,
+    AVG(pnl) as avg_pnl,
+    SUM(pnl) as total_pnl
+FROM trades
+WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY strategy_name;
+```
+
+### Log Files
+
+```powershell
+# View recent logs
+Get-Content .\logs\*.log -Tail 100
+
+# Search for errors
+Select-String -Path .\logs\*.log -Pattern "ERROR"
+
+# Monitor live logs
+Get-Content .\logs\*.log -Wait -Tail 50
 ```
 
 ---
 
-## 🚀 After 30-Day Validation
+## Future: AWS Deployment
 
-Once validation period is complete and all gates pass:
+After successful local validation, you can deploy to AWS for:
+- **24/7 operation** (no local machine needed)
+- **Managed infrastructure** (RDS, ElastiCache)
+- **Enhanced monitoring** (CloudWatch)
+- **Automated backups** (S3)
+- **Scalability** (if needed)
 
-1. Review `SPRINT_PLAN.md` for live trading checklist
-2. Switch `PAPER_TRADING=false` in `.env.production`
-3. Change `TWS_PORT=7496` (live trading port)
-4. Run final test suite
-5. Begin with small capital allocation
-6. Gradually increase allocation as confidence grows
-
----
-
-## 📝 Next Steps
-
-Your local production deployment is complete! 
-
-**Immediate:**
-- ✅ System is running in production mode
-- ✅ 30-day validation clock has started
-- ✅ Monitor daily and track metrics
-
-**Future (After Validation):**
-- Deploy to AWS (we'll guide you through this later)
-- Scale to multiple strategies
-- Increase capital allocation
-- Add advanced monitoring
-
-**For AWS Deployment Later:**
-- Create separate deployment guide
-- Use AWS RDS for PostgreSQL
-- Use AWS ElastiCache for Redis
-- Deploy application to EC2 or ECS
-- Set up CloudWatch monitoring
-- Configure AWS Secrets Manager
+AWS deployment guide will be created when ready.
 
 ---
 
-## 🆘 Support
+## Support
 
-If you encounter issues:
-1. Check logs: `Get-Content .\logs\tws_robot_*.log -Tail 100`
-2. Review `DEPLOYMENT_GUIDE.md` troubleshooting section
-3. Check Docker services: `docker ps`
-4. Verify TWS API settings
-5. Run diagnostic tests: `pytest -vv`
+### Getting Help
+
+1. Check logs for error details
+2. Review this troubleshooting section
+3. Check TWS API documentation
+4. Review code documentation and docstrings
+5. Search project issues on GitHub
+
+### Useful Commands
+
+```powershell
+# Check Python processes
+Get-Process python
+
+# Kill stuck Python processes
+Stop-Process -Name python -Force
+
+# View environment variables
+Get-Content .env
+
+# Test database connection
+python -c "from data.database import Database; db = Database(); print('Connected!')"
+
+# Run specific test
+pytest tests/test_connection.py -v
+
+# Check TWS API status
+python quick_connection_test.py
+```
 
 ---
 
-**Deployment Date:** November 24, 2025  
-**Validation End Date:** ~December 24, 2025  
-**Status:** ✅ DEPLOYED - 30-Day Validation In Progress
+## Summary
+
+**Paper Trading (Now → Dec 24, 2025):**
+- Port: 7497
+- Account: DU2746208
+- Goal: 30-day validation
+- Focus: Verify system stability and performance
+
+**Live Trading (After Dec 24, 2025):**
+- Port: 7496
+- Account: U6801816
+- Prerequisites: Successful 30-day validation
+- Approach: Start small, scale gradually
+
+Good luck with your trading! 🚀📈
