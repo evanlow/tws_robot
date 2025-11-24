@@ -110,7 +110,7 @@ Get-Content .\logs\*.log -Tail 100
   - Sharpe Ratio (target > 1.0)
   - Max Drawdown (target < 10%)
   - Win Rate (target > 50%)
-- Backup database: `.\scripts\backup_database.ps1`
+- Backup database: `.\deployment_scripts\backup_database.ps1`
 - Document any issues or observations
 - Verify risk limits are being enforced
 
