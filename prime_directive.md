@@ -110,6 +110,7 @@ Before writing ANY new code that uses existing classes/methods:
 
 ### ☑️ Research Phase (Mandatory)
 
+#### For New Feature Implementation (TDD):
 1. **Check Method Signatures**
    ```python
    # Use grep_search to find the method definition
@@ -134,6 +135,91 @@ Before writing ANY new code that uses existing classes/methods:
    # See how others use this API
    grep_search(query="method_call.*pattern", isRegexp=True)
    ```
+
+#### For Integration Tests of Existing Code (NEW):
+**⚠️ CRITICAL: Research APIs BEFORE writing integration tests**
+
+1. **List All Components to Integrate**
+   ```python
+   # Write down every class/module you'll test together
+   # Example: StrategyLifecycle, PaperMetricsTracker, StrategyOrchestrator, RiskManager
+   ```
+
+2. **Find Existing Tests for Each Component**
+   ```python
+   # These tests show the CORRECT API usage
+   grep_search(query="test.*ComponentName", includePattern="test_*.py")
+   # Result: tests/test_component.py
+   ```
+
+3. **Read Existing Tests (API Documentation)**
+   ```python
+   # Read the test file completely
+   read_file("tests/test_component.py")
+   # Note ALL constructor signatures, method calls, return values
+   # Pay special attention to:
+   # - Parameter order (db_path first? strategy_name second?)
+   # - Parameter count (5 params not 3?)
+   # - Method names (get_report not validate?)
+   # - Attribute names (overall_passed not passed?)
+   # - Return types (dict not object? list not single item?)
+   ```
+
+4. **Verify Ambiguous Cases from Implementation**
+   ```python
+   # If existing tests don't clarify something, check source
+   grep_search(query="class ComponentName", includePattern="*.py")
+   read_file("path/to/component.py", offset=line, limit=50)
+   ```
+
+5. **Document API Reference in Comments**
+   ```python
+   # Create comprehensive API reference block at top of test file
+   """
+   API Reference (verified from existing tests):
+   
+   ComponentA (from test_component_a.py):
+   - Constructor: ComponentA(param1: type, param2: type)
+   - method1(arg1, arg2) -> return_type
+   - attribute_name (not attribute_name_variant!)
+   
+   ComponentB (from test_component_b.py):
+   - Constructor: ComponentB(db_path, name, initial_val) - db_path FIRST
+   - method2(p1, p2, p3, p4, p5) - 5 params required!
+   - Returns dict with keys: 'key1', 'key2' (not object)
+   """
+   ```
+
+6. **Verify Integration Points**
+   ```python
+   # Check how components interact in existing code
+   grep_search(query="ComponentA.*ComponentB", isRegexp=True)
+   # Look for: data passing patterns, callback signatures, event handling
+   ```
+
+**Integration Test Research Checklist:**
+- [ ] All components listed
+- [ ] Existing tests found for each (test_*.py files)
+- [ ] Existing tests read and APIs documented
+- [ ] Constructor signatures verified (param order, types, required vs optional)
+- [ ] Method signatures verified (names, param counts, return types)
+- [ ] Attribute names verified (singular/plural, exact spelling)
+- [ ] Enum values verified (actual values, not assumed)
+- [ ] Integration patterns verified (how components interact)
+- [ ] API reference comment block created
+- [ ] Ambiguous cases checked in implementation
+- [ ] Expected 80%+ first-run pass rate
+
+**Time Investment:**
+- API Research: 20-40 minutes (depends on component count)
+- Test Writing: 40-60 minutes (faster with verified APIs)
+- Debugging: 5-15 minutes (minimal with correct APIs)
+- **Total: 65-115 minutes** (vs 180+ minutes without research)
+
+**When to Skip Research:**
+- Unit tests for code you just implemented (you know the API)
+- Tests written alongside new implementation (TDD)
+- You implemented the component recently (within same sprint)
 
 ### ☑️ Before Calling Any Method
 
@@ -240,15 +326,33 @@ self.buy(symbol, quantity, OrderType.MARKET)  # ✅ Enum
 
 ## 📋 Development Workflow (The Right Way™)
 
-### Phase 1: Research (15-20% of time)
+### Phase 1: Research (15-30% of time)
 ```
+For New Feature Implementation:
 1. Understand the requirement
 2. Find relevant existing code
 3. Check base classes and interfaces
 4. Verify data structures and enums
 5. Look for usage examples
 6. Document findings in comments
+
+For Integration Tests (ADDITIONAL - MANDATORY):
+1. List ALL components to integrate
+2. Find existing tests for EACH component (test_*.py)
+3. Read existing tests COMPLETELY (note every API detail)
+4. Verify constructor signatures (param order, types, counts)
+5. Verify method signatures (names, params, return types)
+6. Verify attribute names (exact spelling, singular/plural)
+7. Verify integration patterns (how components interact)
+8. Document comprehensive API reference in comments
+9. Expected outcome: 80%+ first-run pass rate
 ```
+
+**Integration Test Research is NON-NEGOTIABLE:**
+- Skipping this step leads to 37+ API mismatches (Sprint 4 Task 1 experience)
+- 30 minutes research saves 2 hours debugging
+- Existing tests are your API documentation
+- Write the API reference comment block BEFORE writing tests
 
 ### Phase 2: Design (10-15% of time)
 ```
@@ -409,6 +513,137 @@ def on_bar(self, market_data):
   - Write detailed commit messages
   - Reference commit hashes in documentation
   - Never force-push deleted code (preserve history)
+
+### Sprint 4 Lessons Learned (November 25, 2025)
+
+#### Lesson 1: Research APIs Before Writing Integration Tests
+**Context:** Sprint 4 Task 1 - Writing 30 integration tests for existing components
+- **What went wrong:**
+  - Wrote 916 lines of integration tests based on assumed APIs
+  - 37+ API mismatches discovered during test execution
+  - Required 5 correction rounds to reach 100% pass rate
+  - Issues: wrong imports, incorrect signatures, missing parameters, wrong attributes
+  
+- **Why it happened:**
+  - Treated integration tests like unit tests (write, then implement)
+  - Assumed APIs instead of researching actual implementations
+  - No pre-test verification phase for existing code
+  
+- **The right way - API Research Protocol:**
+  ```python
+  # BEFORE writing integration tests for existing components:
+  
+  # 1. List all components you'll integrate
+  components = [
+      "strategy.lifecycle.StrategyLifecycle",
+      "strategy.metrics_tracker.PaperMetricsTracker",
+      "strategies.strategy_orchestrator.StrategyOrchestrator",
+      # ... etc
+  ]
+  
+  # 2. For EACH component, research its API:
+  
+  # Step 2a: Find existing tests (they show correct usage)
+  grep_search(query="test.*StrategyLifecycle", includePattern="test_*.py")
+  # Result: tests/test_strategy_lifecycle.py
+  
+  # Step 2b: Read the test file to see actual API usage
+  read_file("tests/test_strategy_lifecycle.py")
+  # Note: StrategyLifecycle(db_path, strategy_name)
+  # Note: transition_to(state) returns bool
+  # Note: get_current_state() returns LifecycleState
+  
+  # Step 2c: Find the implementation for ambiguous cases
+  grep_search(query="class PaperMetricsTracker", includePattern="*.py")
+  read_file("strategy/metrics_tracker.py", offset=line, limit=50)
+  # Note: __init__(self, db_path: str, strategy_name: str, initial_capital: float)
+  # Note: record_daily_snapshot(date, portfolio_value, cash, positions_value, daily_pnl)
+  
+  # Step 2d: Document findings in code comments
+  # PaperMetricsTracker API:
+  # - Constructor: (db_path, strategy_name, initial_capital)
+  # - record_daily_snapshot(date, portfolio_value, cash, positions_value, daily_pnl) - 5 params
+  # - record_trade(symbol, side, quantity, entry_price, exit_price, entry_time, exit_time)
+  # - get_metrics_snapshot() -> MetricsSnapshot
+  
+  # 3. Create API reference comment block at top of test file
+  # 4. NOW write integration tests using verified APIs
+  # 5. Tests should pass on first full run (or have minimal fixes)
+  ```
+
+- **Time comparison:**
+  - Our approach: 0 min research + 60 min writing + 120 min debugging = 180 min
+  - Right approach: 30 min research + 60 min writing + 10 min fixes = 100 min
+  - **Time saved: 44%** (plus less frustration)
+
+- **How to avoid in future:**
+  1. **Add "API Research Phase" before integration tests**
+     - Mandatory for tests integrating 3+ existing components
+     - Research each component's API from existing tests
+     - Document findings in comment block
+     - Verify ambiguous cases by reading implementation
+  
+  2. **Use existing tests as API documentation**
+     - Passing tests show correct usage
+     - More reliable than reading implementation directly
+     - Shows actual parameter values and return types
+  
+  3. **Create API reference at top of integration test file**
+     ```python
+     """
+     Integration Test Suite: End-to-End Workflows
+     
+     API Reference (verified from existing tests):
+     
+     StrategyLifecycle (from test_strategy_lifecycle.py):
+     - Constructor: StrategyLifecycle(db_path: str, strategy_name: str)
+     - transition_to(state: LifecycleState) -> bool
+     - get_current_state() -> LifecycleState
+     - get_history() -> List[StateTransition]
+     
+     PaperMetricsTracker (from test_metrics_tracker.py):
+     - Constructor: PaperMetricsTracker(db_path, strategy_name, initial_capital)
+     - record_daily_snapshot(date, pv, cash, pos_val, daily_pnl) - 5 params!
+     - record_trade(sym, side, qty, entry_px, exit_px, entry_t, exit_t) - needs times!
+     - get_metrics_snapshot() -> MetricsSnapshot (not get_summary!)
+     
+     ... (continue for all integrated components)
+     """
+     ```
+  
+  4. **Integration test writing checklist:**
+     - [ ] Listed all components to integrate
+     - [ ] Found existing tests for each component
+     - [ ] Read existing tests to verify APIs
+     - [ ] Documented API reference in comments
+     - [ ] Verified ambiguous cases from implementation
+     - [ ] Created fixtures matching verified signatures
+     - [ ] Wrote tests using verified APIs only
+     - [ ] Expected high first-run pass rate (80%+)
+
+- **When this applies:**
+  - Writing integration tests for existing components
+  - Writing E2E tests across multiple modules
+  - Adding tests to legacy code
+  - Creating system-level test suites
+  
+- **When research is optional:**
+  - Unit testing new code you just wrote (TDD)
+  - Integration tests written alongside implementation
+  - Tests for code you personally implemented recently
+
+- **Key insight:** "For integration tests of existing code, research APIs first. 30 minutes of research saves 2 hours of debugging."
+
+**Sprint 4 Task 1 Outcome:**
+Despite the inefficient approach, we achieved:
+- 30/30 integration tests passing (100%)
+- 562/562 full test suite passing (100%)
+- Comprehensive coverage of all Sprint 1-3 integration points
+- Clean commit (11da7f4)
+
+**Lesson learned:** API research phase is mandatory before writing integration tests. Add it to the Prime Directive.
+
+---
 
 ### Sprint 3 Lessons Learned (November 24-25, 2025)
 
@@ -1126,21 +1361,25 @@ When deleting code:
 
 ---
 
-### Project Metrics (Sprint 3 Complete)
+### Project Metrics (Sprint 4 Task 1 Complete)
 
 ### Current Test Suite Status
-- **Total Tests:** 532
+- **Total Tests:** 562
 - **Pass Rate:** 100%
 - **Warning Count:** 0
-- **Last Verified:** 2025-11-24
+- **Last Verified:** 2025-11-25
 - **Test Coverage:** 45% overall, 95%+ in risk-critical modules
 - **Recent Additions:**
+  - Sprint 4 Task 1: 30 tests added (Nov 25) - E2E integration tests, full workflow validation
   - Sprint 3: 174 tests added (Nov 24-25) - Config, orchestration, comparison, attribution, health monitoring
   - Sprint 2: 162 tests added (Nov 22-24) - Risk, validation, metrics, promotion, dashboard
   - Sprint 1: 132 tests added (Nov 20-22) - Lifecycle, paper trading, data pipeline, monitoring, integration
   - Week 4: 64 baseline tests - Backtest engine, data, profiles, strategy templates
   
 ### Test Files by Sprint
+**Sprint 4 Task 1 (Day 11):**
+  - test_integration_e2e.py (30 tests) - Complete E2E integration validation
+
 **Sprint 3 (Days 8-10):**
   - test_config_hot_reload.py (35 tests)
   - test_multi_strategy_orchestration.py (35 tests)
@@ -1170,6 +1409,17 @@ When deleting code:
   - test_strategy_templates.py (46 tests)
 
 ### Sprint Completion History
+- **Sprint 4 Task 1 (2025-11-25):** E2E Integration Testing
+  - 30 tests added (comprehensive integration validation)
+  - ~916 lines of test code
+  - 100% test pass rate achieved (532→562)
+  - Zero warnings maintained
+  - Key lesson: API research before integration tests (documented in Lesson 1)
+  - Test progression: 0%→50%→70%→90%→97%→100% (5 correction rounds)
+  - 37+ API mismatches corrected systematically
+  - Commit: 11da7f4
+  - Key achievements: Complete lifecycle validation, multi-component coordination, error handling, data pipeline integrity
+
 - **Sprint 3 (2025-11-24 to 2025-11-25):** Strategy Development Pipeline
   - 174 tests added (35+35+34+35+35)
   - ~4,200 lines of code (2,600 production + 1,600 tests)
@@ -1219,6 +1469,7 @@ When deleting code:
 ---
 
 **Revision History:**
+- 2025-11-25 (v4): **Sprint 4 Task 1 Lesson** - Added critical "Research APIs Before Integration Tests" lesson from Sprint 4 Task 1 experience (37+ API mismatches), Enhanced Pre-Implementation Checklist with Integration Test Research Protocol (mandatory 6-step process), Updated Development Workflow Phase 1 to 15-30% with integration test research requirements, Documented time savings (44% reduction) from proper API research, Current metrics: 562 tests (30 new integration tests)
 - 2025-11-24 (v3): **Sprint 3 Complete** - Added 10 Sprint 3 lessons (dataclasses+enums, statistical analysis, TDD acceleration, comprehensive fixtures, human-readable reports, edge case testing, integration workflows, commit discipline, 100% pass rate, deque for sliding windows), Updated metrics to 532 tests, Documented 87 tests/day velocity (61% increase)
 - 2025-11-24 (v2): **Zero Warnings Policy** - Updated Principle 0 to require zero warnings (not just zero failures), Added warning investigation requirement to all checklists and protocols, Fixed SQLAlchemy deprecation warning (declarative_base import), Documented warning resolution in Sprint 2 history
 - 2025-11-24 (v1): Added Sprint 2 lessons (multi-dimensional validation, two-layer risk management, database persistence, visual feedback, multi-gate approval, incremental testing, test quality focus, velocity compounding), Updated project metrics to 393 tests
