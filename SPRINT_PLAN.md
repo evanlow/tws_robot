@@ -151,57 +151,63 @@ Transform tws_robot into a **versatile quantitative trading platform** with equa
 - **Prime Directive Updates:** 10 new lessons added
 - **Key Achievements:** TDD approach, dataclass+enum architecture, statistical degradation detection
 
-### Sprint 4: TBD (Days 9-11)
-**Status:** Planning Phase  
-**Decision Point:** Integration Phase vs Advanced Features
-
-**Option A: Integration & Deployment Phase**
+### Sprint 4: Integration & Deployment Phase (Days 9-11)
+**Status:** IN PROGRESS (Started Nov 24, 2025)  
+**Decision:** Option A selected - Option B features deferred for post-deployment
 **Goal:** Connect all Sprint 1-3 components into production-ready system
 
 **Deliverables:**
-- [ ] End-to-end integration testing with real paper trading
-- [ ] Production deployment configuration
-- [ ] Monitoring dashboards (web-based)
-- [ ] User documentation and runbooks
-- [ ] Performance tuning and optimization
-- [ ] Live trading readiness checklist
+1. **End-to-End Integration Testing** (30-40 tests)
+   - [ ] Full workflow validation (paper → validated → live transitions)
+   - [ ] Strategy lifecycle testing (initialization → execution → shutdown)
+   - [ ] Multi-component integration (orchestrator + risk + monitoring)
+   - [ ] Error handling and recovery scenarios
+   - [ ] Data pipeline integrity validation
+
+2. **Production Deployment Configuration** (30-40 tests)
+   - [ ] Environment configuration management
+   - [ ] Secrets and credentials handling
+   - [ ] Connection pooling and management
+   - [ ] Production safety checks and guards
+   - [ ] Automated deployment scripts
+
+3. **Real-Time Monitoring Dashboards** (30-40 tests)
+   - [ ] Live strategy monitoring interface
+   - [ ] Performance tracking dashboard
+   - [ ] Alert and notification systems
+   - [ ] Health check endpoints
+   - [ ] Metrics collection and display
+
+4. **Comprehensive Documentation** (20-30 tests)
+   - [ ] API documentation (all modules)
+   - [ ] Deployment guides (step-by-step)
+   - [ ] Operation manuals (daily usage)
+   - [ ] Troubleshooting guides (common issues)
+   - [ ] Architecture diagrams (system overview)
 
 **Success Criteria:**
-- [ ] All components integrated and working together
-- [ ] Paper trading running 24/7 reliably
-- [ ] Web dashboard accessible and responsive
-- [ ] Documentation complete for operators
-- [ ] Performance benchmarks met
-- [ ] Ready for 30-day validation period
+- ✅ All 120-150 integration tests passing
+- ✅ Production deployment fully automated
+- ✅ Monitoring dashboards operational
+- ✅ Documentation complete and reviewed
+- ✅ End-to-end workflows validated
+- ✅ Zero warnings maintained
+- ✅ 100% test pass rate
 
-**Option B: Advanced Features Sprint**
-**Goal:** Add sophisticated risk management and market intelligence
-
-**Deliverables:**
-- [ ] Market regime detection (trend/range/volatile identification)
-- [ ] Dynamic position sizing based on regime
-- [ ] Advanced order types (trailing stops, bracket orders, OCO)
-- [ ] Execution quality tracking and slippage analysis
-- [ ] Portfolio optimization (mean-variance, risk parity)
-- [ ] Correlation-based position limits
-
-**Success Criteria:**
-- [ ] Regime detection working with 3+ regimes
-- [ ] Position sizing adapts to market conditions
-- [ ] Advanced orders executing correctly
-- [ ] Execution metrics tracked accurately
-- [ ] Portfolio optimization functional
-- [ ] All tests passing (target: 650+ tests)
-
-**Estimated Effort (Either Option):**
+**Estimated Effort:**
 - **Tests to Add:** 120-150 tests
-- **Code to Add:** 3,500-4,000 lines
+- **Code to Add:** 3,500-4,000 lines (2,000 production + 1,500-2,000 tests)
 - **Duration:** 2-3 days
-- **Target Velocity:** 60-80 tests/day
+- **Target Velocity:** 60-75 tests/day
 
-**Decision Factors:**
-- **Integration Phase** if: Ready for production, need stability, want to validate live
-- **Advanced Features** if: Need more sophisticated strategies, want to add capabilities, not ready for production yet
+**Future Enhancements (Option B - Post-Sprint 4):**
+Deferred for implementation after production validation:
+- Market regime detection (trend/range/volatile identification)
+- Dynamic position sizing based on volatility and regime
+- Advanced order types (trailing stops, bracket orders, OCO)
+- Execution quality tracking and slippage analysis
+- Portfolio optimization (mean-variance, risk parity)
+- Correlation-based position limits
 
 ---
 
