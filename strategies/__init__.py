@@ -15,6 +15,13 @@ from .strategy_orchestrator import (
     ConflictResolver, 
     AllocationManager
 )
+from .comparison_dashboard import (
+    StrategyComparator,
+    ComparisonMetrics,
+    ComparisonDashboard,
+    MetricType,
+    RankingCriteria
+)
 
 __all__ = [
     'Signal',
@@ -28,5 +35,10 @@ __all__ = [
     'StrategyOrchestrator',
     'SignalAggregator',
     'ConflictResolver',
-    'AllocationManager'
+    'AllocationManager',
+    'StrategyComparator',
+    'ComparisonMetrics',
+    'ComparisonDashboard',
+    'MetricType',
+    'RankingCriteria'
 ]
