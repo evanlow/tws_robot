@@ -742,6 +742,198 @@ echo "Deployment of TWS Robot v$VERSION to $ENVIRONMENT completed!"
 
 ---
 
-This comprehensive deployment guide provides everything needed to run TWS Robot v2.0 in production with proper security, monitoring, backup, and disaster recovery procedures.
+## 🛠️ Troubleshooting
 
-Would you like me to create the specific implementation files for Week 1 to get started, or would you prefer additional documentation for any particular aspect?
+### **Common Issues and Solutions**
+
+#### **TWS Connection Issues**
+
+**Problem:** Cannot connect to TWS API
+```
+Error: [Errno 10061] No connection could be made
+```
+
+**Solutions:**
+1. Verify TWS is running and logged in
+2. Check TWS API settings: Configure → API → Settings
+   - Enable "Enable ActiveX and Socket Clients"
+   - Set "Socket port" to 7497 (paper) or 7496 (live)
+   - Check "Read-Only API" is unchecked
+   - Trusted IP addresses includes 127.0.0.1
+3. Verify port configuration matches `config_paper.py` or `config_live.py`
+4. Check firewall settings allow localhost connections
+5. Restart TWS and wait 30 seconds before connecting
+
+---
+
+#### **Database Connection Failures**
+
+**Problem:** PostgreSQL connection refused
+```
+psycopg2.OperationalError: could not connect to server
+```
+
+**Solutions:**
+1. Verify PostgreSQL container is running: `docker ps | grep postgres`
+2. Check connection string in environment variables
+3. Verify database exists: `docker exec -it tws-postgres psql -U tws_user -l`
+4. Check PostgreSQL logs: `docker logs tws-postgres`
+5. Restart database container: `docker-compose restart postgres`
+6. Verify network connectivity: `docker network inspect tws-network`
+
+---
+
+#### **Memory Issues**
+
+**Problem:** High memory usage or OOM errors
+```
+Warning: Memory usage at 95%
+```
+
+**Solutions:**
+1. Check container resource limits in docker-compose.yml
+2. Increase Docker memory allocation: Docker Desktop → Settings → Resources
+3. Monitor memory usage: `docker stats tws-robot`
+4. Review strategy complexity and data retention policies
+5. Enable data cleanup: Set `MAX_HISTORY_DAYS` environment variable
+6. Consider horizontal scaling for multiple strategies
+
+---
+
+#### **Order Execution Failures**
+
+**Problem:** Orders not executing or getting rejected
+```
+Error: Order rejected - insufficient permissions
+```
+
+**Solutions:**
+1. Verify IB account permissions for API trading
+2. Check account has sufficient buying power
+3. Verify market hours - orders may queue outside trading hours
+4. Check order parameters meet IB requirements (lot sizes, prices)
+5. Review IB account messages in TWS for specific rejection reasons
+6. Enable paper trading mode for testing: Use `config_paper.py`
+7. Check rate limiter settings - may be throttling orders
+
+---
+
+#### **Performance Issues**
+
+**Problem:** Slow API responses or high latency
+```
+Warning: API response time > 5s
+```
+
+**Solutions:**
+1. Check Redis cache is running: `docker ps | grep redis`
+2. Verify network latency to IB servers
+3. Review database query performance: Enable SQL logging
+4. Check Prometheus metrics for bottlenecks: `http://localhost:9090`
+5. Optimize strategy calculations - move heavy compute off critical path
+6. Consider increasing connection pool size
+7. Review rate limiter configuration
+
+---
+
+#### **Missing Market Data**
+
+**Problem:** No market data received
+```
+Error: No market data subscription for AAPL
+```
+
+**Solutions:**
+1. Verify IB account has market data subscriptions
+2. Check TWS market data settings: Global Configuration → Market Data
+3. Subscribe to required data in IB Account Management
+4. Verify contract details are correct (symbol, exchange, currency)
+5. Check for market data permissions errors in TWS messages
+6. Use delayed/frozen data for testing if live data unavailable
+
+---
+
+#### **Deployment Failures**
+
+**Problem:** Docker container won't start
+```
+Error: Container exits immediately
+```
+
+**Solutions:**
+1. Check container logs: `docker logs tws-robot`
+2. Verify environment variables are set correctly
+3. Check volume mounts exist and have correct permissions
+4. Review Dockerfile.production for syntax errors
+5. Test image locally: `docker run -it tws-robot:latest bash`
+6. Verify all required dependencies are installed
+7. Check health check configuration isn't too aggressive
+
+---
+
+#### **Backup Failures**
+
+**Problem:** Database backups not completing
+```
+Error: pg_dump failed - permission denied
+```
+
+**Solutions:**
+1. Verify S3 credentials are correct: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+2. Check S3 bucket exists and has write permissions
+3. Verify database user has backup privileges
+4. Check disk space: `df -h`
+5. Review backup service logs: `docker logs tws-backup`
+6. Test manual backup: `pg_dump $DATABASE_URL -f test_backup.sql`
+7. Verify backup schedule is correct
+
+---
+
+#### **Alert System Not Working**
+
+**Problem:** Not receiving alerts
+```
+No Slack/email notifications received
+```
+
+**Solutions:**
+1. Verify webhook URLs are correct in environment variables
+2. Test webhook manually: `curl -X POST $SLACK_WEBHOOK_URL -d '{"text":"test"}'`
+3. Check alert rules in `monitoring/alert_rules.yml`
+4. Verify Prometheus is scraping metrics: `http://localhost:9090/targets`
+5. Check alertmanager is running: `docker ps | grep alertmanager`
+6. Review alertmanager config: `monitoring/alertmanager.yml`
+7. Check alert firing status in Prometheus: `http://localhost:9090/alerts`
+
+---
+
+#### **Test Failures**
+
+**Problem:** pytest tests failing after deployment
+```
+FAILED tests/test_connection.py::test_tws_connection
+```
+
+**Solutions:**
+1. Verify all dependencies are installed: `pip install -r requirements.txt`
+2. Check test database is configured correctly
+3. Ensure TWS is running for integration tests
+4. Review test configuration in `pytest.ini`
+5. Run tests in verbose mode: `pytest -vv`
+6. Check test fixtures are properly initialized
+7. Verify test data exists: `tests/test_cache/`
+
+---
+
+### **Getting Help**
+
+If issues persist:
+1. Check project documentation: `README.md`, `TECHNICAL_SPECS.md`
+2. Review relevant code modules for inline documentation
+3. Check IB TWS API documentation: https://interactivebrokers.github.io
+4. Review container logs for detailed error messages
+5. Enable debug logging: Set `LOG_LEVEL=DEBUG` environment variable
+
+---
+
+This comprehensive deployment guide provides everything needed to run TWS Robot v2.0 in production with proper security, monitoring, backup, disaster recovery, and troubleshooting procedures.
