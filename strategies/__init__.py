@@ -9,6 +9,12 @@ from .signal import Signal, SignalType, SignalStrength
 from .base_strategy import BaseStrategy, StrategyState, StrategyConfig
 from .strategy_registry import StrategyRegistry
 from .bollinger_bands import BollingerBandsStrategy
+from .strategy_orchestrator import (
+    StrategyOrchestrator, 
+    SignalAggregator, 
+    ConflictResolver, 
+    AllocationManager
+)
 
 __all__ = [
     'Signal',
@@ -18,5 +24,9 @@ __all__ = [
     'StrategyState',
     'StrategyConfig',
     'StrategyRegistry',
-    'BollingerBandsStrategy'
+    'BollingerBandsStrategy',
+    'StrategyOrchestrator',
+    'SignalAggregator',
+    'ConflictResolver',
+    'AllocationManager'
 ]
