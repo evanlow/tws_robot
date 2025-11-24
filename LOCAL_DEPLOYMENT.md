@@ -65,11 +65,14 @@ pytest --tb=short
 ### 5. Start TWS Robot
 
 ```powershell
-# Run main application
+# Run with paper account (default)
 python tws_client.py
 
-# Or use your preferred entry point
-# python main.py
+# Or explicitly specify paper
+python tws_client.py --env paper
+
+# Show current configuration
+python tws_client.py --show-config
 ```
 
 ### 6. Monitor Operation
@@ -148,13 +151,12 @@ After 30 days, verify:
 3. **Update Configuration**
 
 ```powershell
-# Edit .env
+# Verify .env has correct live account settings
 notepad .env
 
-# Change these settings:
-# TRADING_ENV=live
+# Should contain:
 # LIVE_HOST=127.0.0.1
-# LIVE_PORT=7496        # ← Change from 7497 to 7496
+# LIVE_PORT=7496
 # LIVE_ACCOUNT=U6801816
 
 # ⚠️ CRITICAL: Verify risk limits are appropriate for live capital
@@ -172,8 +174,8 @@ notepad .env
 # Run full test suite
 pytest
 
-# Start TWS Robot
-python tws_client.py
+# Start TWS Robot in LIVE mode
+python tws_client.py --env live
 
 # Monitor closely!
 ```
@@ -185,12 +187,16 @@ python tws_client.py
 ### Starting the System
 
 ```powershell
-# 1. Start TWS (paper or live)
+# 1. Start TWS (paper port 7497 or live port 7496)
 # 2. Activate Python environment
 .\Scripts\Activate.ps1
 
 # 3. Start TWS Robot
-python tws_client.py
+# Paper trading:
+python tws_client.py --env paper
+
+# Live trading:
+python tws_client.py --env live
 ```
 
 ### Stopping the System
