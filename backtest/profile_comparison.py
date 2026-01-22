@@ -22,7 +22,7 @@ import statistics
 
 from backtest.profiles import RiskProfile, ProfileManager
 from backtest.engine import BacktestEngine, BacktestConfig, BacktestResult
-from backtest.strategy import Strategy
+from backtest.strategy import Strategy, StrategyConfig
 from backtest.performance import PerformanceMetrics, PerformanceAnalyzer
 
 
@@ -190,21 +190,37 @@ class ProfileComparator:
                 print(f"Warning: Profile '{profile_name}' not found, skipping")
                 continue
             
-            # Create strategy instance with profile
-            strategy_params_with_profile = strategy_params or {}
-            strategy_params_with_profile['profile'] = profile
-            
-            strategy = strategy_class(**strategy_params_with_profile)
-            
-            # Configure and run backtest
-            config = BacktestConfig(
-                strategy=strategy,
-                start_date=start_date,
-                end_date=end_date,
-                symbols=symbols
+            # Create StrategyConfig from profile parameters
+            strategy_config = StrategyConfig(
+                name=f"{strategy_class.__name__}_{profile_name}",
+                symbols=symbols,
+                initial_capital=initial_capital,
+                max_position_size=profile.max_position_size,
+                max_total_exposure=profile.max_total_exposure,
+                use_risk_management=True
             )
             
-            engine = BacktestEngine(config)
+            # Create strategy instance with config and optional strategy-specific params
+            if strategy_params:
+                # Strategy-specific config (e.g., MomentumConfig, MACrossConfig)
+                strategy_specific_config = strategy_params.get('strategy_config')
+                strategy = strategy_class(strategy_config, strategy_specific_config)
+            else:
+                # Just StrategyConfig for strategies that don't need additional config
+                strategy = strategy_class(strategy_config)
+            
+            # Configure and run backtest
+            from backtest.data_manager import HistoricalDataManager
+            data_manager = HistoricalDataManager()
+            
+            backtest_config = BacktestConfig(
+                start_date=datetime.strptime(start_date, '%Y-%m-%d') if isinstance(start_date, str) else start_date,
+                end_date=datetime.strptime(end_date, '%Y-%m-%d') if isinstance(end_date, str) else end_date,
+                initial_capital=initial_capital
+            )
+            
+            engine = BacktestEngine(backtest_config, data_manager)
+            engine.set_strategy(strategy)
             backtest_result = engine.run()
             
             # Store result

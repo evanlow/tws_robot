@@ -363,7 +363,58 @@ Stop trading if you see:
 
 ---
 
-## 🛠️ Next Steps
+## � Understanding the Example Scripts
+
+### `example_profile_comparison.py`
+
+**What it does:** Runs 6 comprehensive examples comparing different risk profiles (conservative, moderate, aggressive) to help you find the best risk settings for your strategy.
+
+**When you run it:**
+
+1. **Example 1 - Basic Comparison**: Tests all three standard risk profiles on AAPL, MSFT, GOOGL for 2023, showing which performed best overall.
+
+2. **Example 2 - Two-Profile Details**: Deep dive comparing conservative vs aggressive profiles on SPY and QQQ, showing metric-by-metric differences.
+
+3. **Example 3 - Optimization Insights**: Provides actionable recommendations based on comparison results.
+
+4. **Example 4 - Custom Profiles**: Demonstrates creating custom risk profiles (ultra_conservative, high_growth) and comparing them.
+
+5. **Example 5 - Ranking System**: Explains how profiles are ranked (1=best, N=worst) across four metrics: Sharpe ratio, returns, drawdown, and win rate.
+
+6. **Example 6 - Summary Statistics**: Shows mean and standard deviation across profiles to understand performance distribution.
+
+**Important Notes:**
+- Script pauses between examples (press Enter to continue)
+- **Requires market data connection** - will show error messages if data unavailable
+- Best used after you understand basic backtesting
+- Helps answer: "Should I use conservative or aggressive settings?"
+
+**Example output:**
+```
+✅ Best Overall Profile: moderate
+Average Sharpe: 1.24
+Return Std Dev: 0.08 (Low variability - similar performance)
+```
+
+### `example_backtest_complete.py`
+
+**What it does:** Complete end-to-end backtest demonstration showing how to test a strategy on historical data.
+
+**When you run it:** Executes a full backtest with performance metrics, trade analysis, and visual reports.
+
+**Use this when:** You want to see if a strategy would have made money historically.
+
+### `example_strategy_templates.py`
+
+**What it does:** Shows all available pre-built strategies and how to use them.
+
+**When you run it:** Demonstrates each strategy template with example code and parameter options.
+
+**Use this when:** You're choosing which strategy to implement.
+
+---
+
+## �🛠️ Next Steps
 
 ### Ready to Get Started?
 

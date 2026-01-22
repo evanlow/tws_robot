@@ -8,7 +8,7 @@ different risk profiles in backtesting scenarios.
 from datetime import datetime
 from backtest.profiles import ProfileManager
 from backtest.profile_comparison import ProfileComparator
-from trading_bot_template import SimpleMomentumStrategy
+from backtest.strategy_templates import MomentumStrategy
 
 
 def example_1_basic_comparison():
@@ -26,7 +26,7 @@ def example_1_basic_comparison():
     comparator = ProfileComparator()
     
     # Define backtest parameters
-    strategy_class = SimpleMomentumStrategy
+    strategy_class = MomentumStrategy
     profile_names = ['conservative', 'moderate', 'aggressive']
     start_date = datetime(2023, 1, 1)
     end_date = datetime(2023, 12, 31)
@@ -55,10 +55,10 @@ def example_1_basic_comparison():
         
         # Get best profile
         best_profile = result.get_best_profile()
-        print(f"\n✅ Best Overall Profile: {best_profile}")
+        print(f"\n[SUCCESS] Best Overall Profile: {best_profile}")
         
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n[ERROR] Error: {e}")
         print("Note: This example requires real market data to run.")
     
     print()
@@ -78,7 +78,7 @@ def example_2_two_profile_comparison():
     comparator = ProfileComparator()
     
     # Define parameters
-    strategy_class = SimpleMomentumStrategy
+    strategy_class = MomentumStrategy
     profile_names = ['conservative', 'aggressive']
     start_date = datetime(2023, 1, 1)
     end_date = datetime(2023, 12, 31)
@@ -113,7 +113,7 @@ def example_2_two_profile_comparison():
             print(f"  Winner: {details['winner']}")
             
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n[ERROR] Error: {e}")
         print("Note: This example requires real market data to run.")
     
     print()
@@ -133,7 +133,7 @@ def example_3_optimization_insights():
     comparator = ProfileComparator()
     
     profile_names = ['conservative', 'moderate', 'aggressive']
-    strategy_class = SimpleMomentumStrategy
+    strategy_class = MomentumStrategy
     start_date = datetime(2023, 1, 1)
     end_date = datetime(2023, 12, 31)
     symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN']
@@ -194,7 +194,7 @@ def example_4_custom_profile_comparison():
         'take_profit_pct': 0.02
     }
     manager.add_profile('ultra_conservative', ultra_conservative)
-    print("✅ Ultra-conservative profile created")
+    print("[OK] Ultra-conservative profile created")
     
     # High-growth profile
     high_growth = {
@@ -205,14 +205,14 @@ def example_4_custom_profile_comparison():
         'take_profit_pct': 0.15
     }
     manager.add_profile('high_growth', high_growth)
-    print("✅ High-growth profile created")
+    print("[OK] High-growth profile created")
     
     # Compare custom profiles
     comparator = ProfileComparator(profile_manager=manager)
     
     profile_names = ['ultra_conservative', 'conservative', 'moderate', 
                     'aggressive', 'high_growth']
-    strategy_class = SimpleMomentumStrategy
+    strategy_class = MomentumStrategy
     start_date = datetime(2023, 1, 1)
     end_date = datetime(2023, 12, 31)
     symbols = ['AAPL', 'MSFT', 'GOOGL']
@@ -233,10 +233,10 @@ def example_4_custom_profile_comparison():
         # Show which custom profile performed best
         best = result.get_best_profile()
         if best in ['ultra_conservative', 'high_growth']:
-            print(f"\n🎯 Custom profile '{best}' performed best!")
+            print(f"\n[SUCCESS] Custom profile '{best}' performed best!")
         
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n[ERROR] Error: {e}")
         print("Note: This example requires real market data to run.")
     
     print()
@@ -272,7 +272,7 @@ def example_5_interpreting_rankings():
     
     try:
         result = comparator.compare_profiles(
-            strategy_class=SimpleMomentumStrategy,
+            strategy_class=MomentumStrategy,
             profile_names=['conservative', 'moderate', 'aggressive'],
             start_date=datetime(2023, 1, 1),
             end_date=datetime(2023, 12, 31),
@@ -303,7 +303,7 @@ def example_5_interpreting_rankings():
         print("=" * 60)
         
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n[ERROR] Error: {e}")
         print("Note: This example requires real market data to run.")
     
     print()
@@ -332,7 +332,7 @@ def example_6_summary_statistics():
     
     try:
         result = comparator.compare_profiles(
-            strategy_class=SimpleMomentumStrategy,
+            strategy_class=MomentumStrategy,
             profile_names=['conservative', 'moderate', 'aggressive'],
             start_date=datetime(2023, 1, 1),
             end_date=datetime(2023, 12, 31),
@@ -364,7 +364,7 @@ def example_6_summary_statistics():
                 print("• Low return variability - Conservative approach may be sufficient")
         
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n[ERROR] Error: {e}")
         print("Note: This example requires real market data to run.")
     
     print()
