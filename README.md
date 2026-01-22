@@ -1,128 +1,344 @@
-# TWS Robot - Interactive Brokers Trading Bot
+# TWS Robot - Your Automated Trading Assistant
 
-A sophisticated automated trading system for Interactive Brokers using Python and the TWS API.
+**Test trading strategies, automate execution, manage risk - all while you sleep.**
 
-## Features
+Transform your trading ideas into automated strategies. Test them on historical data, validate in paper trading, then deploy them live. TWS Robot handles the execution, risk management, and monitoring so you can focus on strategy.
 
-🔧 **Environment-Based Configuration**
-- Supports both paper trading and live trading environments
+---
+
+## 🎯 What Can TWS Robot Do For You?
+
+### For New Algorithmic Traders
+- 📚 **Learn by doing** - Run pre-built strategies and see how they work
+- 🧪 **Test without risk** - Backtest on historical data before risking real money
+- 🎓 **Start simple** - Interactive guides walk you through your first strategy
+- 🛡️ **Built-in safety** - Risk management prevents catastrophic losses
+
+### For Active Traders
+- 🤖 **Automate execution** - Let the bot execute your strategy 24/7
+- 📊 **Multiple strategies** - Run Moving Average, Mean Reversion, Momentum simultaneously
+- ⚡ **Paper trading** - Validate strategies with real-time data before going live
+- 📈 **Performance tracking** - See what's working with Sharpe ratio, win rate, drawdown
+
+### For Quantitative Developers
+- 🏗️ **Professional architecture** - Event-driven design, modular components
+- 🧬 **Extensible framework** - Build custom strategies on proven infrastructure
+- 📊 **Advanced analytics** - Comprehensive backtesting with realistic market simulation
+- 🔧 **Full control** - Customize risk profiles, position sizing, and execution logic
+
+---
+
+## ⚡ Quick Start (5 Minutes)
+
+### 1. Install TWS Robot
+
+```bash
+# Clone and set up
+git clone https://github.com/evanlow/tws_robot.git
+cd tws_robot
+python -m venv .
+.\Scripts\Activate.ps1  # Windows (or source bin/activate on Mac/Linux)
+pip install -r requirements.txt
+```
+
+### 2. Choose Your Path
+
+**New to algo trading? Start here:**
+```bash
+# Interactive guide to choose a strategy for your stock
+python strategy_selector.py
+```
+
+**Want to see if a strategy works? Try this:**
+```bash
+# Test Moving Average strategy on historical data
+python quick_start.py
+```
+
+**Ready to explore? Check these out:**
+```bash
+# Compare Conservative vs. Aggressive risk profiles
+python example_profile_comparison.py
+
+# Test all three strategies (MA, Mean Reversion, Momentum)
+python example_strategy_templates.py
+```
+
+### 3. Learn More
+
+📖 **[Read the User Guide](USER_GUIDE.md)** - Everything you need to know to use TWS Robot effectively
+- Understand what each strategy does and when to use it
+- Learn about risk management and position sizing
+- Get a realistic weekly trading routine
+- Know when to stop trading a strategy
+
+---
+
+## 🎓 What You'll Learn
+
+### Week 1: Your First Strategy
+- Run a backtest and interpret results
+- Understand Sharpe ratio, drawdown, win rate
+- Test strategies on different stocks
+- Choose a risk profile (Conservative/Balanced/Aggressive)
+
+### Week 2: Paper Trading
+- Connect to Interactive Brokers paper account
+- Run strategies with real-time data (fake money)
+- Monitor performance daily
+- Learn when a strategy stops working
+
+### Week 3: Risk Management
+- Set position sizes based on account size
+- Implement stop losses and take profits
+- Use circuit breakers to prevent disasters
+- Build a diversified strategy portfolio
+
+### Week 4: Go Live (If Ready)
+- Start with small position sizes
+- Monitor daily for first month
+- Track performance vs. expectations
+- Adjust or stop strategies as needed
+
+**Full learning path in [USER_GUIDE.md](USER_GUIDE.md)**
+
+---
+
+## 🏆 Built-In Strategies
+
+| Strategy | Best For | When to Use | Example Stocks |
+|----------|----------|-------------|----------------|
+| **Moving Average Crossover** | Trending markets | Stock has clear up/down movements | AAPL, MSFT, NVDA |
+| **Mean Reversion** | Range-bound markets | Stock bounces around stable average | KO, PG, JNJ |
+| **Momentum** | High-growth stocks | Stock shows strong trends | TSLA, growth stocks |
+
+**Not sure which to use?** Run `python strategy_selector.py` for personalized recommendations.
+
+---
+
+## 🛡️ Safety & Risk Management
+
+### Built-In Protections
+- ✅ **Paper trading first** - Test with fake money before risking real capital
+- ✅ **Position limits** - Never risk more than configured percentage per trade
+- ✅ **Circuit breakers** - Auto-shutdown on excessive losses (2% daily, 15% total)
+- ✅ **Market hours checks** - Warns about after-hours trading
+- ✅ **Confirmation prompts** - Extra confirmation for live trading
+
+### Risk Profiles
+
+Choose your comfort level:
+- **Conservative** - 2-3% per trade, tight stops, retirement accounts
+- **Balanced** - 5% per trade, moderate stops, active traders  
+- **Aggressive** - 10% per trade, wide stops, experienced traders
+
+---
+
+## 🔧 Advanced Features
+
+**Professional-grade backtesting:**
+- Realistic market simulation with slippage and commissions
+- Performance analytics (Sharpe, Sortino, Calmar ratios)
+- Trade-by-trade analysis and visualization
+- Parameter optimization tools
+
+**Multi-strategy execution:**
+- Run multiple strategies simultaneously
+- Portfolio-level risk management
+- Strategy comparison and correlation analysis
+- Automated performance reporting
+
+**Enterprise monitoring:**
+- Real-time position and P&L tracking
+- Email/SMS alerts for critical events
+- Complete trade audit trail
+- Customizable dashboards
+
+---
+
+## 📚 Documentation
+
+| Document | Purpose |
+|----------|---------|
+| **[USER_GUIDE.md](USER_GUIDE.md)** | Complete guide for retail traders (start here!) |
+| **[Quick Start](quick_start.py)** | Run your first backtest in minutes |
+| **[Strategy Selector](strategy_selector.py)** | Interactive tool to find the right strategy |
+| **[Technical Docs](docs/)** | Architecture, API reference, runbooks |
+| **[Examples](examples/)** | Code examples for common tasks |
+
+---
+
+## 🚨 Critical Information
+
+### Realistic Expectations
+- ✅ Good strategy: 10-20% annual return
+- ✅ Great strategy: 20-30% annual return  
+- ❌ Claiming 50%+: Probably too risky or unrealistic
+
+**Remember:** S&P 500 averages ~10% per year. Beating that consistently is success!
+
+### The Golden Rules
+1. **ALWAYS backtest first** - If it didn't work historically, it won't work now
+2. **ALWAYS paper trade 30+ days** - Prove it works in real-time
+3. **NEVER risk more than 1-2% per trade** - Survive being wrong 20+ times
+4. **NEVER set-and-forget** - Check your system daily
+5. **STOP if strategy fails** - 5+ consecutive losses or 10% drawdown = stop and reassess
+
+---
+
+## 🔧 Environment-Based Configuration
+
+**Supports both paper and live trading:**
 - Configuration via `.env` files for security
 - Easy switching between environments
+- Separate settings for paper/live accounts
 
-📊 **Market Status Integration**
+**Market Status Integration:**
 - Real-time US stock market status checking
 - Automatic warnings for after-hours trading
 - Safety prompts for live trading during market closures
 
-🛡️ **Safety Features**
-- Graceful connection handling with timeout support
-- Comprehensive error handling and logging
-- Protected sensitive data (account IDs masked)
-- Confirmation prompts for live trading
-
-⚡ **TWS Integration**
+**TWS Integration:**
 - Real-time market data streaming
 - Historical data collection
 - Account balance and portfolio monitoring
 - Order execution capabilities
 
-## Quick Start
+---
+
+## 🚀 Installation & Setup
 
 ### Prerequisites
 
-1. **Interactive Brokers Account**: Paper trading or live account
-2. **TWS or IB Gateway**: Must be running and configured
-3. **Python 3.8+**: With pip package manager
+1. **Interactive Brokers Account** - Paper or live trading account
+2. **TWS or IB Gateway** - Download from Interactive Brokers website
+3. **Python 3.8+** - With pip package manager
 
-### Installation
+### Step-by-Step Installation
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/evanlow/tws_robot.git
-   cd tws_robot
-   ```
-
-2. **Create virtual environment**:
-   ```bash
-   python -m venv .
-   ```
-
-3. **Activate virtual environment**:
-   ```bash
-   # Windows
-   .\Scripts\Activate.ps1
-   
-   # macOS/Linux  
-   source bin/activate
-   ```
-
-4. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-5. **Configure environment**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your account details
-   ```
-
-### Configuration
-
-Edit the `.env` file with your Interactive Brokers configuration:
-
-```env
-# Trading Environment: 'paper' or 'live'
-TRADING_ENV=paper
-
-# Paper Trading Configuration
-PAPER_HOST=127.0.0.1
-PAPER_PORT=7497
-PAPER_CLIENT_ID=0
-PAPER_ACCOUNT=DU2746208
-
-# Live Trading Configuration
-LIVE_HOST=127.0.0.1
-LIVE_PORT=7496
-LIVE_CLIENT_ID=1
-LIVE_ACCOUNT=YOUR_LIVE_ACCOUNT_ID
+**1. Clone the repository:**
+```bash
+git clone https://github.com/evanlow/tws_robot.git
+cd tws_robot
 ```
 
-## Usage
+**2. Create virtual environment:**
+```bash
+python -m venv .
+```
 
-### Basic Usage
+**3. Activate virtual environment:**
+```bash
+# Windows
+.\Scripts\Activate.ps1
+
+# macOS/Linux  
+source bin/activate
+```
+
+**4. Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
+
+**5. Configure your account:**
+```bash
+cp .env.example .env
+# Edit .env with your Interactive Brokers details
+```
+
+### Interactive Brokers Setup
+
+**Enable API Access in TWS:**
+1. Open TWS or IB Gateway
+2. Go to: File → Global Configuration → API → Settings
+3. Enable "Enable ActiveX and Socket Clients"
+4. Set Socket Port:
+   - Paper trading: `7497`
+   - Live trading: `7496`
+5. Add `127.0.0.1` to trusted IPs if prompted
+
+---
+
+## 🎮 Usage Examples
+
+### Backtesting Strategies
 
 ```bash
-# Paper trading (default)
-python tws_client.py --timeout 30
+# Interactive guide for first-time users
+python quick_start.py
 
-# Live trading  
-python tws_client.py --env live --timeout 60
+# Find the right strategy for your stock
+python strategy_selector.py
+
+# Compare risk profiles (Conservative vs. Aggressive)
+python example_profile_comparison.py
+
+# Test all three strategies on historical data
+python example_strategy_templates.py
+```
+
+### Paper Trading (Recommended Before Live)
+
+```bash
+# Start paper trading with default settings
+python tws_client.py --env paper --timeout 30
 
 # Show current configuration
 python tws_client.py --show-config
 
-# Skip market status check
-python tws_client.py --skip-market-check
+# Skip market status check (for after-hours testing)
+python tws_client.py --env paper --skip-market-check
+```
+
+### Live Trading (Use With Caution!)
+
+```bash
+# Live trading requires explicit confirmation
+python tws_client.py --env live --timeout 60
+
+# Check market status before trading
+python market_status.py
 ```
 
 ### Command Line Options
 
 | Option | Description |
 |--------|-------------|
-| `--timeout, -t` | Set timeout in seconds (default: no timeout) |
 | `--env, -e` | Trading environment: `paper` or `live` |
+| `--timeout, -t` | Set timeout in seconds (default: no timeout) |
 | `--show-config` | Display current configuration and exit |
 | `--skip-market-check` | Skip market status verification |
 | `--no-timeout` | Run without timeout |
 | `--help, -h` | Show help message |
 
-### Market Status Check
+---
 
-```bash
-# Check current US market status
-python market_status.py
-```
+## 📊 Understanding Your Results
+
+### Key Metrics Explained
+
+**Total Return**
+- Your profit/loss percentage over the test period
+- Compare to S&P 500 (~10% annually) as benchmark
+
+**Sharpe Ratio** (Risk-adjusted return)
+- `> 2.0` = Excellent  
+- `> 1.0` = Good
+- `> 0.5` = Fair
+- `< 0.5` = Poor (too much risk)
+
+**Max Drawdown** (Worst loss from peak)
+- `< 10%` = Low risk
+- `10-20%` = Moderate risk
+- `> 20%` = High risk (be careful!)
+
+**Win Rate** (Percentage of winning trades)
+- `> 60%` = Great
+- `> 50%` = Good (more wins than losses)
+- `< 40%` = Concerning (review strategy)
+
+---
 
 ## Project Structure
 
@@ -192,12 +408,77 @@ This project is for educational purposes only. Please ensure you understand the 
 
 The authors are not responsible for any financial losses incurred through the use of this software.
 
-## Support
+## 🆘 Getting Help
 
-For questions or issues:
+### Common Questions
+
+**"How much money can I make?"**
+- Realistic: 10-30% annually with good strategies
+- Anything claiming 50%+ is likely too risky
+- Goal: Beat S&P 500's ~10% average consistently
+
+**"Which strategy should I use?"**
+- Start with Moving Average Crossover (simplest)
+- Run `python strategy_selector.py` for personalized recommendations
+- Test multiple strategies to find what works for you
+
+**"How much money do I need?"**
+- Paper trading: $0 (fake money)
+- Live trading: $5,000-$10,000 minimum recommended
+- Need enough to diversify and cover commissions
+
+**"What if my strategy stops working?"**
+- Normal! Markets change and strategies fail
+- Stop trading if: 2 months of losses, 10% drawdown, or 5+ consecutive losses
+- Re-test on recent data and adjust or switch strategies
+
+### Support Resources
+
+📖 **Read First:**
+- [USER_GUIDE.md](USER_GUIDE.md) - Complete trader's guide
+- [Technical Docs](docs/) - Architecture and API reference
+- [Runbooks](docs/runbooks/) - Common tasks and troubleshooting
+
+🐛 **Found a Bug?**
 1. Check existing [Issues](https://github.com/evanlow/tws_robot/issues)
-2. Create a new issue if needed
-3. Include relevant logs and configuration details
+2. Create new issue with:
+   - What you were trying to do
+   - What happened vs. what you expected
+   - Error messages and logs
+   - Your configuration (hide sensitive data!)
+
+💡 **Have a Suggestion?**
+We love feature requests! Open an issue with the "enhancement" label.
+
+---
+
+## 🎯 Your TWS Robot Journey
+
+### Week 1: Learn & Test
+- [ ] Run `python quick_start.py`
+- [ ] Test strategies with `python example_strategy_templates.py`
+- [ ] Use `python strategy_selector.py` to find your strategy
+- [ ] Read [USER_GUIDE.md](USER_GUIDE.md) completely
+
+### Week 2-3: Paper Trade
+- [ ] Connect to IB paper account
+- [ ] Run chosen strategy for 30 days minimum
+- [ ] Track daily performance
+- [ ] Verify risk controls work correctly
+
+### Week 4: Evaluate Results
+- [ ] Did you beat buy-and-hold?
+- [ ] Is Sharpe ratio > 1.0?
+- [ ] Is max drawdown acceptable?
+- [ ] Ready to go live? Start small!
+
+### Going Live (If Ready)
+- [ ] Start with 25% of intended capital
+- [ ] Use 1% position sizes initially
+- [ ] Monitor daily for first month
+- [ ] Scale up gradually if successful
+
+**Remember:** Most traders fail. Go slow, test thoroughly, and never risk money you can't afford to lose.
 
 ---
 
