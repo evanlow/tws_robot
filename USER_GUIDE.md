@@ -100,7 +100,16 @@ See which risk level matches your comfort zone!
 **Best for:** Stocks with clear trends (AAPL, MSFT, NVDA)
 **Avoid using:** Stocks that bounce around with no clear direction
 
-**Try it:**
+**Try it:** The example scripts already use this strategy - just run them!
+```bash
+# Test this strategy on historical data
+python example_backtest_complete.py
+
+# Compare with other strategies
+python example_strategy_templates.py
+```
+
+**For developers:** Here's how to use it in your own code:
 ```python
 from backtest.strategy_templates import MovingAverageCrossStrategy, MACrossConfig
 from backtest.strategy import StrategyConfig
@@ -123,7 +132,16 @@ strategy = MovingAverageCrossStrategy(config, ma_config)
 **Best for:** Stable stocks that don't trend much (utilities, large-cap value stocks)
 **Avoid using:** Stocks that break out to new highs/lows regularly
 
-**Try it:**
+**Try it:** The example scripts already use this strategy - just run them!
+```bash
+# Test this strategy on historical data
+python example_strategy_templates.py
+
+# Compare different risk profiles
+python example_profile_comparison.py
+```
+
+**For developers:** Here's how to use it in your own code:
 ```python
 from backtest.strategy_templates import MeanReversionStrategy
 
@@ -142,7 +160,16 @@ strategy = MeanReversionStrategy(config)
 **Best for:** Growth stocks, tech stocks, trending markets
 **Avoid using:** Choppy or declining markets
 
-**Try it:**
+**Try it:** The example scripts already use this strategy - just run them!
+```bash
+# Test this strategy on historical data
+python example_strategy_templates.py
+
+# Find best strategy for your stock
+python strategy_selector.py
+```
+
+**For developers:** Here's how to use it in your own code:
 ```python
 from backtest.strategy_templates import MomentumStrategy
 
