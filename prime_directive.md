@@ -7,15 +7,122 @@
 
 ## 🎯 Core Principles
 
-### 0. **100% Test Pass Rate + Zero Warnings - Non-Negotiable**
+### 0. **Virtual Environment Verification - ALWAYS FIRST**
+**CRITICAL:** Before ANY pip install, pytest, or Python execution, VERIFY you are in the virtual environment.
+
+**The Protocol:**
+1. ✅ **Check Python path** - run `python -c "import sys; print(sys.executable)"`
+2. ✅ **Verify it points to project venv** - path should contain `\pp2-practice-bot\Scripts\python.exe`
+3. ❌ **If using global Python** - path will be `C:\Users\...\AppData\Local\Programs\Python\...`
+4. ✅ **Activate venv if needed** - run `.\Scripts\Activate.ps1` (Windows) or `source Scripts/activate` (Unix) **AS A SEPARATE COMMAND**
+5. ✅ **Re-verify after activation** - check Python path again to confirm activation worked
+
+**IMPORTANT - Activation Must Be Separate:**
+```powershell
+# ❌ WRONG - Chaining activation with other commands doesn't work
+.\Scripts\Activate.ps1; python -c "..."  # Activation doesn't persist!
+
+# ✅ CORRECT - Run activation first, then run subsequent commands separately
+# Command 1: Activate
+.\Scripts\Activate.ps1
+
+# Command 2: Verify (in next command)
+python -c "import sys; print(sys.executable)"
+
+# Command 3: Now run your work (in next command)
+pip install -r requirements.txt
+```
+
+**Why Separate Commands?**
+- PowerShell activation scripts modify the current session environment
+- Chaining with semicolons creates sub-shells that don't persist environment changes
+- Each terminal command invocation is a fresh session unless activation is explicit
+
+**Background Tasks and Virtual Environments:**
+```powershell
+# ❌ WRONG - Background tasks start NEW sessions without venv
+python -m streamlit run app.py  # If run as background, uses global Python!
+
+# ✅ CORRECT - Use Scripts executables directly for background tasks
+.\Scripts\streamlit.exe run app.py  # Works without activation!
+.\Scripts\python.exe -m pytest test_file.py  # Explicit venv Python
+
+# ✅ ALSO CORRECT - Activate first, then run in foreground/same session
+.\Scripts\Activate.ps1  # Command 1
+python -m streamlit run app.py  # Command 2 in same session
+```
+
+**Key Insight - Scripts Executables:**
+- When packages install in venv, they create executables in `.\Scripts\` directory
+- These executables (`.exe`, `.cmd`) know their Python environment path automatically
+- Using `.\Scripts\executable.exe` works from ANY session (activated or not)
+- Examples: `streamlit.exe`, `pytest.exe`, `python.exe`, `pip.exe`
+- **Benefit:** No activation needed when using direct paths to Scripts executables
+
+**When to Use Each Method:**
+
+| Scenario | Method | Example |
+|----------|--------|---------|
+| Background task (server, watch mode) | Direct Scripts path | `.\Scripts\streamlit.exe run app.py` |
+| Quick one-off command | Direct Scripts path | `.\Scripts\python.exe -m pytest` |
+| Multiple sequential commands | Activate once, then run | Activate → run command 1 → run command 2 |
+| Interactive work session | Activate once | Activate → work with `python`, `pip`, etc. |
+
+**❌ NEVER:**
+- Run `pip install` without checking Python path first
+- Assume the environment is active because it "should be"
+- Install packages into global Python (pollutes base environment)
+- Run tests or code with global Python when venv exists
+- Chain activation with other commands using semicolons (`;`)
+- Run background tasks assuming they inherit venv activation
+- Try to install packages when tests already passed (indicates packages exist!)
+
+**✅ ALWAYS:**
+- Run activation as a standalone command first (if not using Scripts paths)
+- Verify Python executable path AFTER activation in a new command
+- Use `.\Scripts\executable.exe` for background tasks or when activation is unclear
+- Check for venv indicators: `(venv)` or `(pp2-practice-bot)` prompt prefix
+- Verify packages exist before attempting installation (check `pip list` or test results)
+- Document which environment was used if reporting issues
+
+**Recovery from Global Install:**
+```powershell
+# Uninstall from global Python
+python -m pip uninstall package1 package2 -y
+
+# Activate venv
+.\Scripts\Activate.ps1
+
+# Verify venv is active
+python -c "import sys; print(sys.executable)"  # Should show ...\pp2-practice-bot\Scripts\python.exe
+
+# Install to venv
+pip install -r requirements.txt
+```
+
+### 1. **100% Test Pass Rate + Zero Warnings - Non-Negotiable**
 All tests must pass AND produce zero warnings before AND after ANY code changes. No exceptions.
+
+**MANDATORY: Tests Must Exist Before Code Changes**
+- ❌ **Never make code changes without test coverage**
+- ✅ **Write tests FIRST for new features (TDD)**
+- ✅ **Add tests IMMEDIATELY when fixing bugs**
+- ✅ **Create test file alongside new modules**
+- ❌ **Never commit untested code** - tests prevent regressions
 
 **The Protocol:**
 1. ✅ Verify baseline - run full test suite BEFORE any changes (zero failures, zero warnings)
 2. 🔄 Make changes (one logical step at a time)
-3. ✅ Verify again - run full test suite AFTER changes (zero failures, zero warnings)
+3. ✅ **Run tests IMMEDIATELY** after changes (zero failures, zero warnings)
 4. ❌ If tests fail OR warnings appear - fix immediately or revert
 5. ✅ Only commit when all tests pass with zero warnings
+
+**Test Coverage Requirements:**
+- **Backend routes:** Test all HTTP endpoints (GET, POST, error cases)
+- **Business logic:** Test all functions with edge cases (empty, None, boundary values)
+- **Integration:** Test complete workflows end-to-end
+- **Error handling:** Test invalid inputs return proper errors
+- **Minimum coverage:** 70%+ for new features, 90%+ for critical paths
 
 **Warning Policy:**
 - Warnings are NOT acceptable - they must be investigated and resolved
@@ -41,7 +148,7 @@ All tests must pass AND produce zero warnings before AND after ANY code changes.
 - Document test count AND warning count in commits (e.g., "393 passed, 0 warnings")
 - Preserve git history when removing code
 
-### 1. **Verify First, Code Second**  
+### 2. **Verify First, Code Second**  
 Never assume how existing code works. Always verify before implementing.
 
 **❌ Don't:**
@@ -62,7 +169,7 @@ timeframe=TimeFrame.DAY_1
 def on_bar(self, market_data):  # Matches base class signature
 ```
 
-### 2. **Defensive Programming Always**  
+### 3. **Defensive Programming Always**  
 Assume nothing. Handle None, validate inputs, check bounds.
 
 **❌ Don't:**
@@ -84,7 +191,7 @@ if position is None:
     position = 0
 ```
 
-### 3. **Test Incrementally, Not All At Once**  
+### 4. **Test Incrementally, Not All At Once**  
 Build and verify in small steps. Don't write 300 lines before testing.
 
 **✅ Development Flow:**
@@ -644,6 +751,78 @@ Despite the inefficient approach, we achieved:
 **Lesson learned:** API research phase is mandatory before writing integration tests. Add it to the Prime Directive.
 
 ---
+
+### NRIC Verification Demo Lessons Learned (January 8, 2026)
+
+#### Lesson 1: Tests Are Mandatory - Not Optional
+**Context:** Made editable name field enhancement, broke JavaScript, committed without testing
+- **What went wrong:**
+  1. Modified HTML template to make name field editable
+  2. Text replacement corrupted JavaScript code: `document.getElementById('timestavalue = data.name;`
+  3. Committed broken code without testing
+  4. Start Camera button completely broken on production
+  5. User discovered the bug, not automated tests (embarrassing!)
+
+- **Root cause:** 
+  - **No test coverage existed** - project had zero tests
+  - Made changes without running the application
+  - Assumed text replacement was correct without verification
+  - Violated Prime Directive Principle 1 (100% test pass rate) by having no tests at all
+
+- **What should have been done:**
+  1. ✅ Created test suite FIRST (test_app.py)
+  2. ✅ Run tests before making changes (baseline)
+  3. ✅ Make enhancement to HTML
+  4. ✅ **Test manually** by running Flask app and clicking buttons
+  5. ✅ **Run automated tests** after changes
+  6. ✅ Verify 100% pass rate with zero warnings
+  7. ✅ Only then commit
+
+- **Consequences of no tests:**
+  - Broke production functionality
+  - Required immediate hotfix commit
+  - Lost user confidence
+  - Wasted time debugging obvious errors
+  - **Could have been prevented with 1 minute of manual testing**
+
+- **The fix process (doing it right):**
+  1. Created comprehensive test suite (test_app.py)
+  2. Added pytest to requirements.txt
+  3. Wrote 23 tests covering:
+     - All Flask routes (index, verify, error cases)
+     - OCR extraction functions (name, NRIC patterns)
+     - Integration workflows (complete verification)
+     - Edge cases (invalid images, empty data)
+     - Performance (response time under 5s)
+  4. **All 23 tests passing** - proves code works
+  5. Updated Prime Directive to mandate test creation
+
+- **Test categories created:**
+  - **Route tests** (4 tests): HTTP endpoints, error codes, response formats
+  - **OCR function tests** (12 tests): Name extraction, NRIC parsing, edge cases
+  - **Integration tests** (2 tests): Complete workflows, stateless verification
+  - **Edge case tests** (4 tests): Invalid inputs, special characters, error handling
+  - **Performance tests** (1 test): Response time verification
+
+- **Key insight:** "Tests are not optional. Tests are not 'nice to have'. Tests are MANDATORY. They prevent embarrassing production bugs."
+
+**Updated Prime Directive Requirements:**
+- ❌ **Never make code changes without test coverage**
+- ✅ **Write tests FIRST for new features (TDD)**
+- ✅ **Add tests IMMEDIATELY when fixing bugs**
+- ✅ **Run tests before AND after every code change**
+- ✅ **Manual testing required for UI changes** (click the buttons!)
+- ❌ **Never commit untested code** - tests prevent regressions
+
+**Time comparison:**
+- **Without tests (my mistake):** 10 min implement + 0 min test + 30 min debug + 15 min fix = 55 minutes + embarrassment
+- **With tests (right way):** 10 min implement + 5 min manual test + 2 min fix + 30 min write tests = 47 minutes + confidence
+
+**Lesson learned:** Create test suite FIRST. Test EVERY change. Manual + automated testing catches bugs before users do.
+
+---
+
+
 
 ### Sprint 3 Lessons Learned (November 24-25, 2025)
 
