@@ -33,6 +33,11 @@ python example_backtest_complete.py
 
 ### Trading
 ```bash
+# Check your IBKR account status
+python check_account.py          # Paper account (default)
+python check_account.py paper    # Paper account
+python check_account.py live     # Live account
+
 # Paper trading (ALWAYS start here!)
 python tws_client.py --env paper --timeout 30
 

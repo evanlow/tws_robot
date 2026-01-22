@@ -14,7 +14,81 @@ Each example script in TWS Robot demonstrates specific functionality. This guide
 
 ---
 
-## 📊 Profile Comparison Examples
+## � Connection and Account Management
+
+### `check_account.py`
+
+**Purpose:** Connect to your IBKR account and display current status, positions, and account values.
+
+**Usage:**
+```bash
+python check_account.py          # Check paper account (default)
+python check_account.py paper    # Check paper account (explicit)
+python check_account.py live     # Check live account
+```
+
+**What You'll See:**
+```
+======================================================================
+IBKR ACCOUNT STATUS CHECK
+======================================================================
+Time: 2026-01-23 15:30:45
+
+Environment: LIVE
+Connecting to: 127.0.0.1:7496
+Account: U6801816
+
+Connecting...
+[OK] Connected to TWS/Gateway
+Downloading account data...
+
+======================================================================
+ACCOUNT STATUS FOR: U6801816
+======================================================================
+
+Account Values:
+  TotalCashBalance         : $23,076.43
+  CashBalance              : $23,076.43
+  AvailableFunds           : $15,234.56
+  BuyingPower              : $60,938.24
+  GrossPositionValue       : $20,035.18
+  UnrealizedPnL            : $11,230.66
+  RealizedPnL              : $0.00
+  Cushion                  : $0.90
+
+Current Positions (6):
+----------------------------------------------------------------------
+  Symbol: SPY, Position: 50 shares
+  Symbol: QQQ, Position: 30 shares
+  Symbol: AAPL, Position: 100 shares
+  ...
+
+======================================================================
+STATUS CHECK COMPLETE
+======================================================================
+```
+
+**What This Tells You:**
+- **TotalCashBalance**: Cash available in account
+- **UnrealizedPnL**: Current profit/loss on open positions (positive means up)
+- **Cushion**: Margin health (0.90 = 90% cushion, very healthy)
+- **Current Positions**: What you currently own
+
+**Use This When:**
+- Starting your trading day (quick status check)
+- Verifying connection to TWS before running strategies
+- Checking position sizes before deploying new trades
+- Monitoring account health (margin, cushion)
+
+**Requirements:**
+- TWS or IB Gateway must be running
+- Paper account: TWS on port 7497
+- Live account: TWS on port 7496
+- API connections enabled in TWS settings
+
+---
+
+## �📊 Profile Comparison Examples
 
 ### `example_profile_comparison.py`
 

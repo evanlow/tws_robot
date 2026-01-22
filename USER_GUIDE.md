@@ -209,6 +209,10 @@ TWS Robot will **automatically stop trading** if:
 ### Commands You'll Use
 
 ```bash
+# Check your IBKR account status and positions
+python check_account.py          # Paper account (default)
+python check_account.py live     # Live account
+
 # Check if your strategy would work on recent data
 python example_backtest_complete.py
 
