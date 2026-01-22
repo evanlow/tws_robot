@@ -156,15 +156,76 @@ Choose your comfort level:
 
 ---
 
-## 📚 Documentation
+## 📚 Documentation & Guides
 
-| Document | Purpose |
-|----------|---------|
-| **[USER_GUIDE.md](USER_GUIDE.md)** | Complete guide for retail traders (start here!) |
-| **[Quick Start](quick_start.py)** | Run your first backtest in minutes |
-| **[Strategy Selector](strategy_selector.py)** | Interactive tool to find the right strategy |
-| **[Technical Docs](docs/)** | Architecture, API reference, runbooks |
-| **[Examples](examples/)** | Code examples for common tasks |
+**Start Here:** Your complete guide to TWS Robot documentation.
+
+### 🎯 For New Users - Start Here
+
+| Guide | When to Use | What You'll Learn |
+|-------|-------------|-------------------|
+| **[USER_GUIDE.md](USER_GUIDE.md)** | Your first 30 minutes | Complete walkthrough: strategies, risk management, weekly routine, realistic expectations |
+| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** | Daily commands | Cheat sheet: common commands, quick metrics guide, emergency procedures |
+| **[Quick Start Script](quick_start.py)** | Right now! | Run your first backtest in 5 minutes |
+
+### 📖 Understanding What You Have
+
+| Guide | When to Use | What You'll Learn |
+|-------|-------------|-------------------|
+| **[EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md)** | Before running any example | What each example script does, expected output, common issues |
+| **[SPRINT_PLAN.md](SPRINT_PLAN.md)** | Planning your work | Roadmap, feature breakdown, sprint planning |
+| **[PROJECT_PLAN.md](PROJECT_PLAN.md)** | Understanding architecture | System design, component overview, development guidelines |
+
+### 🔧 For Active Trading
+
+| Guide | When to Use | What You'll Learn |
+|-------|-------------|-------------------|
+| **[check_account.py](check_account.py)** | Before each trading session | Current account status, positions, P&L, margin health |
+| **[market_status.py](market_status.py)** | Before placing trades | Is the market open? Safe to trade? |
+| **[Strategy Selector](strategy_selector.py)** | Choosing a strategy | Interactive tool: finds best strategy for your stock |
+
+### 🚀 For Developers
+
+| Guide | When to Use | What You'll Learn |
+|-------|-------------|-------------------|
+| **[prime_directive.md](prime_directive.md)** | Before coding anything | Development standards, testing requirements, code quality rules |
+| **[TECHNICAL_SPECS.md](TECHNICAL_SPECS.md)** | Building features | API references, class structures, integration patterns |
+| **[docs/](docs/)** | Deep dives | Architecture details, runbooks, troubleshooting guides |
+
+### 📊 Understanding Results
+
+| Guide | When to Use | What You'll Learn |
+|-------|-------------|-------------------|
+| **[Metrics in USER_GUIDE](USER_GUIDE.md#understanding-your-results)** | After every backtest | What Sharpe ratio, drawdown, win rate mean |
+| **[Risk Management in USER_GUIDE](USER_GUIDE.md#risk-management)** | Setting up strategies | Position sizing, stop losses, circuit breakers |
+
+### 🆘 When Things Go Wrong
+
+| Guide | When to Use | What You'll Find |
+|-------|-------------|------------------|
+| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md#troubleshooting)** | Quick fixes | Common errors and fast solutions |
+| **[Emergency Procedures](QUICK_REFERENCE.md#emergency-commands)** | System acting weird | How to stop everything NOW |
+| **[docs/runbooks/debugging-strategies.md](docs/runbooks/debugging-strategies.md)** | Strategy not working | Step-by-step debugging process |
+
+### 📚 Documentation Reading Order
+
+**If you're brand new:**
+1. **This README** (you are here!) → Get the big picture
+2. **[USER_GUIDE.md](USER_GUIDE.md)** → Learn strategies and risk management
+3. **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** → Bookmark for daily use
+4. **[EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md)** → Before running examples
+
+**If you want to trade today:**
+1. **[Quick Start Script](quick_start.py)** → Run first backtest
+2. **[Strategy Selector](strategy_selector.py)** → Pick your strategy
+3. **[check_account.py](check_account.py)** → Check account status
+4. **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** → Commands you need
+
+**If you're a developer:**
+1. **[prime_directive.md](prime_directive.md)** → MUST READ before coding
+2. **[PROJECT_PLAN.md](PROJECT_PLAN.md)** → Understand architecture
+3. **[TECHNICAL_SPECS.md](TECHNICAL_SPECS.md)** → API references
+4. **[docs/](docs/)** → Deep technical docs
 
 ---
 
