@@ -26,6 +26,7 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
+    Figure = None  # Set to None when matplotlib not available
     print("Warning: matplotlib not available. Install with: pip install matplotlib")
 
 
@@ -57,7 +58,7 @@ class PerformanceVisualizer:
         title: str = "Equity Curve",
         show_grid: bool = True,
         figsize: Tuple[int, int] = (12, 6)
-    ) -> Figure:
+    ) -> "Figure":
         """
         Plot equity curve over time
         

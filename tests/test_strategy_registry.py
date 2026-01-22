@@ -1,0 +1,426 @@
+"""
+Unit tests for StrategyRegistry.
+
+Tests strategy registration, lifecycle management, and coordination.
+"""
+
+import pytest
+from datetime import datetime
+from unittest.mock import Mock, MagicMock
+
+from strategies.strategy_registry import StrategyRegistry
+from strategies.base_strategy import BaseStrategy, StrategyState, StrategyConfig
+from strategies.signal import Signal, SignalType, SignalStrength
+
+
+class MockStrategy(BaseStrategy):
+    """Mock strategy for testing"""
+    
+    def __init__(self, config: StrategyConfig, event_bus=None):
+        super().__init__(config, event_bus)
+        self.on_bar_called = False
+        self.validate_signal_called = False
+    
+    def on_bar(self, symbol: str, bar_data: dict):
+        """Mock on_bar implementation"""
+        self.on_bar_called = True
+    
+    def validate_signal(self, signal: Signal) -> bool:
+        """Mock validate_signal implementation"""
+        self.validate_signal_called = True
+        return True
+
+
+class TestStrategyRegistry:
+    """Test StrategyRegistry functionality"""
+    
+    def test_registry_initialization(self):
+        """Test registry initialization"""
+        event_bus = Mock()
+        registry = StrategyRegistry(event_bus)
+        
+        assert registry.event_bus == event_bus
+        assert len(registry._strategy_classes) == 0
+        assert len(registry._strategies) == 0
+    
+    def test_register_strategy_class(self):
+        """Test registering a strategy class"""
+        registry = StrategyRegistry()
+        
+        # Register valid strategy class
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Verify registration
+        assert "MockStrategy" in registry._strategy_classes
+        assert registry._strategy_classes["MockStrategy"] == MockStrategy
+        
+        # Check get_registered_classes
+        classes = registry.get_registered_classes()
+        assert "MockStrategy" in classes
+    
+    def test_register_invalid_strategy_class(self):
+        """Test registering non-strategy class raises error"""
+        registry = StrategyRegistry()
+        
+        # Try to register non-BaseStrategy class
+        class NotAStrategy:
+            pass
+        
+        with pytest.raises(ValueError):
+            registry.register_strategy_class("Invalid", NotAStrategy)
+    
+    def test_unregister_strategy_class(self):
+        """Test unregistering a strategy class"""
+        registry = StrategyRegistry()
+        
+        # Register and then unregister
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        assert "MockStrategy" in registry._strategy_classes
+        
+        registry.unregister_strategy_class("MockStrategy")
+        assert "MockStrategy" not in registry._strategy_classes
+    
+    def test_create_strategy(self):
+        """Test creating a strategy instance"""
+        event_bus = Mock()
+        registry = StrategyRegistry(event_bus)
+        
+        # Register strategy class
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Create strategy instance
+        config = StrategyConfig(
+            name="Test_Strategy",
+            symbols=["AAPL"],
+            enabled=True
+        )
+        
+        strategy = registry.create_strategy("MockStrategy", config)
+        
+        # Verify strategy created
+        assert isinstance(strategy, MockStrategy)
+        assert strategy.config.name == "Test_Strategy"
+        assert strategy.event_bus == event_bus
+        
+        # Verify strategy registered in active strategies
+        assert "Test_Strategy" in registry._strategies
+    
+    def test_create_strategy_unregistered_type(self):
+        """Test creating strategy with unregistered type raises error"""
+        registry = StrategyRegistry()
+        
+        config = StrategyConfig(
+            name="Test",
+            symbols=["AAPL"]
+        )
+        
+        with pytest.raises(ValueError):
+            registry.create_strategy("UnknownType", config)
+    
+    def test_create_strategy_duplicate_name(self):
+        """Test creating strategy with duplicate name raises error"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        config = StrategyConfig(
+            name="Duplicate",
+            symbols=["AAPL"]
+        )
+        
+        # Create first strategy
+        registry.create_strategy("MockStrategy", config)
+        
+        # Try to create second with same name
+        with pytest.raises(ValueError):
+            registry.create_strategy("MockStrategy", config)
+    
+    def test_get_strategy(self):
+        """Test retrieving strategy by name"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        config = StrategyConfig(
+            name="TestStrategy",
+            symbols=["AAPL"]
+        )
+        
+        # Create strategy
+        strategy = registry.create_strategy("MockStrategy", config)
+        
+        # Retrieve strategy
+        retrieved = registry.get_strategy("TestStrategy")
+        assert retrieved is strategy
+        
+        # Try to get non-existent strategy
+        none_result = registry.get_strategy("NonExistent")
+        assert none_result is None
+    
+    def test_remove_strategy(self):
+        """Test removing a strategy"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        config = StrategyConfig(
+            name="RemoveMe",
+            symbols=["AAPL"]
+        )
+        
+        # Create strategy
+        registry.create_strategy("MockStrategy", config)
+        assert "RemoveMe" in registry._strategies
+        
+        # Remove strategy
+        registry.remove_strategy("RemoveMe")
+        assert "RemoveMe" not in registry._strategies
+    
+    def test_get_all_strategies(self):
+        """Test getting all active strategies"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Create multiple strategies
+        for i in range(3):
+            config = StrategyConfig(
+                name=f"Strategy_{i}",
+                symbols=["AAPL"]
+            )
+            registry.create_strategy("MockStrategy", config)
+        
+        # Get all strategies
+        strategies = registry.get_all_strategies()
+        assert len(strategies) == 3
+        assert all(isinstance(s, MockStrategy) for s in strategies)
+    
+    def test_start_strategy(self):
+        """Test starting a specific strategy"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        config = StrategyConfig(
+            name="StartMe",
+            symbols=["AAPL"]
+        )
+        
+        strategy = registry.create_strategy("MockStrategy", config)
+        assert strategy.state == StrategyState.READY
+        
+        # Start strategy
+        registry.start_strategy("StartMe")
+        assert strategy.state == StrategyState.RUNNING
+    
+    def test_stop_strategy(self):
+        """Test stopping a specific strategy"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        config = StrategyConfig(
+            name="StopMe",
+            symbols=["AAPL"]
+        )
+        
+        strategy = registry.create_strategy("MockStrategy", config)
+        strategy.start()
+        assert strategy.state == StrategyState.RUNNING
+        
+        # Stop strategy
+        registry.stop_strategy("StopMe")
+        assert strategy.state == StrategyState.STOPPED
+    
+    def test_pause_strategy(self):
+        """Test pausing a specific strategy"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        config = StrategyConfig(
+            name="PauseMe",
+            symbols=["AAPL"]
+        )
+        
+        strategy = registry.create_strategy("MockStrategy", config)
+        strategy.start()
+        assert strategy.state == StrategyState.RUNNING
+        
+        # Pause strategy
+        registry.pause_strategy("PauseMe")
+        assert strategy.state == StrategyState.PAUSED
+    
+    def test_resume_strategy(self):
+        """Test resuming a paused strategy"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        config = StrategyConfig(
+            name="ResumeMe",
+            symbols=["AAPL"]
+        )
+        
+        strategy = registry.create_strategy("MockStrategy", config)
+        strategy.start()
+        strategy.pause()
+        assert strategy.state == StrategyState.PAUSED
+        
+        # Resume strategy
+        registry.resume_strategy("ResumeMe")
+        assert strategy.state == StrategyState.RUNNING
+    
+    def test_start_all_strategies(self):
+        """Test starting all strategies"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Create multiple strategies
+        strategies = []
+        for i in range(3):
+            config = StrategyConfig(
+                name=f"Strategy_{i}",
+                symbols=["AAPL"]
+            )
+            strategy = registry.create_strategy("MockStrategy", config)
+            strategies.append(strategy)
+        
+        # Start all
+        registry.start_all()
+        
+        # Verify all started
+        for strategy in strategies:
+            assert strategy.state == StrategyState.RUNNING
+    
+    def test_stop_all_strategies(self):
+        """Test stopping all strategies"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Create and start multiple strategies
+        strategies = []
+        for i in range(3):
+            config = StrategyConfig(
+                name=f"Strategy_{i}",
+                symbols=["AAPL"]
+            )
+            strategy = registry.create_strategy("MockStrategy", config)
+            strategy.start()
+            strategies.append(strategy)
+        
+        # Stop all
+        registry.stop_all()
+        
+        # Verify all stopped
+        for strategy in strategies:
+            assert strategy.state == StrategyState.STOPPED
+    
+    def test_pause_all_strategies(self):
+        """Test pausing all strategies"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Create and start multiple strategies
+        strategies = []
+        for i in range(3):
+            config = StrategyConfig(
+                name=f"Strategy_{i}",
+                symbols=["AAPL"]
+            )
+            strategy = registry.create_strategy("MockStrategy", config)
+            strategy.start()
+            strategies.append(strategy)
+        
+        # Pause all
+        registry.pause_all()
+        
+        # Verify all paused
+        for strategy in strategies:
+            assert strategy.state == StrategyState.PAUSED
+    
+    def test_get_strategies_by_state(self):
+        """Test getting strategies filtered by state"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Create strategies in different states
+        config1 = StrategyConfig(name="Running1", symbols=["AAPL"])
+        strategy1 = registry.create_strategy("MockStrategy", config1)
+        strategy1.start()
+        
+        config2 = StrategyConfig(name="Running2", symbols=["MSFT"])
+        strategy2 = registry.create_strategy("MockStrategy", config2)
+        strategy2.start()
+        
+        config3 = StrategyConfig(name="Paused1", symbols=["GOOGL"])
+        strategy3 = registry.create_strategy("MockStrategy", config3)
+        strategy3.start()
+        strategy3.pause()
+        
+        config4 = StrategyConfig(name="Ready1", symbols=["TSLA"])
+        strategy4 = registry.create_strategy("MockStrategy", config4)
+        
+        # Get running strategies
+        running = registry.get_strategies_by_state(StrategyState.RUNNING)
+        assert len(running) == 2
+        assert strategy1 in running
+        assert strategy2 in running
+        
+        # Get paused strategies
+        paused = registry.get_strategies_by_state(StrategyState.PAUSED)
+        assert len(paused) == 1
+        assert strategy3 in paused
+        
+        # Get ready strategies
+        ready = registry.get_strategies_by_state(StrategyState.READY)
+        assert len(ready) == 1
+        assert strategy4 in ready
+    
+    def test_get_strategies_by_symbol(self):
+        """Test getting strategies filtered by symbol"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Create strategies with different symbols
+        config1 = StrategyConfig(name="AAPL_1", symbols=["AAPL"])
+        strategy1 = registry.create_strategy("MockStrategy", config1)
+        
+        config2 = StrategyConfig(name="AAPL_2", symbols=["AAPL", "MSFT"])
+        strategy2 = registry.create_strategy("MockStrategy", config2)
+        
+        config3 = StrategyConfig(name="MSFT_1", symbols=["MSFT"])
+        strategy3 = registry.create_strategy("MockStrategy", config3)
+        
+        # Get strategies for AAPL
+        aapl_strategies = registry.get_strategies_by_symbol("AAPL")
+        assert len(aapl_strategies) == 2
+        assert strategy1 in aapl_strategies
+        assert strategy2 in aapl_strategies
+        
+        # Get strategies for MSFT
+        msft_strategies = registry.get_strategies_by_symbol("MSFT")
+        assert len(msft_strategies) == 2
+        assert strategy2 in msft_strategies
+        assert strategy3 in msft_strategies
+    
+    def test_registry_performance_summary(self):
+        """Test getting performance summary from registry"""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        
+        # Create strategies with different performance
+        for i in range(3):
+            config = StrategyConfig(
+                name=f"Strategy_{i}",
+                symbols=["AAPL"]
+            )
+            strategy = registry.create_strategy("MockStrategy", config)
+            strategy.signals_generated = (i + 1) * 10
+            strategy.signals_accepted = (i + 1) * 8
+            strategy.signals_rejected = (i + 1) * 2
+        
+        # Get summary using actual method name
+        summary = registry.get_overall_summary()
+        
+        assert summary['total_strategies'] == 3
+        assert summary['total_signals'] == 60  # 10 + 20 + 30
+        assert summary['total_accepted'] == 48   # 8 + 16 + 24
+        assert summary['total_rejected'] == 12   # 2 + 4 + 6
+        assert 'acceptance_rate' in summary
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])
