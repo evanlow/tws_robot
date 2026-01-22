@@ -76,25 +76,25 @@ python example_strategy_templates.py
 
 ## 🎓 What You'll Learn
 
-### Week 1: Your First Strategy
+### Module 1: Your First Strategy
 - Run a backtest and interpret results
 - Understand Sharpe ratio, drawdown, win rate
 - Test strategies on different stocks
 - Choose a risk profile (Conservative/Balanced/Aggressive)
 
-### Week 2: Paper Trading
+### Module 2: Paper Trading
 - Connect to Interactive Brokers paper account
 - Run strategies with real-time data (fake money)
 - Monitor performance daily
 - Learn when a strategy stops working
 
-### Week 3: Risk Management
+### Module 3: Risk Management
 - Set position sizes based on account size
 - Implement stop losses and take profits
 - Use circuit breakers to prevent disasters
 - Build a diversified strategy portfolio
 
-### Week 4: Go Live (If Ready)
+### Module 4: Go Live (If Ready)
 - Start with small position sizes
 - Monitor daily for first month
 - Track performance vs. expectations
@@ -515,19 +515,19 @@ We love feature requests! Open an issue with the "enhancement" label.
 
 ## 🎯 Your TWS Robot Journey
 
-### Week 1: Learn & Test
+### Module 1: Learn & Test
 - [ ] Run `python quick_start.py`
 - [ ] Test strategies with `python example_strategy_templates.py`
 - [ ] Use `python strategy_selector.py` to find your strategy
 - [ ] Read [USER_GUIDE.md](USER_GUIDE.md) completely
 
-### Week 2-3: Paper Trade
+### Module 2: Paper Trade
 - [ ] Connect to IB paper account
 - [ ] Run chosen strategy for 30 days minimum
 - [ ] Track daily performance
 - [ ] Verify risk controls work correctly
 
-### Week 4: Evaluate Results
+### Module 3: Evaluate Results
 - [ ] Did you beat buy-and-hold?
 - [ ] Is Sharpe ratio > 1.0?
 - [ ] Is max drawdown acceptable?
