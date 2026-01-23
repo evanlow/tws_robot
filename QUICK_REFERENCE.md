@@ -9,8 +9,8 @@
 ### Getting Started
 ```bash
 # Activate environment (ALWAYS do this first!)
-.\Scripts\Activate.ps1  # Windows
-source bin/activate     # Mac/Linux
+.\venv\Scripts\Activate.ps1  # Windows PowerShell
+source venv/bin/activate      # Mac/Linux
 
 # Your first backtest
 python quick_start.py
@@ -209,10 +209,12 @@ ls data/historical/
 ```bash
 # Make sure you're in virtual environment
 python -c "import sys; print(sys.executable)"
-# Should show: .../tws_robot/Scripts/python.exe
+# Should show: .../tws_robot/venv/Scripts/python.exe (Windows)
+# Should show: .../tws_robot/venv/bin/python (Mac/Linux)
 
 # If not, activate it
-.\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1  # Windows
+source venv/bin/activate      # Mac/Linux
 ```
 
 ### "Tests failing"
@@ -233,6 +235,7 @@ pip install -r requirements.txt
 | Need to... | Read this... |
 |------------|-------------|
 | Understand strategies | [USER_GUIDE.md](USER_GUIDE.md) - Strategy section |
+| **API documentation** | **[API_REFERENCE.md](API_REFERENCE.md) - Developer API** |
 | Learn risk management | [USER_GUIDE.md](USER_GUIDE.md) - Risk section |
 | Set up TWS connection | [README.md](README.md) - Installation section |
 | Add a new strategy | [docs/runbooks/adding-new-strategy.md](docs/runbooks/adding-new-strategy.md) |
