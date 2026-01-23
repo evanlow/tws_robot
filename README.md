@@ -37,8 +37,15 @@ Transform your trading ideas into automated strategies. Test them on historical 
 # Clone and set up
 git clone https://github.com/evanlow/tws_robot.git
 cd tws_robot
-python -m venv .
-.\Scripts\Activate.ps1  # Windows (or source bin/activate on Mac/Linux)
+
+# Create virtual environment
+python -m venv venv
+
+# Activate it (choose your platform)
+.\venv\Scripts\Activate.ps1  # Windows PowerShell
+source venv/bin/activate        # Mac/Linux
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
@@ -74,6 +81,139 @@ python example_strategy_templates.py
 - Learn about risk management and position sizing
 - Get a realistic weekly trading routine
 - Know when to stop trading a strategy
+
+---
+
+## 📁 Project Structure
+
+Understanding the codebase:
+
+```
+tws_robot/
+├── backtest/              # Historical testing engine
+│   ├── strategy_templates.py  # Pre-built strategies (MA, MeanReversion, Momentum)
+│   ├── engine.py             # Backtesting engine
+│   ├── data_manager.py       # Historical data handling
+│   └── profiles.py           # Risk profiles (Conservative, Moderate, Aggressive)
+├── strategies/            # Live trading strategies
+│   └── bollinger_bands.py    # Production-ready Bollinger Bands strategy
+├── risk/                  # Risk management system
+│   ├── risk_manager.py       # Position sizing, drawdown control
+│   └── position_sizer.py     # Calculate position sizes
+├── core/                  # Infrastructure
+│   ├── event_bus.py          # Event-driven architecture
+│   └── ...                   # Other core components
+├── execution/             # Order execution and TWS integration
+├── monitoring/            # Performance tracking
+└── docs/                  # Architecture documentation
+```
+
+**🎯 Quick Navigation:**
+- **Want to backtest?** → `backtest/strategy_templates.py`
+- **Want to live trade?** → `strategies/bollinger_bands.py`
+- **Need risk controls?** → `risk/risk_manager.py`
+- **Building custom strategy?** → `docs/runbooks/adding-new-strategy.md`
+
+---
+
+## ❓ Frequently Asked Questions
+
+### Can I use this for live trading right now?
+Yes, but limited. The **BollingerBands strategy** is production-ready for paper/live trading. Other strategies (Moving Average, Mean Reversion, Momentum) are backtest-only currently.
+
+### Which strategy should I start with?
+1. **New to algo trading?** Start with `python strategy_selector.py` for guided selection
+2. **Want proven results?** Backtest all strategies: `python example_strategy_templates.py`
+3. **Ready to trade?** Use BollingerBands with conservative risk profile
+
+### Do I need Interactive Brokers TWS running?
+- **For backtesting:** No, works offline with historical data
+- **For paper trading:** Yes, need TWS Paper Trading mode (port 7497)
+- **For live trading:** Yes, need TWS with live account (port 7496)
+
+### How much capital do I need?
+- **Backtesting:** $0 (simulated)
+- **Paper trading:** $0 (simulated TWS account)
+- **Live trading:** Minimum $10,000 recommended for proper diversification
+
+### Is this beginner-friendly?
+**Backtesting:** Yes! Examples are well-documented and easy to run  
+**Live trading:** Intermediate+ (requires understanding of trading, risk management, TWS setup)
+
+### What if I get errors?
+1. Check you're in the project directory and venv is activated
+2. Verify dependencies installed: `pip install -r requirements.txt`
+3. For TWS connection issues, see [Troubleshooting](#-troubleshooting) below
+4. See [Debugging Guide](docs/runbooks/debugging-strategies.md) for detailed help
+
+---
+
+## 🔧 Troubleshooting
+
+### "ModuleNotFoundError: No module named 'backtest'"
+```bash
+# Ensure you're in the project directory
+cd tws_robot
+
+# Activate virtual environment
+.\venv\Scripts\Activate.ps1  # Windows
+source venv/bin/activate      # Mac/Linux
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### "Connection refused" when running check_account.py
+- Ensure TWS or IB Gateway is running
+- Check TWS API settings enabled: **Edit → Global Configuration → API → Settings**
+  - Enable ActiveX and Socket Clients
+  - Trusted IP addresses: 127.0.0.1
+- Paper trading uses port **7497**, live uses port **7496**
+
+### "No data available" during backtest
+```bash
+# Download historical data first
+python download_real_data.py AAPL MSFT GOOGL
+```
+
+### Tests failing
+```bash
+# Clear test cache and rerun
+pytest --cache-clear
+
+# Run specific test file
+pytest test_backtest_engine.py -v
+```
+
+**More help:**
+- [Debugging Strategies Guide](docs/runbooks/debugging-strategies.md)
+- [Emergency Procedures](docs/runbooks/emergency-procedures.md)
+- [Architecture Documentation](docs/architecture/overview.md)
+
+---
+
+## 📚 Documentation Index
+
+**Getting Started:**
+- [README](README.md) - Quick start and overview (you are here)
+- [User Guide](USER_GUIDE.md) - Learn strategies and workflows
+- [Examples Guide](EXAMPLES_GUIDE.md) - Working code examples
+- [Quick Reference](QUICK_REFERENCE.md) - Commands and configs cheat sheet
+
+**Development:**
+- [Technical Specs](TECHNICAL_SPECS.md) - Architecture details
+- [Architecture Docs](docs/architecture/overview.md) - System design
+- [Adding New Strategy](docs/runbooks/adding-new-strategy.md) - Development guide
+- [Prime Directive](prime_directive.md) - Development philosophy
+
+**Operations:**
+- [Deployment Guide](DEPLOYMENT_GUIDE.md) - Future production setup
+- [Emergency Procedures](docs/runbooks/emergency-procedures.md) - Crisis management
+- [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting
+
+**Project Management:**
+- [Sprint Plans](SPRINT_PLAN.md) - Development roadmap
+- [Test Coverage Analysis](TEST_COVERAGE_ANALYSIS.md) - Quality metrics
 
 ---
 

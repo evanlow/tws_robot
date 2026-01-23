@@ -4,6 +4,19 @@
 
 ---
 
+## 📚 Documentation Navigation
+
+**You are here:** User Guide - Learn how to use TWS Robot  
+**Next steps:** [Examples Guide](EXAMPLES_GUIDE.md) - See working code examples  
+**Reference:** [Quick Reference](QUICK_REFERENCE.md) - Commands cheat sheet
+
+**Other guides:**
+- [README](README.md) - Quick start and installation
+- [Technical Specs](TECHNICAL_SPECS.md) - Architecture for developers
+- [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting help
+
+---
+
 ## 🎯 What is TWS Robot?
 
 TWS Robot is your **automated trading assistant** that connects to your Interactive Brokers account and executes trading strategies for you - while you sleep, work, or live your life.
