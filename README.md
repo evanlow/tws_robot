@@ -23,8 +23,9 @@ Transform your trading ideas into automated strategies. Test them on historical 
 ### For Quantitative Developers
 - 🏗️ **Professional architecture** - Event-driven design, modular components
 - 🧬 **Extensible framework** - Build custom strategies on proven infrastructure
-- 📊 **Advanced analytics** - Comprehensive backtesting with realistic market simulation
+- 📊 **Advanced analytics** - Comprehensive backtesting with realistic market simulation (Moving Average, Mean Reversion, Momentum templates included)
 - 🔧 **Full control** - Customize risk profiles, position sizing, and execution logic
+- 🤖 **Live trading ready** - Bollinger Bands strategy available for paper/live trading
 
 ---
 
@@ -54,6 +55,8 @@ python strategy_selector.py
 # Test Moving Average strategy on historical data
 python quick_start.py
 ```
+
+> 💡 **Note:** Quick start examples use **backtest strategies** (Moving Average, Mean Reversion, Momentum) for historical testing. For **live/paper trading**, see the Bollinger Bands strategy in `strategies/` folder.
 
 **Ready to explore? Check these out:**
 ```bash

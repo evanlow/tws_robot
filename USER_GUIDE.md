@@ -89,7 +89,25 @@ See which risk level matches your comfort zone!
 
 ## 📚 Understanding the Strategies
 
-### Strategy #1: Moving Average Crossover
+### 🏗️ Two Types of Strategies
+
+TWS Robot has two strategy locations for different purposes:
+
+**1. Backtest Strategies** (`backtest/strategy_templates.py`)
+- **Purpose:** Historical testing and research
+- **Available:** MovingAverageCrossStrategy, MeanReversionStrategy, MomentumStrategy
+- **Use for:** Testing ideas on past data before committing real capital
+- **Examples:** `quick_start.py`, `example_backtest_complete.py`, `example_strategy_templates.py`
+
+**2. Live Trading Strategies** (`strategies/` folder)
+- **Purpose:** Paper trading and live trading with Interactive Brokers
+- **Available:** BollingerBandsStrategy
+- **Use for:** Real-time trading with actual TWS connection
+- **Note:** Only deploy strategies here after thorough backtesting
+
+---
+
+### Strategy #1: Moving Average Crossover *(Backtest Only)*
 **When to use:** When you believe a stock is trending (going up or down clearly)
 
 **How it works:**
@@ -97,8 +115,9 @@ See which risk level matches your comfort zone!
 - **BUY signal:** When fast MA crosses above slow MA (trend is turning up)
 - **SELL signal:** When fast MA crosses below slow MA (trend is turning down)
 
-**Best for:** Stocks with clear trends (AAPL, MSFT, NVDA)
-**Avoid using:** Stocks that bounce around with no clear direction
+**Best for:** Stocks with clear trends (AAPL, MSFT, NVDA)  
+**Avoid using:** Stocks that bounce around with no clear direction  
+**Status:** 📊 Available for historical backtesting only (not yet enabled for live trading)
 
 **Try it:** The example scripts already use this strategy - just run them!
 ```bash
@@ -121,7 +140,7 @@ ma_config = MACrossConfig(fast_period=20, slow_period=50)
 strategy = MovingAverageCrossStrategy(config, ma_config)
 ```
 
-### Strategy #2: Mean Reversion (Bollinger Bands)
+### Strategy #2: Mean Reversion *(Backtest Only)*
 **When to use:** When you believe a stock that moves away from average will bounce back
 
 **How it works:**
@@ -129,8 +148,9 @@ strategy = MovingAverageCrossStrategy(config, ma_config)
 - **BUY signal:** When price drops 2 standard deviations below average (oversold)
 - **SELL signal:** When price returns to average (take profit)
 
-**Best for:** Stable stocks that don't trend much (utilities, large-cap value stocks)
-**Avoid using:** Stocks that break out to new highs/lows regularly
+**Best for:** Stable stocks that don't trend much (utilities, large-cap value stocks)  
+**Avoid using:** Stocks that break out to new highs/lows regularly  
+**Status:** 📊 Available for historical backtesting only (not yet enabled for live trading)
 
 **Try it:** The example scripts already use this strategy - just run them!
 ```bash

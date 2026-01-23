@@ -7,6 +7,35 @@
 
 ---
 
+> ⚠️ **IMPORTANT NOTICE**
+> 
+> **This deployment guide describes a planned production architecture that is NOT YET IMPLEMENTED.**
+> 
+> The Docker configurations, web dashboard, FastAPI gateway, and production infrastructure
+> described in this document represent the **future production roadmap** for TWS Robot.
+> 
+> **Current Project Status:**
+> - ✅ **Core backtesting engine** - Fully implemented and tested (690 tests passing)
+> - ✅ **Risk management system** - Production ready
+> - ✅ **Strategy templates** - Available for backtesting (MovingAverage, MeanReversion, Momentum)
+> - ✅ **Live trading integration** - BollingerBands strategy available for paper/live trading with TWS
+> - ❌ **Docker containerization** - Planned, not yet implemented
+> - ❌ **Web dashboard** - Planned, not yet implemented
+> - ❌ **FastAPI gateway** - Planned, not yet implemented
+> - ❌ **Production monitoring** - Planned, not yet implemented
+> 
+> **To use TWS Robot today:**
+> - Follow the [README.md](README.md) Quick Start for local development setup
+> - Use [USER_GUIDE.md](USER_GUIDE.md) for backtesting and paper trading
+> - See [EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md) for working code examples
+> 
+> **This guide is useful for:**
+> - Understanding the planned production architecture
+> - Preparing for future deployment
+> - Contributing to production infrastructure development
+
+---
+
 ## 🚀 Production Deployment Strategy
 
 ### **Infrastructure Architecture**
