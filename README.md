@@ -74,7 +74,28 @@ python example_profile_comparison.py
 python example_strategy_templates.py
 ```
 
-### 3. Learn More
+### 3. Understand the Workflow
+
+```mermaid
+graph LR
+    A[📥 Historical Data] --> B[🧪 Backtest]
+    B --> C{Good Results?}
+    C -->|No| D[🔧 Adjust Strategy]
+    D --> B
+    C -->|Yes| E[📄 Paper Trade]
+    E --> F{Still Good?}
+    F -->|No| D
+    F -->|Yes| G[💰 Live Trade]
+    
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style E fill:#d4edda
+    style G fill:#f8d7da
+```
+
+**Never skip steps!** Every successful strategy follows this path.
+
+### 4. Learn More
 
 📖 **[Read the User Guide](USER_GUIDE.md)** - Everything you need to know to use TWS Robot effectively
 - Understand what each strategy does and when to use it
@@ -201,6 +222,7 @@ pytest test_backtest_engine.py -v
 - [Quick Reference](QUICK_REFERENCE.md) - Commands and configs cheat sheet
 
 **Development:**
+- [API Reference](API_REFERENCE.md) - Complete developer API documentation
 - [Technical Specs](TECHNICAL_SPECS.md) - Architecture details
 - [Architecture Docs](docs/architecture/overview.md) - System design
 - [Adding New Strategy](docs/runbooks/adding-new-strategy.md) - Development guide

@@ -120,6 +120,34 @@ TWS Robot has two strategy locations for different purposes:
 
 ---
 
+### 🧭 Strategy Selection Flowchart
+
+Not sure which strategy to use? Follow this decision tree:
+
+```mermaid
+graph TD
+    A[What kind of stock?] --> B{Clear trend?}
+    B -->|Yes - trending up/down| C[Moving Average Crossover]
+    B -->|No - choppy/sideways| D[Mean Reversion]
+    
+    A --> E{How volatile?}
+    E -->|Very volatile| F[Momentum Strategy]
+    E -->|Stable/moderate| D
+    
+    A --> G{Stock type?}
+    G -->|Blue chip AAPL, MSFT| C
+    G -->|Dividend KO, PG| D
+    G -->|Growth TSLA, NVDA| F
+    
+    style C fill:#d4edda
+    style D fill:#cfe2ff
+    style F fill:#fff3cd
+```
+
+**Quick tip:** When in doubt, test all three strategies and compare results!
+
+---
+
 ### Strategy #1: Moving Average Crossover *(Backtest Only)*
 **When to use:** When you believe a stock is trending (going up or down clearly)
 

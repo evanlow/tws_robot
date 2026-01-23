@@ -4,6 +4,20 @@
 
 ---
 
+## 📚 Documentation Navigation
+
+**You are here:** API Reference - Developer documentation  
+**Start here:** [README](README.md) - Installation and overview  
+**Learn concepts:** [User Guide](USER_GUIDE.md) - How strategies work  
+**Quick lookup:** [Quick Reference](QUICK_REFERENCE.md) - Commands cheat sheet
+
+**Need help?**
+- [Adding New Strategy](docs/runbooks/adding-new-strategy.md) - Step-by-step guide
+- [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting
+- [Architecture Overview](docs/architecture/overview.md) - System design
+
+---
+
 ## 📚 Table of Contents
 
 1. [Strategy Development API](#strategy-development-api)
