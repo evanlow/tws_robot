@@ -1,7 +1,38 @@
 # Prime Directive: Development Guidelines
 
-**Last Updated:** November 22, 2025  
+**Last Updated:** January 24, 2026  
 **Purpose:** Ensure high-quality, maintainable code by learning from past experiences and establishing best practices for all team members, AI agents, and contributors.
+
+---
+
+# 🚨🚨🚨 CRITICAL: READ THIS FIRST 🚨🚨🚨
+
+## IF YOU'RE ABOUT TO WRITE CODE THAT USES EXISTING CLASSES/METHODS:
+
+```
+═══════════════════════════════════════════════════════════════════════
+
+                            ⛔ STOP ⛔
+                            
+                    Have you verified the API?
+                    
+                    □ NO  → Go to Section 2 NOW (Verify First)
+                    □ YES → Show your verification in comments
+
+═══════════════════════════════════════════════════════════════════════
+```
+
+**⚠️ Last violation cost:** 15 minutes debugging, 8 AttributeError/TypeError/ImportError  
+**⏱️ Your time is valuable:** 30 seconds of verification saves 15 minutes of debugging
+
+**Common mistakes that cause errors:**
+- ❌ Assuming class names (BarData vs Bar)
+- ❌ Assuming module paths (risk.manager vs risk.risk_manager)
+- ❌ Assuming method names (validate_trade vs check_trade_risk)
+- ❌ Assuming enum values (MARKET_DATA vs MARKET_DATA_RECEIVED)
+- ❌ Assuming method signatures (on_start vs start)
+
+**✅ The fix:** Spend 30 seconds using grep_search + read_file BEFORE coding
 
 ---
 
@@ -169,6 +200,113 @@ timeframe=TimeFrame.DAY_1
 def on_bar(self, market_data):  # Matches base class signature
 ```
 
+---
+
+### 2.1 **THE 30-SECOND RULE** ⏱️
+
+**Spending 30 seconds to verify saves 15 minutes of debugging.**
+
+**Verification is NOT optional:**
+- grep_search: 5 seconds
+- read_file: 10 seconds  
+- Documenting findings: 15 seconds
+- **Total: 30 seconds**
+
+**Compare to NOT verifying:**
+- Writing wrong code: 5 minutes
+- Getting error: instant
+- Debugging error: 5 minutes
+- Fixing code: 5 minutes
+- **Total: 15+ minutes wasted**
+
+**The math is simple: Always verify.**
+
+---
+
+### 2.2 **MANDATORY: API Verification Block Template**
+
+Before ANY code that uses existing APIs, add this verification block.  
+**AI agents must output this BEFORE implementation code.**
+
+**Template (Copy-Paste This):**
+
+```python
+# ==============================================================================
+# API VERIFICATION CHECKLIST ✓
+# ==============================================================================
+# Date: YYYY-MM-DD
+# Task: [Brief description of what you're implementing]
+#
+# Classes/Methods to be used:
+# ----------------------------
+# 1. ClassName (from module/file.py:line)
+#    Tool: grep_search(query="class ClassName", includePattern="*.py")
+#    Found: [file path and line number]
+#    Verified: ✓
+#
+# 2. method_name (from module/file.py:line)
+#    Tool: read_file(filePath="...", startLine=X, endLine=Y)
+#    Signature: method_name(param1: type, param2: type) -> return_type
+#    Verified: ✓
+#
+# 3. [Add more as needed]
+#
+# VERIFICATION COMPLETE: ✓ All APIs confirmed to exist with correct signatures
+# ==============================================================================
+
+# Now proceed with implementation...
+```
+
+**Example from today's work:**
+
+```python
+# ==============================================================================
+# API VERIFICATION CHECKLIST ✓
+# ==============================================================================
+# Date: 2026-01-24
+# Task: Create functionality demonstration script
+#
+# 1. Bar class (NOT BarData!)
+#    grep_search: Found backtest/data_models.py:36
+#    Verified: ✓ class Bar exists
+#
+# 2. RiskManager.__init__
+#    read_file: risk/risk_manager.py lines 112-130
+#    Signature: __init__(initial_capital, max_positions, max_position_pct, 
+#                        max_drawdown_pct, daily_loss_limit_pct, ...)
+#    Note: NOT max_total_exposure_pct (doesn't exist)
+#    Verified: ✓
+#
+# 3. RiskManager.get_risk_summary
+#    Returns: Dict with 'current_equity' (NOT 'equity')
+#    Verified: ✓
+#
+# 4. EventType enum values
+#    Found: core/event_bus.py:46
+#    Values: MARKET_DATA_RECEIVED (NOT MARKET_DATA)
+#    Verified: ✓
+#
+# 5. Strategy methods
+#    base_strategy.py:172 → start() NOT on_start()
+#    base_strategy.py:193 → stop() NOT on_stop()
+#    Verified: ✓
+#
+# VERIFICATION COMPLETE: ✓
+# ==============================================================================
+```
+
+**Warning Signs You're Skipping Verification:**
+- ⚠️ Typing a class/method name from memory
+- ⚠️ Assuming parameter order
+- ⚠️ Guessing at return types
+- ⚠️ Copy-pasting from similar (but different) code
+- ⚠️ Thinking "this probably works like..."
+- ⚠️ Getting ANY runtime errors (AttributeError, TypeError, KeyError)
+
+**Each warning sign = STOP and verify properly**
+
+---
+
 ### 3. **Defensive Programming Always**  
 Assume nothing. Handle None, validate inputs, check bounds.
 
@@ -208,6 +346,69 @@ strategy.on_start()  # Does it initialize?
 # Step 3: Test integration
 result = engine.run()  # Now combine them
 ```
+
+---
+
+### 5. **Post-Mortem: Learn From Errors** 📋
+
+After ANY AttributeError, TypeError, or ImportError, you MUST complete a post-mortem.  
+This is how we improve and prevent future violations.
+
+**Prime Directive Post-Mortem Template:**
+
+```markdown
+## Post-Mortem: [Brief Error Description]
+
+**Date:** YYYY-MM-DD  
+**Task:** [What were you trying to do?]
+
+**Error(s) Encountered:**
+```
+[Paste full error traceback]
+```
+
+**Prime Directive Section Violated:**
+□ Section 0: Virtual Environment
+□ Section 1: Test Coverage
+☑ Section 2: Verify First ← [Usually this one]
+□ Section 3: Defensive Programming
+□ Section 4: Incremental Testing
+
+**Verification Steps Skipped:**
+☑ grep_search to find class/method
+☑ read_file to see actual signature
+☑ list_code_usages to see examples
+☑ Writing verification block
+□ Running test before full implementation
+
+**Specific Mistakes:**
+1. [e.g., Assumed BarData existed, actually Bar]
+2. [e.g., Assumed risk.manager, actually risk.risk_manager]
+3. [List all wrong assumptions]
+
+**Time Impact:**
+- Time spent coding wrong version: [X minutes]
+- Time spent debugging errors: [Y minutes]
+- Time verification would have taken: [30 seconds]
+- **Net time wasted:** [X+Y-0.5 minutes]
+
+**Lesson Learned:**
+[What specific step will you never skip again?]
+
+**Prevention Action:**
+□ Updated prime_directive_violations.log
+□ Added example to Prime Directive
+□ Created verification checklist for similar tasks
+
+**Commitment:**
+I commit to [specific behavior change] to prevent this in the future.
+```
+
+**Example Post-Mortem (Today's Error):**
+
+See `prime_directive_violations.log` for complete post-mortem from 2026-01-24.
+
+**Key Takeaway:** Every error is a lesson. Document it, learn from it, prevent it.
 
 ---
 

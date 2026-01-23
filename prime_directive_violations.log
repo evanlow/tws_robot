@@ -1,0 +1,238 @@
+# Prime Directive Violation Log
+
+**Purpose:** Track violations, learn from mistakes, measure improvement over time
+
+**Format:** Each violation gets a detailed post-mortem to prevent recurrence
+
+---
+
+## 2026-01-24: Section 2 Violation - "Verify First, Code Second"
+
+**Task:** Create functionality demonstration script (`demo_functionality.py` → `verify_functionality.py`)
+
+**Errors Encountered:**
+```
+1. ImportError: cannot import name 'BarData' from 'backtest.data_models'
+   → Actual class name: Bar (line 36)
+
+2. ModuleNotFoundError: No module named 'strategies.moving_average_crossover'
+   → Strategy doesn't exist (only BollingerBandsStrategy exists)
+
+3. ModuleNotFoundError: No module named 'strategies.mean_reversion'
+   → Strategy doesn't exist
+
+4. ModuleNotFoundError: No module named 'risk.manager'
+   → Actual module: risk.risk_manager
+
+5. TypeError: RiskManager.__init__() got unexpected keyword argument 'max_total_exposure_pct'
+   → Actual params: initial_capital, max_positions, max_position_pct, max_drawdown_pct, daily_loss_limit_pct, max_leverage, ...
+
+6. AttributeError: 'RiskManager' object has no attribute 'validate_trade'
+   → Actual method: check_trade_risk(symbol, side, quantity, price, positions)
+
+7. KeyError: 'equity'
+   → Actual key in dict: 'current_equity' (from get_risk_summary())
+
+8. AttributeError: type object 'EventType' has no attribute 'MARKET_DATA'
+   → Actual enum value: MARKET_DATA_RECEIVED
+
+9. AttributeError: 'BollingerBandsStrategy' object has no attribute 'on_start'
+   → Actual method: start() (not on_start())
+
+10. AttributeError: 'BollingerBandsStrategy' object has no attribute 'name'
+    → Actual attribute: config.name (not name)
+
+11. ValueError: Low (133.9) must be <= open and close
+    → Bar class validates OHLC constraints
+```
+
+**Prime Directive Section Violated:**
+☑ Section 2: Verify First, Code Second
+
+**Verification Steps Skipped:**
+☑ grep_search to find actual class names
+☑ read_file to see actual method signatures
+☑ read_file to verify __init__ parameters
+☑ grep_search to find what strategies exist
+☑ list_code_usages to see how APIs are actually used
+☑ Writing verification block before implementation
+
+**Root Cause Analysis:**
+
+1. **Assumed class names from common patterns**
+   - Expected: BarData (sounds like a data class)
+   - Reality: Bar (simpler name)
+   - Why: Didn't grep_search first
+
+2. **Assumed strategies existed**
+   - Expected: MovingAverageCrossoverStrategy, MeanReversionStrategy (common strategies)
+   - Reality: Only BollingerBandsStrategy implemented
+   - Why: Didn't check what files actually exist
+
+3. **Assumed module naming conventions**
+   - Expected: risk.manager (shorter)
+   - Reality: risk.risk_manager (more explicit)
+   - Why: Didn't verify import path
+
+4. **Assumed method names from memory**
+   - Expected: validate_trade, on_start, on_stop
+   - Reality: check_trade_risk, start, stop
+   - Why: Relied on memory instead of verification
+
+5. **Assumed parameter names**
+   - Expected: max_total_exposure_pct, equity
+   - Reality: Different parameter set, current_equity
+   - Why: Didn't read actual __init__ and return values
+
+**Time Impact:**
+- Time spent writing wrong code: ~10 minutes
+- Time spent debugging 11 errors: ~20 minutes
+- Time verification would have taken: ~2 minutes (30 sec × 4 main classes)
+- **Net time wasted: 28 minutes**
+
+**What Should Have Happened:**
+
+Before writing ANY code, should have run:
+
+```python
+# 1. Verify Bar class
+grep_search(query="class Bar", includePattern="backtest/data_models.py")
+# Found: class Bar at line 36 ✓
+
+# 2. Verify what strategies exist
+file_search(query="strategies/*.py")
+# Found: Only bollinger_bands.py has a strategy ✓
+
+# 3. Verify RiskManager module and __init__
+grep_search(query="class RiskManager", includePattern="risk/*.py")
+read_file("risk/risk_manager.py", startLine=112, endLine=130)
+# Found: risk.risk_manager with specific params ✓
+
+# 4. Verify method names
+grep_search(query="def check_trade", includePattern="risk/risk_manager.py")
+grep_search(query="def start", includePattern="strategies/base_strategy.py")
+# Found: check_trade_risk, start(), stop() ✓
+
+# 5. Verify return types
+read_file to see get_risk_summary returns Dict with 'current_equity'
+# Found: Returns dict with current_equity, peak_equity, etc. ✓
+```
+
+**Total verification time: 2 minutes**
+**Errors prevented: 11**
+**Time saved: 28 minutes**
+
+**Lessons Learned:**
+
+1. **NEVER assume class names** - Always grep_search first
+2. **NEVER assume what files exist** - Always file_search to see what's available
+3. **NEVER assume method signatures** - Always read_file to verify
+4. **NEVER assume enum values** - Always read the enum definition
+5. **NEVER assume attribute names** - Always check if it's direct or in config
+
+**Prevention Actions:**
+✓ Updated prime_directive.md with:
+  - 🚨 STOP sign at top
+  - Mandatory verification block template
+  - 30-second rule emphasis
+  - Real example from today's errors
+  - Post-mortem template
+
+✓ Created this violations log with detailed post-mortem
+
+✓ Will use verification template on ALL future code
+
+**Commitment:**
+I commit to ALWAYS running grep_search + read_file BEFORE writing any code that uses existing APIs. The 30-second rule is non-negotiable.
+
+**Success Metric:**
+- Before today: 0% verification → 11 errors in 1 task
+- Target: 100% verification → 0 errors per task
+- Next review: After next coding task
+
+---
+
+## Template for Future Violations
+
+```markdown
+## YYYY-MM-DD: Section X Violation - [Title]
+
+**Task:** [What were you trying to do?]
+
+**Errors Encountered:**
+```
+[List all errors with actual vs expected]
+```
+
+**Prime Directive Section Violated:**
+[Which section(s)]
+
+**Verification Steps Skipped:**
+[Which tools/steps were not used]
+
+**Root Cause Analysis:**
+[Why did this happen? What assumptions were made?]
+
+**Time Impact:**
+- Time spent coding wrong version: X minutes
+- Time spent debugging: Y minutes
+- Time verification would have taken: Z minutes
+- Net time wasted: (X+Y-Z) minutes
+
+**What Should Have Happened:**
+[Specific grep_search/read_file commands that would have prevented this]
+
+**Lessons Learned:**
+[Specific takeaways]
+
+**Prevention Actions:**
+[What was updated/changed]
+
+**Commitment:**
+[Specific behavior change]
+
+**Success Metric:**
+[How to measure improvement]
+```
+
+---
+
+## Metrics Dashboard
+
+**Current Period:** January 2026
+
+| Date       | Violations | Errors | Time Wasted | Verification Rate |
+|------------|------------|--------|-------------|-------------------|
+| 2026-01-24 | 1          | 11     | 28 min      | 0% → Learning     |
+| Future     | Target: 0  | 0      | 0 min       | Target: 100%      |
+
+**Goal:** Maintain 100% verification rate, 0 violations per sprint
+
+**Review Schedule:** After each significant coding task
+
+---
+
+## Quick Reference: Common Verification Commands
+
+**Find a class:**
+```python
+grep_search(query="class ClassName", includePattern="**/*.py", isRegexp=False)
+```
+
+**Find a method signature:**
+```python
+grep_search(query="def method_name", includePattern="module/*.py", isRegexp=False)
+read_file(filePath="path/to/file.py", startLine=X, endLine=Y)
+```
+
+**See how something is used:**
+```python
+list_code_usages(symbolName="ClassName", filePaths=["path/to/file.py"])
+```
+
+**Find what files exist:**
+```python
+file_search(query="module/*.py")
+```
+
+**Remember: 30 seconds of verification saves 15+ minutes of debugging**
