@@ -7,6 +7,8 @@
 ## 📚 Documentation Navigation
 
 **You are here:** API Reference - Developer documentation  
+**New to coding?** [Your First 30 Minutes](GETTING_STARTED_30MIN.md) - Start here instead ⭐  
+**Want to contribute?** [Contributing Guide](CONTRIBUTING.md) - Development workflow  
 **Start here:** [README](README.md) - Installation and overview  
 **Learn concepts:** [User Guide](USER_GUIDE.md) - How strategies work  
 **Quick lookup:** [Quick Reference](QUICK_REFERENCE.md) - Commands cheat sheet

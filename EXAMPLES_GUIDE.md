@@ -17,11 +17,14 @@ Each example script in TWS Robot demonstrates specific functionality. This guide
 ## 📚 Documentation Navigation
 
 **You are here:** Examples Guide - Detailed script explanations  
+**New user?** [Your First 30 Minutes](GETTING_STARTED_30MIN.md) - Complete beginner tutorial ⭐  
 **Start here:** [README](README.md) - Installation and quick start  
 **Learn concepts:** [User Guide](USER_GUIDE.md) - Strategy explanations  
 **Quick lookup:** [Quick Reference](QUICK_REFERENCE.md) - Commands cheat sheet
 
 **Need help?**
+- [API Reference](API_REFERENCE.md) - Developer documentation
+- [Contributing](CONTRIBUTING.md) - How to contribute
 - [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting
 - [Architecture Docs](docs/architecture/overview.md) - System design
 

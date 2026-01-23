@@ -7,11 +7,14 @@
 ## 📚 Documentation Navigation
 
 **You are here:** User Guide - Learn how to use TWS Robot  
+**New user?** [Your First 30 Minutes](GETTING_STARTED_30MIN.md) - Complete beginner tutorial ⭐  
 **Next steps:** [Examples Guide](EXAMPLES_GUIDE.md) - See working code examples  
 **Reference:** [Quick Reference](QUICK_REFERENCE.md) - Commands cheat sheet
 
 **Other guides:**
 - [README](README.md) - Quick start and installation
+- [API Reference](API_REFERENCE.md) - Developer documentation
+- [Contributing](CONTRIBUTING.md) - How to contribute
 - [Technical Specs](TECHNICAL_SPECS.md) - Architecture for developers
 - [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting help
 
