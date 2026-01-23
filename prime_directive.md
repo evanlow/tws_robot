@@ -5,6 +5,24 @@
 
 ---
 
+## 📋 Using This Guide in Your Project
+
+**This Prime Directive is project-agnostic and fully transferable.**
+
+Examples below are from the **TWS Robot** project (algorithmic trading system). To adapt for your project:
+
+1. **Keep all principles as-is** - They're universal
+2. **Update project-specific paths** - Replace `tws_robot` with your project name
+3. **Add your own examples** - Replace TWS Robot API examples with your project's APIs
+4. **Start fresh violations log** - Track your own learnings
+
+**Look for these markers:**
+- 🎯 = Universal principle (keep as-is)
+- 📝 = Example from TWS Robot (replace with your examples)
+- 🔧 = Project-specific path (update for your project)
+
+---
+
 # 🚨🚨🚨 CRITICAL: READ THIS FIRST 🚨🚨🚨
 
 ## IF YOU'RE ABOUT TO WRITE CODE THAT USES EXISTING CLASSES/METHODS:
@@ -38,12 +56,13 @@
 
 ## 🎯 Core Principles
 
-### 0. **Virtual Environment Verification - ALWAYS FIRST**
+### 0. **Virtual Environment Verification - ALWAYS FIRST** 🎯
 **CRITICAL:** Before ANY pip install, pytest, or Python execution, VERIFY you are in the virtual environment.
 
 **The Protocol:**
 1. ✅ **Check Python path** - run `python -c "import sys; print(sys.executable)"`
-2. ✅ **Verify it points to project venv** - path should contain `\pp2-practice-bot\Scripts\python.exe`
+2. ✅ **Verify it points to project venv** - path should contain `\<your-project-name>\Scripts\python.exe` 🔧
+   - 📝 TWS Robot example: `\tws_robot\Scripts\python.exe`
 3. ❌ **If using global Python** - path will be `C:\Users\...\AppData\Local\Programs\Python\...`
 4. ✅ **Activate venv if needed** - run `.\Scripts\Activate.ps1` (Windows) or `source Scripts/activate` (Unix) **AS A SEPARATE COMMAND**
 5. ✅ **Re-verify after activation** - check Python path again to confirm activation worked
@@ -131,7 +150,7 @@ python -c "import sys; print(sys.executable)"  # Should show ...\pp2-practice-bo
 pip install -r requirements.txt
 ```
 
-### 1. **100% Test Pass Rate + Zero Warnings - Non-Negotiable**
+### 1. **100% Test Pass Rate + Zero Warnings - Non-Negotiable** 🎯
 All tests must pass AND produce zero warnings before AND after ANY code changes. No exceptions.
 
 **MANDATORY: Tests Must Exist Before Code Changes**
@@ -179,7 +198,7 @@ All tests must pass AND produce zero warnings before AND after ANY code changes.
 - Document test count AND warning count in commits (e.g., "393 passed, 0 warnings")
 - Preserve git history when removing code
 
-### 2. **Verify First, Code Second**  
+### 2. **Verify First, Code Second** 🎯
 Never assume how existing code works. Always verify before implementing.
 
 **❌ Don't:**
@@ -202,7 +221,7 @@ def on_bar(self, market_data):  # Matches base class signature
 
 ---
 
-### 2.1 **THE 30-SECOND RULE** ⏱️
+### 2.1 **THE 30-SECOND RULE** 🎯⏱️
 
 **Spending 30 seconds to verify saves 15 minutes of debugging.**
 
@@ -223,12 +242,12 @@ def on_bar(self, market_data):  # Matches base class signature
 
 ---
 
-### 2.2 **MANDATORY: API Verification Block Template**
+### 2.2 **MANDATORY: API Verification Block Template** 🎯
 
 Before ANY code that uses existing APIs, add this verification block.  
 **AI agents must output this BEFORE implementation code.**
 
-**Template (Copy-Paste This):**
+**Template (Copy-Paste This - Works for Any Project):**
 
 ```python
 # ==============================================================================
@@ -257,13 +276,14 @@ Before ANY code that uses existing APIs, add this verification block.
 # Now proceed with implementation...
 ```
 
-**Example from today's work:**
+**📝 Example from TWS Robot Project:**
 
 ```python
 # ==============================================================================
 # API VERIFICATION CHECKLIST ✓
 # ==============================================================================
 # Date: 2026-01-24
+# Project: TWS Robot (Algorithmic Trading System)
 # Task: Create functionality demonstration script
 #
 # 1. Bar class (NOT BarData!)
@@ -295,6 +315,31 @@ Before ANY code that uses existing APIs, add this verification block.
 # ==============================================================================
 ```
 
+**🔧 Template for Your Project (Replace with your APIs):**
+
+```python
+# ==============================================================================
+# API VERIFICATION CHECKLIST ✓
+# ==============================================================================
+# Date: YYYY-MM-DD
+# Project: [Your Project Name]
+# Task: [What you're implementing]
+#
+# 1. [YourClassName]
+#    grep_search: Found [path/to/file.py:line]
+#    Verified: ✓
+#
+# 2. [your_method_name]
+#    read_file: [path/to/file.py lines X-Y]
+#    Signature: [actual signature from code]
+#    Verified: ✓
+#
+# [Add your project's specific APIs here as you use them]
+#
+# VERIFICATION COMPLETE: ✓
+# ==============================================================================
+```
+
 **Warning Signs You're Skipping Verification:**
 - ⚠️ Typing a class/method name from memory
 - ⚠️ Assuming parameter order
@@ -307,7 +352,7 @@ Before ANY code that uses existing APIs, add this verification block.
 
 ---
 
-### 3. **Defensive Programming Always**  
+### 3. **Defensive Programming Always** 🎯
 Assume nothing. Handle None, validate inputs, check bounds.
 
 **❌ Don't:**
@@ -329,7 +374,7 @@ if position is None:
     position = 0
 ```
 
-### 4. **Test Incrementally, Not All At Once**  
+### 4. **Test Incrementally, Not All At Once** 🎯
 Build and verify in small steps. Don't write 300 lines before testing.
 
 **✅ Development Flow:**
@@ -349,12 +394,12 @@ result = engine.run()  # Now combine them
 
 ---
 
-### 5. **Post-Mortem: Learn From Errors** 📋
+### 5. **Post-Mortem: Learn From Errors** 🎯📋
 
 After ANY AttributeError, TypeError, or ImportError, you MUST complete a post-mortem.  
 This is how we improve and prevent future violations.
 
-**Prime Directive Post-Mortem Template:**
+**Prime Directive Post-Mortem Template (Universal):**
 
 ```markdown
 ## Post-Mortem: [Brief Error Description]
@@ -404,9 +449,12 @@ This is how we improve and prevent future violations.
 I commit to [specific behavior change] to prevent this in the future.
 ```
 
-**Example Post-Mortem (Today's Error):**
+**📝 Example Post-Mortem (TWS Robot Project):**
 
-See `prime_directive_violations.log` for complete post-mortem from 2026-01-24.
+See `prime_directive_violations.log` in TWS Robot for complete post-mortem from 2026-01-24.
+
+**🔧 For Your Project:**
+Create your own `prime_directive_violations.log` to track your learnings.
 
 **Key Takeaway:** Every error is a lesson. Document it, learn from it, prevent it.
 
