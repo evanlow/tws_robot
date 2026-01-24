@@ -361,7 +361,7 @@ def main():
         market_data_feed = MarketDataFeed(
             tws_adapter=tws_adapter,
             symbols=symbols,
-            bar_size='5 min',  # Aggregated bar size
+            bar_size_minutes=5,  # 5-minute aggregated bars
             buffer_size=100  # Keep last 100 bars per symbol
         )
         logger.info("✅ Market data feed initialized")
@@ -425,8 +425,7 @@ def main():
         
         # Subscribe to market data
         logger.info("Subscribing to market data...")
-        for symbol in symbols:
-            market_data_feed.subscribe(symbol, on_new_bar_data)
+        market_data_feed.subscribe(on_new_bar_data)
         
         # 11. Start components
         logger.info("Starting market data feed...")
