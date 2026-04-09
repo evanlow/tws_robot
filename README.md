@@ -54,13 +54,13 @@ pip install -r requirements.txt
 **New to algo trading? Start here:**
 ```bash
 # Interactive guide to choose a strategy for your stock
-python strategy_selector.py
+python scripts/strategy_selector.py
 ```
 
 **Want to see if a strategy works? Try this:**
 ```bash
 # Test Moving Average strategy on historical data
-python quick_start.py
+python scripts/quick_start.py
 ```
 
 > 💡 **Note:** Quick start examples use **backtest strategies** (Moving Average, Mean Reversion, Momentum) for historical testing. For **live/paper trading**, see the Bollinger Bands strategy in `strategies/` folder.
@@ -68,10 +68,10 @@ python quick_start.py
 **Ready to explore? Check these out:**
 ```bash
 # Compare Conservative vs. Aggressive risk profiles
-python example_profile_comparison.py
+python examples/example_profile_comparison.py
 
 # Test all three strategies (MA, Mean Reversion, Momentum)
-python example_strategy_templates.py
+python examples/example_strategy_templates.py
 ```
 
 ### 3. Understand the Workflow
@@ -143,8 +143,8 @@ tws_robot/
 Yes, but limited. The **BollingerBands strategy** is production-ready for paper/live trading. Other strategies (Moving Average, Mean Reversion, Momentum) are backtest-only currently.
 
 ### Which strategy should I start with?
-1. **New to algo trading?** Start with `python strategy_selector.py` for guided selection
-2. **Want proven results?** Backtest all strategies: `python example_strategy_templates.py`
+1. **New to algo trading?** Start with `python scripts/strategy_selector.py` for guided selection
+2. **Want proven results?** Backtest all strategies: `python examples/example_strategy_templates.py`
 3. **Ready to trade?** Use BollingerBands with conservative risk profile
 
 ### Do I need Interactive Brokers TWS running?
@@ -194,7 +194,7 @@ pip install -r requirements.txt
 ### "No data available" during backtest
 ```bash
 # Download historical data first
-python download_real_data.py AAPL MSFT GOOGL
+python scripts/download_real_data.py AAPL MSFT GOOGL
 ```
 
 ### Tests failing
@@ -310,7 +310,7 @@ pytest test_backtest_engine.py -v
 | **Mean Reversion** | Range-bound markets | Stock bounces around stable average | KO, PG, JNJ |
 | **Momentum** | High-growth stocks | Stock shows strong trends | TSLA, growth stocks |
 
-**Not sure which to use?** Run `python strategy_selector.py` for personalized recommendations.
+**Not sure which to use?** Run `python scripts/strategy_selector.py` for personalized recommendations.
 
 ---
 
@@ -364,7 +364,7 @@ Choose your comfort level:
 |-------|-------------|-------------------|
 | **[USER_GUIDE.md](USER_GUIDE.md)** | Your first 30 minutes | Complete walkthrough: strategies, risk management, weekly routine, realistic expectations |
 | **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** | Daily commands | Cheat sheet: common commands, quick metrics guide, emergency procedures |
-| **[Quick Start Script](quick_start.py)** | Right now! | Run your first backtest in 5 minutes |
+| **[Quick Start Script](scripts/quick_start.py)** | Right now! | Run your first backtest in 5 minutes |
 
 ### 📖 Understanding What You Have
 
@@ -378,9 +378,9 @@ Choose your comfort level:
 
 | Guide | When to Use | What You'll Learn |
 |-------|-------------|-------------------|
-| **[check_account.py](check_account.py)** | Before each trading session | Current account status, positions, P&L, margin health |
-| **[market_status.py](market_status.py)** | Before placing trades | Is the market open? Safe to trade? |
-| **[Strategy Selector](strategy_selector.py)** | Choosing a strategy | Interactive tool: finds best strategy for your stock |
+| **[check_account.py](scripts/check_account.py)** | Before each trading session | Current account status, positions, P&L, margin health |
+| **[market_status.py](scripts/market_status.py)** | Before placing trades | Is the market open? Safe to trade? |
+| **[Strategy Selector](scripts/strategy_selector.py)** | Choosing a strategy | Interactive tool: finds best strategy for your stock |
 
 ### 🚀 For Developers
 
@@ -414,9 +414,9 @@ Choose your comfort level:
 4. **[EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md)** → Before running examples
 
 **If you want to trade today:**
-1. **[Quick Start Script](quick_start.py)** → Run first backtest
-2. **[Strategy Selector](strategy_selector.py)** → Pick your strategy
-3. **[check_account.py](check_account.py)** → Check account status
+1. **[Quick Start Script](scripts/quick_start.py)** → Run first backtest
+2. **[Strategy Selector](scripts/strategy_selector.py)** → Pick your strategy
+3. **[check_account.py](scripts/check_account.py)** → Check account status
 4. **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** → Commands you need
 
 **If you're a developer:**
@@ -525,16 +525,16 @@ cp .env.example .env
 
 ```bash
 # Interactive guide for first-time users
-python quick_start.py
+python scripts/quick_start.py
 
 # Find the right strategy for your stock
-python strategy_selector.py
+python scripts/strategy_selector.py
 
 # Compare risk profiles (Conservative vs. Aggressive)
-python example_profile_comparison.py
+python examples/example_profile_comparison.py
 
 # Test all three strategies on historical data
-python example_strategy_templates.py
+python examples/example_strategy_templates.py
 ```
 
 ### Paper Trading (Recommended Before Live)
@@ -557,7 +557,7 @@ python tws_client.py --env paper --skip-market-check
 python tws_client.py --env live --timeout 60
 
 # Check market status before trading
-python market_status.py
+python scripts/market_status.py
 ```
 
 ### Command Line Options
@@ -603,18 +603,46 @@ python market_status.py
 
 ```
 tws_robot/
-├── .env.example          # Configuration template
-├── .env                  # Your configuration (not in git)
-├── .gitignore           # Git ignore rules
+├── backtest/            # Backtesting engine, data manager, analytics, profiles
+├── config/              # Environment & broker configuration
+│   ├── env_config.py    #   Loads & validates .env at runtime
+│   ├── paper.py         #   Paper trading defaults (port 7497)
+│   └── live.py          #   Live trading defaults (port 7496)
+├── core/                # Event bus, TWS connection, order management
+├── data/                # SQLite databases, data models, real-time pipeline
+├── deployment_scripts/  # Windows startup / backup scripts
+├── docs/                # All project documentation
+│   ├── architecture/    #   System design overviews
+│   ├── decisions/       #   Architectural decision records (ADRs)
+│   ├── runbooks/        #   Operational runbooks
+│   └── sprints/         #   Sprint & week-by-week progress logs
+├── examples/            # Self-contained demonstration scripts
+├── execution/           # Order executor, market data feed, paper adapter
+├── ibapi/               # Interactive Brokers Python API (vendored)
+├── monitoring/          # Paper trading monitor, validation monitor
+├── reports/             # Generated backtest chart images
+├── risk/                # Risk manager, position sizer, drawdown control
+├── scripts/             # Command-line utilities and entry points
+│   ├── quick_start.py   #   Your first backtest (5 min)
+│   ├── run_live.py      #   Launch paper / live trading session
+│   ├── run_web.py       #   Start the Flask web UI
+│   ├── check_account.py #   Account balance, positions, P&L
+│   ├── market_status.py #   Is the US market open?
+│   └── ...
+├── strategies/          # Live-trading strategies (Bollinger Bands), configs
+├── strategy/            # Strategy lifecycle, metrics, promotion, validation
+├── tests/               # Full test suite (mirrors source structure)
+├── web/                 # Flask web UI
+│   ├── app.py           #   Application entry point
+│   ├── routes/          #   One Blueprint per menu section
+│   ├── templates/       #   Jinja2 HTML templates
+│   └── static/          #   CSS, JavaScript assets
+├── .env.example         # Configuration template
+├── prime_directive.md   # Development standards & safety rules
+├── pytest.ini           # Test discovery & coverage config
 ├── requirements.txt     # Python dependencies
-├── env_config.py        # Environment configuration loader
-├── market_status.py     # US market status checker
-├── tws_client.py        # Main TWS client application
-├── trading_bot_template.py  # Trading strategy template
-├── config_paper.py      # Legacy paper config (deprecated)
-├── config_live.py       # Legacy live config (deprecated)
-├── test_input.py        # Input handling tests
-└── ibapi/              # Interactive Brokers API library
+├── README.md            # This file
+└── tws_robot_spec.md    # Full application specification
 ```
 
 ## Safety & Security
@@ -678,7 +706,7 @@ The authors are not responsible for any financial losses incurred through the us
 
 **"Which strategy should I use?"**
 - Start with Moving Average Crossover (simplest)
-- Run `python strategy_selector.py` for personalized recommendations
+- Run `python scripts/strategy_selector.py` for personalized recommendations
 - Test multiple strategies to find what works for you
 
 **"How much money do I need?"**
@@ -714,9 +742,9 @@ We love feature requests! Open an issue with the "enhancement" label.
 ## 🎯 Your TWS Robot Journey
 
 ### Module 1: Learn & Test
-- [ ] Run `python quick_start.py`
-- [ ] Test strategies with `python example_strategy_templates.py`
-- [ ] Use `python strategy_selector.py` to find your strategy
+- [ ] Run `python scripts/quick_start.py`
+- [ ] Test strategies with `python examples/example_strategy_templates.py`
+- [ ] Use `python scripts/strategy_selector.py` to find your strategy
 - [ ] Read [USER_GUIDE.md](USER_GUIDE.md) completely
 
 ### Module 2: Paper Trade
