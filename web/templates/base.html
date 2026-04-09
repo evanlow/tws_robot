@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{{ title | default('TWS Robot') }}{% endblock %} — TWS Robot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}" />
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+  <nav class="navbar">
+    <a class="navbar-brand" href="{{ url_for('dashboard.index') }}">⚡ TWS Robot</a>
+    <ul class="navbar-nav">
+      <li class="{{ 'active' if active_page == 'dashboard' }}">
+        <a href="{{ url_for('dashboard.index') }}">Dashboard</a>
+      </li>
+      <li class="{{ 'active' if active_page == 'strategies' }}">
+        <a href="{{ url_for('strategies.index') }}">Strategies</a>
+      </li>
+      <li class="{{ 'active' if active_page == 'backtest' }}">
+        <a href="{{ url_for('backtest.index') }}">Backtest</a>
+      </li>
+      <li class="{{ 'active' if active_page == 'positions' }}">
+        <a href="{{ url_for('positions.index') }}">Positions</a>
+      </li>
+      <li class="{{ 'active' if active_page == 'risk' }}">
+        <a href="{{ url_for('risk.index') }}">Risk</a>
+      </li>
+      <li class="{{ 'active' if active_page == 'logs' }}">
+        <a href="{{ url_for('logs.index') }}">Logs</a>
+      </li>
+      <li class="{{ 'active' if active_page == 'settings' }}">
+        <a href="{{ url_for('settings.index') }}">Settings</a>
+      </li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

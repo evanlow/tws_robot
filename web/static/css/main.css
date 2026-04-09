@@ -1,0 +1,51 @@
+/* TWS Robot — main stylesheet (placeholder) */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0f0f13;
+  color: #e2e8f0;
+  line-height: 1.6;
+}
+
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0.75rem 2rem;
+  background: #1a1a2e;
+  border-bottom: 1px solid #2d2d44;
+}
+
+.navbar-brand {
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: #63b3ed;
+  text-decoration: none;
+}
+
+.navbar-nav {
+  display: flex;
+  list-style: none;
+  gap: 1.5rem;
+}
+
+.navbar-nav a {
+  color: #a0aec0;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.navbar-nav .active a,
+.navbar-nav a:hover {
+  color: #63b3ed;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 2rem auto;
+  padding: 0 2rem;
+}
+
+h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
