@@ -106,6 +106,18 @@ class AIClient:
 _client_instance: Optional[AIClient] = None
 
 
+def reset_client() -> None:
+    """Reset the module-level singleton and feature-flag cache.
+
+    Call this after changing ``OPENAI_API_KEY``, ``OPENAI_MODEL``, or
+    ``AI_ENABLED`` environment variables so that subsequent calls to
+    ``get_client()`` pick up the new values.
+    """
+    global _client_instance, _AI_ENABLED
+    _client_instance = None
+    _AI_ENABLED = None
+
+
 def get_client() -> Optional[AIClient]:
     """Return the shared AIClient, or None when AI is disabled/unconfigured.
 

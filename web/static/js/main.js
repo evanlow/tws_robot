@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
  * @param {string} text
  * @returns {string} HTML string
  */
-function renderMarkdown(text) {
+window.renderMarkdown = function renderMarkdown(text) {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -24,4 +24,4 @@ function renderMarkdown(text) {
     .replace(/\*(.+?)\*/g,    '<em>$1</em>')
     .replace(/`(.+?)`/g,      '<code>$1</code>')
     .replace(/\n/g,           '<br>');
-}
+};

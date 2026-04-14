@@ -74,38 +74,55 @@
       const data = await res.json();
 
       if (data.error) {
-        paramsDiff.innerHTML = `<span style="color:#fc8181;">${data.error}</span>`;
+        const span = document.createElement('span');
+        span.style.color = '#fc8181';
+        span.textContent = data.error;
+        paramsDiff.innerHTML = '';
+        paramsDiff.appendChild(span);
       } else {
         const suggestions = data.suggestions || {};
         const reasoning   = suggestions._reasoning || '';
-        const rows = Object.entries(suggestions)
-          .filter(([k]) => k !== '_reasoning')
-          .map(([k, v]) => {
-            const old = currentParams[k];
-            return `<tr>
-              <td style="padding:0.3rem 0.6rem;color:#e2e8f0;">${k}</td>
-              <td style="padding:0.3rem 0.6rem;color:#fc8181;">${old !== undefined ? old : '—'}</td>
-              <td style="padding:0.3rem 0.6rem;color:#68d391;">${v}</td>
-            </tr>`;
-          }).join('');
 
-        paramsDiff.innerHTML = `
-          <table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:0.8rem;">
-            <thead>
-              <tr style="color:#718096;">
-                <th style="padding:0.3rem 0.6rem;text-align:left;">Parameter</th>
-                <th style="padding:0.3rem 0.6rem;text-align:left;">Current</th>
-                <th style="padding:0.3rem 0.6rem;text-align:left;">Suggested</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-          ${reasoning ? `<p style="margin-top:0.75rem;color:#a0aec0;font-size:0.82rem;font-style:italic;">${reasoning}</p>` : ''}
-        `;
+        // Build table using DOM API to avoid XSS
+        const table = document.createElement('table');
+        table.style.cssText = 'border-collapse:collapse;width:100%;font-family:monospace;font-size:0.8rem;';
+
+        const thead = table.createTHead();
+        const hRow  = thead.insertRow();
+        ['Parameter', 'Current', 'Suggested'].forEach(text => {
+          const th = document.createElement('th');
+          th.style.cssText = 'padding:0.3rem 0.6rem;text-align:left;color:#718096;';
+          th.textContent = text;
+          hRow.appendChild(th);
+        });
+
+        const tbody = table.createTBody();
+        Object.entries(suggestions)
+          .filter(([k]) => k !== '_reasoning')
+          .forEach(([k, v]) => {
+            const row  = tbody.insertRow();
+            const tdK  = row.insertCell(); tdK.style.cssText = 'padding:0.3rem 0.6rem;color:#e2e8f0;';  tdK.textContent = k;
+            const tdOld = row.insertCell(); tdOld.style.cssText = 'padding:0.3rem 0.6rem;color:#fc8181;'; tdOld.textContent = currentParams[k] !== undefined ? currentParams[k] : '—';
+            const tdNew = row.insertCell(); tdNew.style.cssText = 'padding:0.3rem 0.6rem;color:#68d391;'; tdNew.textContent = v;
+          });
+
+        paramsDiff.innerHTML = '';
+        paramsDiff.appendChild(table);
+
+        if (reasoning) {
+          const p = document.createElement('p');
+          p.style.cssText = 'margin-top:0.75rem;color:#a0aec0;font-size:0.82rem;font-style:italic;';
+          p.textContent = reasoning;
+          paramsDiff.appendChild(p);
+        }
       }
       paramsResult.style.display = 'block';
     } catch (err) {
-      paramsDiff.innerHTML = `<span style="color:#fc8181;">Network error: ${err}</span>`;
+      const span = document.createElement('span');
+      span.style.color = '#fc8181';
+      span.textContent = 'Network error contacting AI service.';
+      paramsDiff.innerHTML = '';
+      paramsDiff.appendChild(span);
       paramsResult.style.display = 'block';
     } finally {
       suggestBtn.disabled = false;

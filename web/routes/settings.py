@@ -28,9 +28,8 @@ def index():
         os.environ["AI_ENABLED"] = "true" if ai_enabled else "false"
 
         # Reset the cached client so it picks up new settings
-        import ai.client as _ai_client
-        _ai_client._client_instance = None
-        _ai_client._AI_ENABLED = None
+        from ai.client import reset_client
+        reset_client()
 
         message = "Settings saved."
 

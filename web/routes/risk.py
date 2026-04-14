@@ -45,7 +45,10 @@ def alert_ai_explanation(alert_id: str):
 @bp.route("/alerts/digest", methods=["GET"])
 def alert_digest():
     """Return an AI-generated daily digest of recent emergency events."""
-    window_hours = int(request.args.get("hours", 24))
+    try:
+        window_hours = max(1, min(168, int(request.args.get("hours", 24))))
+    except (ValueError, TypeError):
+        window_hours = 24
     events = list(_alert_store.values())
     digest = generate_alert_summary(events, window_hours=window_hours)
     return jsonify({"digest": digest})

@@ -6,8 +6,6 @@ GET  /backtest/<id>    →  results for a specific run
 POST /backtest/<id>/ai-report  →  generate/return AI narrative report
 """
 
-import json
-
 from flask import Blueprint, jsonify, render_template, request
 
 from backtest.ai_report import cache_report, generate_narrative, get_cached_report
@@ -50,11 +48,6 @@ def ai_report(run_id: str):
     strategy_name: str = data.get("strategy_name", run_id)
     metrics_dict: dict = data.get("metrics", {})
 
-    # Build a lightweight proxy so generate_narrative can call .to_dict()
-    class _MetricsProxy:
-        def to_dict(self):
-            return metrics_dict
-
-    report = generate_narrative(_MetricsProxy(), strategy_name)
+    report = generate_narrative(metrics_dict, strategy_name)
     cache_report(run_id, report)
     return jsonify({"report": report, "cached": False})

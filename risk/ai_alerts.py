@@ -74,7 +74,7 @@ def explain_emergency_event(event: "EmergencyEvent") -> str:  # type: ignore[nam
         return client.chat(messages, temperature=0.3)
     except RuntimeError as exc:
         logger.error("AI risk alert explanation error: %s", exc)
-        return f"_Failed to generate AI explanation: {exc}_"
+        return "_Failed to generate AI explanation. Please check logs for details._"
 
 
 def generate_alert_summary(
@@ -117,4 +117,4 @@ def generate_alert_summary(
         return client.chat(messages, temperature=0.4)
     except RuntimeError as exc:
         logger.error("AI risk digest error: %s", exc)
-        return f"_Failed to generate AI digest: {exc}_"
+        return "_Failed to generate AI digest. Please check logs for details._"

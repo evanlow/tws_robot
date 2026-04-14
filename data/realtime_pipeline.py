@@ -38,9 +38,10 @@ class DataSubscription:
         timeframe: Bar timeframe (MINUTE_1, MINUTE_5, etc.)
         active: Whether subscription is active
         include_sentiment: When True, each MarketData delivered to the callback
-            will include a ``sentiment`` key in its ``extra`` dict containing
-            a float score in [-1.0, 1.0].  Scores are fetched via
-            ``data.sentiment_feed.fetch_sentiment`` and cached per symbol.
+            will carry a ``sentiment`` attribute (float in [-1.0, 1.0]).
+            Scores are fetched via ``data.sentiment_feed.fetch_sentiment``
+            and cached per symbol.  Strategies can read the score with
+            ``getattr(market_data, 'sentiment', 0.0)``.
     """
     strategy_id: str
     symbols: List[str]

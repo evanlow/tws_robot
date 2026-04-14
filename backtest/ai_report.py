@@ -12,7 +12,7 @@ Usage::
 
 import json
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from ai.client import get_client
 from ai.prompts import Prompts
@@ -23,11 +23,15 @@ logger = logging.getLogger(__name__)
 _report_cache: dict = {}
 
 
-def generate_narrative(metrics: "PerformanceMetrics", strategy_name: str) -> str:  # type: ignore[name-defined]
+def generate_narrative(
+    metrics: "Union[PerformanceMetrics, dict]",  # type: ignore[name-defined]
+    strategy_name: str,
+) -> str:
     """Generate a markdown narrative report for a single backtest run.
 
     Args:
-        metrics:       ``PerformanceMetrics`` instance from performance.py.
+        metrics:       ``PerformanceMetrics`` instance **or** a plain dict
+                       (e.g. the result of ``PerformanceMetrics.to_dict()``).
         strategy_name: Human-readable strategy name for the report header.
 
     Returns:
@@ -41,7 +45,13 @@ def generate_narrative(metrics: "PerformanceMetrics", strategy_name: str) -> str
             "`OPENAI_API_KEY` to generate narrative reports._"
         )
 
-    metrics_dict = metrics.to_dict() if hasattr(metrics, "to_dict") else {}
+    if isinstance(metrics, dict):
+        metrics_dict = metrics
+    elif hasattr(metrics, "to_dict"):
+        metrics_dict = metrics.to_dict()
+    else:
+        metrics_dict = {}
+
     metrics_json = json.dumps(metrics_dict, indent=2, default=str)
 
     system_prompt = Prompts.BACKTEST_NARRATOR.format(
@@ -58,7 +68,7 @@ def generate_narrative(metrics: "PerformanceMetrics", strategy_name: str) -> str
         return client.chat(messages, temperature=0.4)
     except RuntimeError as exc:
         logger.error("AI backtest narrative error: %s", exc)
-        return f"_Failed to generate AI report: {exc}_"
+        return "_Failed to generate AI report. Please check logs for details._"
 
 
 def generate_comparison_narrative(
@@ -96,7 +106,7 @@ def generate_comparison_narrative(
         return client.chat(messages, temperature=0.4)
     except RuntimeError as exc:
         logger.error("AI backtest comparison error: %s", exc)
-        return f"_Failed to generate AI comparison report: {exc}_"
+        return "_Failed to generate AI comparison report. Please check logs for details._"
 
 
 def get_cached_report(run_id: str) -> Optional[str]:
