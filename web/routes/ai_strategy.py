@@ -5,7 +5,7 @@ Endpoints
 POST /ai/strategy/suggest-params
     Body: { "strategy_name": "...", "current_params": {...},
             "backtest_metrics": {...} }
-    Returns: { "suggestions": {...}, "_reasoning": "..." }
+    Returns: { "suggestions": { ..., "_reasoning": "..." } }
 
 POST /ai/strategy/create
     Body: { "description": "Buy when RSI < 30 on daily bars..." }
