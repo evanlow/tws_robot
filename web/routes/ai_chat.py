@@ -13,7 +13,6 @@ DELETE /ai/chat/history
     Clears the in-memory chat history for the current session.
 """
 
-import json
 import logging
 from collections import deque
 from datetime import datetime, timezone
