@@ -81,7 +81,6 @@ class AIClient:
                     messages=messages,  # type: ignore[arg-type]
                     temperature=temperature,
                 )
-                return response.choices[0].message.content or ""
             except self._RateLimitError as exc:
                 wait = _RETRY_BASE_SECONDS ** (attempt + 1)
                 logger.warning(
@@ -92,10 +91,17 @@ class AIClient:
                 )
                 last_error = exc
                 time.sleep(wait)
+                continue
             except self._APIError as exc:
                 logger.error("OpenAI API error: %s", exc)
                 last_error = exc
                 break
+            except Exception as exc:
+                logger.error("OpenAI client error: %s", exc)
+                last_error = exc
+                break
+
+            return response.choices[0].message.content or ""
 
         raise RuntimeError(
             f"OpenAI request failed after {_MAX_RETRIES} attempts: {last_error}"
