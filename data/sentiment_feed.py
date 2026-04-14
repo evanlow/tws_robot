@@ -47,7 +47,11 @@ class SentimentResult:
 
 
 class SentimentCache:
-    """Thread-safe in-memory cache for sentiment scores.
+    """In-memory cache for sentiment scores.
+
+    This cache is not thread-safe. If it is shared across threads, callers
+    must provide external synchronization, or use separate cache instances
+    per thread.
 
     Args:
         ttl_seconds: How long a cached score remains valid.
