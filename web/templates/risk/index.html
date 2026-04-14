@@ -3,4 +3,80 @@
 {% block content %}
 <h1>{{ title }}</h1>
 <p><em>Risk — implementation coming soon.</em></p>
+
+<!-- ============================================================
+     AI Daily Risk Digest (Enhancement 4)
+     ============================================================ -->
+<section class="ai-digest-section" style="margin-top:2rem;">
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;">🤖 AI Daily Risk Digest</h2>
+    <button id="digestBtn" class="btn-primary">Generate Digest</button>
+  </div>
+
+  <div id="digestSpinner" style="display:none;color:#a0aec0;font-style:italic;font-size:0.85rem;">
+    Generating digest…
+  </div>
+
+  <div id="digestContent" style="display:none;
+       background:#16213e;border:1px solid #2d2d44;border-radius:6px;
+       padding:1.25rem;font-size:0.85rem;line-height:1.7;white-space:pre-wrap;">
+  </div>
+</section>
+
+<!-- ============================================================
+     Alert Table (placeholder — shows AI explanation on expand)
+     ============================================================ -->
+<section style="margin-top:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Recent Alerts</h2>
+  <p style="color:#718096;font-size:0.85rem;">
+    Click <strong>Explain</strong> next to any alert to get an AI explanation.
+    (Alert rows will be populated here once the risk monitor is connected.)
+  </p>
+  <div id="alertsContainer"></div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  // --- Daily Digest ---
+  const digestBtn     = document.getElementById('digestBtn');
+  const digestSpinner = document.getElementById('digestSpinner');
+  const digestContent = document.getElementById('digestContent');
+
+  digestBtn.addEventListener('click', async () => {
+    digestBtn.disabled = true;
+    digestSpinner.style.display = 'block';
+    digestContent.style.display = 'none';
+
+    try {
+      const res  = await fetch('/risk/alerts/digest?hours=24');
+      const data = await res.json();
+      digestContent.textContent = data.digest || data.error || '(empty)';
+      digestContent.style.display = 'block';
+    } catch (err) {
+      digestContent.textContent = 'Error: ' + err;
+      digestContent.style.display = 'block';
+    } finally {
+      digestBtn.disabled = false;
+      digestSpinner.style.display = 'none';
+    }
+  });
+
+  // --- Per-alert AI explanation (lazy-loaded) ---
+  async function loadExplanation(alertId, container) {
+    container.textContent = 'Loading AI explanation…';
+    try {
+      const res  = await fetch(`/risk/alerts/${alertId}/ai-explanation`);
+      const data = await res.json();
+      container.textContent = data.explanation || data.error || '(empty)';
+    } catch (err) {
+      container.textContent = 'Error: ' + err;
+    }
+  }
+
+  // Expose helper so dynamically rendered alert rows can call it
+  window.loadAlertExplanation = loadExplanation;
+})();
+</script>
 {% endblock %}

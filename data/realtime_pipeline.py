@@ -37,12 +37,18 @@ class DataSubscription:
         callback: Function to call when new data arrives (receives MarketData)
         timeframe: Bar timeframe (MINUTE_1, MINUTE_5, etc.)
         active: Whether subscription is active
+        include_sentiment: When True, each MarketData delivered to the callback
+            will carry a ``sentiment`` attribute (float in [-1.0, 1.0]).
+            Scores are fetched via ``data.sentiment_feed.fetch_sentiment``
+            and cached per symbol.  Strategies can read the score with
+            ``getattr(market_data, 'sentiment', 0.0)``.
     """
     strategy_id: str
     symbols: List[str]
     callback: Callable[[MarketData], None]
     timeframe: TimeFrame = TimeFrame.MINUTE_1
     active: bool = True
+    include_sentiment: bool = False
 
 
 @dataclass
@@ -448,6 +454,16 @@ class RealtimeDataManager(EWrapper, EClient):
             for subscription in self._subscriptions.values():
                 if subscription.active and symbol in subscription.symbols:
                     try:
+                        # Attach sentiment score when the subscription requests it
+                        if subscription.include_sentiment:
+                            try:
+                                from data.sentiment_feed import fetch_sentiment
+                                market_data.sentiment = fetch_sentiment(symbol)
+                            except Exception as sent_exc:
+                                logger.warning(
+                                    "Sentiment fetch failed for %s: %s", symbol, sent_exc
+                                )
+                                market_data.sentiment = 0.0
                         subscription.callback(market_data)
                         logger.debug(f"Delivered {symbol} bar to strategy '{subscription.strategy_id}'")
                     except Exception as e:

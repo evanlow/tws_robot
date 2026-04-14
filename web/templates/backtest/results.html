@@ -3,4 +3,57 @@
 {% block content %}
 <h1>Backtest Results</h1>
 <p>Run ID: {{ run_id }}</p>
+
+<!-- ============================================================
+     AI Narrative Report (Enhancement 3)
+     ============================================================ -->
+<section class="ai-report-section" style="margin-top:2rem;">
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;">🤖 AI Performance Report</h2>
+    <button id="aiReportBtn" class="btn-primary">Generate AI Report</button>
+  </div>
+
+  <div id="aiReportSpinner" style="display:none;color:#a0aec0;font-style:italic;font-size:0.85rem;">
+    Generating report…
+  </div>
+
+  <div id="aiReportContent" style="display:none;
+       background:#16213e;border:1px solid #2d2d44;border-radius:6px;
+       padding:1.25rem;font-size:0.85rem;line-height:1.7;white-space:pre-wrap;">
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  const btn     = document.getElementById('aiReportBtn');
+  const spinner = document.getElementById('aiReportSpinner');
+  const content = document.getElementById('aiReportContent');
+  const runId   = {{ run_id | tojson }};
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    spinner.style.display = 'block';
+    content.style.display = 'none';
+
+    try {
+      const res  = await fetch(`/backtest/${runId}/ai-report`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ strategy_name: runId, metrics: {} }),
+      });
+      const data = await res.json();
+      content.textContent = data.report || data.error || '(empty response)';
+      content.style.display = 'block';
+    } catch (err) {
+      content.textContent = 'Error: ' + err;
+      content.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      spinner.style.display = 'none';
+    }
+  });
+})();
+</script>
 {% endblock %}
