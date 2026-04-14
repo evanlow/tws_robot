@@ -51,12 +51,39 @@
   const paramsResult = document.getElementById('paramsResult');
   const paramsDiff   = document.getElementById('paramsDiff');
 
+  function showValidationError(message) {
+    const span = document.createElement('span');
+    span.style.color = '#fc8181';
+    span.textContent = message;
+    paramsDiff.innerHTML = '';
+    paramsDiff.appendChild(span);
+    paramsResult.style.display = 'block';
+  }
+
   suggestBtn.addEventListener('click', async () => {
     let currentParams = {};
     let backtestMetrics = {};
 
-    try { currentParams = JSON.parse(document.getElementById('currentParamsInput').value || '{}'); } catch (e) {}
-    try { backtestMetrics = JSON.parse(document.getElementById('backtestMetricsInput').value || '{}'); } catch (e) {}
+    const currentParamsRaw = document.getElementById('currentParamsInput').value.trim();
+    const backtestMetricsRaw = document.getElementById('backtestMetricsInput').value.trim();
+
+    if (currentParamsRaw) {
+      try {
+        currentParams = JSON.parse(currentParamsRaw);
+      } catch (e) {
+        showValidationError('Current parameters must be valid JSON.');
+        return;
+      }
+    }
+
+    if (backtestMetricsRaw) {
+      try {
+        backtestMetrics = JSON.parse(backtestMetricsRaw);
+      } catch (e) {
+        showValidationError('Backtest metrics must be valid JSON.');
+        return;
+      }
+    }
 
     suggestBtn.disabled = true;
     suggestBtn.textContent = 'Thinking…';
