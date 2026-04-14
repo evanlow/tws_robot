@@ -66,7 +66,7 @@
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          strategy_name:   '{{ strategy_name }}',
+          strategy_name:   {{ strategy_name|tojson }},
           current_params:  currentParams,
           backtest_metrics: backtestMetrics,
         }),
