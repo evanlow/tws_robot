@@ -133,7 +133,7 @@ def test_component_integration():
     
     # Add positions to risk manager
     for pos in positions:
-        #risk_manager.add_position(pos.symbol, pos.market_value, pos.market_value * 0.02)
+        pass  # risk_manager.add_position(pos.symbol, pos.market_value, pos.market_value * 0.02)
     
     risk_manager.current_equity =(100000)
     drawdown_monitor.update_equity(100000)
@@ -279,7 +279,7 @@ def test_dashboard_data():
     ]
     
     for pos in positions:
-        #risk_manager.add_position(pos.symbol, pos.market_value, pos.market_value * 0.02)
+        pass  # risk_manager.add_position(pos.symbol, pos.market_value, pos.market_value * 0.02)
     
     risk_manager.current_equity =(100000)
     drawdown_monitor.update_equity(100000)
