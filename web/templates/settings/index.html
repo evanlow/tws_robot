@@ -2,5 +2,58 @@
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
 <h1>{{ title }}</h1>
-<p><em>Settings — implementation coming soon.</em></p>
+
+{% if message %}
+<p class="settings-message" style="color:#68d391;margin-bottom:1rem;">{{ message }}</p>
+{% endif %}
+
+<form method="POST" action="{{ url_for('settings.index') }}" style="max-width:640px;">
+
+  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">Connection</legend>
+    <p style="color:#718096;font-style:italic;font-size:0.85rem;">TWS connection settings — implementation coming soon.</p>
+  </fieldset>
+
+  <!-- ============================================================
+       AI Configuration (Enhancement — Settings)
+       ============================================================ -->
+  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🤖 AI Configuration</legend>
+
+    <div style="margin-bottom:1rem;">
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;cursor:pointer;">
+        <input type="checkbox" name="ai_enabled" {% if ai_enabled %}checked{% endif %}
+               style="width:16px;height:16px;accent-color:#63b3ed;">
+        Enable AI features
+      </label>
+      <p style="color:#718096;font-size:0.78rem;margin-top:0.25rem;margin-left:1.5rem;">
+        Requires a valid OpenAI API key. When disabled all AI endpoints return 503.
+      </p>
+    </div>
+
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-size:0.85rem;color:#a0aec0;margin-bottom:0.3rem;">
+        OpenAI API Key
+      </label>
+      <input type="password" name="openai_api_key" placeholder="sk-…"
+             style="width:100%;background:#0f0f13;border:1px solid #2d2d44;border-radius:4px;
+                    color:#e2e8f0;font-size:0.85rem;padding:0.4rem 0.6rem;">
+      <p style="color:#718096;font-size:0.78rem;margin-top:0.2rem;">
+        Leave blank to keep the current key. The stored key is never displayed.
+      </p>
+    </div>
+
+    <div>
+      <label style="display:block;font-size:0.85rem;color:#a0aec0;margin-bottom:0.3rem;">
+        OpenAI Model
+      </label>
+      <input type="text" name="openai_model" value="{{ openai_model }}"
+             placeholder="gpt-4o"
+             style="width:100%;background:#0f0f13;border:1px solid #2d2d44;border-radius:4px;
+                    color:#e2e8f0;font-size:0.85rem;padding:0.4rem 0.6rem;">
+    </div>
+  </fieldset>
+
+  <button type="submit" class="btn-primary">Save Settings</button>
+</form>
 {% endblock %}

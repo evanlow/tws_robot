@@ -2,4 +2,116 @@
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
 <h1>Strategy: {{ strategy_name }}</h1>
+
+<!-- ============================================================
+     Suggest Better Parameters (Enhancement 2)
+     ============================================================ -->
+<section class="ai-params-section" style="margin-top:1.5rem;">
+  <h2 style="font-size:1.1rem; color:#63b3ed; margin-bottom:0.75rem;">
+    🤖 AI Parameter Suggestion
+  </h2>
+  <p style="font-size:0.85rem;color:#a0aec0;margin-bottom:0.75rem;">
+    Provide your most recent backtest metrics (JSON) to get AI-suggested parameter improvements.
+  </p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+    <div>
+      <label style="font-size:0.8rem;color:#718096;">Current Parameters (JSON)</label>
+      <textarea id="currentParamsInput"
+        placeholder='{"fast_period": 10, "slow_period": 30}'
+        style="width:100%;height:100px;background:#1a1a2e;border:1px solid #2d2d44;
+               border-radius:4px;color:#e2e8f0;font-size:0.8rem;padding:0.5rem;
+               font-family:monospace;resize:vertical;margin-top:0.3rem;"></textarea>
+    </div>
+    <div>
+      <label style="font-size:0.8rem;color:#718096;">Backtest Metrics (JSON)</label>
+      <textarea id="backtestMetricsInput"
+        placeholder='{"sharpe_ratio": 0.8, "max_drawdown_pct": -18.5}'
+        style="width:100%;height:100px;background:#1a1a2e;border:1px solid #2d2d44;
+               border-radius:4px;color:#e2e8f0;font-size:0.8rem;padding:0.5rem;
+               font-family:monospace;resize:vertical;margin-top:0.3rem;"></textarea>
+    </div>
+  </div>
+
+  <button id="suggestParamsBtn" class="btn-primary" style="margin-top:0.75rem;">
+    Suggest Better Parameters
+  </button>
+
+  <div id="paramsResult" style="display:none;margin-top:1rem;">
+    <h3 style="font-size:0.9rem;color:#a0aec0;margin-bottom:0.5rem;">Suggested Parameters:</h3>
+    <div id="paramsDiff" style="font-size:0.82rem;"></div>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  const suggestBtn   = document.getElementById('suggestParamsBtn');
+  const paramsResult = document.getElementById('paramsResult');
+  const paramsDiff   = document.getElementById('paramsDiff');
+
+  suggestBtn.addEventListener('click', async () => {
+    let currentParams = {};
+    let backtestMetrics = {};
+
+    try { currentParams = JSON.parse(document.getElementById('currentParamsInput').value || '{}'); } catch (e) {}
+    try { backtestMetrics = JSON.parse(document.getElementById('backtestMetricsInput').value || '{}'); } catch (e) {}
+
+    suggestBtn.disabled = true;
+    suggestBtn.textContent = 'Thinking…';
+
+    try {
+      const res  = await fetch('/ai/strategy/suggest-params', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          strategy_name:   '{{ strategy_name }}',
+          current_params:  currentParams,
+          backtest_metrics: backtestMetrics,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        paramsDiff.innerHTML = `<span style="color:#fc8181;">${data.error}</span>`;
+      } else {
+        const suggestions = data.suggestions || {};
+        const reasoning   = suggestions._reasoning || '';
+        const rows = Object.entries(suggestions)
+          .filter(([k]) => k !== '_reasoning')
+          .map(([k, v]) => {
+            const old = currentParams[k];
+            return `<tr>
+              <td style="padding:0.3rem 0.6rem;color:#e2e8f0;">${k}</td>
+              <td style="padding:0.3rem 0.6rem;color:#fc8181;">${old !== undefined ? old : '—'}</td>
+              <td style="padding:0.3rem 0.6rem;color:#68d391;">${v}</td>
+            </tr>`;
+          }).join('');
+
+        paramsDiff.innerHTML = `
+          <table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:0.8rem;">
+            <thead>
+              <tr style="color:#718096;">
+                <th style="padding:0.3rem 0.6rem;text-align:left;">Parameter</th>
+                <th style="padding:0.3rem 0.6rem;text-align:left;">Current</th>
+                <th style="padding:0.3rem 0.6rem;text-align:left;">Suggested</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ${reasoning ? `<p style="margin-top:0.75rem;color:#a0aec0;font-size:0.82rem;font-style:italic;">${reasoning}</p>` : ''}
+        `;
+      }
+      paramsResult.style.display = 'block';
+    } catch (err) {
+      paramsDiff.innerHTML = `<span style="color:#fc8181;">Network error: ${err}</span>`;
+      paramsResult.style.display = 'block';
+    } finally {
+      suggestBtn.disabled = false;
+      suggestBtn.textContent = 'Suggest Better Parameters';
+    }
+  });
+})();
+</script>
 {% endblock %}

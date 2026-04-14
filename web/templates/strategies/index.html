@@ -3,4 +3,75 @@
 {% block content %}
 <h1>{{ title }}</h1>
 <p><em>Strategies — implementation coming soon.</em></p>
+
+<!-- ============================================================
+     Create Strategy from Description (Enhancement 2)
+     ============================================================ -->
+<section class="ai-create-section" style="margin-top:2rem;">
+  <h2 style="font-size:1.1rem; color:#63b3ed; margin-bottom:0.75rem;">
+    🤖 Create Strategy from Description
+  </h2>
+  <textarea
+    id="stratDescInput"
+    placeholder="Describe your strategy in plain English, e.g. 'Buy AAPL when RSI drops below 30 on the daily chart and sell when it rises above 70.'"
+    style="width:100%;height:80px;background:#1a1a2e;border:1px solid #2d2d44;
+           border-radius:4px;color:#e2e8f0;font-size:0.85rem;padding:0.5rem;
+           font-family:inherit;resize:vertical;"
+  ></textarea>
+  <div style="margin-top:0.5rem;">
+    <button id="stratGenerateBtn" class="btn-primary">Generate Config</button>
+  </div>
+
+  <div id="stratGenerateResult" style="display:none;margin-top:1rem;">
+    <h3 style="font-size:0.9rem;color:#a0aec0;margin-bottom:0.5rem;">Generated Configuration (review before saving):</h3>
+    <pre id="stratGenerateJson" style="background:#0f0f13;border:1px solid #2d2d44;
+         border-radius:4px;padding:1rem;font-size:0.8rem;overflow-x:auto;white-space:pre-wrap;"></pre>
+    <button id="stratSaveBtn" class="btn-secondary" style="margin-top:0.5rem;">Save Strategy</button>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  const descInput   = document.getElementById('stratDescInput');
+  const genBtn      = document.getElementById('stratGenerateBtn');
+  const resultBox   = document.getElementById('stratGenerateResult');
+  const jsonPre     = document.getElementById('stratGenerateJson');
+  const saveBtn     = document.getElementById('stratSaveBtn');
+
+  genBtn.addEventListener('click', async () => {
+    const desc = descInput.value.trim();
+    if (!desc) return;
+    genBtn.disabled = true;
+    genBtn.textContent = 'Generating…';
+
+    try {
+      const res  = await fetch('/ai/strategy/create', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ description: desc }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        jsonPre.textContent = 'Error: ' + data.error;
+      } else {
+        jsonPre.textContent = JSON.stringify(data.config, null, 2);
+      }
+      resultBox.style.display = 'block';
+    } catch (err) {
+      jsonPre.textContent = 'Network error: ' + err;
+      resultBox.style.display = 'block';
+    } finally {
+      genBtn.disabled = false;
+      genBtn.textContent = 'Generate Config';
+    }
+  });
+
+  saveBtn.addEventListener('click', () => {
+    // Placeholder: POST to /strategies/new in a real implementation
+    alert('Save functionality will POST the config to /strategies/new.');
+  });
+})();
+</script>
 {% endblock %}

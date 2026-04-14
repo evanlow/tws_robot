@@ -32,5 +32,8 @@ pytest==8.3.4
 pytest-cov==6.0.0
 pytest-asyncio==0.24.0
 
+# OpenAI integration
+openai>=1.0
+
 # Optional: Visualization (uncomment if needed)
 # matplotlib>=3.8.0  # For plotting equity curves and performance charts

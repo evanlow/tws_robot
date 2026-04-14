@@ -40,6 +40,8 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.risk import bp as risk_bp
     from web.routes.logs import bp as logs_bp
     from web.routes.settings import bp as settings_bp
+    from web.routes.ai_chat import bp as ai_chat_bp
+    from web.routes.ai_strategy import bp as ai_strategy_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(strategies_bp)
@@ -48,5 +50,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(risk_bp)
     app.register_blueprint(logs_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(ai_chat_bp)
+    app.register_blueprint(ai_strategy_bp)
 
     return app
