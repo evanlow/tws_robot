@@ -30,7 +30,7 @@
   const btn     = document.getElementById('aiReportBtn');
   const spinner = document.getElementById('aiReportSpinner');
   const content = document.getElementById('aiReportContent');
-  const runId   = '{{ run_id }}';
+  const runId   = {{ run_id | tojson }};
 
   btn.addEventListener('click', async () => {
     btn.disabled = true;
