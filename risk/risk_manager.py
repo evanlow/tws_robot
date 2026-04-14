@@ -16,7 +16,7 @@ Week 3 Day 1 Implementation.
 import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -81,6 +81,10 @@ class RiskMetrics:
     drawdown: float
     drawdown_pct: float
     risk_status: RiskStatus
+    position_sizes: Dict[str, float] = field(default_factory=dict)
+    portfolio_heat: float = field(default=0.0)   # total positions / equity (0-1+)
+    daily_loss_pct: float = field(default=0.0)   # magnitude of daily loss as decimal
+    daily_loss: float = field(default=0.0)        # dollar amount of daily loss
 
 
 class RiskManager:
@@ -428,7 +432,11 @@ class RiskManager:
             daily_pnl_pct=daily_pnl_pct,
             drawdown=drawdown,
             drawdown_pct=drawdown_pct,
-            risk_status=self.risk_status
+            risk_status=self.risk_status,
+            position_sizes={symbol: p.market_value / equity for symbol, p in positions.items() if equity > 0},
+            portfolio_heat=total_position_value / equity if equity > 0 else 0.0,
+            daily_loss_pct=max(0.0, -daily_pnl_pct),
+            daily_loss=max(0.0, -daily_pnl),
         )
     
     def _check_risk_limits(self, metrics: RiskMetrics):

@@ -187,6 +187,12 @@ class RiskMonitor:
         positions_dict = {}
         risk_metrics = self.risk_manager.update(current_equity, positions_dict, timestamp)
         
+        # If PositionInfo list provided, populate position_sizes for position size alerts
+        if positions is not None and current_equity > 0:
+            risk_metrics.position_sizes = {
+                p.symbol: p.market_value / current_equity for p in positions
+            }
+        
         # Check risk manager alerts
         self._check_risk_manager_alerts(risk_metrics, timestamp)
         
@@ -533,13 +539,13 @@ class RiskMonitor:
         # Deduct for portfolio heat (0-20 points)
         score -= risk_metrics.portfolio_heat * 20
         
-        # Deduct for daily loss (0-20 points)
+        # Deduct for daily loss (0-10 points, smaller weight)
         if risk_metrics.daily_loss_pct > 0:
-            score -= min(risk_metrics.daily_loss_pct * 400, 20)  # Max 20 points
+            score -= min(risk_metrics.daily_loss_pct * 50, 10)  # Max 10 points
         
-        # Deduct for drawdown if available (0-25 points)
+        # Deduct for drawdown if available (0-30 points, higher weight)
         if drawdown_metrics is not None:
-            score -= min(drawdown_metrics.current_drawdown_pct * 100, 25)
+            score -= min(drawdown_metrics.current_drawdown_pct * 200, 30)
         
         # Deduct for poor diversification if available (0-20 points)
         if correlation_metrics is not None:
@@ -628,6 +634,13 @@ class RiskMonitor:
                     'high_pairs': correlation_metrics.high_correlation_pairs,
                     'has_high_correlations': correlation_metrics.has_high_correlations
                 }
+            }
+        elif self.correlation_analyzer is not None:
+            # Include placeholder when analyzer configured but no metrics yet
+            status['correlation_analyzer'] = {
+                'diversification_score': {'current': 100.0, 'target': 60.0, 'status': 'GOOD'},
+                'concentration': {'herfindahl_index': 0.0, 'threshold': 0.25, 'is_concentrated': False},
+                'correlation': {'max_correlation': 0.0, 'high_pairs': 0, 'has_high_correlations': False}
             }
         
         return status

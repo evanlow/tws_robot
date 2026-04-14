@@ -16,7 +16,7 @@ Author: Trading Bot Development Team
 Date: November 21, 2025
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
@@ -55,6 +55,16 @@ class DrawdownMetrics:
     # Recovery tracking
     recovery_needed_pct: float    # % needed to return to peak
     bars_in_drawdown: int         # Number of periods in drawdown
+
+    # Convenience / compatibility fields
+    current_drawdown_pct: float = field(default=0.0)   # drawdown as decimal fraction (0-1)
+    current_drawdown: float = field(default=0.0)        # drawdown amount in dollars (alias for drawdown_amount)
+    in_protection_mode: bool = field(default=False)    # severity > MINOR
+    protection_level: Optional[str] = field(default=None)  # severity label when in protection
+    trading_allowed: bool = field(default=True)         # not is_trading_halted
+    max_drawdown_pct: float = field(default=0.0)        # configured max drawdown (decimal)
+    max_position_pct: float = field(default=1.0)        # max position pct allowed (position_scale_factor)
+    recovery_target: float = field(default=0.0)         # equity target for recovery (peak_equity)
     
     def __str__(self) -> str:
         return (
@@ -332,6 +342,14 @@ class DrawdownMonitor:
             halt_reason=self.halt_reason,
             recovery_needed_pct=recovery_needed_pct,
             bars_in_drawdown=self.bars_in_drawdown,
+            current_drawdown_pct=drawdown_pct / 100.0,
+            current_drawdown=drawdown_amount,
+            in_protection_mode=severity.value not in ('NORMAL', 'MINOR'),
+            protection_level=severity.value if severity.value not in ('NORMAL', 'MINOR') else None,
+            trading_allowed=not self.is_trading_halted,
+            max_drawdown_pct=self.max_drawdown_pct,
+            max_position_pct=position_scale_factor,
+            recovery_target=self.peak_equity,
         )
     
     def _determine_severity(self, drawdown_pct: float) -> DrawdownSeverity:
