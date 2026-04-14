@@ -1,68 +1,155 @@
 # Prime Directive: Development Guidelines
 
-**Last Updated:** January 24, 2026  
+**Last Updated:** April 8, 2026  
 **Purpose:** Ensure high-quality, maintainable code by learning from past experiences and establishing best practices for all team members, AI agents, and contributors.
 
----
-
-## 📋 Using This Guide in Your Project
-
-**This Prime Directive is project-agnostic and fully transferable.**
-
-Examples below are from the **TWS Robot** project (algorithmic trading system). To adapt for your project:
-
-1. **Keep all principles as-is** - They're universal
-2. **Update project-specific paths** - Replace `tws_robot` with your project name
-3. **Add your own examples** - Replace TWS Robot API examples with your project's APIs
-4. **Start fresh violations log** - Track your own learnings
-
-**Look for these markers:**
-- 🎯 = Universal principle (keep as-is)
-- 📝 = Example from TWS Robot (replace with your examples)
-- 🔧 = Project-specific path (update for your project)
+**Scope:** This directive is designed for use across all software projects. Project-specific case studies and stack/tool profiles are explicitly labeled as optional examples.
 
 ---
 
-# 🚨🚨🚨 CRITICAL: READ THIS FIRST 🚨🚨🚨
+## 📋 Quick Reference - Before Every Commit
 
-## IF YOU'RE ABOUT TO WRITE CODE THAT USES EXISTING CLASSES/METHODS:
+```markdown
+Pre-Commit Checklist:
+□ Virtual environment active (Principle 0)
+□ Every new/modified module has a smoke test file (Principle 1 — Coverage Rule)
+□ Full regression suite passes: .\Scripts\python.exe tests/run_all_smoke.py — X/X passed, 0 failures (Principle 1) [run via run_in_terminal — never via execution_subagent (Principle 9)]
 
+For Backend-Only Changes:
+□ Tests added/updated for new code
+□ All tests pass
+□ Any strange behavior investigated (Principle 8)
+→ Ready to commit
+
+For UI Changes (HTML/CSS/JavaScript):
+□ Backend tests passing
+□ Manual smoke test completed (Principle 5)
+□ Browser console checked (F12) - 0 errors
+□ Critical user flows tested
+□ Input validation: Frontend (UX) + Backend (Security) (Principle 7)
+□ Date/time inputs use proper controls (datetime-local or picker library)
+□ Any strange behavior investigated (Principle 8)
+□ Manual testing documented in commit message
+□ No Python code with braces/f-strings passed via PowerShell -c (Principle 10)
+→ Ready to commit
+
+Session Log Cadence (Mandatory):
+□ Append `session_log.md` at start, each test run, each major implementation cycle, and handoff (include KPI delta)
+
+Commit Message Format:
+  <type>: <description>
+  
+  <body with details>
+  
+  Backend Tests: X/X passed, 0 warnings [PASS]
+  Smoke test files: smoke_auth, smoke_export, smoke_validators, smoke_mapper, smoke_excel_gen, ...
+  New smoke tests added: <list exact filenames, or "none">
+  Manual Testing: [PASS] (for UI changes only)
+    - [What you tested]
+    - [Results]
+
+**Important:** Use ASCII characters only in commit messages (no Unicode/emoji).
+  ✅ [PASS], [OK], [DONE], [FAIL]
+  ❌ ✓, ✗, �	 (causes PowerShell encoding errors)
 ```
-═══════════════════════════════════════════════════════════════════════
 
-                            ⛔ STOP ⛔
-                            
-                    Have you verified the API?
-                    
-                    □ NO  → Go to Section 2 NOW (Verify First)
-                    □ YES → Show your verification in comments
+---
 
-═══════════════════════════════════════════════════════════════════════
+## 📊 Live Directive Compliance KPI (Session-Level)
+
+Use a live compliance score throughout every working session to make adherence observable and auditable in real time.
+
+### KPI Score Model
+
+**Score format:** `X/8 green`
+
+- **Green** = Requirement satisfied and evidenced in this session
+- **Yellow** = Not yet applicable or pending the relevant step
+- **Red** = Violated; must be flagged and corrected before continuing
+
+### Required KPI Checklist (Track Live)
+
+1. **Track directive compliance live**
+2. **Verify venv before Python actions** (Principle 0)
+3. **Confirm baseline tests pass clean** (Principle 1)
+4. **Require post-change tests clean** (Principle 1)
+5. **Enforce UI manual smoke checks** for UI changes (Principle 5)
+6. **Validate input handling: Frontend (UX) + Backend (Security)** for form inputs (Principle 7)
+7. **Investigate anomalies, don't work around them** (Principle 8)
+8. **Record compliance status in updates**
+
+### Session Reporting Protocol
+
+- Report the KPI score in progress updates and handoffs
+- Update checklist state immediately after each meaningful action
+- If any item turns **Red**, stop new implementation work, fix the issue, then resume
+- If an item is **Yellow**, state what trigger/action will move it to **Green**
+
+### Checkpoint Cadence Rule (Mandatory)
+
+Append an entry to `session_log.md` at the following minimum cadence:
+
+1. **Session Start** - before implementation begins
+2. **Environment/Test Gate** - after venv verification and baseline test run
+3. **Each Major Implementation Cycle** - after meaningful code changes and their verification
+4. **Every Test Execution** - when running targeted tests or full suite tests
+5. **Any State Change to Red** - immediately when a violation is detected, plus correction outcome
+6. **Session Handoff/Close** - final status and next steps
+
+**Checkpoint metadata required per entry:**
+- Checkpoint type (start, test, implementation, risk, handoff)
+- Trigger event (what caused this entry)
+- KPI delta (what changed since prior entry)
+
+**Guideline:** prefer more frequent short entries over infrequent large summaries.
+
+### Session Log File Requirement (Per Project)
+
+Every project must maintain a dedicated session log file at repository root:
+
+- **Required file:** `session_log.md`
+- **Created when:** project initialization (or first work session if missing)
+- **Updated when:** at session start, after major checkpoints, and at handoff/close
+
+**Minimum entry fields:**
+
+1. Date and session identifier
+2. Directive Compliance KPI score (`X/6 green`)
+3. Green/Yellow/Red breakdown with reasons
+4. Checkpoint type and trigger event
+5. KPI delta since previous entry
+6. Actions completed since last entry
+7. Risks, blockers, or corrective actions
+8. Next planned steps
+
+**Bootstrap instructions for new projects:**
+
+1. Create `session_log.md` at repo root
+2. Add a reusable entry template with KPI checklist fields
+3. Add first baseline entry before implementation begins
+4. Continue appending entries chronologically (newest at bottom)
+
+**Rule:** if a session performs work and `session_log.md` is not updated, session compliance is incomplete.
+
+### Example Status Update
+
+```markdown
+Directive Compliance KPI: 5/7 green
+- Green: #1, #2, #3, #5, #7
+- Yellow: #4 (awaiting post-change test run), #6 (no form input changes yet)
+- Red: none
 ```
-
-**⚠️ Last violation cost:** 15 minutes debugging, 8 AttributeError/TypeError/ImportError  
-**⏱️ Your time is valuable:** 30 seconds of verification saves 15 minutes of debugging
-
-**Common mistakes that cause errors:**
-- ❌ Assuming class names (BarData vs Bar)
-- ❌ Assuming module paths (risk.manager vs risk.risk_manager)
-- ❌ Assuming method names (validate_trade vs check_trade_risk)
-- ❌ Assuming enum values (MARKET_DATA vs MARKET_DATA_RECEIVED)
-- ❌ Assuming method signatures (on_start vs start)
-
-**✅ The fix:** Spend 30 seconds using grep_search + read_file BEFORE coding
 
 ---
 
 ## 🎯 Core Principles
 
-### 0. **Virtual Environment Verification - ALWAYS FIRST** 🎯
+### 0. **Virtual Environment Verification - ALWAYS FIRST**
 **CRITICAL:** Before ANY pip install, pytest, or Python execution, VERIFY you are in the virtual environment.
 
 **The Protocol:**
 1. ✅ **Check Python path** - run `python -c "import sys; print(sys.executable)"`
-2. ✅ **Verify it points to project venv** - path should contain `\<your-project-name>\Scripts\python.exe` 🔧
-   - 📝 TWS Robot example: `\tws_robot\Scripts\python.exe`
+2. ✅ **Verify it points to project venv** - path should contain `\<project-folder>\Scripts\python.exe`
 3. ❌ **If using global Python** - path will be `C:\Users\...\AppData\Local\Programs\Python\...`
 4. ✅ **Activate venv if needed** - run `.\Scripts\Activate.ps1` (Windows) or `source Scripts/activate` (Unix) **AS A SEPARATE COMMAND**
 5. ✅ **Re-verify after activation** - check Python path again to confirm activation worked
@@ -87,6 +174,40 @@ pip install -r requirements.txt
 - PowerShell activation scripts modify the current session environment
 - Chaining with semicolons creates sub-shells that don't persist environment changes
 - Each terminal command invocation is a fresh session unless activation is explicit
+
+**CRITICAL - DO NOT CREATE NEW VENV WHEN ONE EXISTS:**
+```powershell
+# ❌ NEVER - Do not create new venv if project already has one
+# Check for existing venv indicators FIRST:
+# - Scripts/ directory exists
+# - Lib/ directory exists  
+# - Include/ directory exists
+# - pyvenv.cfg file exists
+# If these exist at project root, the venv is already set up!
+
+# ❌ WRONG - Creating new venv when one exists
+python -m venv .venv  # Creates duplicate venv!
+configure_python_environment  # Tool that creates new venv!
+
+# ✅ CORRECT - Use existing venv
+.\Scripts\Activate.ps1  # Just activate what exists
+pip install <missing-package>  # Install missing dependencies
+```
+
+**Detecting Existing Virtual Environment:**
+1. Check if `Scripts/`, `Lib/`, `Include/`, `pyvenv.cfg` exist at project root
+2. If YES → venv exists, just activate it with `.\Scripts\Activate.ps1`
+3. If NO → venv doesn't exist, safe to create one
+4. **Common mistake:** Seeing "ModuleNotFoundError" and creating new venv
+   - **Correct response:** Install missing package: `pip install <package>`
+   - **Wrong response:** Create new venv with configure_python_environment
+
+**Why This Matters:**
+- Creating duplicate venv wastes disk space (hundreds of MB)
+- Creates confusion about which venv to use
+- May have different package versions than existing venv
+- Tests may pass in one venv but fail in another
+- **Never use configure_python_environment or python -m venv if venv structure exists**
 
 **Background Tasks and Virtual Environments:**
 ```powershell
@@ -113,6 +234,8 @@ python -m streamlit run app.py  # Command 2 in same session
 
 | Scenario | Method | Example |
 |----------|--------|---------|
+| **Venv already exists (Scripts/, Lib/, etc.)** | **Activate existing venv** | **`.\Scripts\Activate.ps1` → never create new one** |
+| **Missing package error** | **Install package** | **`pip install <package>` → don't create new venv** |
 | Background task (server, watch mode) | Direct Scripts path | `.\Scripts\streamlit.exe run app.py` |
 | Quick one-off command | Direct Scripts path | `.\Scripts\python.exe -m pytest` |
 | Multiple sequential commands | Activate once, then run | Activate → run command 1 → run command 2 |
@@ -126,12 +249,18 @@ python -m streamlit run app.py  # Command 2 in same session
 - Chain activation with other commands using semicolons (`;`)
 - Run background tasks assuming they inherit venv activation
 - Try to install packages when tests already passed (indicates packages exist!)
+- Create new virtual environment (`.venv`, `venv`, etc.) when Scripts/Lib/Include/pyvenv.cfg already exist
+- Use `configure_python_environment` tool when venv structure already exists at project root
+- Use `python -m venv` command when virtual environment is already set up
 
 **✅ ALWAYS:**
+- **Check for existing venv FIRST** (Scripts/, Lib/, Include/, pyvenv.cfg in project root)
+- If venv exists → activate it, don't create a new one
+- If missing package → `pip install <package>`, don't create new venv
 - Run activation as a standalone command first (if not using Scripts paths)
 - Verify Python executable path AFTER activation in a new command
 - Use `.\Scripts\executable.exe` for background tasks or when activation is unclear
-- Check for venv indicators: `(venv)` or `(pp2-practice-bot)` prompt prefix
+- Check for venv indicators: `(venv)` or your project-name prompt prefix
 - Verify packages exist before attempting installation (check `pip list` or test results)
 - Document which environment was used if reporting issues
 
@@ -144,13 +273,13 @@ python -m pip uninstall package1 package2 -y
 .\Scripts\Activate.ps1
 
 # Verify venv is active
-python -c "import sys; print(sys.executable)"  # Should show ...\pp2-practice-bot\Scripts\python.exe
+python -c "import sys; print(sys.executable)"  # Should show ...\<project-folder>\Scripts\python.exe
 
 # Install to venv
 pip install -r requirements.txt
 ```
 
-### 1. **100% Test Pass Rate + Zero Warnings - Non-Negotiable** 🎯
+### 1. **100% Test Pass Rate + Zero Warnings - Non-Negotiable**
 All tests must pass AND produce zero warnings before AND after ANY code changes. No exceptions.
 
 **MANDATORY: Tests Must Exist Before Code Changes**
@@ -160,12 +289,41 @@ All tests must pass AND produce zero warnings before AND after ANY code changes.
 - ✅ **Create test file alongside new modules**
 - ❌ **Never commit untested code** - tests prevent regressions
 
+**MODULE → SMOKE TEST HARD RULE:**
+Every new Python module under `app/routes/` or `app/services/` MUST have a corresponding `tests/smoke_<module>.py` file created in the **same commit**. A new module with no smoke test file is treated as a failed commit — equivalent to failing tests.
+
+**Test file naming convention (enforced):**
+
+| New module | Required test file |
+|---|---|
+| `app/routes/auth.py` | `tests/smoke_auth.py` |
+| `app/routes/export.py` | `tests/smoke_export.py` |
+| `app/services/validators.py` | `tests/smoke_validators.py` |
+| `app/services/mapper.py` | `tests/smoke_mapper.py` |
+| `app/routes/<name>.py` | `tests/smoke_<name>.py` |
+| `app/services/<name>.py` | `tests/smoke_<name>.py` |
+
+**Regression Suite Runner (Mandatory):**
+```powershell
+# Run all smoke tests in one command — use before EVERY commit
+.\Scripts\python.exe tests/run_all_smoke.py
+```
+This script auto-discovers every `tests/smoke_*.py` file, runs them, and prints a consolidated
+pass/fail count. It exits with code 1 on any failure, making it CI/CD-compatible.
+The count reported here is the authoritative number for the commit message.
+
+**IMPORTANT — How to run this (Principle 9):**
+Always use `run_in_terminal` directly. Never delegate this command to `execution_subagent`.
+Never redirect output to an assumed absolute path (e.g., `C:\Temp`) — the directory may not exist.
+
 **The Protocol:**
 1. ✅ Verify baseline - run full test suite BEFORE any changes (zero failures, zero warnings)
 2. 🔄 Make changes (one logical step at a time)
 3. ✅ **Run tests IMMEDIATELY** after changes (zero failures, zero warnings)
 4. ❌ If tests fail OR warnings appear - fix immediately or revert
-5. ✅ Only commit when all tests pass with zero warnings
+5. ✅ **Backend tests pass = Server logic correct** (necessary but not sufficient for UI changes)
+6. ✅ **For UI changes: Add manual testing** (see Principle 5)
+7. ✅ Only commit when tests pass + manual verification complete (if UI changed)
 
 **Test Coverage Requirements:**
 - **Backend routes:** Test all HTTP endpoints (GET, POST, error cases)
@@ -198,7 +356,7 @@ All tests must pass AND produce zero warnings before AND after ANY code changes.
 - Document test count AND warning count in commits (e.g., "393 passed, 0 warnings")
 - Preserve git history when removing code
 
-### 2. **Verify First, Code Second** 🎯
+### 2. **Verify First, Code Second**  
 Never assume how existing code works. Always verify before implementing.
 
 **❌ Don't:**
@@ -219,140 +377,7 @@ timeframe=TimeFrame.DAY_1
 def on_bar(self, market_data):  # Matches base class signature
 ```
 
----
-
-### 2.1 **THE 30-SECOND RULE** 🎯⏱️
-
-**Spending 30 seconds to verify saves 15 minutes of debugging.**
-
-**Verification is NOT optional:**
-- grep_search: 5 seconds
-- read_file: 10 seconds  
-- Documenting findings: 15 seconds
-- **Total: 30 seconds**
-
-**Compare to NOT verifying:**
-- Writing wrong code: 5 minutes
-- Getting error: instant
-- Debugging error: 5 minutes
-- Fixing code: 5 minutes
-- **Total: 15+ minutes wasted**
-
-**The math is simple: Always verify.**
-
----
-
-### 2.2 **MANDATORY: API Verification Block Template** 🎯
-
-Before ANY code that uses existing APIs, add this verification block.  
-**AI agents must output this BEFORE implementation code.**
-
-**Template (Copy-Paste This - Works for Any Project):**
-
-```python
-# ==============================================================================
-# API VERIFICATION CHECKLIST ✓
-# ==============================================================================
-# Date: YYYY-MM-DD
-# Task: [Brief description of what you're implementing]
-#
-# Classes/Methods to be used:
-# ----------------------------
-# 1. ClassName (from module/file.py:line)
-#    Tool: grep_search(query="class ClassName", includePattern="*.py")
-#    Found: [file path and line number]
-#    Verified: ✓
-#
-# 2. method_name (from module/file.py:line)
-#    Tool: read_file(filePath="...", startLine=X, endLine=Y)
-#    Signature: method_name(param1: type, param2: type) -> return_type
-#    Verified: ✓
-#
-# 3. [Add more as needed]
-#
-# VERIFICATION COMPLETE: ✓ All APIs confirmed to exist with correct signatures
-# ==============================================================================
-
-# Now proceed with implementation...
-```
-
-**📝 Example from TWS Robot Project:**
-
-```python
-# ==============================================================================
-# API VERIFICATION CHECKLIST ✓
-# ==============================================================================
-# Date: 2026-01-24
-# Project: TWS Robot (Algorithmic Trading System)
-# Task: Create functionality demonstration script
-#
-# 1. Bar class (NOT BarData!)
-#    grep_search: Found backtest/data_models.py:36
-#    Verified: ✓ class Bar exists
-#
-# 2. RiskManager.__init__
-#    read_file: risk/risk_manager.py lines 112-130
-#    Signature: __init__(initial_capital, max_positions, max_position_pct, 
-#                        max_drawdown_pct, daily_loss_limit_pct, ...)
-#    Note: NOT max_total_exposure_pct (doesn't exist)
-#    Verified: ✓
-#
-# 3. RiskManager.get_risk_summary
-#    Returns: Dict with 'current_equity' (NOT 'equity')
-#    Verified: ✓
-#
-# 4. EventType enum values
-#    Found: core/event_bus.py:46
-#    Values: MARKET_DATA_RECEIVED (NOT MARKET_DATA)
-#    Verified: ✓
-#
-# 5. Strategy methods
-#    base_strategy.py:172 → start() NOT on_start()
-#    base_strategy.py:193 → stop() NOT on_stop()
-#    Verified: ✓
-#
-# VERIFICATION COMPLETE: ✓
-# ==============================================================================
-```
-
-**🔧 Template for Your Project (Replace with your APIs):**
-
-```python
-# ==============================================================================
-# API VERIFICATION CHECKLIST ✓
-# ==============================================================================
-# Date: YYYY-MM-DD
-# Project: [Your Project Name]
-# Task: [What you're implementing]
-#
-# 1. [YourClassName]
-#    grep_search: Found [path/to/file.py:line]
-#    Verified: ✓
-#
-# 2. [your_method_name]
-#    read_file: [path/to/file.py lines X-Y]
-#    Signature: [actual signature from code]
-#    Verified: ✓
-#
-# [Add your project's specific APIs here as you use them]
-#
-# VERIFICATION COMPLETE: ✓
-# ==============================================================================
-```
-
-**Warning Signs You're Skipping Verification:**
-- ⚠️ Typing a class/method name from memory
-- ⚠️ Assuming parameter order
-- ⚠️ Guessing at return types
-- ⚠️ Copy-pasting from similar (but different) code
-- ⚠️ Thinking "this probably works like..."
-- ⚠️ Getting ANY runtime errors (AttributeError, TypeError, KeyError)
-
-**Each warning sign = STOP and verify properly**
-
----
-
-### 3. **Defensive Programming Always** 🎯
+### 3. **Defensive Programming Always**  
 Assume nothing. Handle None, validate inputs, check bounds.
 
 **❌ Don't:**
@@ -374,7 +399,7 @@ if position is None:
     position = 0
 ```
 
-### 4. **Test Incrementally, Not All At Once** 🎯
+### 4. **Test Incrementally, Not All At Once**  
 Build and verify in small steps. Don't write 300 lines before testing.
 
 **✅ Development Flow:**
@@ -392,71 +417,922 @@ strategy.on_start()  # Does it initialize?
 result = engine.run()  # Now combine them
 ```
 
+### 5. **Frontend/UI Testing - The Backend Test Blind Spot**
+**CRITICAL:** Backend tests (pytest, unittest) **CANNOT** catch frontend bugs. Know the gap.
+
+**The Reality Check:**
+- ✅ Backend tests verify: routes work, logic correct, data flows properly
+- ❌ Backend tests **MISS**: JavaScript bugs, form behavior, UI interactions, browser rendering
+- 🎯 **100% backend test pass ≠ working application from user perspective**
+
+**What Backend Tests Don't Catch:**
+1. **JavaScript Errors**
+   - Form fields being cleared by JS
+   - Event handlers not firing
+   - Tab switching breaking functionality
+   - Client-side validation issues
+   - **CRITICAL: Syntax errors that break ALL JavaScript** (missing braces, semicolons)
+
+2. **HTML Form Behavior**
+   - Disabled fields don't submit their values (HTML spec behavior)
+   - Form validation preventing submission
+   - Field names not matching server expectations
+   - Empty file inputs always present in request.files
+
+3. **Browser-Specific Issues**
+   - CSS breaking layout
+   - Forms not submitting
+   - AJAX requests failing
+   - Event listeners not attaching
+
+4. **User Flow Problems**
+   - Confusing UX (buttons that don't work as expected)
+   - Missing feedback (no loading indicators)
+   - Error messages not displayed
+   - Navigation breaks
+
+**⚠️ SPECIAL DANGER: JavaScript Syntax Errors**
+JavaScript syntax errors are **silent killers** that make debugging extremely difficult:
+
+```javascript
+// Bug example: Missing closing brace
+if (inputForm) {
+    inputForm.addEventListener('submit', function(e) {
+        // ... lots of code ...
+        return true;
+    });
+// ❌ MISSING } for if statement!
+</script>
+
+// Result:
+// - Browser shows: "Uncaught SyntaxError: Unexpected end of input"
+// - ALL JavaScript after the error: DOESN'T RUN
+// - Event handlers: NEVER REGISTERED
+// - Console logs: NEVER APPEAR
+// - Form: Falls back to plain HTML submission (no validation, no logging)
+// - From user perspective: Form "doesn't work" with no clear error
+```
+
+**Why Syntax Errors Are Devastating:**
+1. **Silent failure** - JavaScript stops executing, no obvious error to user
+2. **All subsequent code disabled** - entire script block becomes useless
+3. **Event handlers don't register** - buttons appear functional but don't work
+4. **No logging output** - can't debug with console.log if code never runs
+5. **Backend tests still pass** - they don't load JavaScript at all
+
+**How to Catch JavaScript Syntax Errors:**
+1. **Open browser console (F12)** before any manual test
+2. **Look for red error messages** - "SyntaxError" is your clue  
+3. **Check line numbers** - browser tells you exactly where the error is
+4. **Fix syntax, hard refresh** - Ctrl+Shift+R to clear cached JavaScript
+5. **Re-test** - verify error gone and functionality works
+
+**⚠️ SPECIAL DANGER: Compounding Bugs (Multiple Bugs Masking Each Other)**
+When multiple bugs exist simultaneously, they can hide each other:
+
+**Example Cascade:**
+```
+Bug #1: Disabled form fields (don't submit values)
+         ↓
+Prevents testing → Bug #2: JavaScript syntax error (code doesn't run)
+         ↓  
+Can't reach server → Bug #3: if/elif logic bug (wrong branch executes)
+         ↓
+Each bug hides the next → Appears as single issue to user
+```
+
+**Debugging Compounding Bugs - Systematic Approach:**
+1. **Start at the beginning** - browser loads page (console errors?)
+2. **Check each layer in order:**
+   - Browser console → any errors?
+   - JavaScript logs → are they appearing?
+   - Network tab → is request being sent?
+   - Server logs → is request received?
+   - Server processing → what's the data?
+3. **Fix ONE bug at a time**
+4. **Re-test after EACH fix** - don't assume you found "the" bug
+5. **Repeat until workflow succeeds end-to-end**
+
+**Cost of Compounding Bugs:**
+- Single bug alone: 5-10 min to find
+- Two bugs together: 15-30 min (each hides symptoms of the other)
+- Three bugs together: 45+ min (exponential debugging difficulty)
+- **Prevention: Manual testing catches ALL of them in 2 minutes**
+
+**The Protocol - Web Applications:**
+
+**After ANY UI Change (HTML/CSS/JavaScript):**
+1. ✅ **Run backend tests** - ensure server-side still works (100% pass required)
+2. ✅ **Manual smoke test** - actually use the application (MANDATORY)
+3. ✅ **Check browser console** - no JavaScript errors (F12 DevTools)
+4. ✅ **Test critical user flows** - can users complete key tasks?
+5. ✅ **Verify on refresh** - state persists, no unexpected resets
+
+**Manual Testing Checklist** (Required for UI changes):
+```markdown
+Critical User Flows (Test EVERY TIME):
+- [ ] Submit form with valid data → reaches next page
+- [ ] Submit form with invalid data → shows errors
+- [ ] Navigate between pages → no data loss  
+- [ ] Refresh page mid-workflow → state preserved (or reasonable fallback)
+- [ ] Click all primary buttons → expected actions occur
+- [ ] Check browser console (F12) → zero errors
+- [ ] Mobile/responsive view → usable on small screens (if applicable)
+```
+
+**When to Add Browser-Based E2E Tests:**
+Consider Selenium/Playwright if:
+- Application has complex JS interactions (SPAs, real-time updates)
+- UI bugs cause frequent customer escalations
+- Team size > 3 developers making concurrent UI changes
+- Application is customer-facing (not internal tool)
+
+**Trade-offs:**
+- **Backend tests:** Fast (seconds), reliable, catch logic bugs -  **miss UI bugs**
+- **Manual testing:** Fast (minutes), catches UI bugs - **not automated, can be forgotten**
+- **E2E browser tests:** Catch UI bugs, automated - **slow (minutes), brittle, maintenance overhead**
+
+**For Small Projects/Internal Tools:**
+- Prioritize: Backend tests (automated) + Manual checklist (discipline)
+- Skip: E2E browser automation (too much overhead)
+- Reason: Manual testing 5 critical flows takes 2-5 minutes vs hours maintaining E2E tests
+
+**Red Flags That Indicate Missing Manual Testing:**
+- ❌ "All 138 tests pass" but users report basic features broken
+- ❌ Form submissions fail but tests don't catch it
+- ❌ JavaScript console full of errors
+- ❌ UI changes deployed without anyone actually clicking buttons
+
+**❌ Never:**
+- Deploy UI changes without manual smoke test
+- Assume backend tests caught all issues
+- Skip browser console error check
+- Trust "it works on my machine" without verification
+
+**✅ Always:**
+- Manually test every UI change before commit
+- Check browser console (F12) for errors
+- Test critical user flows end-to-end
+- Document UI testing in commit message ("Tested: form submission, navigation, refresh")
+- Have second person spot-check if possible
+
+### 6. **User-Facing Output Quality - No Truncated Business Content**
+**CRITICAL:** Do not ship user-facing documents with truncated sentences (e.g., "...") unless explicitly labeled as a preview.
+
+**Why this matters:**
+- Business minutes are circulated as authoritative records
+- Truncated content undermines clarity, professionalism, and legal/audit value
+- "Looks fine" in UI can still be wrong in exported output
+
+**✅ Always:**
+- Ensure exported/printable user-facing text includes full sentences
+- If compact tables are used, wrap lines instead of truncating
+- Only use ellipses in explicit previews, never in final export content
+
+**Manual Output Check (Required when rendering changes):**
+- Verify final exported text and PDF contain complete action items
+- Confirm no ellipses appear in the final output (unless explicitly intended)
+
+**Cost of Skipping Manual UI Testing:**
+- 2 minutes saved = hours debugging production issues
+- "100% test pass" gives false confidence
+- Users discover bugs = credibility damage
+- Regression bugs = wasted time
+
+**Example Commit Message (Good):**
+```
+Fix word counter validation logic
+
+- Changed minimum from 50 to 10 words
+- Updated UI messaging to show "recommended" vs "required"
+- Updated core/parser.py validation
+- Updated tests/test_parser.py expectations
+
+Backend Tests: 138/138 passed, 0 warnings ✓
+Manual Testing: ✓
+  - Submitted 10-word transcript → accepted
+  - Submitted 5-word transcript → rejected with error
+  - Word counter updates in real-time
+  - Browser console: 0 errors
+```
+
+### 7. **Enterprise Input Validation & Security Standards**
+**CRITICAL:** Never trust frontend validation alone. Always validate and sanitize on the backend.
+
+**The Golden Rules:**
+1. **Frontend validation = UX convenience** (instant feedback, prevent network calls)
+2. **Backend validation = Security boundary** (enforceable, cannot be bypassed)
+3. **Both are required** - frontend for UX, backend for security
+
 ---
 
-### 5. **Post-Mortem: Learn From Errors** 🎯📋
+#### **Date/Time Input Standards**
 
-After ANY AttributeError, TypeError, or ImportError, you MUST complete a post-mortem.  
-This is how we improve and prevent future violations.
-
-**Prime Directive Post-Mortem Template (Universal):**
-
-```markdown
-## Post-Mortem: [Brief Error Description]
-
-**Date:** YYYY-MM-DD  
-**Task:** [What were you trying to do?]
-
-**Error(s) Encountered:**
-```
-[Paste full error traceback]
+**❌ NEVER: Plain text fields for time without backend normalization**
+```html
+<!-- BAD: Relies on user typing correct format -->
+<input type="text" name="start_time" placeholder="Enter time">
 ```
 
-**Prime Directive Section Violated:**
-□ Section 0: Virtual Environment
-□ Section 1: Test Coverage
-☑ Section 2: Verify First ← [Usually this one]
-□ Section 3: Defensive Programming
-□ Section 4: Incremental Testing
-
-**Verification Steps Skipped:**
-☑ grep_search to find class/method
-☑ read_file to see actual signature
-☑ list_code_usages to see examples
-☑ Writing verification block
-□ Running test before full implementation
-
-**Specific Mistakes:**
-1. [e.g., Assumed BarData existed, actually Bar]
-2. [e.g., Assumed risk.manager, actually risk.risk_manager]
-3. [List all wrong assumptions]
-
-**Time Impact:**
-- Time spent coding wrong version: [X minutes]
-- Time spent debugging errors: [Y minutes]
-- Time verification would have taken: [30 seconds]
-- **Net time wasted:** [X+Y-0.5 minutes]
-
-**Lesson Learned:**
-[What specific step will you never skip again?]
-
-**Prevention Action:**
-□ Updated prime_directive_violations.log
-□ Added example to Prime Directive
-□ Created verification checklist for similar tasks
-
-**Commitment:**
-I commit to [specific behavior change] to prevent this in the future.
+**❌ NEVER: HTML5 time input without backend conversion**
+```html
+<!-- BAD: Browser sends HH:MM but no timezone info -->
+<input type="time" name="start_time">
+<!-- Backend receives: "09:30" - but in what timezone? -->
 ```
 
-**📝 Example Post-Mortem (TWS Robot Project):**
+**✅ ALWAYS: Use proper datetime controls with timezone handling**
 
-See `prime_directive_violations.log` in TWS Robot for complete post-mortem from 2026-01-24.
+**Option 1: Modern JavaScript DateTime Picker (Recommended for Enterprise)**
+```html
+<!-- Use libraries that handle timezones properly -->
+<!-- Flatpickr, React DatePicker, MUI DateTimePicker, etc. -->
+<input id="meeting-time" type="text">
+<script>
+flatpickr("#meeting-time", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+    time_24hr: true
+});
+</script>
+```
 
-**🔧 For Your Project:**
-Create your own `prime_directive_violations.log` to track your learnings.
+**Option 2: HTML5 datetime-local (Acceptable for Internal Tools)**
+```html
+<!-- datetime-local includes date + time, no timezone -->
+<input type="datetime-local" name="meeting_time">
+<!-- Browser sends: "2026-02-23T09:30" -->
+```
 
-**Key Takeaway:** Every error is a lesson. Document it, learn from it, prevent it.
+**Backend Processing (MANDATORY for all datetime inputs):**
+```python
+from datetime import datetime
+from zoneinfo import ZoneInfo  # Python 3.9+
+
+# ✅ GOOD: Convert to UTC, store as ISO 8601
+def process_meeting_time(user_input: str, user_timezone: str = "UTC") -> str:
+    """
+    Convert user's local datetime to UTC ISO 8601 format.
+    
+    Args:
+        user_input: "2026-02-23T09:30" or "2026-02-23 09:30"
+        user_timezone: "Asia/Singapore", "America/New_York", etc.
+    
+    Returns:
+        ISO 8601 UTC string: "2026-02-23T01:30:00Z"
+    """
+    # Parse input (handle multiple formats)
+    dt_naive = datetime.fromisoformat(user_input.replace(' ', 'T'))
+    
+    # Attach user's timezone
+    dt_aware = dt_naive.replace(tzinfo=ZoneInfo(user_timezone))
+    
+    # Convert to UTC
+    dt_utc = dt_aware.astimezone(ZoneInfo("UTC"))
+    
+    # Store as ISO 8601
+    return dt_utc.isoformat()
+
+# Example:
+# User in Singapore enters: "2026-02-23T09:30"
+# Backend stores: "2026-02-23T01:30:00Z" (UTC)
+# Display to user: "2026-02-23T09:30:00+08:00" (Singapore time)
+```
+
+**Database Storage Standards:**
+```sql
+-- ✅ ALWAYS: Store datetimes in UTC
+CREATE TABLE meetings (
+    id SERIAL PRIMARY KEY,
+    meeting_time TIMESTAMP WITH TIME ZONE NOT NULL,  -- PostgreSQL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- ❌ NEVER: Store as local time without timezone
+CREATE TABLE meetings (
+    meeting_time TIMESTAMP,  -- Ambiguous! What timezone?
+    created_at DATETIME      -- SQLite/MySQL - no timezone info
+);
+```
+
+**Display to Users (Convert back to local time):**
+```python
+def display_meeting_time(utc_iso_string: str, user_timezone: str) -> str:
+    """
+    Convert stored UTC time back to user's local timezone.
+    
+    Args:
+        utc_iso_string: "2026-02-23T01:30:00Z"
+        user_timezone: "Asia/Singapore"
+    
+    Returns:
+        "2026-02-23 09:30 SGT"
+    """
+    dt_utc = datetime.fromisoformat(utc_iso_string.replace('Z', '+00:00'))
+    dt_local = dt_utc.astimezone(ZoneInfo(user_timezone))
+    return dt_local.strftime("%Y-%m-%d %H:%M %Z")
+```
+
+**Time Input Validation Rules:**
+1. **Frontend:** Provide picker UI (date + time together)
+2. **Backend:** Parse, validate, convert to UTC ISO 8601
+3. **Storage:** Always UTC with timezone marker (`TIMESTAMP WITH TIME ZONE`)
+4. **Display:** Convert from UTC to user's timezone
+
+**Acceptable Shortcuts for Internal/Small Tools:**
+- Use `datetime-local` input (not `time` alone)
+- Assume single timezone (e.g., company HQ timezone)
+- Store as ISO 8601 string: `YYYY-MM-DDTHH:MM:SS`
+- Document timezone assumption clearly
+
+**❌ NEVER Acceptable (Even for Internal Tools):**
+- Plain text `<input type="text">` for time without backend normalization
+- `<input type="time">` without date - time is meaningless without date
+- Storing time as "09:30" string - ambiguous format, no date context
+- Mixing 12-hour/24-hour formats without clear indicators
+
+---
+
+#### **General Input Validation Standards**
+
+**The Three-Layer Defense:**
+```
+Layer 1: Frontend (HTML5 + JavaScript)
+         ↓ (Can be bypassed - user can modify DOM/disable JS)
+Layer 2: Backend Validation (Python/Node/etc)
+         ↓ (Enforceable - server controls this)
+Layer 3: Database Constraints
+         ↓ (Last line of defense)
+```
+
+**HTML5 Client-Side Validation (UX Layer):**
+```html
+<!-- ✅ GOOD: Provides instant feedback -->
+<input 
+    type="email" 
+    name="email" 
+    required 
+    pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
+    title="Enter a valid email address"
+>
+
+<input 
+    type="number" 
+    name="age" 
+    min="0" 
+    max="120" 
+    required
+>
+
+<!-- Date input with min/max constraints -->
+<input 
+    type="date" 
+    name="meeting_date" 
+    min="2026-01-01" 
+    max="2026-12-31"
+    required
+>
+```
+
+**Backend Validation (Security Layer - REQUIRED):**
+```python
+from pydantic import BaseModel, Field, field_validator, EmailStr
+from datetime import datetime, date
+from typing import Optional
+
+class MeetingInput(BaseModel):
+    """Backend validation model - never trust frontend alone"""
+    
+    email: EmailStr  # Validates email format
+    age: int = Field(ge=0, le=120)  # Greater/equal 0, less/equal 120
+    meeting_date: date = Field(...)
+    meeting_time: datetime = Field(...)
+    description: str = Field(min_length=1, max_length=500)
+    
+    @field_validator('meeting_date')
+    @classmethod
+    def validate_date_not_past(cls, v: date) -> date:
+        """Meetings must be in the future"""
+        if v < date.today():
+            raise ValueError("Meeting date cannot be in the past")
+        return v
+    
+    @field_validator('description')
+    @classmethod
+    def sanitize_description(cls, v: str) -> str:
+        """Sanitize to prevent XSS"""
+        # Strip dangerous characters/tags
+        import html
+        return html.escape(v.strip())
+
+# Usage in Flask/FastAPI route:
+@app.post("/create-meeting")
+def create_meeting(data: MeetingInput):
+    # If we reach here, data is validated
+    # Pydantic raises 422 Unprocessable Entity if validation fails
+    return {"status": "success", "meeting": data.model_dump()}
+```
+
+**Database Constraints (Last Defense):**
+```sql
+-- PostgreSQL example
+CREATE TABLE meetings (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
+    age INT CHECK (age >= 0 AND age <= 120),
+    meeting_date DATE NOT NULL CHECK (meeting_date >= CURRENT_DATE),
+    description TEXT NOT NULL CHECK (LENGTH(description) > 0 AND LENGTH(description) <= 500)
+);
+```
+
+---
+
+#### **Input Sanitization Standards**
+
+**XSS Prevention (Cross-Site Scripting):**
+```python
+import html
+from markupsafe import escape  # If using Flask/Jinja2
+
+# ✅ ALWAYS: Escape user input before displaying in HTML
+user_input = "<script>alert('XSS')</script>"
+safe_output = html.escape(user_input)
+# Result: "&lt;script&gt;alert('XSS')&lt;/script&gt;"
+
+# In templates (Jinja2/Flask auto-escapes by default)
+{{ user_input }}  # ✅ Auto-escaped
+{{ user_input | safe }}  # ❌ DANGEROUS - bypasses escaping
+```
+
+**SQL Injection Prevention:**
+```python
+# ❌ NEVER: String concatenation
+cursor.execute(f"SELECT * FROM users WHERE email = '{user_email}'")
+
+# ✅ ALWAYS: Parameterized queries
+cursor.execute("SELECT * FROM users WHERE email = %s", (user_email,))
+
+# ✅ ALWAYS: Use ORM (SQLAlchemy, Django ORM)
+User.query.filter_by(email=user_email).first()  # Auto-escaped
+```
+
+**File Upload Validation:**
+```python
+from werkzeug.utils import secure_filename
+import os
+
+ALLOWED_EXTENSIONS = {'pdf', 'docx', 'txt'}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+def validate_file_upload(file):
+    """Validate uploaded file"""
+    # Check if file exists
+    if not file or file.filename == '':
+        raise ValueError("No file provided")
+    
+    # Secure the filename (remove path traversal attempts)
+    filename = secure_filename(file.filename)
+    
+    # Check extension
+    ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+    if ext not in ALLOWED_EXTENSIONS:
+        raise ValueError(f"File type .{ext} not allowed")
+    
+    # Check file size
+    file.seek(0, os.SEEK_END)
+    size = file.tell()
+    file.seek(0)  # Reset file pointer
+    if size > MAX_FILE_SIZE:
+        raise ValueError("File too large (max 10MB)")
+    
+    return filename
+```
+
+---
+
+#### **Enterprise DateTime Best Practices Summary**
+
+**For Production/Enterprise Systems:**
+1. ✅ Use modern datetime picker libraries (Flatpickr, MUI, etc.)
+2. ✅ Capture user's timezone (from browser or profile)
+3. ✅ Convert all times to UTC before storage
+4. ✅ Store as ISO 8601 with timezone: `2026-02-23T01:30:00Z`
+5. ✅ Use `TIMESTAMP WITH TIME ZONE` in database
+6. ✅ Convert back to user's timezone when displaying
+7. ✅ Handle daylight saving time transitions
+
+**For Internal Tools (Acceptable Shortcuts):**
+1. ✅ Use `<input type="datetime-local">` (includes date + time)
+2. ✅ Document assumed timezone clearly (e.g., "All times in UTC")
+3. ✅ Store as ISO 8601: `YYYY-MM-DDTHH:MM:SS`
+4. ⚠️ Validate format on backend even if frontend provides picker
+
+**❌ NEVER Acceptable:**
+1. ❌ `<input type="time">` alone without date
+2. ❌ Plain `<input type="text">` for time without backend normalization
+3. ❌ Storing times without date context (e.g., "09:30" string)
+4. ❌ Trusting frontend validation alone
+5. ❌ Storing times without timezone information
+
+---
+
+#### **Validation Checklist (Required for ALL form inputs)**
+
+**Frontend (UX Layer):**
+- [ ] Use appropriate HTML5 input types (`email`, `number`, `date`, `datetime-local`)
+- [ ] Add `required`, `min`, `max`, `pattern` attributes where applicable
+- [ ] Provide clear error messages with `title` attribute
+- [ ] Use datetime pickers for date/time inputs (not plain text)
+- [ ] JavaScript validation for complex rules (matching passwords, etc.)
+
+**Backend (Security Layer - MANDATORY):**
+- [ ] Use Pydantic/Marshmallow/dataclasses for validation models
+- [ ] Validate data types (int, str, email, date, etc.)
+- [ ] Validate ranges (min/max length, min/max value)
+- [ ] Validate formats (email regex, date format, etc.)
+- [ ] Sanitize all text inputs (escape HTML, strip dangerous chars)
+- [ ] Convert datetimes to UTC ISO 8601 before storage
+- [ ] Return clear error messages (400/422 with details)
+
+**Database (Last Defense):**
+- [ ] Add NOT NULL constraints where required
+- [ ] Add CHECK constraints for value ranges
+- [ ] Add UNIQUE constraints where applicable
+- [ ] Use proper column types (`TIMESTAMP WITH TIME ZONE`, `INTEGER`, etc.)
+- [ ] Add foreign key constraints for relationships
+
+**Testing:**
+- [ ] Test with valid inputs → success
+- [ ] Test with missing required fields → 400/422 error
+- [ ] Test with invalid formats → 400/422 error
+- [ ] Test with boundary values (min, max) → correct behavior
+- [ ] Test with malicious inputs (XSS, SQL injection attempts) → sanitized/blocked
+
+---
+
+### 8. **Investigate Anomalies - Don't Work Around Them**
+**CRITICAL:** If something seems wrong, strange, or requires a workaround - it IS wrong. Stop and investigate.
+
+**The Rule:**
+```
+IF behavior seems unexpected OR requires a workaround:
+  THEN:
+    1. STOP forward progress immediately
+    2. Document the strange behavior
+    3. Investigate root cause thoroughly
+    4. Fix properly OR confirm it's intentional
+    5. ONLY THEN continue with your task
+```
+
+**Why This Matters:**
+- Workarounds mask problems, they don't solve them
+- "Strange" is a red flag, not a quirk to accept
+- 2 minutes investigating now prevents hours debugging later
+- Small issues compound into major blockers
+
+**Real Example - The .gitignore Incident:**
+```bash
+# ❌ WRONG Response
+$ git add core/export.py
+# Error: The following paths are ignored by .gitignore: core
+# Thought: "That's weird... let me try a workaround"
+$ git add -u  # Works! Moving on...
+# Result: Broken .gitignore with wildcard '*' went unfixed
+
+# ✅ CORRECT Response  
+$ git add core/export.py
+# Error: The following paths are ignored by .gitignore: core
+# Thought: "That's wrong. Why is 'core' ignored?"
+$ cat .gitignore
+# Found: wildcard '*' ignoring EVERYTHING
+# Action: Fix .gitignore properly, verify, then continue
+```
+
+**Common "Strange" Signals:**
+- Error messages that disappear with a different command
+- Tests that "randomly" pass/fail
+- "It works on my machine" but fails elsewhere
+- Needing sudo/admin rights where you shouldn't
+- Circular imports that "just work"
+- Settings that only work in a specific order
+- Code that requires comments like "don't change this or it breaks"
+- Dependencies installed multiple times
+
+**The Cost of Ignoring Anomalies:**
+
+| Issue | Workaround Time | Investigation Time | Cost of Ignoring |
+|-------|-----------------|-------------------|------------------|
+| `.gitignore` broken | 30 seconds | 2 minutes | Can't add new files (project-blocking) |
+| Import error | 1 minute | 5 minutes | Wrong package version breaks production |
+| Test flakiness | Skip the test | 10 minutes | Regression goes undetected |
+| Permission error | Run as admin | 3 minutes | Security vulnerability in deployment |
+
+**Investigation Protocol:**
+
+1. **Capture the anomaly**
+   ```bash
+   # Save error messages
+   command 2>&1 | tee error.log
+   
+   # Document unexpected behavior
+   echo "Expected X, got Y because Z" >> investigation.md
+   ```
+
+2. **Form hypothesis**
+   - What should happen?
+   - What actually happens?
+   - What's different?
+
+3. **Test hypothesis**
+   - Read config files
+   - Check environment variables  
+   - Review recent changes
+   - Search codebase for similar patterns
+
+4. **Fix root cause**
+   - Don't patch symptoms
+   - Fix the underlying issue
+   - Verify fix with tests
+   - Document why it happened
+
+5. **Prevent recurrence**
+   - Add checks/validation
+   - Update documentation
+   - Add to Prime Directive if broadly applicable
+
+**❌ Never:**
+- Dismiss errors as "probably nothing"
+- Use workarounds without understanding why they're needed
+- Proceed when something feels wrong
+- Skip investigation "to save time"
+- Leave TODO comments for weird behavior
+- Assume "it's always been like that"
+
+**✅ Always:**
+- Treat "strange" as a bug until proven otherwise
+- Investigate before implementing workarounds
+- Document both the problem AND the solution
+- Share findings with team (update Prime Directive)
+- Fix properly, not quickly
+- Trust your instincts - if it feels wrong, investigate
+
+**Remember: "It works" ≠ "It's correct"**
+
+Code that works despite being wrong is technical debt waiting to cause production incidents.
+
+---
+
+### 9. **AI Agent Execution Discipline — No Blind Commands**
+**CRITICAL:** AI agents must never execute terminal commands blindly. Every command must be grounded, observable, and use the simplest possible tool for the job.
+
+#### The Regression Suite Rule (Non-Negotiable)
+
+The regression suite command is **always** run with `run_in_terminal` directly. It must never be delegated to `execution_subagent`.
+
+```powershell
+# ✅ CORRECT — direct, observable, no assumptions
+run_in_terminal:
+  .\Scripts\python.exe tests/run_all_smoke.py 2>&1
+
+# ❌ WRONG — subagent invents unseen paths, redirects to assumed directories
+execution_subagent:
+  "Run the regression suite and capture output to C:\Temp\results.txt"
+```
+
+**Why delegation fails here:**
+- `execution_subagent` runs in an isolated subcontext with no verified knowledge of machine directory structure
+- It invents file paths (`C:\Temp`) that may not exist
+- Failures accumulate silently, wasting session time
+- The prime directive already documents the canonical command — just run it
+
+#### Tool Selection Rules for Terminal Commands
+
+| Situation | Correct Tool | Never Use |
+|-----------|-------------|-----------|
+| Run regression suite | `run_in_terminal` | `execution_subagent` |
+| Run a single known command | `run_in_terminal` | `execution_subagent` |
+| Multi-step exploratory build/install | `execution_subagent` | `run_in_terminal` (fragile for long chains) |
+| Check file or grep result | `grep_search` / `read_file` | Terminal `cat` / `grep` commands |
+
+#### Never Assume Paths
+
+Before writing **any** path into a command (especially for output redirection), verify it exists.
+
+```powershell
+# ❌ WRONG — assumes C:\Temp exists (it often doesn't on Windows)
+.\Scripts\python.exe tests/run_all_smoke.py *> "C:\Temp\results.txt"
+
+# ✅ CORRECT — use project-relative path (always exists in project context)
+.\Scripts\python.exe tests/run_all_smoke.py 2>&1
+
+# ✅ CORRECT — if a file path is needed, use $env:TEMP (guaranteed) or project dir
+.\Scripts\python.exe tests/run_all_smoke.py *> "$env:TEMP\cdw_results.txt"
+```
+
+**Path verification before use:**
+- Project-relative paths (e.g., `tests/_last_run.txt`) — safe, always within the project
+- `$env:TEMP` — safe on Windows, guaranteed to exist
+- Absolute paths like `C:\Temp` — **NEVER** without first verifying with `Test-Path`
+
+#### Incident: April 7, 2026
+
+**What happened:**
+- `execution_subagent` was invoked to run the regression suite
+- Subagent invented `C:\Temp\test_results.txt` as output path
+- `C:\Temp` did not exist on this machine → command failed
+- Multiple retry attempts all failed; user had to intervene
+
+**What should have happened:**
+```powershell
+# One tool call, one command, done
+run_in_terminal: .\Scripts\python.exe tests/run_all_smoke.py 2>&1
+```
+
+**Time wasted:** Multiple tool invocations + user frustration vs. one direct command
+
+**Root causes:**
+1. Used the wrong abstraction (`execution_subagent`) for a known, single command
+2. Assumed a system path without verification
+3. Did not apply "simplest correct approach first" principle
+
+**❌ Never:**
+- Delegate a single documented command to `execution_subagent`
+- Write a path into any command without verifying it exists
+- Use `execution_subagent` when `run_in_terminal` is sufficient
+- Retry the same failing approach more than once — step back and use a different tool
+
+**✅ Always:**
+- Use `run_in_terminal` for single, known commands (regression suite, test runs, git operations)
+- Use project-relative paths or `$env:TEMP` if output redirection is needed
+- Apply Principle 8: if a command fails once with a path error, investigate before retrying
+- Reserve `execution_subagent` for genuinely multi-step exploratory tasks (install sequences, build chains)
+
+---
+
+### 10. **PowerShell + Python: Never Inline Complex Python via `-c`**
+**CRITICAL:** PowerShell parses `{`, `}`, `'`, and `"` inside `-c "..."` strings before Python ever sees them. Any Python code containing f-string format specs (`{'field':<8}`), nested braces, or certain quote patterns will trigger a PowerShell `ParserError` — not a Python error — making the failure misleading and the fix non-obvious.
+
+#### The Rule
+
+**Never pass Python code that contains `{`, `}`, or nested quotes directly to `.\Scripts\python.exe -c "..."`.**
+
+Write it to a `.py` file instead, run the file, then delete it.
+
+#### The Problem
+
+```powershell
+# ❌ WRONG — PowerShell treats {'ID':<5} as a script block → ParserError
+.\Scripts\python.exe -c "print(f'{'ID':<5} {'Active':<8}')"
+
+# ❌ WRONG — here-string (@"..."@) helps with outer quotes but still chokes
+# on nested braces like f-string format specs
+.\Scripts\python.exe -c @"
+print(f'{'ID':<5} {'Username':<20}')
+"@
+# Result: Unexpected token '}' in expression or statement
+```
+
+PowerShell errors like these are **not Python errors** — they never reach the Python interpreter at all. This makes them especially confusing to diagnose.
+
+#### The Solution Pattern
+
+```powershell
+# ✅ CORRECT — write to file, run file, delete file
+Set-Content _tmp.py -Encoding utf8 -Value @'
+from app import create_app
+from app.models import User
+
+app = create_app()
+with app.app_context():
+    users = User.query.order_by(User.id).all()
+    print(f"{'ID':<5} {'Username':<20} {'Active':<8} {'Admin':<7} {'Created'}")
+    print('-' * 70)
+    for u in users:
+        print(f"{u.id:<5} {u.username:<20} {str(u.is_active):<8} {str(u.is_admin):<7} {u.created_at.strftime('%Y-%m-%d %H:%M')}")
+'@
+.\Scripts\python.exe _tmp.py
+Remove-Item _tmp.py
+```
+
+Note the use of **single-quoted here-string** (`@'...'@`) — PowerShell does **zero** interpolation inside `@'...'@`, so all braces and quotes are passed verbatim to the file.
+
+#### When Each Form Is Safe
+
+| Python code complexity | Safe method |
+|---|---|
+| Simple string, no braces — `print("hello")` | `-c "..."` is fine |
+| Contains `{}` for `.format()` or f-strings | Write to `.py` file |
+| Contains nested quotes | Write to `.py` file |
+| Multi-line or imports Flask app context | Write to `.py` file |
+| Database inspection, schema migrations | Write to `.py` file |
+
+**Default to the file pattern for anything beyond trivial one-liners.** The cost is two extra commands; the benefit is zero mysterious parser errors.
+
+#### Naming Convention for Temp Files
+
+Use a leading underscore so the project's `.gitignore` (which excludes `_*.py` scratch files) keeps them out of version control:
+
+```powershell
+# ✅ Temp script names
+_tmp.py
+_migrate.py
+_patch_guide.py
+_inspect.py
+```
+
+Always `Remove-Item` the temp file immediately after use.
+
+#### Incident: April 8, 2026
+
+**What happened:** A database patch and an ADMIN_GUIDE.md update were both written as PowerShell `-c` one-liners. Both contained Python f-string format specs (`{'Active':<8}`) and nested quotes. Multiple `ParserError: Unexpected token '}'` failures were generated before switching to the file-based approach.
+
+**What should have happened:** Recognised immediately that any Python containing `{...}` format specs cannot be passed via `-c`. Written the script to `_tmp.py`, run it, deleted it — zero parser errors.
+
+**❌ Never:**
+- Pass Python f-string format specs (`{'field':<N}`) via `-c`
+- Pass multi-line Python with braces or nested quotes via `-c`
+- Retry a `-c` variant of the same broken command — switch to `.py` file on first `ParserError`
+- Leave temp `.py` files in the repo after use
+
+**✅ Always:**
+- Use `@'...'@` (single-quoted here-string) when writing Python to a temp file — prevents PowerShell interpolation
+- Delete temp files immediately with `Remove-Item`
+- Treat a PowerShell `ParserError` on a `-c` command as a signal to switch to the file pattern, not to escape/rewrite the one-liner
+
+---
+
+## 🧪 Testing Strategy Decision Matrix
+
+**Quick Guide: What Testing Do I Need?**
+
+| Change Type | Backend Tests | Manual UI Test | E2E Browser Tests | Time Investment |
+|-------------|--------------|----------------|-------------------|-----------------|
+| **Backend logic only** (API, core, data models) | ✅ Required | ❌ Not needed | ❌ Not needed | 5-15 min |
+| **UI only** (CSS, static HTML) | ⚠️ Run existing | ✅ Required | ❌ Not needed | 2-5 min |
+| **JavaScript/Forms** (interactions, validation) | ✅ Required | ✅ Required | ⚠️ Consider for complex | 10-20 min |
+| **Full-stack feature** (backend + frontend) | ✅ Required | ✅ Required | ⚠️ Consider for critical | 20-40 min |
+| **Bug fix** (any layer) | ✅ Add regression test | ✅ Required if UI | ❌ Usually not needed | 10-30 min |
+
+**Testing Type Definitions:**
+
+1. **Backend Tests (pytest, unittest)**
+   - **What:** Python tests that call functions/routes directly
+   - **Catches:** Logic errors, data flow issues, API contract violations
+   - **Misses:** JavaScript bugs, form behavior, browser rendering, user interactions
+   - **Speed:** Fast (seconds to minutes)
+   - **When:** Always for backend changes; run but don't add for pure UI changes
+
+2. **Manual UI Testing**
+   - **What:** Human clicking through the application in a browser
+   - **Catches:** Broken forms, JS errors, layout issues, confusing UX
+   - **Misses:** Race conditions, edge cases (manual testing is not exhaustive)
+   - **Speed:** Fast (2-5 minutes for smoke test)
+   - **When:** Required for ANY change that touches HTML/CSS/JavaScript
+
+3. **E2E Browser Tests (Selenium, Playwright)**
+   - **What:** Automated browser tests simulating user interactions
+   - **Catches:** UI bugs, JS errors, integration issues (automated coverage)
+   - **Misses:** Nothing significant (most comprehensive)
+   - **Speed:** Slow (minutes to hours for full suite)
+   - **When:** Complex UIs, multiple developers, customer-facing apps
+   - **Trade-off:** High maintenance cost vs. manual testing discipline
+
+**Decision Flowchart:**
+
+```
+Did I change backend code (Python)?
+├─ YES → Write/update backend tests ✅
+└─ NO → Run existing backend tests (smoke check) ⚠️
+
+Did I change frontend code (HTML/CSS/JS)?
+├─ YES → Manual UI test REQUIRED ✅
+│        └─ Is it complex/critical user flow?
+│           ├─ YES → Consider E2E tests 💭
+│           └─ NO → Manual test sufficient ✅
+└─ NO → Skip manual testing ❌
+
+Is this a customer-facing production app?
+├─ YES → Consider E2E test suite 💭
+└─ NO (Internal tool) → Manual testing sufficient ✅
+```
+
+**For Small Internal Tool Profile (Example):**
+- ✅ Backend tests required (fast, automated)
+- ✅ Manual UI testing required (2-5 min, catches most issues)
+- ❌ E2E browser tests skipped (overhead > benefit for small team)
+
+**When to Add E2E Tests:**
+- Team size > 5 developers making concurrent UI changes
+- Frequent customer escalations due to UI bugs
+- Critical financial/healthcare application (high risk)
+- Complex SPA with heavy JavaScript (React/Vue/Angular)
+
+**When to Skip E2E Tests:**
+- Small team (1-3 developers)
+- Internal tools with few users
+- Simple CRUD applications
+- Manual testing discipline working well
+- Limited time/budget for test maintenance
 
 ---
 
@@ -705,7 +1581,7 @@ For Integration Tests (ADDITIONAL - MANDATORY):
 ```
 
 **Integration Test Research is NON-NEGOTIABLE:**
-- Skipping this step leads to 37+ API mismatches (Sprint 4 Task 1 experience)
+- Skipping this step leads to API mismatches (see historical sprint example below)
 - 30 minutes research saves 2 hours debugging
 - Existing tests are your API documentation
 - Write the API reference comment block BEFORE writing tests
@@ -797,10 +1673,342 @@ def on_bar(self, market_data):
 
 ## 🎓 Learning from Errors
 
-### Week 4 Day 4 Lessons Learned (November 22, 2025)
+_Note: This section contains case studies and examples. Reuse the principles even when your stack, framework, and project domain differ._
+
+### Case Study (Web App): Frontend Testing Gap (February 16, 2026)
+
+#### Lesson: Backend Tests Can't Catch JavaScript Bugs
+**Context:** Web application incident - backend tests were passing, but users couldn't submit forms
+
+**The Incident:**
+- All 138 backend tests passing with 0 warnings ✓
+- Application deployed confidently based on test results
+- User reports: "Transcript text disappears when I click Generate MOM"
+- Form submissions never reaching server - no POST requests logged
+- Issue: JavaScript tab-switching code was **clearing form field values**
+
+**Root Cause:**
+```javascript
+// Bug in templates/index.html
+if (tabId === 'text-tab') {
+    transcriptField.disabled = false;
+    audioField.disabled = true;
+    audioField.value = '';  // OK
+} else {
+    transcriptField.disabled = true;
+    audioField.disabled = false;
+    transcriptField.value = '';  // ❌ BUG: Clears user input!
+}
+```
+
+**Why Tests Didn't Catch It:**
+- Backend tests use `client.post('/process', data={...})` directly
+- They **bypass** all HTML, JavaScript, and browser behavior
+- Tests never execute tab-switching JS code
+- Tests never interact with actual form elements
+- 100% backend test pass ≠ working user interface
+
+**The False Confidence:**
+```bash
+============================= 138 passed in 21.81s =============================
+```
+- Looked perfect ✓
+- All routes working ✓
+- All business logic correct ✓
+- **But users couldn't use the app** ❌
+
+**What We Should Have Done:**
+1. ✅ Run backend tests (we did this)
+2. ❌ **Manual smoke test** (we skipped this) → would have caught bug in 30 seconds
+3. ❌ **Check browser console** (we skipped this) → might have shown errors
+4. ❌ **Test critical flow** (we skipped this) → submit form, verify POST request
+
+**The 2-Minute Test That Would Have Saved Hours:**
+```markdown
+Manual Smoke Test (skipped):
+1. Open http://localhost:5000 in browser
+2. Paste transcript in text field
+3. Click "Generate MOM" button
+4. Expected: redirect to /edit page
+5. Actual: page refreshes, data gone
+→ Bug discovered in 30 seconds
+```
+
+**Cost of Skipping Manual Test:**
+- Time saved: 2 minutes
+- Time spent debugging: 45+ minutes  
+- User frustration: High
+- Damage to test credibility: "Tests passed but app is broken"
+
+**Lessons Learned:**
+1. **"100% backend tests pass" ≠ "application works"**
+   - Tests verify logic, not user experience
+   - JavaScript bugs invisible to Python tests
+   - Browser behavior not tested
+
+2. **Manual testing is NOT optional for UI changes**
+   - Takes 2-5 minutes
+   - Catches 90% of UI bugs immediately
+   - No excuses for skipping
+
+3. **Always check browser console (F12)**
+   - JavaScript errors show here
+   - Network tab shows failed requests
+   - Console logs show debugging info
+
+4. **Add manual testing to commit messages**
+   ```
+   Fix: Enable form submission workflow
+   
+   Backend Tests: 138/138 passed ✓
+   Manual Testing: ✓
+     - Form submission works
+     - POST request reaches server  
+     - Redirects to /edit successfully
+     - Browser console: 0 errors
+   ```
+
+5. **Consider where automated tests fall short**
+   - Backend tests → fast, reliable, miss UI bugs
+   - Manual testing → catches UI bugs, requires discipline
+   - E2E browser tests → comprehensive, but expensive
+
+**Action Items Implemented:**
+1. ✅ Added Principle 5 to Prime Directive: "Frontend/UI Testing - The Backend Test Blind Spot"
+2. ✅ Created manual testing checklist for UI changes
+3. ✅ Added enhanced logging (server + client) for debugging
+4. ✅ Fixed root cause: removed field value clearing in tab-switch code
+5. ✅ Documented in commit with manual testing verification
+
+**Key Quote:**
+> "It's not exactly reassuring that the initial set of tests still let this issue happen"  
+> — User feedback that exposed the testing blind spot
+
+**Prevention Strategy:**
+- Never deploy UI changes without manual smoke test
+- Add "Manual Testing: ✓" section to commit messages for UI work
+- Check browser console must be part of workflow
+- Accept that some testing requires human interaction
+
+**Long-term Consideration:**
+- For larger teams/complex UIs: Consider Selenium/Playwright E2E tests
+- For small projects/internal tools: Manual checklist + discipline is sufficient
+- Trade-off: E2E test maintenance time vs manual testing time (usually manual wins for small projects)
+
+---
+
+### Case Study (Web App): Premature Commit and Compounding Bugs (February 16, 2026)
+
+#### Lesson: "Fixed" Doesn't Mean Fixed - Three Bugs Masking Each Other
+**Context:** Web application incident - a committed "fix" didn't actually work and required extensive debugging to find THREE separate bugs
+
+**The Incident Timeline:**
+1. **First commit (0e64b72):** "Fix form submission bug" - claimed to remove field clearing
+2. **User test:** "Same problem persists" - form still not working
+3. **Debugging discovery:** THREE separate bugs were present:
+   - Bug #1: Disabled form fields (don't submit values)
+   - Bug #2: JavaScript syntax error (missing closing brace)
+   - Bug #3: if/elif logic bug in Python (audio field check always true)
+
+**The Premature Commit:**
+```bash
+# What I thought I fixed:
+- Removed transcriptField.value = '' and audioField.value = ''
+- Added extensive logging
+- Committed with confidence
+
+# What I actually missed:
+- Didn't test manually before committing
+- Assumed code changes were correct without verification
+- Trusted code review over actual execution
+```
+
+**The Three Compounding Bugs:**
+
+**Bug #1: Disabled Form Fields**
+```javascript
+// templates/index.html
+if (tabId === 'text-tab') {
+    transcriptField.disabled = false;
+    audioField.disabled = true;  // ❌ Disabled fields DON'T submit!
+}
+```
+**Issue:** HTML specification - disabled form fields are excluded from form submission
+**Hidden by:** Even if JavaScript worked, fields wouldn't submit
+**Fix:** Removed all disabled logic, let server decide which input to use
+
+**Bug #2: JavaScript Syntax Error**
+```javascript
+// templates/index.html - broken structure
+if (inputForm) {
+    inputForm.addEventListener('submit', function(e) {
+        // ... submission handler code ...
+        return true;
+    });
+// ❌ MISSING CLOSING BRACE for if (inputForm) block!
+</script>
+```
+**Error:** `Uncaught SyntaxError: Unexpected end of input (at (index):222)`
+**Impact:** 
+- Event handler never registered
+- JavaScript failed silently
+- Form did plain HTML submission (no validation, no logging)
+- All console.log statements never executed
+**Hidden by:** Bug #1 meant even if JS worked, form wouldn't submit values
+**Fix:** Added missing `}` closing brace
+
+**Bug #3: if/elif Logic Bug**
+```python
+# app.py - broken logic
+if 'audio_file' in request.files:  # ❌ ALWAYS TRUE (field exists even when empty)
+    audio_file = request.files['audio_file']
+    if audio_file and audio_file.filename:  # Only processes if file uploaded
+        transcript = transcribe_audio(...)
+# elif never runs because outer if is always true!
+elif 'transcript_text' in request.form:  # ❌ NEVER EXECUTES
+    transcript = request.form['transcript_text']
+```
+**Issue:** Form fields always exist in request, even when empty
+**Impact:**
+- Transcript branch never executed
+- `transcript` variable stayed `None`
+- Cleaned to empty string
+- Validation failed: "Transcript is empty"
+**Hidden by:** Bugs #1 and #2 prevented form from submitting properly to even see this
+**Fix:** Changed to check for actual file content: `if audio_file and audio_file.filename:`
+
+**Why All Three Bugs Were Present:**
+1. **First bug** (disabled fields) introduced when trying to "fix" clearing issue
+2. **Second bug** (syntax error) introduced while adding extensive logging
+3. **Third bug** (if/elif logic) was pre-existing but hidden by first two bugs
+4. **Each bug masked the others** - fixing one revealed the next
+
+**The Systematic Debugging Process That Found Them:**
+```markdown
+Step 1: Check browser console → Found syntax error (Bug #2)
+Step 2: Fix syntax error, test → Still doesn't work, no logs appearing
+Step 3: Check form submission → Fields have values, but not submitting  
+Step 4: Research disabled fields → Discovered they don't submit (Bug #1)
+Step 5: Remove disabled logic, test → Form submits but server gets empty transcript
+Step 6: Check server logs → Transcript arrives (230 chars) but becomes empty after cleaning
+Step 7: Trace Python logic → Found if/elif never reaching transcript branch (Bug #3)
+Step 8: Fix if/elif logic → SUCCESS!
+```
+
+**What Should Have Been Done (First Time):**
+```markdown
+Pre-Commit Checklist (FAILED):
+□ Backend tests passing (138/138) ✓ - Not sufficient!
+□ Manual smoke test - ❌ SKIPPED (would have caught all bugs)
+□ Browser console check - ❌ SKIPPED (would have found syntax error)
+□ Server logs during manual test - ❌ SKIPPED (would have found if/elif bug)
+□ Verified form submission end-to-end - ❌ SKIPPED
+```
+
+**Cost Analysis:**
+- Time to manual test before first commit: **2 minutes**
+- Time spent debugging after premature commit: **45+ minutes**
+- Additional commits needed: **2 (first one was wrong)**
+- Users affected: **1 (found issues immediately)**
+- **ROI of 2-minute manual test: 22.5x time savings**
+
+**Critical Insights:**
+
+1. **"Backend tests pass" ≠ "Code works"**
+   - 138/138 tests passed for ALL THREE buggy commits
+   - Tests validated logic, not execution
+   - No amount of unit tests catches these build-time issues
+
+2. **Multiple bugs compound exponentially**
+   - Bug #1 alone: 5 min to find
+   - Bug #2 alone: 2 min to find  
+   - Bug #3 alone: 10 min to find
+   - All three together: 45+ min (each hides the others)
+
+3. **Systematic debugging is essential when multiple bugs present**
+   - Start at the beginning (browser loads)
+   - Check each layer (JavaScript → HTML → Server → Logic)
+   - Fix one bug, re-test immediately
+   - Don't assume you found "the" bug (there might be more)
+
+4. **Never commit "fixes" without verification**
+   - Code that "should work" often doesn't
+   - Reading code ≠ executing code
+   - 2 minutes of testing > 45 minutes of debugging later
+
+5. **Syntax errors are silent killers**
+   - JavaScript syntax errors prevent ALL subsequent code from running
+   - Event handlers never register
+   - No error shown to user (just fails silently)
+   - Browser console is MANDATORY for any JS changes
+
+**Updated Pre-Commit Protocol (Post-Incident):**
+```markdown
+For ANY code change that affects user-facing features:
+
+1. Backend tests passing ✓
+2. **MANDATORY Manual Test:**
+   - Start application
+   - Exercise the changed feature end-to-end
+   - Check browser console (F12) for errors
+   - Check server logs for expected behavior
+   - Verify success/failure cases
+3. **Document manual testing in commit message:**
+   ```
+   Manual Testing: ✓
+     - Pasted transcript in form (228 chars)
+     - Clicked Generate MOM
+     - Form submitted successfully
+     - Server received transcript
+     - MOM generated and displayed
+     - Browser console: 0 errors
+   ```
+4. Only then commit and push
+
+Time investment: 2-5 minutes
+Time savings: 15-60+ minutes (per avoided bug)
+Confidence level: Actually fixed (not "should be fixed")
+```
+
+**The Hard Truth:**
+```
+Commit 0e64b72: "Fix form submission bug" 
+Actual status: Claimed fix, didn't test, pushed broken code
+User feedback: "Same problem persists"
+Reality: THREE bugs still present
+
+Commit ca0e67d: "Fix form submission bugs (ACTUAL fix)" 
+Actual status: Tested manually, verified working
+User feedback: "the previous errors were resolved"
+Reality: Actually fixed, user confirmed
+```
+
+**Key Quote:**
+> "appreciate the hard work. Can you please push to git?"  
+> — User request showing assumption that code was ready (but it wasn't until manual testing forced proper debugging)
+
+**Permanent Rule Additions:**
+1. **Never commit without manual verification of changed functionality**
+2. **"Should work" ≠ "Does work" - only execution proves correctness**
+3. **Browser console must be checked for ALL JavaScript changes**
+4. **Systematic debugging checklist for compounding bugs**
+5. **Document what you tested, not just what you changed**
+
+**Prevention Strategy:**
+- Make manual testing feel as important as backend tests (because it is)
+- Budget 2-5 minutes for manual verification into every code change
+- Use browser DevTools as religiously as pytest
+- Treat premature commits as failures requiring incident reports
+- Accept that some verification requires actual execution, not code review
+
+---
+
+### Historical Lessons (Legacy Project) - Day 4 (November 22, 2025)
+
+_Note: This section is retained as historical reference from a prior project. Apply the principles, not the project-specific module names._
 
 #### Lesson 1: Delete Systematically with Test Verification
-**Context:** Cleaning up duplicate backtesting modules and legacy scripts
+**Context:** Cleaning up duplicate modules and legacy scripts (legacy project example)
 - **What we did right:**
   1. Verified baseline: 138/138 tests passing
   2. Made one logical change (rename backtesting → backtesting_old)
@@ -838,13 +2046,13 @@ def on_bar(self, market_data):
   - `tests/test_backtesting.py` - tested deleted module
   
 - **Why delete instead of rewrite:** 
-  - Week 4 backtest/ module is superior and complete
+  - The retained canonical module was superior and complete
   - These were superseded, not complementary
   - Maintaining two implementations creates confusion
   - Can recreate if needed (git history preserved)
 
 #### Lesson 3: Module Consolidation
-**Context:** Had two backtesting directories causing import confusion
+**Context:** Had two overlapping directories causing import confusion
 - **Problem indicators:**
   - Developers confused about which to import
   - Duplicate functionality
@@ -1567,7 +2775,9 @@ Despite the inefficient approach, we achieved:
   
 - **Key insight:** "Warnings are errors waiting to happen - fix them immediately, don't defer to later"
 
-### Week 4 Day 3 Lessons Learned
+### Historical Lessons (Legacy Project) - Day 3
+
+_Note: This section is retained as historical reference from a prior project. The verification discipline applies broadly across projects._
 
 #### Error 1: TimeFrame.DAILY
 - **What happened:** Used `TimeFrame.DAILY` without checking enum
@@ -1693,6 +2903,79 @@ When deleting code:
 2. ✅ Search for all usages: `grep_search(query="module_name", isRegexp=True)`
 3. ✅ Analyze impact (is it in test suite? imported elsewhere?)
 4. ✅ Delete in logical groups (related files together)
+
+---
+
+### 9. **Periodic Test Coverage Audit - Prevent Silent Gaps**
+
+**CRITICAL:** New modules can accumulate without smoke tests if the Module → Smoke Test Hard Rule
+(Principle 1) is not enforced in every commit. This principle adds a **scheduled safety net**.
+
+**Audit Trigger:**
+Run a coverage audit at the **start of every 5th session** or after **any session that introduces
+three or more new modules** in a batch.
+
+**Audit Procedure (5 minutes max):**
+```powershell
+# Step 1: List all modules that require smoke tests
+Get-ChildItem app/routes/*.py, app/services/*.py | Where-Object { $_.Name -ne '__init__.py' } | Select-Object Name
+
+# Step 2: List existing smoke test files
+Get-ChildItem tests/smoke_*.py | Select-Object Name
+
+# Step 3: Identify gaps (module without matching smoke_<module>.py)
+# Any module in Step 1 with no matching file in Step 2 is a gap.
+# Gaps MUST be closed before new feature work begins.
+```
+
+**Audit Output Example:**
+```
+Modules requiring coverage:   auth, export, generate, tsc, ai_handler, excel_gen,
+                              mapper, tsc_service, validators
+Smoke tests present:          smoke_auth, smoke_export, smoke_generate, smoke_tsc,
+                              smoke_excel_gen, smoke_mapper, smoke_tsc_service,
+                              smoke_validators
+Gaps:                         ai_handler  <-- must create tests/smoke_ai_handler.py
+```
+
+**Rule: No new feature work until all audit gaps are closed.**
+
+**Gap Closure Protocol:**
+1. For each gap, create `tests/smoke_<module>.py` covering:
+   - All exported functions/classes
+   - Happy path for each function
+   - At least one error/edge case per function
+2. Run `tests/run_all_smoke.py` — must pass before proceeding
+3. Commit the new smoke tests with message: `test: add smoke tests to close coverage audit gaps`
+
+**Why a Scheduled Audit Is Needed (Root Cause):**
+During the March 2026 session, four modules (`auth`, `export`, `validators`, `mapper`) had
+been live without smoke tests across multiple sessions. The gap was only discovered when
+an explicit audit was triggered by a human question — not by any automated enforcement.
+The Module → Smoke Test Hard Rule prevents new gaps; this Principle prevents historic gaps
+from persisting indefinitely.
+
+**Session Log Integration:**
+Record the audit result in `session_log.md` as a checkpoint entry with type `audit`:
+```markdown
+## Audit Checkpoint
+- Type: audit
+- Modules checked: 9
+- Gaps found: 0 (or list gaps)
+- Gaps closed: n/a (or list files created)
+- KPI delta: Coverage gate now green
+```
+
+**❌ Never:**
+- Begin new feature implementation if an audit gap is known
+- Skip the audit because "we've been careful"
+- Close the audit by deleting the module instead of writing the test
+
+**✅ Always:**
+- Run the audit at the scheduled cadence (every 5th session)
+- Close all gaps before proceeding with new work
+- Record audit outcome in `session_log.md`
+- Run `tests/run_all_smoke.py` to confirm 0 failures after closing gaps
 5. ✅ Verify tests still pass after deletion
 6. ✅ Commit with detailed message explaining what and why
 7. ✅ Reference commit hash in documentation if significant
@@ -1737,8 +3020,8 @@ When deleting code:
 
 ### Internal Documentation
 - `README.md` - Project overview
-- `backtest/README.md` - Backtesting framework docs
-- `risk/README.md` - Risk management docs
+- `session_log.md` - Session-level compliance log and KPI checkpoints
+- `tests/` - Living examples of expected behavior and usage patterns
 - Test files - Living examples of correct usage
 
 ### When in Doubt
@@ -1789,122 +3072,421 @@ When deleting code:
 
 ---
 
-### Project Metrics (Sprint 4 Task 1 Complete)
+### Legacy Metrics Archive (Reference Only)
 
-### Current Test Suite Status
-- **Total Tests:** 562
-- **Pass Rate:** 100%
-- **Warning Count:** 0
-- **Last Verified:** 2025-11-25
-- **Test Coverage:** 45% overall, 95%+ in risk-critical modules
-- **Recent Additions:**
-  - Sprint 4 Task 1: 30 tests added (Nov 25) - E2E integration tests, full workflow validation
-  - Sprint 3: 174 tests added (Nov 24-25) - Config, orchestration, comparison, attribution, health monitoring
-  - Sprint 2: 162 tests added (Nov 22-24) - Risk, validation, metrics, promotion, dashboard
-  - Sprint 1: 132 tests added (Nov 20-22) - Lifecycle, paper trading, data pipeline, monitoring, integration
-  - Week 4: 64 baseline tests - Backtest engine, data, profiles, strategy templates
+The detailed sprint and module metrics below this directive were originally captured from a prior project phase and are retained as historical context only.
+
+For current project status and auditable checkpoints, use:
+- `session_log.md` for live KPI and test execution cadence
+- Local test output (`pytest`) for authoritative test and warning counts in this repository
+
+---
+
+## 📌 Summary: Key Takeaways
+
+### The Core Truth
+**"100% backend tests passing ≠ working application"**
+- Backend tests verify logic correctness
+- Manual testing verifies user experience
+- Both required for UI changes
+
+### The Five Principles (In Order)
+0. **Virtual Environment First** - Always verify before running commands
+1. **100% Test Pass + Zero Warnings** - Non-negotiable baseline
+2. **Verify First, Code Second** - Research existing code before changing
+3. **Defensive Programming** - Handle None, validate inputs, check bounds
+4. **Test Incrementally** - Build and verify in small steps
+5. **Manual UI Testing** - Required for any HTML/CSS/JS changes
+
+### The Critical Workflow
+
+**For Backend Changes:**
+```bash
+1. ✅ Verify venv active
+2. ✅ Run baseline tests
+3. 🔧 Make changes
+4. ✅ Run tests again
+5. ✅ All pass → Commit
+```
+
+**For UI Changes:**
+```bash
+1. ✅ Verify venv active
+2. ✅ Run baseline tests
+3. 🔧 Make changes (HTML/CSS/JS)
+4. ✅ Run backend tests
+5. 👁️ Manual smoke test (2-5 min)
+6. 👁️ Check browser console (F12)
+7. 👁️ Test critical flows
+8. ✅ All pass → Document manual testing → Commit
+```
+
+### The Most Common Mistakes
+1. ❌ Skipping manual testing for "small" UI changes
+2. ❌ Assuming backend tests catch UI bugs
+3. ❌ Not checking browser console for errors
+4. ❌ Deploying without actually clicking buttons
+5. ❌ Ignoring warnings ("they're just warnings")
+
+### The Cost of Shortcuts
+- Skip 2-minute manual test → Spend 45+ minutes debugging
+- Ignore warnings → Breaking changes in future versions
+- Assume without verifying → Hours fixing wrong implementation
+- Make multiple changes → Can't identify what broke
+
+### The Discipline That Pays Off
+- Manual testing every UI change → Catch 90% of bugs before deployment
+- Zero warnings policy → Clean, maintainable codebase  
+- Incremental testing → Fast debugging, clear git history
+- Research APIs first → 44% reduction in debugging time
+
+### Remember
+> "It's not exactly reassuring that the initial set of tests still let this issue happen"
+
+Tests are tools, not guarantees. The best test is actually using your application.
+
+---
+
+## 🌐 Hosted Deployment Addendum (New)
+
+### Why This Exists
+Cloud hosting introduces new failure modes that local tests cannot catch:
+- Dependency install failures (large ML packages, GPU/CUDA wheels)
+- Incompatible library versions in managed runtimes
+- Missing system binaries (ffmpeg, etc.)
+- Cold-start latency and model download behavior
+
+### Mandatory Hosted Checks
+
+1. **Verify dependency install logs** after any dependency change
+  - Look for failed installs, version conflicts, or large GPU wheel downloads
+  - If install fails, prefer lighter dependencies or explicit pins
+
+2. **Pin compatibility-sensitive libraries**
+  - If a library depends on a specific `transformers` API, pin it
+  - Document the reason in commit message or session log
+
+3. **Prefer lightweight fallbacks for hosted reliability**
+  - If ML dependencies break hosting, use a simpler fallback that keeps the app running
+  - You can move heavier ML to a separate hosted API later
+
+4. **System dependencies must be declared**
+  - For Streamlit Cloud, use `packages.txt` (e.g., `ffmpeg`)
+  - For other hosts, add platform-specific install docs
+
+### Hosted Smoke Test (Required)
+
+- Deploy and run a full end-to-end flow in the hosted environment
+- Verify:
+  - App starts without install errors
+  - Upload works
+  - Transcription returns
+  - Downloads succeed
+  - Any optional features (punctuation, timestamps) work or fall back cleanly
+
+---
+
+## ♻️ Stack Profile (Streamlit) - Optional
+
+Streamlit reruns the script on most UI interactions. This can retrigger expensive work unless you explicitly cache.
+
+**Mandatory rule for heavy work (transcription, conversion, model downloads):**
+- Use `st.session_state` to cache results keyed by input content
+- Use `st.cache_resource` for heavyweight model initialization
+- Never re-run transcription on download button clicks
+
+**Checklist for Streamlit apps:**
+- [ ] Expensive work is cached by input hash
+- [ ] Model initialization uses `st.cache_resource`
+- [ ] Download buttons do not re-trigger heavy computation
+
+---
+
+### Code Quality Standards (Target State)
+✅ No duplicate implementations for the same behavior
+✅ 100% test pass rate maintained before and after changes
+✅ Zero warnings maintained (all warnings investigated and resolved)
+✅ Clear git history with detailed commit messages
+✅ Zero breaking changes to existing user-critical workflows
+✅ TDD or immediate regression-test coverage for bug fixes and new logic
+
+---
+
+## 🔧 Git Best Practices - Tool Selection & Encoding
+
+### ⚠️ PowerShell Unicode Encoding Issues
+
+**The Problem:**
+PowerShell has known issues with Unicode character handling when used with shell redirection (`2>&1`).
+Commit messages with special characters (✓, ✗, →, •, etc.) cause:
+```
+git : To https://github.com/user/repo.git
+At line:XX char:YY
+    + CategoryInfo          : NotSpecified (To https://github.com/...):String) [], RemoteException
+    + FullyQualifiedNameId : NativeCommandError
+```
+
+**The Reality:**
+- The error is **cosmetic only** - the git command still succeeds
+- Commits are pushed successfully despite the error message
+- But the error message creates confusion and looks unprofessional
+
+---
+
+### ✅ Solution 1: Use ASCII-Only Commit Messages (Recommended for all projects)
+
+**Why this is the best approach:**
+- Works everywhere (PowerShell, Git Bash, macOS, Linux)
+- Professional appearance
+- No encoding issues ever
+- Commits are readable in all tools
+
+**Update to commit format (v7):**
+
+```markdown
+Pre-Commit Checklist - Updated Format:
+
+Commit Message Format:
+  <type>: <description>
   
-### Test Files by Sprint
-**Sprint 4 Task 1 (Day 11):**
-  - test_integration_e2e.py (30 tests) - Complete E2E integration validation
-
-**Sprint 3 (Days 8-10):**
-  - test_config_hot_reload.py (35 tests)
-  - test_multi_strategy_orchestration.py (35 tests)
-  - test_strategy_comparison.py (34 tests)
-  - test_performance_attribution.py (35 tests)
-  - test_health_monitor.py (35 tests)
-
-**Sprint 2 (Days 5-7):**
-  - test_risk_monitor.py (28 tests)
-  - test_metrics_tracker.py (34 tests)
-  - test_validation.py (35 tests)
-  - test_promotion.py (27 tests)
-  - test_validation_monitor.py (38 tests)
-
-**Sprint 1 (Days 1-4):**
-  - test_strategy_lifecycle.py (29 tests)
-  - test_paper_adapter.py (32 tests)
-  - test_realtime_pipeline.py (17 tests)
-  - test_paper_monitor.py (28 tests)
-  - test_paper_trading_integration.py (26 tests)
-
-**Week 4 Baseline:**
-  - test_backtest_engine.py (18 tests)
-  - test_backtest_data.py (18 tests)
-  - test_profiles.py (36 tests)
-  - test_profile_comparison.py (20 tests)
-  - test_strategy_templates.py (46 tests)
-
-### Sprint Completion History
-- **Sprint 4 Task 1 (2025-11-25):** E2E Integration Testing
-  - 30 tests added (comprehensive integration validation)
-  - ~916 lines of test code
-  - 100% test pass rate achieved (532→562)
-  - Zero warnings maintained
-  - Key lesson: API research before integration tests (documented in Lesson 1)
-  - Test progression: 0%→50%→70%→90%→97%→100% (5 correction rounds)
-  - 37+ API mismatches corrected systematically
-  - Commit: 11da7f4
-  - Key achievements: Complete lifecycle validation, multi-component coordination, error handling, data pipeline integrity
-
-- **Sprint 3 (2025-11-24 to 2025-11-25):** Strategy Development Pipeline
-  - 174 tests added (35+35+34+35+35)
-  - ~4,200 lines of code (2,600 production + 1,600 tests)
-  - 100% test pass rate maintained (393→428→463→497→532)
-  - Zero warnings maintained throughout
-  - Velocity: 87 tests/day (61% increase over Sprint 2)
-  - TDD approach: All tests passing immediately after implementation
-  - All 5 tasks completed on schedule
-  - Key achievements: Config hot-reload, multi-strategy orchestration, comparison dashboard, attribution system, health monitoring
-
-- **Sprint 2 (2025-11-22 to 2025-11-24):** Risk & Validation Framework
-  - 162 tests added (28+34+35+27+38)
-  - 3,667 lines of code (2,310 production + 1,357 tests)
-  - 100% test pass rate maintained (231→293→328→357→393)
-  - Zero warnings maintained throughout (fixed SQLAlchemy deprecation on Day 7)
-  - Velocity: 54 tests/day (64% increase over Sprint 1)
-  - All 5 tasks completed on schedule
+  <body with details>
   
-- **Sprint 1 (2025-11-20 to 2025-11-22):** Paper Trading Foundation
-  - 132 tests added (29+32+17+28+26)
-  - 100% test pass rate maintained (138→231)
-  - Velocity: 33 tests/day
-  - All 5 tasks completed on schedule
+  Backend Tests: X/X passed, 0 warnings [PASS]
+  Manual Testing: [PASS] (for UI changes only)
+    - [What you tested]
+    - [Results]
 
-### Cleanup History
-- **2025-11-22:** Deleted legacy backtesting module (8 files, 3,070 lines)
-  - Commit da9a714: Archive step (backtesting → backtesting_old)
-  - Commit 8206109: Deletion step (removed backtesting_old/)
-  - Tests maintained: 138/138 (100%) throughout all deletions
+Approved ASCII replacements:
+  [PASS]  == previously ✓
+  [FAIL]  == previously ✗
+  [OK]    == previously ✓
+  [DONE]  == previously ✓
+  [TODO]  == previously ?
+  [WAIT]  == previously ⏳
+  ->      == previously →
+  -       == previously •
+```
 
-### Code Quality Standards Achieved
-✅ Single authoritative backtest module (backtest/)  
-✅ No duplicate implementations  
-✅ 100% test pass rate maintained (532/532)  
-✅ Zero warnings maintained (all warnings investigated and resolved)  
-✅ Clear git history with detailed commit messages  
-✅ Zero breaking changes to production code  
-✅ High coverage in risk-critical modules (95%+)  
-✅ Comprehensive validation framework operational  
-✅ Multi-gate approval workflow enforced  
-✅ Complete audit trail for strategy promotion  
-✅ Multi-strategy orchestration system with attribution tracking  
-✅ Real-time health monitoring with statistical degradation detection  
-✅ Dynamic configuration hot-reload without restarts  
-✅ TDD approach with comprehensive test-first development
+**Example commits (updated format):**
+```bash
+# ✅ Good - ASCII only
+git commit -m "feat: implement PDF export module
+
+- Created core/pdf_export.py with export_mom_pdf() function
+- Uses reportlab for monospaced text rendering
+- Returns raw PDF bytes for Flask send_file() compatibility
+
+Backend Tests: 151/151 passed, 0 warnings [PASS]"
+
+
+# ❌ Avoid - Unicode characters
+git commit -m "feat: implement PDF export module ✓"
+```
+
+---
+
+### ✅ Solution 2: Use Git Bash (Recommended for development)
+
+**Why Git Bash is better for git operations:**
+- Native Unicode support (no encoding issues)
+- Standard shell syntax works everywhere
+- Part of Git for Windows installation
+- No configuration needed
+- More reliable than PowerShell for git
+
+**How to use Git Bash:**
+
+1. **Install Git for Windows** (if not already installed)
+   - Download: https://git-scm.com/download/win
+   - Installation includes Git Bash
+
+2. **Open Git Bash** instead of PowerShell for git operations
+   - Right-click in Explorer: "Git Bash Here"
+   - Or launch from Start Menu: "Git Bash"
+
+3. **Use standard bash commands:**
+   ```bash
+   cd "/c/Users/evanl/Documents/development workspace/clearmeet"
+   git add -A
+   git commit -m "feat: add PDF export [PASS]"
+   git push origin main
+   ```
+
+4. **No Unicode issues** - Git Bash handles all characters correctly
+
+**Comparison:**
+
+| Task | PowerShell | Git Bash |
+|------|-----------|----------|
+| ASCII commits | ✅ Works | ✅ Works |
+| Unicode commits | ❌ Errors shown | ✅ Works perfectly |
+| Standard shell syntax | ⚠️ Different | ✅ Standard |
+| Line continuation | Semicolon (;) | Backslash (\) |
+| Feel | Windows-specific | Universal |
+
+---
+
+### ✅ Solution 3: Configure PowerShell for UTF-8 (Advanced)
+
+If you must use PowerShell, add UTF-8 support to your profile:
+
+```powershell
+# Edit your PowerShell profile
+# Usually at: C:\Users\USERNAME\Documents\PowerShell\profile.ps1
+
+# Add these lines
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
+$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+$env:PYTHONIOENCODING = 'utf-8'
+```
+
+**Limitation:** Even with this, PowerShell's shell redirection (`2>&1`) can still cause issues. Better to avoid relying on this.
+
+---
+
+### 🎯 Project Profile Example (Windows): Git Bash as Team Standard
+
+**Effective immediately (February 19, 2026):**
+
+For teams that adopt this profile, Git Bash is the required git tool for development on Windows.
+
+**Why Git Bash is a strong team standard for Windows projects:**
+- ✅ **Zero cosmetic errors** - No confusing error messages during commits
+- ✅ **Professional appearance** - Clean git history without artifacts
+- ✅ **Universal compatibility** - Works across all operating systems and environments
+- ✅ **Culture of quality** - Demonstrates commitment to "no eyesores" philosophy
+- ✅ **Team consistency** - Everyone uses the same tool, same experience
+- ✅ **Future-proof** - Avoids PowerShell issues entirely, no workarounds needed
+- ✅ **Built into Git** - No additional setup beyond standard Git for Windows
+
+**This standard means:**
+- When performing git operations (add, commit, push, pull, etc.), use Git Bash
+- PowerShell remains useful for runtime and automation tasks
+- Git operations are standardized in Git Bash for consistency
+- This is a team commitment to quality, not an arbitrary restriction
+
+---
+
+### 📋 Setup Guide: Switching to Git Bash
+
+**For contributors using this profile:**
+
+1. **Verify Git for Windows is installed**
+   ```powershell
+   # In PowerShell, check git version
+   git --version
+   # Should show: git version 2.x.x.windows.1
+   ```
+
+2. **Locate Git Bash**
+   - **Option A:** Right-click in Windows Explorer → "Git Bash Here"
+   - **Option B:** Start Menu → Search "Git Bash" → Launch
+   - **Option C:** From any terminal: `"C:\Program Files\Git\bin\bash.exe"`
+
+3. **Set up Git Bash as your default for repo operations**
+   - Create desktop shortcut to Git Bash pointing to the project folder
+   - Or: Open Git Bash → `cd` to project folder → keep it open during development
+
+4. **Daily workflow (Updated):**
+
+   ```powershell
+   # PowerShell - Python/Flask operations
+   .\Scripts\Activate.ps1
+   python app.py
+   python -m pytest
+   ```
+
+   ```bash
+   # Git Bash - Git operations (NOT PowerShell)
+   cd /c/Users/evanl/Documents/development\ workspace/clearmeet
+   git add README.md
+   git commit -m "docs: update audio upload security [PASS]"
+   git push origin main
+   ```
+
+5. **Avoid PowerShell for git operations**
+   - ❌ PowerShell: `git commit -m "message" 2>&1` (may show cosmetic errors)
+   - ✅ Git Bash: Same command works perfectly
+
+---
+
+### 🎨 Why This Reflects Our Quality Culture
+
+**Values demonstrated by this standard:**
+- **Highest Quality:** No compromises on appearance or professionalism
+- **User Experience:** Clean output, no confusing error messages ("eyesores")
+- **Team Consistency:** Everyone operates the same way
+- **Preventive:** Avoid problems instead of working around them
+- **Documentation:** This is written down, not assumed knowledge
+
+**A single cosmetic error affects credibility:**
+- User sees error messages even though everything works
+- Creates doubt: "Is the commit really pushed?"
+- Undermines professional appearance
+- Prevents us from inculcating highest quality culture
+
+**This standard says:** "We care enough to eliminate cosmetic issues. Quality matters in every detail."
+
+---
+
+### ✅ Alternative: ASCII-Only Commit Messages (For teams that insist on PowerShell)
+
+If your team strongly prefers PowerShell and refuses Git Bash, **minimum requirement** is ASCII-only commit messages:
+
+```markdown
+Update to commit format (v7):
+
+Commit Message Format:
+  <type>: <description>
+  
+  <body with details>
+  
+  Backend Tests: X/X passed, 0 warnings [PASS]
+  Manual Testing: [PASS] (for UI changes only)
+
+Approved ASCII replacements ONLY:
+  [PASS]  == previously ✓
+  [FAIL]  == previously ✗
+  [OK]    == previously ✓
+  [DONE]  == previously ✓
+```
+
+**But note:** This approach still has the PowerShell redirection issue appear cosmetically.  
+**Git Bash approach is superior** - Choose that instead.
+
+---
+
+### Updating Prime Directive
+
+**Git profile requirements (if this profile is adopted):**
+- ✅ **PRIMARY:** Use Git Bash for all git operations on Windows
+- ✅ Use only ASCII characters in commit messages (no Unicode/emoji)
+- ✅ Use approved ASCII replacements: `[PASS]`, `[FAIL]`, `[OK]`, `[DONE]`
+- ✅ Document what was tested in commit message
+- ✅ Include test count: "Backend Tests: X/X passed, 0 warnings [PASS]"
+- ✅ For UI changes, include: "Manual Testing: [PASS]" with checklist items
+- ✅ Never commit code with failing tests or warnings
+
+**Document last updated:** 2026-02-19
 
 ---
 
 **Revision History:**
-- 2025-11-25 (v4): **Sprint 4 Task 1 Lesson** - Added critical "Research APIs Before Integration Tests" lesson from Sprint 4 Task 1 experience (37+ API mismatches), Enhanced Pre-Implementation Checklist with Integration Test Research Protocol (mandatory 6-step process), Updated Development Workflow Phase 1 to 15-30% with integration test research requirements, Documented time savings (44% reduction) from proper API research, Current metrics: 562 tests (30 new integration tests)
-- 2025-11-24 (v3): **Sprint 3 Complete** - Added 10 Sprint 3 lessons (dataclasses+enums, statistical analysis, TDD acceleration, comprehensive fixtures, human-readable reports, edge case testing, integration workflows, commit discipline, 100% pass rate, deque for sliding windows), Updated metrics to 532 tests, Documented 87 tests/day velocity (61% increase)
+- **2026-02-20 (v11): Cross-Project Portability Refactor** - Added explicit global scope statement; generalized hardcoded project path examples (`<project-folder>`); reframed ClearMeet-titled incidents as stack-agnostic case studies; generalized output-quality wording beyond MOM-specific content; converted Git Bash section into an optional Windows project profile; clarified that historical/case-study sections are examples to apply across projects
+- **2026-02-20 (v10): Context Cleanup Pass** - Updated virtual environment examples to use ClearMeet naming (`clearmeet` instead of `pp2-practice-bot`); refreshed internal documentation pointers (`session_log.md`, `tests/`); archived outdated non-ClearMeet sprint metrics into a legacy reference note; normalized "Code Quality Standards Achieved" into project-agnostic target-state criteria
+- **2026-02-20 (v9): Hosted Deployment Addendum + Streamlit Rerun Discipline** - Added hosted dependency checks, version pinning guidance, and system dependency declaration for cloud deployments; added Streamlit rerun caching discipline to prevent unintended reprocessing; required hosted smoke tests for end-to-end verification
+- **2026-02-19 (v8): Git Bash as Required Standard** - Upgraded Git Bash from "optional recommendation" to "REQUIRED team standard" (v7 was incomplete approach); Added "Why Git Bash is the standard for ClearMeet" section emphasizing quality culture alignment; Created detailed "Setup Guide: Switching to Git Bash" for team onboarding; Added "Why This Reflects Our Quality Culture" section explaining how this standard demonstrates commitment to highest quality; Established daily workflow division: PowerShell for Python/Flask operations, Git Bash exclusively for git operations; Made clear that cosmetic errors undermine professionalism and damage credibility; Updated all requirements to mandate Git Bash; Secondary fallback (ASCII-only messages) now clearly marked as "minimum if team refuses Git Bash" (not recommended); Rationale: Single cosmetic error affects entire credibility - preventing the issue is better than working around it; Philosophy: "We care enough to eliminate eyesores entirely"
+- **2026-02-19 (v7): Git Best Practices & ASCII Commit Messages** - Added comprehensive Git best practices section addressing PowerShell Unicode encoding issues; Established ASCII-only commit message standard to prevent encoding errors; Documented three solutions (ASCII messages, Git Bash, UTF-8 config); Updated commit message format to use [PASS]/[FAIL] instead of Unicode; Added tool comparison table and recommendations; Commits with special characters will no longer cause error messages
+- **2026-02-16 (v6): Audio Chunking for Large Files** - Implemented time-based audio chunking to handle files >20MB (up to 200MB); Used lazy import pattern for pydub to avoid Python 3.13 audioop compatibility issues when not chunking; Added Phase 1 progress UI (loading overlay with spinner) to inform users during long transcription operations; Updated validation to accept larger files (16MB → 200MB); Maintained backward compatibility for small files (<20MB) using single-file transcription; Design decision: Simple time-based chunking (Option B) over silence detection (Option A) for faster implementation and reliability; Testing approach: Verified existing tests still pass (17/19 audio tests), chunking tested with large file; Future enhancement: Real-time progress updates via SSE/WebSocket (Phase 2); Key lesson: Lazy imports can resolve dependency conflicts while maintaining functionality
+- **2026-02-16 (v5): ClearMeet Frontend Testing Gap** - Added Principle 5 "Frontend/UI Testing - The Backend Test Blind Spot" after 138/138 tests passed but form submission failed due to JavaScript bug; Added comprehensive lesson learned documenting incident where tab-switching code cleared form values; Added Quick Reference "Before Every Commit" checklist at document top; Added Testing Strategy Decision Matrix with clear guidance on when to use backend tests vs manual testing vs E2E tests; Enhanced Principle 1 Protocol to explicitly require manual testing for UI changes (steps 5-7); Added Summary section with key takeaways, common mistakes, cost analysis, and critical workflows; Updated last modified date to 2026-02-16; Total additions: ~150 lines of critical frontend testing guidance
+- 2025-11-25 (v4): **Sprint 4 Task 1 Lesson (Legacy Snapshot)** - Added critical "Research APIs Before Integration Tests" lesson from Sprint 4 Task 1 experience (37+ API mismatches), enhanced pre-implementation checklist with integration test research protocol, and documented time savings from API research
+- 2025-11-24 (v3): **Sprint 3 Complete (Legacy Snapshot)** - Added sprint lessons (dataclasses+enums, statistical analysis, TDD acceleration, fixtures, reporting, edge cases, integration workflows, commit discipline, pass-rate rigor)
 - 2025-11-24 (v2): **Zero Warnings Policy** - Updated Principle 0 to require zero warnings (not just zero failures), Added warning investigation requirement to all checklists and protocols, Fixed SQLAlchemy deprecation warning (declarative_base import), Documented warning resolution in Sprint 2 history
-- 2025-11-24 (v1): Added Sprint 2 lessons (multi-dimensional validation, two-layer risk management, database persistence, visual feedback, multi-gate approval, incremental testing, test quality focus, velocity compounding), Updated project metrics to 393 tests
-- 2025-11-22: Added Prime Directive Principle 0 (100% Test Pass Rate), Week 4 Day 4 lessons, Deletion Protocol, Project Metrics
-- 2025-11-21: Initial creation based on Week 4 Day 3 lessons learned
+- 2025-11-24 (v1): Added Sprint 2 lessons (legacy snapshot) including validation, risk management, persistence, and incremental testing guidance
+- 2025-11-22: Added Prime Directive Principle 0 (100% test pass requirement), historical Day 4 lessons, and deletion protocol
+- 2025-11-21: Initial creation with historical Day 3 lessons learned
 
-**Next Review:** After Sprint 4 completion (estimated 2025-11-28)
+**Next Review:** After next major incident or quarterly (next: May 2026)
 
 ---
 
