@@ -52,6 +52,9 @@ class ServiceManager:
         self._connection_env: Optional[str] = None  # "paper" | "live"
         self._connection_info: Dict[str, Any] = {}
 
+        # TWS bridge (actual IB API connection)
+        self._tws_bridge: Any = None
+
         # Lazy-initialised services (None ⇒ not started yet)
         self._risk_manager: Any = None
         self._strategy_registry: Any = None
@@ -112,6 +115,45 @@ class ServiceManager:
             data={},
             source="ServiceManager",
         ))
+
+    # ------------------------------------------------------------------
+    # TWS bridge helpers (actual IB Gateway connection)
+    # ------------------------------------------------------------------
+
+    def connect_tws(self, env: str, config: Dict[str, Any],
+                    timeout: int = 10) -> bool:
+        """Open a real TWS socket and subscribe to account updates.
+
+        Returns ``True`` if the connection was established within *timeout*.
+        On success the service-manager is also marked as *connected*.
+        """
+        from core.tws_bridge import TWSBridge
+
+        bridge = TWSBridge(self, config)
+        if not bridge.connect(timeout=timeout):
+            return False
+
+        with self._lock:
+            self._tws_bridge = bridge
+        self.set_connected(env, {
+            "host": config["host"],
+            "port": config["port"],
+            "client_id": config["client_id"],
+            "account": config.get("account", ""),
+        })
+        return True
+
+    def disconnect_tws(self) -> None:
+        """Tear down the TWS bridge and clear cached account data."""
+        with self._lock:
+            bridge = self._tws_bridge
+            self._tws_bridge = None
+            # Clear stale account / position caches
+            self._positions.clear()
+            self._account_summary.clear()
+        if bridge is not None:
+            bridge.disconnect()
+        self.set_disconnected()
 
     # ------------------------------------------------------------------
     # Lazy service accessors
