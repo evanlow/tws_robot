@@ -279,3 +279,42 @@ class PerformanceMetric(Base):
     def __repr__(self):
         return (f"<PerformanceMetric(date={self.date.date()}, "
                 f"pnl=${self.daily_pnl:.2f})>")
+
+
+class AccountSnapshot(Base):
+    """
+    Periodic account equity snapshots for tracking real peak equity,
+    drawdown, and historical account performance.
+    """
+    __tablename__ = 'account_snapshots'
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    equity = Column(Float, nullable=False)
+    cash_balance = Column(Float, nullable=True)
+    buying_power = Column(Float, nullable=True)
+    unrealized_pnl = Column(Float, nullable=True)
+    realized_pnl = Column(Float, nullable=True)
+    daily_pnl = Column(Float, nullable=True)
+    num_positions = Column(Integer, nullable=True)
+    environment = Column(String(20), nullable=True)  # "paper" or "live"
+
+    def __repr__(self):
+        return (f"<AccountSnapshot(time={self.timestamp}, "
+                f"equity=${self.equity:,.2f})>")
+
+
+class UserPreference(Base):
+    """
+    Key-value store for persistent user preferences and account settings
+    (e.g. initial capital, display options, strategy parameters).
+    """
+    __tablename__ = 'user_preferences'
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(100), nullable=False, unique=True, index=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self):
+        return f"<UserPreference(key={self.key}, value={self.value!r})>"

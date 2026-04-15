@@ -76,6 +76,10 @@ class ServiceManager:
         self._start_time = datetime.now()
         self._backtest_runs: Dict[str, Dict[str, Any]] = {}
 
+        # Account snapshot throttle (at most one save per 60 s)
+        self._last_snapshot_time: Optional[datetime] = None
+        self._snapshot_interval_seconds = 60
+
         logger.info("ServiceManager initialised")
 
     # ------------------------------------------------------------------
@@ -194,6 +198,9 @@ class ServiceManager:
     def update_account_summary(self, data: Dict[str, Any]) -> None:
         with self._lock:
             self._account_summary.update(data)
+        # Persist a snapshot (throttled) when equity arrives
+        if "equity" in data:
+            self._maybe_save_snapshot()
 
     def get_account_summary(self) -> Dict[str, Any]:
         with self._lock:
@@ -338,6 +345,89 @@ class ServiceManager:
             "sse_clients": len(self._sse_queues),
             "timestamp": datetime.now().isoformat(),
         }
+
+    # ------------------------------------------------------------------
+    # Persistent account snapshots (SQLite)
+    # ------------------------------------------------------------------
+
+    def _maybe_save_snapshot(self) -> None:
+        """Save an account snapshot to SQLite (throttled to once per minute)."""
+        now = datetime.now()
+        if (self._last_snapshot_time is not None
+                and (now - self._last_snapshot_time).total_seconds()
+                < self._snapshot_interval_seconds):
+            return
+        self._last_snapshot_time = now
+
+        try:
+            from data.database import get_database
+            from data.models import AccountSnapshot
+
+            db = get_database()
+            db.create_tables()
+
+            account = self.get_account_summary()
+            equity = account.get("equity", 0)
+            if equity <= 0:
+                return
+
+            total_unrealized_pnl = sum(
+                pos.get("unrealized_pnl", 0)
+                for pos in self._positions.values()
+            )
+            rm = self.risk_manager
+            daily_pnl = rm.current_equity - rm.daily_start_equity
+
+            snapshot = AccountSnapshot(
+                timestamp=now,
+                equity=equity,
+                cash_balance=account.get("cash_balance"),
+                buying_power=account.get("buying_power"),
+                unrealized_pnl=total_unrealized_pnl,
+                daily_pnl=daily_pnl,
+                num_positions=len(self._positions),
+                environment=self._connection_env,
+            )
+            with db.session_scope() as session:
+                session.add(snapshot)
+            logger.debug("Account snapshot saved (equity=$%.2f)", equity)
+        except Exception:
+            logger.debug("Could not persist account snapshot", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Persistent user preferences (SQLite key-value store)
+    # ------------------------------------------------------------------
+
+    def get_preference(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Read a user preference from the SQLite store."""
+        try:
+            from data.database import get_database
+            from data.models import UserPreference
+
+            db = get_database()
+            db.create_tables()
+            with db.session_scope() as session:
+                pref = session.query(UserPreference).filter_by(key=key).first()
+                return pref.value if pref else default
+        except Exception:
+            return default
+
+    def set_preference(self, key: str, value: str) -> None:
+        """Write a user preference to the SQLite store."""
+        try:
+            from data.database import get_database
+            from data.models import UserPreference
+
+            db = get_database()
+            db.create_tables()
+            with db.session_scope() as session:
+                pref = session.query(UserPreference).filter_by(key=key).first()
+                if pref:
+                    pref.value = value
+                else:
+                    session.add(UserPreference(key=key, value=value))
+        except Exception:
+            logger.debug("Could not save preference %s", key, exc_info=True)
 
 
 def get_services() -> ServiceManager:
