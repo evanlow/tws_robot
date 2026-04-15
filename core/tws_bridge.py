@@ -119,6 +119,7 @@ class _BridgeApp(EWrapper, EClient):
                 "unrealized_pnl_pct": pnl_pct,
                 "realized_pnl": realizedPNL,
                 "side": "LONG" if pos_float > 0 else "SHORT",
+                "sec_type": contract.secType or "",
             })
 
         self._svc.event_bus.publish(Event(

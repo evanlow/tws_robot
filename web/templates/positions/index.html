@@ -45,9 +45,13 @@
         <td class="{{ 'pnl-positive' if (pos.unrealized_pnl|default(0)) >= 0 else 'pnl-negative' }}">
           ${{ "%.2f"|format(pos.unrealized_pnl|default(0)) }}
         </td>
+        {% if pos.side|default('LONG') == 'SHORT' and pos.sec_type|default('') == 'OPT' %}
+        <td>—</td>
+        {% else %}
         <td class="{{ 'pnl-positive' if (pos.unrealized_pnl_pct|default(0)) >= 0 else 'pnl-negative' }}">
           {{ "%.2f"|format((pos.unrealized_pnl_pct|default(0)) * 100) }}%
         </td>
+        {% endif %}
         <td>
           <button class="btn-sm btn-danger" onclick="closePosition('{{ symbol }}')">Close</button>
         </td>

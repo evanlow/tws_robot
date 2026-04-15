@@ -54,6 +54,7 @@ def positions():
             "unrealized_pnl": pos.get("unrealized_pnl", 0),
             "unrealized_pnl_pct": pos.get("unrealized_pnl_pct", 0),
             "side": pos.get("side", "LONG"),
+            "sec_type": pos.get("sec_type", ""),
         })
 
     return jsonify({"positions": positions_list, "count": len(positions_list)})
