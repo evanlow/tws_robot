@@ -32,7 +32,12 @@ def create_app(config_override: dict | None = None) -> "Flask":
     if config_override:
         app.config.update(config_override)
 
-    # Register blueprints (one per menu section)
+    # Singleton service manager — shared across all routes
+    from web.services import ServiceManager
+    if "services" not in app.config:
+        app.config["services"] = ServiceManager()
+
+    # ---- Page blueprints (server-rendered HTML) ----
     from web.routes.dashboard import bp as dashboard_bp
     from web.routes.strategies import bp as strategies_bp
     from web.routes.backtest import bp as backtest_bp
@@ -52,5 +57,26 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(settings_bp)
     app.register_blueprint(ai_chat_bp)
     app.register_blueprint(ai_strategy_bp)
+
+    # ---- JSON API blueprints ----
+    from web.routes.api_connection import bp as api_connection_bp
+    from web.routes.api_account import bp as api_account_bp
+    from web.routes.api_emergency import bp as api_emergency_bp
+    from web.routes.api_strategies import bp as api_strategies_bp
+    from web.routes.api_orders import bp as api_orders_bp
+    from web.routes.api_events import bp as api_events_bp
+    from web.routes.api_system import bp as api_system_bp
+    from web.routes.api_backtest import bp as api_backtest_bp
+    from web.routes.api_data import bp as api_data_bp
+
+    app.register_blueprint(api_connection_bp)
+    app.register_blueprint(api_account_bp)
+    app.register_blueprint(api_emergency_bp)
+    app.register_blueprint(api_strategies_bp)
+    app.register_blueprint(api_orders_bp)
+    app.register_blueprint(api_events_bp)
+    app.register_blueprint(api_system_bp)
+    app.register_blueprint(api_backtest_bp)
+    app.register_blueprint(api_data_bp)
 
     return app
