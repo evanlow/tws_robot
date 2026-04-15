@@ -584,7 +584,7 @@ Return Std Dev: 0.08 (Low variability - similar performance)
 ### Need Help?
 
 - 🌐 **Use the Dashboard:** Most tasks can be done from the web UI at http://127.0.0.1:5000
-- 📖 **Read the Docs:** Full technical docs in `docs/` folder
+- 📖 **Read the Docs:** Explore the other guides in this directory
 - 🐛 **Found a Bug?** Open an issue on GitHub
 - 💡 **Have an Idea?** We love suggestions!
 
