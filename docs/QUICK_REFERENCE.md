@@ -4,7 +4,32 @@
 
 ---
 
-## 🚀 Quick Commands
+## 🌐 Web Dashboard (Easiest Way)
+
+```bash
+# Start the web dashboard (then open http://127.0.0.1:5000)
+python scripts/run_web.py
+
+# With custom host/port
+python scripts/run_web.py --host 0.0.0.0 --port 8080 --debug
+```
+
+**Dashboard Pages:**
+| Page | What You Can Do |
+|------|----------------|
+| **Dashboard** | View connection status, equity, P&L, active strategies, alerts |
+| **Strategies** | Create, start, stop, and monitor strategies |
+| **Backtest** | Run backtests and review results |
+| **Positions** | View open positions and trade history |
+| **Risk** | Monitor risk levels and circuit breaker status |
+| **Logs** | Browse application logs in real time |
+| **Settings** | Configure TWS connection and parameters |
+
+> 🚨 **Emergency Stop** is always visible in the top status bar — one click halts all trading.
+
+---
+
+## 🚀 Quick Commands (Terminal)
 
 ### Getting Started
 ```bash
@@ -12,37 +37,40 @@
 .\venv\Scripts\Activate.ps1  # Windows PowerShell
 source venv/bin/activate      # Mac/Linux
 
-# Your first backtest
-python quick_start.py
+# Launch the web dashboard
+python scripts/run_web.py
+
+# Your first backtest (terminal)
+python scripts/quick_start.py
 
 # Find a strategy for your stock
-python strategy_selector.py
+python scripts/strategy_selector.py
 ```
 
 ### Testing Strategies
 ```bash
 # Compare all strategies
-python example_strategy_templates.py
+python examples/example_strategy_templates.py
 
 # Compare risk profiles (Conservative vs. Aggressive)
-python example_profile_comparison.py
+python examples/example_profile_comparison.py
 
 # Full backtest with analytics
-python example_backtest_complete.py
+python examples/example_backtest_complete.py
 ```
 
 ### Trading
 ```bash
 # Check your IBKR account status
-python check_account.py          # Paper account (default)
-python check_account.py paper    # Paper account
-python check_account.py live     # Live account
+python scripts/check_account.py          # Paper account (default)
+python scripts/check_account.py paper    # Paper account
+python scripts/check_account.py live     # Live account
 
 # Paper trading (ALWAYS start here!)
 python tws_client.py --env paper --timeout 30
 
 # Check market status
-python market_status.py
+python scripts/market_status.py
 
 # Live trading (BE CAREFUL!)
 python tws_client.py --env live --timeout 60
@@ -199,7 +227,7 @@ python tws_client.py --show-config  # Verify settings
 ### "No historical data"
 ```bash
 # Download sample data
-python download_real_data.py
+python scripts/download_real_data.py
 
 # Or check data/ folder exists
 ls data/historical/
@@ -234,14 +262,15 @@ pip install -r requirements.txt
 
 | Need to... | Read this... |
 |------------|-------------|
+| Use the web dashboard | Launch `python scripts/run_web.py` → http://127.0.0.1:5000 |
 | Understand strategies | [USER_GUIDE.md](USER_GUIDE.md) - Strategy section |
 | **API documentation** | **[API_REFERENCE.md](API_REFERENCE.md) - Developer API** |
 | Learn risk management | [USER_GUIDE.md](USER_GUIDE.md) - Risk section |
 | Set up TWS connection | [README.md](README.md) - Installation section |
-| Add a new strategy | [docs/runbooks/adding-new-strategy.md](docs/runbooks/adding-new-strategy.md) |
-| Debug issues | [docs/runbooks/debugging-strategies.md](docs/runbooks/debugging-strategies.md) |
-| Emergency procedures | [docs/runbooks/emergency-procedures.md](docs/runbooks/emergency-procedures.md) |
-| System architecture | [docs/architecture/overview.md](docs/architecture/overview.md) |
+| Add a new strategy | [runbooks/adding-new-strategy.md](runbooks/adding-new-strategy.md) |
+| Debug issues | [runbooks/debugging-strategies.md](runbooks/debugging-strategies.md) |
+| Emergency procedures | [runbooks/emergency-procedures.md](runbooks/emergency-procedures.md) |
+| System architecture | [architecture/overview.md](architecture/overview.md) |
 
 ---
 
@@ -277,10 +306,12 @@ pip install -r requirements.txt
 
 ### Stop Everything NOW
 ```bash
-# In Python/terminal: Ctrl+C (immediately stops)
+# From the web dashboard: Click the 🚨 EMERGENCY STOP button in the top bar
+
+# From the terminal: Ctrl+C (immediately stops)
 
 # Or if that doesn't work:
-# Windows: Close TWS/IB Gateway
+# Windows/Mac: Close TWS/IB Gateway
 # This disconnects all API clients
 ```
 

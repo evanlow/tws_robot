@@ -1,13 +1,13 @@
 # Your First 30 Minutes with TWS Robot
 
-**Goal:** Go from zero to running your first profitable backtest in 30 minutes.
+**Goal:** Go from zero to exploring the web dashboard and running your first backtest in 30 minutes.
 
 ---
 
 ## ⏱️ Time Budget
 
 - **Minutes 0-5:** Installation
-- **Minutes 5-10:** Understand what you have
+- **Minutes 5-10:** Launch the web dashboard and explore
 - **Minutes 10-15:** Choose your strategy
 - **Minutes 15-25:** Run your first backtest
 - **Minutes 25-30:** Understand your results
@@ -45,7 +45,24 @@ pip install -r requirements.txt
 
 ---
 
-## Minutes 5-10: Understand What You Have
+## Minutes 5-10: Launch the Web Dashboard
+
+### Start the Dashboard
+
+```bash
+python scripts/run_web.py
+```
+
+Open your browser to **http://127.0.0.1:5000**. You'll see the TWS Robot dashboard!
+
+### What You'll See
+
+The web dashboard gives you a bird's-eye view of everything:
+- **Top Status Bar** — Connection status, equity, daily P&L, risk level, and an **Emergency Stop** button
+- **Navigation Menu** — Dashboard, Strategies, Backtest, Positions, Risk, Logs, Settings
+- **Dashboard Page** — Active strategies, portfolio overview, recent trades, and alerts
+
+> 💡 **Don't worry** if it shows "Disconnected" — you don't need TWS connected for backtesting!
 
 ### TWS Robot Has 2 Modes
 
@@ -80,7 +97,7 @@ pip install -r requirements.txt
 
 ```bash
 # Interactive strategy selector
-python strategy_selector.py
+python scripts/strategy_selector.py
 ```
 
 **You'll answer:**
@@ -95,7 +112,7 @@ python strategy_selector.py
 If you want to jump straight in:
 ```bash
 # Test Moving Average on AAPL
-python quick_start.py
+python scripts/quick_start.py
 ```
 
 This tests a Moving Average strategy on AAPL from 2022-2023.
@@ -233,16 +250,16 @@ The strategy:
 
 **1. Test on Different Stocks**
 ```bash
-# Edit quick_start.py to change symbol
+# Edit scripts/quick_start.py to change symbol
 # Change 'AAPL' to 'MSFT', 'GOOGL', etc.
-python quick_start.py
+python scripts/quick_start.py
 ```
 
 **Does the strategy work on multiple stocks?** If yes, that's more confidence!
 
 **2. Test Different Time Periods**
 ```bash
-# Edit dates in quick_start.py
+# Edit dates in scripts/quick_start.py
 # Try 2021, 2020, bull market vs bear market
 ```
 
@@ -251,7 +268,7 @@ python quick_start.py
 **3. Compare Strategies**
 ```bash
 # Test all 3 strategies side-by-side
-python example_strategy_templates.py
+python examples/example_strategy_templates.py
 ```
 
 **Which strategy works best for your stock?**
@@ -268,7 +285,7 @@ python example_strategy_templates.py
 
 **If results are consistently good:**
 - Learn about risk profiles (Conservative/Moderate/Aggressive)
-- Run `python example_profile_comparison.py`
+- Run `python examples/example_profile_comparison.py`
 - Choose risk level that matches your comfort
 
 **Read:** [EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md) for all example scripts
@@ -335,7 +352,7 @@ pip install -r requirements.txt
 ### "No data available"
 ```bash
 # Download historical data
-python download_real_data.py AAPL MSFT GOOGL
+python scripts/download_real_data.py AAPL MSFT GOOGL
 ```
 
 ### "Script hangs or runs forever"
@@ -346,7 +363,7 @@ python download_real_data.py AAPL MSFT GOOGL
 ### Still stuck?
 1. Read error message carefully (usually tells you what's wrong)
 2. Check [QUICK_REFERENCE.md](QUICK_REFERENCE.md) troubleshooting section
-3. See [Debugging Guide](docs/runbooks/debugging-strategies.md)
+3. See [Debugging Guide](runbooks/debugging-strategies.md)
 
 ---
 
@@ -365,7 +382,7 @@ python download_real_data.py AAPL MSFT GOOGL
 
 **For developers:**
 - [API_REFERENCE.md](API_REFERENCE.md) - Build custom strategies
-- [docs/architecture/](docs/architecture/) - System design
+- [Architecture Docs](architecture/) - System design
 
 ---
 
@@ -408,4 +425,4 @@ python download_real_data.py AAPL MSFT GOOGL
 
 **Next:** [USER_GUIDE.md](USER_GUIDE.md) to learn strategy details  
 **Help:** [QUICK_REFERENCE.md](QUICK_REFERENCE.md) for quick commands  
-**Questions:** Check [docs/runbooks/debugging-strategies.md](docs/runbooks/debugging-strategies.md)
+**Questions:** Check [Debugging Guide](runbooks/debugging-strategies.md)

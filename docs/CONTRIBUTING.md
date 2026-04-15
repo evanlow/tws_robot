@@ -60,7 +60,7 @@ pytest tests/ -v
 
 ## 📜 Prime Directive - Our Development Philosophy
 
-**READ THIS FIRST:** [prime_directive.md](prime_directive.md)
+**READ THIS FIRST:** [prime_directive.md](../prime_directive.md)
 
 **TL;DR:**
 - ✅ **100% test pass rate** - No exceptions
@@ -80,8 +80,8 @@ pytest tests/ -v
 
 ### Before You Start
 
-1. **Read the Prime Directive:** [prime_directive.md](prime_directive.md)
-2. **Understand the architecture:** [docs/architecture/overview.md](docs/architecture/overview.md)
+1. **Read the Prime Directive:** [prime_directive.md](../prime_directive.md)
+2. **Understand the architecture:** [docs/architecture/overview.md](architecture/overview.md)
 3. **Check existing issues:** Someone might already be working on it
 
 ### Making Changes
@@ -358,18 +358,52 @@ Why is this change needed?
 
 ```
 tws_robot/
-├── backtest/      # Historical testing engine
-├── strategies/    # Live trading strategies
+├── web/          # Flask web UI (dashboard)
+├── backtest/     # Historical testing engine
+├── strategies/   # Live trading strategies
 ├── risk/         # Risk management
 ├── core/         # Infrastructure (EventBus, etc.)
 ├── execution/    # Order execution
-└── monitoring/   # Performance tracking
+├── monitoring/   # Performance tracking
+├── scripts/      # CLI utilities
+└── examples/     # Example scripts
 ```
 
 **Add new features in the right place:**
 - New strategy? → `backtest/strategy_templates.py` (backtest) or `strategies/` (live)
 - Risk control? → `risk/`
 - Core infrastructure? → `core/`
+- New web page? → `web/routes/` (Blueprint) + `web/templates/` (HTML)
+
+### Web UI Development
+
+TWS Robot uses **Flask** with server-rendered **Jinja2 templates**:
+
+```
+web/
+├── __init__.py          # Application factory (create_app)
+├── services.py          # ServiceManager singleton
+├── routes/              # One Blueprint per page section
+│   ├── dashboard.py     # GET / — main dashboard
+│   ├── strategies.py    # Strategy management page
+│   ├── backtest.py      # Backtest page
+│   ├── positions.py     # Positions page
+│   ├── risk.py          # Risk monitoring page
+│   ├── logs.py          # Logs viewer
+│   ├── settings.py      # Settings page
+│   ├── api_*.py         # JSON API endpoints
+│   └── ...
+├── templates/           # Jinja2 HTML templates
+│   ├── base.html        # Layout with nav + status bar
+│   └── ...
+└── static/              # CSS and JavaScript assets
+```
+
+**To add a new page:**
+1. Create a new Blueprint in `web/routes/your_page.py`
+2. Create HTML template(s) in `web/templates/your_page/`
+3. Register the Blueprint in `web/__init__.py`
+4. Add navigation link in `web/templates/base.html`
 
 ---
 
@@ -428,8 +462,8 @@ Contributors will be:
 
 ## ❓ Questions?
 
-- Check [docs/](docs/) folder for architecture details
-- Read [prime_directive.md](prime_directive.md) for development philosophy
+- Check [docs/](.) folder for architecture details
+- Read [prime_directive.md](../prime_directive.md) for development philosophy
 - Open an issue for clarification
 - Join discussions in GitHub Discussions
 

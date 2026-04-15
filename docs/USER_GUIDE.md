@@ -16,7 +16,7 @@
 - [API Reference](API_REFERENCE.md) - Developer documentation
 - [Contributing](CONTRIBUTING.md) - How to contribute
 - [Technical Specs](TECHNICAL_SPECS.md) - Architecture for developers
-- [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting help
+- [Debugging Guide](runbooks/debugging-strategies.md) - Troubleshooting help
 
 ---
 
@@ -33,6 +33,7 @@ TWS Robot is your **automated trading assistant** that connects to your Interact
 - You want to test strategies before risking real money
 
 **The Solution - TWS Robot:**
+- ✅ **Web dashboard** to manage everything from your browser — no terminal needed
 - ✅ **Tests your strategy** on historical data to see if it would have worked
 - ✅ **Executes trades automatically** based on your rules
 - ✅ **Manages risk** so you don't blow up your account
@@ -41,9 +42,44 @@ TWS Robot is your **automated trading assistant** that connects to your Interact
 
 ---
 
+## 🌐 Using the Web Dashboard (Recommended)
+
+The **easiest way** to use TWS Robot is through the built-in web dashboard. No terminal experience needed beyond the initial setup.
+
+### Launching the Dashboard
+
+```bash
+# From the project directory (with your virtual environment activated)
+python scripts/run_web.py
+```
+
+Then open your browser to **http://127.0.0.1:5000**.
+
+### What You'll See
+
+The dashboard has several pages accessible from the navigation bar:
+
+| Page | What It Does |
+|------|-------------|
+| **Dashboard** | Overview of your connection status, equity, P&L, active strategies, and recent alerts |
+| **Strategies** | Create, start, stop, and monitor your trading strategies |
+| **Backtest** | Run backtests on historical data and review results |
+| **Positions** | View your current open positions and trade history |
+| **Risk** | Monitor risk levels, drawdown, and circuit breaker status |
+| **Logs** | Browse application logs in real time |
+| **Settings** | Configure TWS connection details and trading parameters |
+
+### Key Features
+
+- 🚨 **Emergency Stop Button** — always visible in the top status bar; one click halts all trading
+- 📊 **Real-time Status Bar** — shows connection status, equity, daily P&L, and risk level
+- 🤖 **AI Strategy Assistant** — get AI-powered help creating and refining strategies
+
+---
+
 ## 🚀 Your First 30 Minutes with TWS Robot
 
-### Goal: Run your first backtest and see if a strategy would have made money
+### Goal: Launch the dashboard and run your first backtest
 
 **Step 1: Install (5 minutes)**
 ```bash
@@ -52,17 +88,28 @@ git clone https://github.com/evanlow/tws_robot.git
 cd tws_robot
 
 # Set up Python environment
-python -m venv .
-.\Scripts\Activate.ps1  # Windows
+python -m venv venv
+.\venv\Scripts\Activate.ps1  # Windows
+source venv/bin/activate       # Mac/Linux
 pip install -r requirements.txt
 ```
 
-**Step 2: Test a Strategy on Historical Data (10 minutes)**
+**Step 2: Launch the Web Dashboard (2 minutes)**
+
+```bash
+python scripts/run_web.py
+```
+
+Open your browser to **http://127.0.0.1:5000**. You'll see the TWS Robot dashboard with connection status, strategy panels, and monitoring tools.
+
+> 💡 **Tip:** If you prefer the command line, you can also run backtests directly — see the [Command-Line Alternative](#commands-youll-use) section below.
+
+**Step 3: Run a Backtest from the Command Line (10 minutes)**
 
 Let's test a classic "Moving Average Crossover" strategy on Apple stock:
 
 ```bash
-python example_backtest_complete.py
+python examples/example_backtest_complete.py
 ```
 
 **What just happened?**
@@ -91,7 +138,7 @@ Number of Trades: 24
 Now test different strategy settings to find what works best:
 
 ```bash
-python example_profile_comparison.py
+python examples/example_profile_comparison.py
 ```
 
 This compares:
@@ -166,10 +213,10 @@ graph TD
 **Try it:** The example scripts already use this strategy - just run them!
 ```bash
 # Test this strategy on historical data
-python example_backtest_complete.py
+python examples/example_backtest_complete.py
 
 # Compare with other strategies
-python example_strategy_templates.py
+python examples/example_strategy_templates.py
 ```
 
 **For developers:** Here's how to use it in your own code:
@@ -199,10 +246,10 @@ strategy = MovingAverageCrossStrategy(config, ma_config)
 **Try it:** The example scripts already use this strategy - just run them!
 ```bash
 # Test this strategy on historical data
-python example_strategy_templates.py
+python examples/example_strategy_templates.py
 
 # Compare different risk profiles
-python example_profile_comparison.py
+python examples/example_profile_comparison.py
 ```
 
 **For developers:** Here's how to use it in your own code:
@@ -227,10 +274,10 @@ strategy = MeanReversionStrategy(config)
 **Try it:** The example scripts already use this strategy - just run them!
 ```bash
 # Test this strategy on historical data
-python example_strategy_templates.py
+python examples/example_strategy_templates.py
 
 # Find best strategy for your stock
-python strategy_selector.py
+python scripts/strategy_selector.py
 ```
 
 **For developers:** Here's how to use it in your own code:
@@ -284,31 +331,41 @@ TWS Robot will **automatically stop trading** if:
 ### Weekly Routine (Recommended)
 
 **Monday Morning:**
-1. Review last week's performance
-2. Check if strategy is still working (markets change!)
-3. Adjust position sizes if needed
+1. Open the web dashboard (`python scripts/run_web.py` → http://127.0.0.1:5000)
+2. Review last week's performance on the Dashboard page
+3. Check if strategy is still working (markets change!)
+4. Adjust position sizes on the Risk page if needed
 
 **Daily (5 minutes):**
-1. Glance at dashboard to confirm system is running
-2. Check for any alerts or unusual activity
+1. Glance at the Dashboard to confirm system is running
+2. Check for any alerts or unusual activity on the Alerts tab
+3. Review the Positions page for open trades
 
 **Monthly:**
-1. Run backtests on recent data
+1. Run backtests on recent data from the Backtest page
 2. Compare strategy performance vs. buy-and-hold
 3. Decide: Keep running, adjust, or pause
 
 ### Commands You'll Use
 
+**Web dashboard (primary — recommended for most users):**
+```bash
+# Start the web dashboard
+python scripts/run_web.py
+# Open: http://127.0.0.1:5000
+```
+
+**Command-line alternative:**
 ```bash
 # Check your IBKR account status and positions
-python check_account.py          # Paper account (default)
-python check_account.py live     # Live account
+python scripts/check_account.py          # Paper account (default)
+python scripts/check_account.py live     # Live account
 
 # Check if your strategy would work on recent data
-python example_backtest_complete.py
+python examples/example_backtest_complete.py
 
 # Compare different risk profiles
-python example_profile_comparison.py
+python examples/example_profile_comparison.py
 
 # Test strategy on paper trading (fake money)
 python tws_client.py --env paper
@@ -443,22 +500,25 @@ Stop trading if you see:
 
 ### "Do I need to be a programmer?"
 
-**No, but it helps!**
+**No!** TWS Robot now includes a **web dashboard** that lets you manage everything from your browser.
 
 **You CAN use TWS Robot if you:**
-- Can copy/paste commands into a terminal
-- Can edit simple configuration files
-- Can read performance reports
+- Can follow installation instructions (one-time setup)
+- Can open a web browser and click buttons
+- Can read performance reports and charts
 
-**You CANNOT (yet) if you:**
-- Want a point-and-click GUI interface (we don't have that yet)
-- Want to avoid any coding (you'll need to run Python scripts)
+**The web dashboard lets you:**
+- View your portfolio, positions, and P&L
+- Start and stop trading strategies
+- Run backtests and review results
+- Monitor risk levels and alerts
+- Configure settings — all without touching the terminal
 
-**Future plans:** We're working on a web dashboard to make this easier!
+**For power users:** Command-line tools are still available for scripting and automation.
 
 ---
 
-## � Understanding the Example Scripts
+## 📋 Understanding the Example Scripts
 
 ### `example_profile_comparison.py`
 
@@ -509,20 +569,22 @@ Return Std Dev: 0.08 (Low variability - similar performance)
 
 ---
 
-## �🛠️ Next Steps
+## 🛠️ Next Steps
 
 ### Ready to Get Started?
 
-1. **Read the Quick Start (30 minutes)** - See if a strategy would have made money
-2. **Choose Your Strategy** - Moving Average is easiest to start
-3. **Pick a Risk Profile** - Conservative is safest
-4. **Start Paper Trading** - Run for 30 days minimum
-5. **Track and Learn** - Keep a trading journal
-6. **Go Live Carefully** - Start with 1% position sizes
+1. **Launch the Web Dashboard** — `python scripts/run_web.py` → http://127.0.0.1:5000
+2. **Read the Quick Start (30 minutes)** — See if a strategy would have made money
+3. **Choose Your Strategy** — Moving Average is easiest to start
+4. **Pick a Risk Profile** — Conservative is safest
+5. **Start Paper Trading** — Run for 30 days minimum
+6. **Track and Learn** — Keep a trading journal
+7. **Go Live Carefully** — Start with 1% position sizes
 
 ### Need Help?
 
-- 📖 **Read the Docs:** Full technical docs in `/docs` folder
+- 🌐 **Use the Dashboard:** Most tasks can be done from the web UI at http://127.0.0.1:5000
+- 📖 **Read the Docs:** Explore the other guides in this directory
 - 🐛 **Found a Bug?** Open an issue on GitHub
 - 💡 **Have an Idea?** We love suggestions!
 

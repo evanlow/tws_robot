@@ -1,33 +1,34 @@
 # TWS Robot v2.0 - Deployment & DevOps Guide
 ## Production Setup and Operations Manual
 
-**Document Version:** 1.0  
-**Last Updated:** November 13, 2025  
+**Document Version:** 1.1  
+**Last Updated:** April 2026  
 **Operations Team:** DevOps & Production Support  
 
 ---
 
 > ⚠️ **IMPORTANT NOTICE**
 > 
-> **This deployment guide describes a planned production architecture that is NOT YET IMPLEMENTED.**
+> **This deployment guide describes a planned production architecture that is partially implemented.**
 > 
-> The Docker configurations, web dashboard, FastAPI gateway, and production infrastructure
+> The Docker configurations, FastAPI gateway, and full production infrastructure
 > described in this document represent the **future production roadmap** for TWS Robot.
 > 
 > **Current Project Status:**
-> - ✅ **Core backtesting engine** - Fully implemented and tested (690 tests passing)
+> - ✅ **Core backtesting engine** - Fully implemented and tested
 > - ✅ **Risk management system** - Production ready
 > - ✅ **Strategy templates** - Available for backtesting (MovingAverage, MeanReversion, Momentum)
 > - ✅ **Live trading integration** - BollingerBands strategy available for paper/live trading with TWS
+> - ✅ **Web dashboard** - Implemented (Flask-based, launch with `python scripts/run_web.py`)
 > - ❌ **Docker containerization** - Planned, not yet implemented
-> - ❌ **Web dashboard** - Planned, not yet implemented
 > - ❌ **FastAPI gateway** - Planned, not yet implemented
-> - ❌ **Production monitoring** - Planned, not yet implemented
+> - ❌ **Production monitoring (Prometheus/Grafana)** - Planned, not yet implemented
 > 
 > **To use TWS Robot today:**
-> - Follow the [README.md](README.md) Quick Start for local development setup
+> - Launch the web dashboard: `python scripts/run_web.py` → http://127.0.0.1:5000
+> - Follow the [README.md](../README.md) Quick Start for local development setup
 > - Use [USER_GUIDE.md](USER_GUIDE.md) for backtesting and paper trading
-> - See [EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md) for working code examples
+> - See [LOCAL_DEPLOYMENT.md](LOCAL_DEPLOYMENT.md) for local deployment with the web dashboard
 > 
 > **This guide is useful for:**
 > - Understanding the planned production architecture

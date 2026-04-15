@@ -9,14 +9,14 @@
 **You are here:** API Reference - Developer documentation  
 **New to coding?** [Your First 30 Minutes](GETTING_STARTED_30MIN.md) - Start here instead ⭐  
 **Want to contribute?** [Contributing Guide](CONTRIBUTING.md) - Development workflow  
-**Start here:** [README](README.md) - Installation and overview  
+**Start here:** [README](../README.md) - Installation and overview  
 **Learn concepts:** [User Guide](USER_GUIDE.md) - How strategies work  
 **Quick lookup:** [Quick Reference](QUICK_REFERENCE.md) - Commands cheat sheet
 
 **Need help?**
-- [Adding New Strategy](docs/runbooks/adding-new-strategy.md) - Step-by-step guide
-- [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting
-- [Architecture Overview](docs/architecture/overview.md) - System design
+- [Adding New Strategy](runbooks/adding-new-strategy.md) - Step-by-step guide
+- [Debugging Guide](runbooks/debugging-strategies.md) - Troubleshooting
+- [Architecture Overview](architecture/overview.md) - System design
 
 ---
 
