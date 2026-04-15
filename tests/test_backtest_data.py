@@ -12,6 +12,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -19,6 +20,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from backtest.data_models import Bar, MarketData, BarSeries, TimeFrame, Position, Trade
 from backtest.data_manager import HistoricalDataManager
 from backtest.market_simulator import MarketSimulator, FillSimulator, Order
+
+# Check for test data availability
+PROJECT_ROOT = Path(__file__).parent.parent
+TEST_DATA_DIR = PROJECT_ROOT / "data" / "historical"
+HAS_TEST_DATA = TEST_DATA_DIR.exists() and any(TEST_DATA_DIR.glob("*.csv"))
 
 
 class TestBar(unittest.TestCase):
@@ -170,6 +176,7 @@ class TestHistoricalDataManager(unittest.TestCase):
         """Setup data manager with sample data"""
         self.data_mgr = HistoricalDataManager('data/historical')
     
+    @pytest.mark.skipif(not HAS_TEST_DATA, reason="Test data files not found in data/historical/")
     def test_load_csv(self):
         """Test loading CSV data"""
         success = self.data_mgr.load_csv(
@@ -191,6 +198,7 @@ class TestHistoricalDataManager(unittest.TestCase):
         print(f"✓ Loaded {bar_count} bars for AAPL")
         print(f"  Date range: {date_range[0].date()} to {date_range[1].date()}")
     
+    @pytest.mark.skipif(not HAS_TEST_DATA, reason="Test data files not found in data/historical/")
     def test_get_bars(self):
         """Test retrieving bars"""
         self.data_mgr.load_csv('AAPL', 'data/historical/AAPL_daily.csv')
@@ -205,6 +213,7 @@ class TestHistoricalDataManager(unittest.TestCase):
         
         print(f"✓ Retrieved {len(all_bars)} total bars, {len(recent)} recent bars")
     
+    @pytest.mark.skipif(not HAS_TEST_DATA, reason="Test data files not found in data/historical/")
     def test_get_bar_at_time(self):
         """Test getting bar at specific time"""
         self.data_mgr.load_csv('AAPL', 'data/historical/AAPL_daily.csv')
@@ -218,6 +227,7 @@ class TestHistoricalDataManager(unittest.TestCase):
         else:
             print(f"✓ No bar at {test_date.date()} (likely weekend)")
     
+    @pytest.mark.skipif(not HAS_TEST_DATA, reason="Test data files not found in data/historical/")
     def test_validate_data(self):
         """Test data validation"""
         self.data_mgr.load_csv('AAPL', 'data/historical/AAPL_daily.csv')
@@ -234,6 +244,7 @@ class TestHistoricalDataManager(unittest.TestCase):
             for issue in validation['issues'][:5]:  # Show first 5
                 print(f"  - {issue}")
     
+    @pytest.mark.skipif(not HAS_TEST_DATA, reason="Test data files not found in data/historical/")
     def test_multiple_symbols(self):
         """Test loading multiple symbols"""
         symbols = ['AAPL', 'MSFT', 'SPY']
@@ -361,6 +372,8 @@ class TestMarketSimulator(unittest.TestCase):
         
         self.market_sim = MarketSimulator(self.data_mgr)
     
+    @pytest.mark.skipif(not HAS_TEST_DATA, reason="Test data files not found in data/historical/")
+
     def test_market_replay(self):
         """Test replaying market data"""
         start_date = datetime(2024, 1, 2)
@@ -379,6 +392,7 @@ class TestMarketSimulator(unittest.TestCase):
         self.assertGreater(bar_count, 0)
         print(f"✓ Replayed {bar_count} bars")
     
+    @pytest.mark.skipif(not HAS_TEST_DATA, reason="Test data files not found in data/historical/")
     def test_order_submission_and_fill(self):
         """Test submitting and filling orders"""
         start_date = datetime(2024, 1, 2)

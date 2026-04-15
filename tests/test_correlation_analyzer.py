@@ -104,9 +104,7 @@ def test_concentration_metrics():
     assert metrics3.is_concentrated == True
     
     print("\n✅ Concentration Metrics PASSED")
-    return True
-
-
+    # Test passed
 def test_correlation_calculation():
     """Test correlation matrix calculation"""
     print("\n" + "=" * 70)
@@ -166,9 +164,7 @@ def test_correlation_calculation():
     assert high_pairs[0].correlation > 0.8
     
     print("\n✅ Correlation Calculation PASSED")
-    return True
-
-
+    # Test passed
 def test_sector_industry_tracking():
     """Test sector and industry exposure tracking"""
     print("\n" + "=" * 70)
@@ -212,9 +208,7 @@ def test_sector_industry_tracking():
     assert abs(metrics.industry_concentration["Software"] - 0.25) < 0.01
     
     print("\n✅ Sector & Industry Tracking PASSED")
-    return True
-
-
+    # Test passed
 def test_diversification_scoring():
     """Test diversification score calculation"""
     print("\n" + "=" * 70)
@@ -274,9 +268,7 @@ def test_diversification_scoring():
     assert metrics2.sector_risk == True
     
     print("\n✅ Diversification Scoring PASSED")
-    return True
-
-
+    # Test passed
 def test_diversification_suggestions():
     """Test diversification suggestion generation"""
     print("\n" + "=" * 70)
@@ -327,9 +319,7 @@ def test_diversification_suggestions():
     assert any("well diversified" in s.lower() for s in suggestions_good)
     
     print("\n✅ Diversification Suggestions PASSED")
-    return True
-
-
+    # Test passed
 def test_new_position_impact():
     """Test new position impact analysis"""
     print("\n" + "=" * 70)
@@ -385,9 +375,7 @@ def test_new_position_impact():
     assert "sector" in reason3.lower()
     
     print("\n✅ New Position Impact Analysis PASSED")
-    return True
-
-
+    # Test passed
 def test_metrics_summary():
     """Test metrics summary generation"""
     print("\n" + "=" * 70)
@@ -449,9 +437,7 @@ def test_metrics_summary():
     assert summary['diversification']['score'] > 0
     
     print("\n✅ Metrics Summary PASSED")
-    return True
-
-
+    # Test passed
 def run_all_tests():
     """Run all correlation analyzer validation tests"""
     print("\n" + "=" * 70)
@@ -502,12 +488,14 @@ def run_all_tests():
         print("  • Actionable diversification suggestions")
         
         print("\n✅ Ready for Week 3 Day 5: Real-time Monitoring")
-        return True
+        # Test passed
     else:
         print("❌ SOME TESTS FAILED")
         print("=" * 70)
         failed = sum(1 for r in results if not r)
         print(f"\n{len(results) - failed}/{len(results)} tests passed")
+        # Return statement removed - test functions should not return values
+        # 
         return False
 
 

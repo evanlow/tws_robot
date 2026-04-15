@@ -65,7 +65,7 @@ def test_single_strategy_single_symbol():
     # Run and print results
     result = engine.run()
     print_results(strategy, result)
-    return strategy
+    # Test completed - strategy executed successfully
 
 
 def test_multi_symbol_portfolio():
@@ -94,7 +94,7 @@ def test_multi_symbol_portfolio():
     
     result = engine.run()
     print_results(strategy, result)
-    return strategy
+    # Test completed - portfolio strategy executed successfully
 
 
 def test_different_timeframes():

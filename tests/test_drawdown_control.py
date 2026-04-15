@@ -90,9 +90,7 @@ def test_basic_drawdown_tracking():
     print(f"\n✓ Drawdown event recorded: {monitor.drawdown_events[0]}")
     
     print("\n✅ Basic Drawdown Tracking PASSED")
-    return True
-
-
+    # Test passed
 def test_protective_stops():
     """Test daily, weekly, and max drawdown protective stops"""
     print("\n" + "=" * 70)
@@ -169,9 +167,7 @@ def test_protective_stops():
     assert "Maximum drawdown limit" in metrics3.halt_reason
     
     print("\n✅ Protective Stops PASSED")
-    return True
-
-
+    # Test passed
 def test_position_scaling():
     """Test position sizing scale factor during drawdown"""
     print("\n" + "=" * 70)
@@ -219,9 +215,7 @@ def test_position_scaling():
             assert abs(metrics.position_scale_factor - expected_scale) < 0.15
     
     print("\n✅ Position Scaling PASSED")
-    return True
-
-
+    # Test passed
 def test_recovery_and_events():
     """Test drawdown recovery detection and event logging"""
     print("\n" + "=" * 70)
@@ -284,9 +278,7 @@ def test_recovery_and_events():
     print(f"  Total events: {len(monitor.drawdown_events)}")
     
     print("\n✅ Recovery Detection & Event Logging PASSED")
-    return True
-
-
+    # Test passed
 def test_drawdown_summary():
     """Test summary statistics and reporting"""
     print("\n" + "=" * 70)
@@ -334,9 +326,7 @@ def test_drawdown_summary():
     assert stats['avg_recovery_days'] == 4.0
     
     print("\n✅ Drawdown Summary Statistics PASSED")
-    return True
-
-
+    # Test passed
 def test_manual_resume():
     """Test manual trading resume after halt"""
     print("\n" + "=" * 70)
@@ -381,9 +371,7 @@ def test_manual_resume():
     print(f"  Position Scale: {monitor.get_position_scale_factor():.2f}x")
     
     print("\n✅ Manual Trading Resume PASSED")
-    return True
-
-
+    # Test passed
 def run_all_tests():
     """Run all drawdown control validation tests"""
     print("\n" + "=" * 70)
@@ -431,12 +419,14 @@ def run_all_tests():
         print("  • Manual trading resume with safety checks")
         
         print("\n✅ Ready for Week 3 Day 4: Correlation Analysis")
-        return True
+        # Test passed
     else:
         print("❌ SOME TESTS FAILED")
         print("=" * 70)
         failed = sum(1 for r in results if not r)
         print(f"\n{len(results) - failed}/{len(results)} tests passed")
+        # Return statement removed - test functions should not return values
+        # 
         return False
 
 
