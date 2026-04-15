@@ -293,12 +293,10 @@ python examples/example_strategy_templates.py
 ### Week 3-4
 
 **If you want to paper trade:**
-1. Set up Interactive Brokers paper account (free)
-2. Install TWS (Trader Workstation)
-3. Connect TWS Robot to paper trading
-4. Let it trade with fake money
+1. **Follow the [TWS Connection Guide](TWS_CONNECTION_GUIDE.md)** — walks you through installing TWS, configuring the API, setting up your `.env` file, and connecting from the web dashboard
+2. Let TWS Robot trade with fake money and monitor results
 
-**Read:** [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for TWS setup
+**Read:** [TWS Connection Guide](TWS_CONNECTION_GUIDE.md) for complete setup, then [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for 30-day validation
 
 ### Month 2+
 
@@ -377,8 +375,9 @@ python scripts/download_real_data.py AAPL MSFT GOOGL
 - [EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md) - All example scripts explained
 
 **When ready to trade:**
+- [TWS Connection Guide](TWS_CONNECTION_GUIDE.md) - Connect to Interactive Brokers
 - [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Command cheat sheet
-- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - TWS setup
+- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - 30-day validation
 
 **For developers:**
 - [API_REFERENCE.md](API_REFERENCE.md) - Build custom strategies
