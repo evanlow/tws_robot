@@ -1,2 +1,48 @@
-# Created by venv; see https://docs.python.org/3/library/venv.html
-*
+# Python virtual environment
+Scripts/
+Lib/
+Include/
+pyvenv.cfg
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+*.cover
+.hypothesis/
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Logs
+*.log
+test_logs.log
+
+# Temporary files
+*.tmp
+_tmp.py
+test_output.txt
