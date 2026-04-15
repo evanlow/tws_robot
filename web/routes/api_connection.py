@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("api_connection", __name__, url_prefix="/api/connection")
 
 
+def _connection_info(cfg: dict) -> dict:
+    """Build the connection-info dict stored in ServiceManager."""
+    return {
+        "host": cfg["host"],
+        "port": cfg["port"],
+        "client_id": cfg["client_id"],
+        "account": cfg.get("account", ""),
+    }
+
+
 @bp.route("/status", methods=["GET"])
 def status():
     """Return current TWS connection state."""
@@ -50,14 +60,15 @@ def connect():
     except Exception as exc:
         return jsonify({"error": "Configuration error for the requested environment"}), 400
 
-    # Record connection in service manager (actual TWS socket connection
-    # requires the IB Gateway/TWS to be running — we store intent here).
-    svc.set_connected(env, {
-        "host": cfg["host"],
-        "port": cfg["port"],
-        "client_id": cfg["client_id"],
-        "account": cfg.get("account", ""),
-    })
+    # Attempt a real TWS API connection via the bridge.
+    ok = svc.connect_tws(env, cfg, timeout=10)
+
+    if not ok:
+        # TWS is not reachable – fall back to storing intent so the UI
+        # still reflects the selected environment.
+        svc.set_connected(env, _connection_info(cfg))
+        logger.warning("TWS not reachable; stored connection intent for %s",
+                        env)
 
     logger.info("Connection initiated: env=%s host=%s port=%s",
                 env, cfg["host"], cfg["port"])
@@ -76,6 +87,6 @@ def disconnect():
     if not svc.connected:
         return jsonify({"error": "Not connected"}), 409
 
-    svc.set_disconnected()
+    svc.disconnect_tws()
     logger.info("Disconnected from TWS")
     return jsonify({"status": "disconnected"})
