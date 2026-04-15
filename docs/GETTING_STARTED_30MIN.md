@@ -293,11 +293,8 @@ python examples/example_strategy_templates.py
 ### Week 3-4
 
 **If you want to paper trade:**
-1. **Follow the [TWS Connection Guide](TWS_CONNECTION_GUIDE.md)** — step-by-step instructions to install TWS, configure the API, and connect
-2. Set up Interactive Brokers paper account (free)
-3. Install TWS (Trader Workstation)
-4. Connect TWS Robot to paper trading
-5. Let it trade with fake money
+1. **Follow the [TWS Connection Guide](TWS_CONNECTION_GUIDE.md)** — walks you through installing TWS, configuring the API, setting up your `.env` file, and connecting from the web dashboard
+2. Let TWS Robot trade with fake money and monitor results
 
 **Read:** [TWS Connection Guide](TWS_CONNECTION_GUIDE.md) for complete setup, then [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for 30-day validation
 
