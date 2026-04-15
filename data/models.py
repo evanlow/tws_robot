@@ -279,3 +279,5 @@ class PerformanceMetric(Base):
     def __repr__(self):
         return (f"<PerformanceMetric(date={self.date.date()}, "
                 f"pnl=${self.daily_pnl:.2f})>")
+
+

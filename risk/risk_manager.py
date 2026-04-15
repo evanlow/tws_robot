@@ -495,6 +495,7 @@ class RiskManager:
             'emergency_stop_active': self.emergency_stop_active,
             'current_equity': self.current_equity,
             'peak_equity': self.peak_equity,
+            'daily_start_equity': self.daily_start_equity,
             'drawdown_pct': (self.peak_equity - self.current_equity) / self.peak_equity if self.peak_equity > 0 else 0.0,
             'daily_pnl_pct': (self.current_equity - self.daily_start_equity) / self.daily_start_equity if self.daily_start_equity > 0 else 0.0,
             'drawdown_breached': self.drawdown_breached,

@@ -18,6 +18,7 @@ def summary():
 
     risk = svc.risk_manager.get_risk_summary()
     account = svc.get_account_summary()
+    insights = svc.get_account_insights()
 
     return jsonify({
         "connected": svc.connected,
@@ -25,11 +26,13 @@ def summary():
         "equity": risk.get("current_equity", 0),
         "peak_equity": risk.get("peak_equity", 0),
         "daily_pnl_pct": risk.get("daily_pnl_pct", 0),
+        "daily_pnl_dollar": insights["daily_pnl_dollar"],
         "drawdown_pct": risk.get("drawdown_pct", 0),
         "risk_status": risk.get("risk_status", "NORMAL"),
         "emergency_stop": risk.get("emergency_stop_active", False),
-        "buying_power": account.get("buying_power", 0),
+        "buying_power": insights["buying_power"],
         "cash_balance": account.get("cash_balance", 0),
+        "unrealized_pnl": insights["total_unrealized_pnl"],
         "limits": risk.get("limits", {}),
     })
 

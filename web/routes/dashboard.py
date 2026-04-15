@@ -16,6 +16,7 @@ def index():
     svc = get_services()
     risk_summary = svc.risk_manager.get_risk_summary()
     positions = svc.get_positions()
+    insights = svc.get_account_insights()
     strategies = []
     try:
         strategies = [
@@ -36,5 +37,8 @@ def index():
         "alerts": svc.get_alerts()[-10:],
         "recent_trades": svc.get_recent_trades()[-10:],
         "system_health": svc.get_system_health(),
+        "total_unrealized_pnl": insights["total_unrealized_pnl"],
+        "daily_pnl_dollar": insights["daily_pnl_dollar"],
+        "buying_power": insights["buying_power"],
     }
     return render_template("dashboard/index.html", **context)
