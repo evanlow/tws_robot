@@ -32,7 +32,7 @@ Transform your trading ideas into automated strategies. Test them on historical 
 
 ## ⚡ Quick Start (5 Minutes)
 
-> **Prerequisites:** For **paper or live trading**, you need [Interactive Brokers TWS](https://www.interactivebrokers.com/en/trading/tws.php) (or IB Gateway) running with API access enabled. Backtesting works without TWS.
+> **Prerequisites:** For **paper or live trading**, you need [Interactive Brokers TWS](https://www.interactivebrokers.com/en/trading/tws.php) (or IB Gateway) running with API access enabled. Backtesting works without TWS. See the **[TWS Connection Guide](docs/TWS_CONNECTION_GUIDE.md)** for complete setup instructions.
 
 ### 1. Install TWS Robot
 
@@ -182,6 +182,7 @@ Yes, but limited. The **BollingerBands strategy** is production-ready for paper/
 - **For backtesting:** No, works offline with historical data
 - **For paper trading:** Yes, need TWS Paper Trading mode (port 7497)
 - **For live trading:** Yes, need TWS with live account (port 7496)
+- **Setup guide:** See the **[TWS Connection Guide](docs/TWS_CONNECTION_GUIDE.md)** for step-by-step instructions
 
 ### How much capital do I need?
 - **Backtesting:** $0 (simulated)

@@ -8,6 +8,7 @@
 
 **You are here:** User Guide - Learn how to use TWS Robot  
 **New user?** [Your First 30 Minutes](GETTING_STARTED_30MIN.md) - Complete beginner tutorial ⭐  
+**Connect to IBKR:** [TWS Connection Guide](TWS_CONNECTION_GUIDE.md) - Step-by-step TWS setup and connection  
 **Next steps:** [Examples Guide](EXAMPLES_GUIDE.md) - See working code examples  
 **Reference:** [Quick Reference](QUICK_REFERENCE.md) - Commands cheat sheet
 

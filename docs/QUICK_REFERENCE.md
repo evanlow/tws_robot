@@ -263,10 +263,11 @@ pip install -r requirements.txt
 | Need to... | Read this... |
 |------------|-------------|
 | Use the web dashboard | Launch `python scripts/run_web.py` → http://127.0.0.1:5000 |
+| **Connect to IBKR TWS** | **[TWS_CONNECTION_GUIDE.md](TWS_CONNECTION_GUIDE.md) - Step-by-step setup** |
 | Understand strategies | [USER_GUIDE.md](USER_GUIDE.md) - Strategy section |
 | **API documentation** | **[API_REFERENCE.md](API_REFERENCE.md) - Developer API** |
 | Learn risk management | [USER_GUIDE.md](USER_GUIDE.md) - Risk section |
-| Set up TWS connection | [README.md](README.md) - Installation section |
+| Set up TWS connection | [TWS_CONNECTION_GUIDE.md](TWS_CONNECTION_GUIDE.md) - Complete guide |
 | Add a new strategy | [runbooks/adding-new-strategy.md](runbooks/adding-new-strategy.md) |
 | Debug issues | [runbooks/debugging-strategies.md](runbooks/debugging-strategies.md) |
 | Emergency procedures | [runbooks/emergency-procedures.md](runbooks/emergency-procedures.md) |

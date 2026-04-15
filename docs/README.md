@@ -29,6 +29,7 @@ pytest --cov
 ### For New Users — Start Here
 
 - **[Getting Started (30 min)](GETTING_STARTED_30MIN.md)** - Complete beginner tutorial ⭐
+- **[TWS Connection Guide](TWS_CONNECTION_GUIDE.md)** - Connect to Interactive Brokers TWS step by step ⭐
 - **[User Guide](USER_GUIDE.md)** - Strategies, risk management, weekly routines
 - **[Quick Reference](QUICK_REFERENCE.md)** - Commands cheat sheet and emergency procedures
 - **[Examples Guide](EXAMPLES_GUIDE.md)** - What each example script does
@@ -68,6 +69,7 @@ Practical guides for common tasks:
 
 ### Operations
 
+- **[TWS Connection Guide](TWS_CONNECTION_GUIDE.md)** - Connect to IBKR TWS (install, configure, connect, verify)
 - **[Deployment Guide](DEPLOYMENT_GUIDE.md)** - Production setup and 30-day validation
 - **[Local Deployment](LOCAL_DEPLOYMENT.md)** - Local development setup with web UI
 - **[Live Trading Safety](LIVE_TRADING_SAFETY.md)** - Critical safety guide for live trading
