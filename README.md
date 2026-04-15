@@ -32,6 +32,8 @@ Transform your trading ideas into automated strategies. Test them on historical 
 
 ## ⚡ Quick Start (5 Minutes)
 
+> **Prerequisites:** For **paper or live trading**, you need [Interactive Brokers TWS](https://www.interactivebrokers.com/en/trading/tws.php) (or IB Gateway) running with API access enabled. Backtesting works without TWS.
+
 ### 1. Install TWS Robot
 
 ```bash
