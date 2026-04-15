@@ -111,18 +111,44 @@ Disconnect from TWS.
 
 ### `GET /api/account/summary`
 
-Get account summary with equity, cash balance, and buying power.
+Get comprehensive account summary including equity, P&L, risk status, and buying power.
 
 **Response:**
 ```json
 {
+  "connected": true,
+  "environment": "paper",
   "equity": 105000.00,
-  "cash_balance": 50000.00,
+  "peak_equity": 110000.00,
+  "daily_pnl_pct": 2.43,
+  "daily_pnl_dollar": 2500.00,
+  "drawdown_pct": 4.55,
+  "risk_status": "NORMAL",
+  "emergency_stop": false,
   "buying_power": 200000.00,
-  "daily_pnl": 2500.00,
-  "daily_pnl_pct": 2.43
+  "cash_balance": 50000.00,
+  "unrealized_pnl": 1500.00,
+  "limits": {
+    "max_drawdown_pct": 15.0,
+    "daily_loss_limit_pct": 5.0
+  }
 }
 ```
+
+**Field Descriptions:**
+- `connected` - Whether connected to TWS/IB Gateway
+- `environment` - `"paper"` or `"live"`
+- `equity` - Current account equity (NAV)
+- `peak_equity` - Highest equity reached today
+- `daily_pnl_pct` - Daily P&L as percentage of starting equity
+- `daily_pnl_dollar` - Daily P&L in dollars (calculated: current_equity - daily_start_equity)
+- `drawdown_pct` - Current drawdown from peak as percentage
+- `risk_status` - Risk status: `"NORMAL"`, `"WARNING"`, or `"CRITICAL"`
+- `emergency_stop` - Whether emergency stop is active
+- `buying_power` - Available buying power
+- `cash_balance` - Cash balance
+- `unrealized_pnl` - Total unrealized P&L across all positions (calculated: sum of all position unrealized P&L)
+- `limits` - Configured risk limits
 
 ### `GET /api/account/positions`
 

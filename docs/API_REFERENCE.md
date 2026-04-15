@@ -600,6 +600,39 @@ summary = services.get_account_summary()
 
 # Update account summary (called by TWSBridge)
 services.update_account_summary({"equity": 105000.0, "cash_balance": 50000.0})
+
+# Get calculated account insights (NEW in v1.5)
+insights = services.get_account_insights()
+# Returns: {
+#   "total_unrealized_pnl": float,    # Sum of all positions' unrealized P&L
+#   "daily_pnl_dollar": float,        # Dollar P&L for today (equity - daily_start_equity)
+#   "buying_power": float             # Current buying power
+# }
+# This is the single source of truth for derived metrics used by
+# both the dashboard and the /api/account/summary endpoint.
+
+# Example: Display account insights in dashboard
+insights = services.get_account_insights()
+print(f"Total Unrealized P&L: ${insights['total_unrealized_pnl']:,.2f}")
+print(f"Today's P&L: ${insights['daily_pnl_dollar']:,.2f}")
+print(f"Buying Power: ${insights['buying_power']:,.2f}")
+
+# Example: Used by API endpoints to avoid duplicating calculation logic
+# (from web/routes/api_account.py)
+@bp.route("/summary", methods=["GET"])
+def summary():
+    svc = get_services()
+    risk = svc.risk_manager.get_risk_summary()
+    account = svc.get_account_summary()
+    insights = svc.get_account_insights()  # Single source of truth
+    
+    return jsonify({
+        "equity": risk.get("current_equity", 0),
+        "daily_pnl_dollar": insights["daily_pnl_dollar"],  # From insights
+        "unrealized_pnl": insights["total_unrealized_pnl"],  # From insights
+        "buying_power": insights["buying_power"],  # From insights
+        # ... other fields
+    })
 ```
 
 #### Position Management
