@@ -294,7 +294,6 @@ class AccountSnapshot(Base):
     cash_balance = Column(Float, nullable=True)
     buying_power = Column(Float, nullable=True)
     unrealized_pnl = Column(Float, nullable=True)
-    realized_pnl = Column(Float, nullable=True)
     daily_pnl = Column(Float, nullable=True)
     num_positions = Column(Integer, nullable=True)
     environment = Column(String(20), nullable=True)  # "paper" or "live"

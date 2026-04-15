@@ -219,6 +219,35 @@ class ServiceManager:
             return dict(self._positions)
 
     # ------------------------------------------------------------------
+    # Computed account insights (derived from live state)
+    # ------------------------------------------------------------------
+
+    def get_account_insights(self) -> Dict[str, Any]:
+        """Return computed dashboard metrics (unrealized P&L, daily P&L $, buying power).
+
+        This is the single source of truth for these derived values — used
+        by both the dashboard route and the account-summary API to avoid
+        duplicating the calculation logic.
+        """
+        positions = self.get_positions()
+        total_unrealized_pnl = sum(
+            pos.get("unrealized_pnl", 0) for pos in positions.values()
+        )
+
+        rm = self.risk_manager
+        equity = rm.current_equity
+        daily_start = rm.daily_start_equity
+        daily_pnl_dollar = (equity - daily_start) if daily_start else 0.0
+
+        account = self.get_account_summary()
+
+        return {
+            "total_unrealized_pnl": total_unrealized_pnl,
+            "daily_pnl_dollar": daily_pnl_dollar,
+            "buying_power": account.get("buying_power", 0),
+        }
+
+    # ------------------------------------------------------------------
     # Orders
     # ------------------------------------------------------------------
 
@@ -371,20 +400,15 @@ class ServiceManager:
             if equity <= 0:
                 return
 
-            total_unrealized_pnl = sum(
-                pos.get("unrealized_pnl", 0)
-                for pos in self._positions.values()
-            )
-            rm = self.risk_manager
-            daily_pnl = rm.current_equity - rm.daily_start_equity
+            insights = self.get_account_insights()
 
             snapshot = AccountSnapshot(
                 timestamp=now,
                 equity=equity,
                 cash_balance=account.get("cash_balance"),
                 buying_power=account.get("buying_power"),
-                unrealized_pnl=total_unrealized_pnl,
-                daily_pnl=daily_pnl,
+                unrealized_pnl=insights["total_unrealized_pnl"],
+                daily_pnl=insights["daily_pnl_dollar"],
                 num_positions=len(self._positions),
                 environment=self._connection_env,
             )
