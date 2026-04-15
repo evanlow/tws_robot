@@ -1,14 +1,15 @@
 # TWS Robot - Your Automated Trading Assistant
 
-**Test trading strategies, automate execution, manage risk - all while you sleep.**
+**Test trading strategies, automate execution, manage risk — all from your browser.**
 
-Transform your trading ideas into automated strategies. Test them on historical data, validate in paper trading, then deploy them live. TWS Robot handles the execution, risk management, and monitoring so you can focus on strategy.
+Transform your trading ideas into automated strategies. Test them on historical data, validate with paper trading, then deploy them live. TWS Robot's **web dashboard** handles the execution, risk management, and monitoring so you can focus on strategy — no terminal experience required.
 
 ---
 
 ## 🎯 What Can TWS Robot Do For You?
 
 ### For New Algorithmic Traders
+- 🌐 **Web dashboard** - Point-and-click interface for managing everything from your browser
 - 📚 **Learn by doing** - Run pre-built strategies and see how they work
 - 🧪 **Test without risk** - Backtest on historical data before risking real money
 - 🎓 **Start simple** - Interactive guides walk you through your first strategy
@@ -49,7 +50,28 @@ source venv/bin/activate        # Mac/Linux
 pip install -r requirements.txt
 ```
 
-### 2. Choose Your Path
+### 2. Launch the Web Dashboard (Recommended)
+
+The easiest way to use TWS Robot is through the **web dashboard** — no terminal expertise needed:
+
+```bash
+# Start the web dashboard
+python scripts/run_web.py
+
+# Then open your browser to: http://127.0.0.1:5000
+```
+
+From the dashboard you can:
+- 📊 **View positions and P&L** on the Dashboard page
+- 🧪 **Run backtests** from the Backtest page
+- 🤖 **Manage strategies** on the Strategies page
+- 🛡️ **Monitor risk** on the Risk page
+- ⚙️ **Configure settings** on the Settings page
+- 🚨 **Emergency stop** with one click from the top bar
+
+### 3. Or Use the Command Line
+
+If you prefer working in a terminal:
 
 **New to algo trading? Start here:**
 ```bash
@@ -97,7 +119,7 @@ graph LR
 
 ### 4. Learn More
 
-📖 **[Read the User Guide](USER_GUIDE.md)** - Everything you need to know to use TWS Robot effectively
+📖 **[Read the User Guide](docs/USER_GUIDE.md)** - Everything you need to know to use TWS Robot effectively
 - Understand what each strategy does and when to use it
 - Learn about risk management and position sizing
 - Get a realistic weekly trading routine
@@ -111,6 +133,10 @@ Understanding the codebase:
 
 ```
 tws_robot/
+├── web/                   # ⭐ Web dashboard (primary user interface)
+│   ├── routes/               # One Blueprint per menu section
+│   ├── templates/            # Jinja2 HTML templates
+│   └── static/               # CSS, JavaScript assets
 ├── backtest/              # Historical testing engine
 │   ├── strategy_templates.py  # Pre-built strategies (MA, MeanReversion, Momentum)
 │   ├── engine.py             # Backtesting engine
@@ -126,10 +152,13 @@ tws_robot/
 │   └── ...                   # Other core components
 ├── execution/             # Order execution and TWS integration
 ├── monitoring/            # Performance tracking
-└── docs/                  # Architecture documentation
+├── scripts/               # Command-line utilities (run_web.py, quick_start.py, etc.)
+├── examples/              # Self-contained demonstration scripts
+└── docs/                  # Documentation
 ```
 
 **🎯 Quick Navigation:**
+- **Want to use the dashboard?** → `python scripts/run_web.py` then open http://127.0.0.1:5000
 - **Want to backtest?** → `backtest/strategy_templates.py`
 - **Want to live trade?** → `strategies/bollinger_bands.py`
 - **Need risk controls?** → `risk/risk_manager.py`
@@ -158,7 +187,8 @@ Yes, but limited. The **BollingerBands strategy** is production-ready for paper/
 - **Live trading:** Minimum $10,000 recommended for proper diversification
 
 ### Is this beginner-friendly?
-**Backtesting:** Yes! Examples are well-documented and easy to run  
+**Absolutely!** TWS Robot includes a **web dashboard** that you can access in your browser — no terminal experience required.  
+**Backtesting:** Yes! The web dashboard lets you run backtests with a few clicks  
 **Live trading:** Intermediate+ (requires understanding of trading, risk management, TWS setup)
 
 ### What if I get errors?
@@ -216,28 +246,25 @@ pytest test_backtest_engine.py -v
 ## 📚 Documentation Index
 
 **Getting Started:**
-- ⭐ **[Your First 30 Minutes](GETTING_STARTED_30MIN.md) - Complete beginner tutorial**
+- ⭐ **[Your First 30 Minutes](docs/GETTING_STARTED_30MIN.md) - Complete beginner tutorial**
 - [README](README.md) - Quick start and overview (you are here)
-- [User Guide](USER_GUIDE.md) - Learn strategies and workflows
-- [Examples Guide](EXAMPLES_GUIDE.md) - Working code examples
-- [Quick Reference](QUICK_REFERENCE.md) - Commands and configs cheat sheet
+- [User Guide](docs/USER_GUIDE.md) - Learn strategies and workflows
+- [Examples Guide](docs/EXAMPLES_GUIDE.md) - Working code examples
+- [Quick Reference](docs/QUICK_REFERENCE.md) - Commands and configs cheat sheet
 
 **Development:**
-- [API Reference](API_REFERENCE.md) - Complete developer API documentation
-- [Contributing Guide](CONTRIBUTING.md) - How to contribute
-- [Technical Specs](TECHNICAL_SPECS.md) - Architecture details
+- [API Reference](docs/API_REFERENCE.md) - Complete developer API documentation
+- [Contributing Guide](docs/CONTRIBUTING.md) - How to contribute
+- [Technical Specs](docs/TECHNICAL_SPECS.md) - Architecture details
 - [Architecture Docs](docs/architecture/overview.md) - System design
 - [Adding New Strategy](docs/runbooks/adding-new-strategy.md) - Development guide
 - [Prime Directive](prime_directive.md) - Development philosophy
 
 **Operations:**
-- [Deployment Guide](DEPLOYMENT_GUIDE.md) - Future production setup
+- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) - Production setup
+- [Local Deployment](docs/LOCAL_DEPLOYMENT.md) - Local development setup
 - [Emergency Procedures](docs/runbooks/emergency-procedures.md) - Crisis management
 - [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting
-
-**Project Management:**
-- [Sprint Plans](SPRINT_PLAN.md) - Development roadmap
-- [Test Coverage Analysis](TEST_COVERAGE_ANALYSIS.md) - Quality metrics
 
 ---
 ## 📊 Performance Benchmarks
@@ -298,7 +325,7 @@ pytest test_backtest_engine.py -v
 - Track performance vs. expectations
 - Adjust or stop strategies as needed
 
-**Full learning path in [USER_GUIDE.md](USER_GUIDE.md)**
+**Full learning path in [USER_GUIDE.md](docs/USER_GUIDE.md)**
 
 ---
 
@@ -346,11 +373,13 @@ Choose your comfort level:
 - Strategy comparison and correlation analysis
 - Automated performance reporting
 
-**Enterprise monitoring:**
+**Web dashboard (built-in):**
 - Real-time position and P&L tracking
-- Email/SMS alerts for critical events
-- Complete trade audit trail
-- Customizable dashboards
+- Strategy management and monitoring
+- Backtest execution from the browser
+- Risk monitoring and emergency stop
+- Logs viewer and settings configuration
+- AI-powered strategy assistant
 
 ---
 
@@ -362,23 +391,24 @@ Choose your comfort level:
 
 | Guide | When to Use | What You'll Learn |
 |-------|-------------|-------------------|
-| **[USER_GUIDE.md](USER_GUIDE.md)** | Your first 30 minutes | Complete walkthrough: strategies, risk management, weekly routine, realistic expectations |
-| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** | Daily commands | Cheat sheet: common commands, quick metrics guide, emergency procedures |
-| **[Quick Start Script](scripts/quick_start.py)** | Right now! | Run your first backtest in 5 minutes |
+| **[Web Dashboard](scripts/run_web.py)** | Right now! | Launch `python scripts/run_web.py` and open http://127.0.0.1:5000 |
+| **[USER_GUIDE.md](docs/USER_GUIDE.md)** | Your first 30 minutes | Complete walkthrough: strategies, risk management, weekly routine, realistic expectations |
+| **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** | Daily commands | Cheat sheet: common commands, quick metrics guide, emergency procedures |
+| **[Quick Start Script](scripts/quick_start.py)** | From the terminal | Run your first backtest in 5 minutes |
 
 ### 📖 Understanding What You Have
 
 | Guide | When to Use | What You'll Learn |
 |-------|-------------|-------------------|
-| **[EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md)** | Before running any example | What each example script does, expected output, common issues |
-| **[SPRINT_PLAN.md](SPRINT_PLAN.md)** | Planning your work | Roadmap, feature breakdown, sprint planning |
-| **[PROJECT_PLAN.md](PROJECT_PLAN.md)** | Understanding architecture | System design, component overview, development guidelines |
+| **[EXAMPLES_GUIDE.md](docs/EXAMPLES_GUIDE.md)** | Before running any example | What each example script does, expected output, common issues |
+| **[PROJECT_PLAN.md](docs/PROJECT_PLAN.md)** | Understanding architecture | System design, component overview, development guidelines |
 
 ### 🔧 For Active Trading
 
 | Guide | When to Use | What You'll Learn |
 |-------|-------------|-------------------|
-| **[check_account.py](scripts/check_account.py)** | Before each trading session | Current account status, positions, P&L, margin health |
+| **[Web Dashboard](/)**  | Every trading session | Real-time positions, P&L, strategy status, risk monitoring |
+| **[check_account.py](scripts/check_account.py)** | Terminal account check | Current account status, positions, P&L, margin health |
 | **[market_status.py](scripts/market_status.py)** | Before placing trades | Is the market open? Safe to trade? |
 | **[Strategy Selector](scripts/strategy_selector.py)** | Choosing a strategy | Interactive tool: finds best strategy for your stock |
 
@@ -387,42 +417,42 @@ Choose your comfort level:
 | Guide | When to Use | What You'll Learn |
 |-------|-------------|-------------------|
 | **[prime_directive.md](prime_directive.md)** | Before coding anything | Development standards, testing requirements, code quality rules |
-| **[TECHNICAL_SPECS.md](TECHNICAL_SPECS.md)** | Building features | API references, class structures, integration patterns |
+| **[TECHNICAL_SPECS.md](docs/TECHNICAL_SPECS.md)** | Building features | API references, class structures, integration patterns |
 | **[docs/](docs/)** | Deep dives | Architecture details, runbooks, troubleshooting guides |
 
 ### 📊 Understanding Results
 
 | Guide | When to Use | What You'll Learn |
 |-------|-------------|-------------------|
-| **[Metrics in USER_GUIDE](USER_GUIDE.md#understanding-your-results)** | After every backtest | What Sharpe ratio, drawdown, win rate mean |
-| **[Risk Management in USER_GUIDE](USER_GUIDE.md#risk-management)** | Setting up strategies | Position sizing, stop losses, circuit breakers |
+| **[Metrics in USER_GUIDE](docs/USER_GUIDE.md#understanding-your-results)** | After every backtest | What Sharpe ratio, drawdown, win rate mean |
+| **[Risk Management in USER_GUIDE](docs/USER_GUIDE.md#risk-management)** | Setting up strategies | Position sizing, stop losses, circuit breakers |
 
 ### 🆘 When Things Go Wrong
 
 | Guide | When to Use | What You'll Find |
 |-------|-------------|------------------|
-| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md#troubleshooting)** | Quick fixes | Common errors and fast solutions |
-| **[Emergency Procedures](QUICK_REFERENCE.md#emergency-commands)** | System acting weird | How to stop everything NOW |
+| **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md#troubleshooting)** | Quick fixes | Common errors and fast solutions |
+| **[Emergency Procedures](docs/QUICK_REFERENCE.md#emergency-commands)** | System acting weird | How to stop everything NOW |
 | **[docs/runbooks/debugging-strategies.md](docs/runbooks/debugging-strategies.md)** | Strategy not working | Step-by-step debugging process |
 
 ### 📚 Documentation Reading Order
 
 **If you're brand new:**
 1. **This README** (you are here!) → Get the big picture
-2. **[USER_GUIDE.md](USER_GUIDE.md)** → Learn strategies and risk management
-3. **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** → Bookmark for daily use
-4. **[EXAMPLES_GUIDE.md](EXAMPLES_GUIDE.md)** → Before running examples
+2. **[USER_GUIDE.md](docs/USER_GUIDE.md)** → Learn strategies and risk management
+3. **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** → Bookmark for daily use
+4. **[EXAMPLES_GUIDE.md](docs/EXAMPLES_GUIDE.md)** → Before running examples
 
 **If you want to trade today:**
-1. **[Quick Start Script](scripts/quick_start.py)** → Run first backtest
+1. **[Web Dashboard](scripts/run_web.py)** → Run `python scripts/run_web.py` and open http://127.0.0.1:5000
 2. **[Strategy Selector](scripts/strategy_selector.py)** → Pick your strategy
 3. **[check_account.py](scripts/check_account.py)** → Check account status
-4. **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** → Commands you need
+4. **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** → Commands you need
 
 **If you're a developer:**
 1. **[prime_directive.md](prime_directive.md)** → MUST READ before coding
-2. **[PROJECT_PLAN.md](PROJECT_PLAN.md)** → Understand architecture
-3. **[TECHNICAL_SPECS.md](TECHNICAL_SPECS.md)** → API references
+2. **[PROJECT_PLAN.md](docs/PROJECT_PLAN.md)** → Understand architecture
+3. **[TECHNICAL_SPECS.md](docs/TECHNICAL_SPECS.md)** → API references
 4. **[docs/](docs/)** → Deep technical docs
 
 ---
@@ -447,6 +477,12 @@ Choose your comfort level:
 
 ## 🔧 Environment-Based Configuration
 
+**Web dashboard for easy management:**
+- Launch with `python scripts/run_web.py` and access at http://127.0.0.1:5000
+- Manage strategies, run backtests, and monitor risk from your browser
+- Connect/disconnect from TWS directly via the Settings page
+- Emergency stop button always visible in the top bar
+
 **Supports both paper and live trading:**
 - Configuration via `.env` files for security
 - Easy switching between environments
@@ -469,8 +505,8 @@ Choose your comfort level:
 
 ### Prerequisites
 
-1. **Interactive Brokers Account** - Paper or live trading account
-2. **TWS or IB Gateway** - Download from Interactive Brokers website
+1. **Interactive Brokers Account** - Paper or live trading account (only needed for paper/live trading, not for backtesting)
+2. **TWS or IB Gateway** - Download from Interactive Brokers website (only needed for paper/live trading)
 3. **Python 3.8+** - With pip package manager
 
 ### Step-by-Step Installation
@@ -483,16 +519,16 @@ cd tws_robot
 
 **2. Create virtual environment:**
 ```bash
-python -m venv .
+python -m venv venv
 ```
 
 **3. Activate virtual environment:**
 ```bash
-# Windows
-.\Scripts\Activate.ps1
+# Windows PowerShell
+.\venv\Scripts\Activate.ps1
 
-# macOS/Linux  
-source bin/activate
+# macOS/Linux
+source venv/bin/activate
 ```
 
 **4. Install dependencies:**
@@ -521,7 +557,27 @@ cp .env.example .env
 
 ## 🎮 Usage Examples
 
-### Backtesting Strategies
+### Web Dashboard (Easiest — Recommended for Most Users)
+
+```bash
+# Start the web dashboard
+python scripts/run_web.py
+
+# Open in your browser: http://127.0.0.1:5000
+# Optional: specify host/port
+python scripts/run_web.py --host 0.0.0.0 --port 8080 --debug
+```
+
+From the web dashboard you can manage everything visually:
+- **Dashboard** — Connection status, equity, P&L, active strategies at a glance
+- **Strategies** — Start, stop, and monitor your trading strategies
+- **Backtest** — Run backtests and review results
+- **Positions** — View open positions and trade history
+- **Risk** — Monitor risk levels and circuit breaker status
+- **Logs** — Browse application logs in real time
+- **Settings** — Configure TWS connection and trading parameters
+
+### Command-Line Backtesting
 
 ```bash
 # Interactive guide for first-time users
@@ -603,6 +659,11 @@ python scripts/market_status.py
 
 ```
 tws_robot/
+├── web/                 # ⭐ Flask web UI (primary user interface)
+│   ├── app.py           #   Application entry point
+│   ├── routes/          #   One Blueprint per menu section
+│   ├── templates/       #   Jinja2 HTML templates
+│   └── static/          #   CSS, JavaScript assets
 ├── backtest/            # Backtesting engine, data manager, analytics, profiles
 ├── config/              # Environment & broker configuration
 │   ├── env_config.py    #   Loads & validates .env at runtime
@@ -610,7 +671,7 @@ tws_robot/
 │   └── live.py          #   Live trading defaults (port 7496)
 ├── core/                # Event bus, TWS connection, order management
 ├── data/                # SQLite databases, data models, real-time pipeline
-├── deployment_scripts/  # Windows startup / backup scripts
+├── deployment_scripts/  # Startup / backup scripts
 ├── docs/                # All project documentation
 │   ├── architecture/    #   System design overviews
 │   ├── decisions/       #   Architectural decision records (ADRs)
@@ -623,20 +684,15 @@ tws_robot/
 ├── reports/             # Generated backtest chart images
 ├── risk/                # Risk manager, position sizer, drawdown control
 ├── scripts/             # Command-line utilities and entry points
+│   ├── run_web.py       #   Start the Flask web UI
 │   ├── quick_start.py   #   Your first backtest (5 min)
 │   ├── run_live.py      #   Launch paper / live trading session
-│   ├── run_web.py       #   Start the Flask web UI
 │   ├── check_account.py #   Account balance, positions, P&L
 │   ├── market_status.py #   Is the US market open?
 │   └── ...
 ├── strategies/          # Live-trading strategies (Bollinger Bands), configs
 ├── strategy/            # Strategy lifecycle, metrics, promotion, validation
 ├── tests/               # Full test suite (mirrors source structure)
-├── web/                 # Flask web UI
-│   ├── app.py           #   Application entry point
-│   ├── routes/          #   One Blueprint per menu section
-│   ├── templates/       #   Jinja2 HTML templates
-│   └── static/          #   CSS, JavaScript assets
 ├── .env.example         # Configuration template
 ├── prime_directive.md   # Development standards & safety rules
 ├── pytest.ini           # Test discovery & coverage config
@@ -722,7 +778,7 @@ The authors are not responsible for any financial losses incurred through the us
 ### Support Resources
 
 📖 **Read First:**
-- [USER_GUIDE.md](USER_GUIDE.md) - Complete trader's guide
+- [USER_GUIDE.md](docs/USER_GUIDE.md) - Complete trader's guide
 - [Technical Docs](docs/) - Architecture and API reference
 - [Runbooks](docs/runbooks/) - Common tasks and troubleshooting
 
@@ -742,10 +798,11 @@ We love feature requests! Open an issue with the "enhancement" label.
 ## 🎯 Your TWS Robot Journey
 
 ### Module 1: Learn & Test
-- [ ] Run `python scripts/quick_start.py`
+- [ ] Launch the web dashboard: `python scripts/run_web.py`
+- [ ] Run `python scripts/quick_start.py` for your first backtest
 - [ ] Test strategies with `python examples/example_strategy_templates.py`
 - [ ] Use `python scripts/strategy_selector.py` to find your strategy
-- [ ] Read [USER_GUIDE.md](USER_GUIDE.md) completely
+- [ ] Read [USER_GUIDE.md](docs/USER_GUIDE.md) completely
 
 ### Module 2: Paper Trade
 - [ ] Connect to IB paper account
