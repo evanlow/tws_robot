@@ -274,7 +274,7 @@ class ServiceManager:
     def get_system_health(self) -> Dict[str, Any]:
         uptime = (datetime.now() - self._start_time).total_seconds()
         raw_stats = self.event_bus.get_stats()
-        # Ensure stats keys are strings for JSON serialisation
+        # Ensure stats keys are strings for JSON serialization
         event_stats = {
             (k.name if hasattr(k, 'name') else str(k)): v
             for k, v in raw_stats.items()

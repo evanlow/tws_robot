@@ -48,7 +48,7 @@ def connect():
         from config.env_config import get_config
         cfg = get_config(env)
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": "Configuration error for the requested environment"}), 400
 
     # Record connection in service manager (actual TWS socket connection
     # requires the IB Gateway/TWS to be running — we store intent here).

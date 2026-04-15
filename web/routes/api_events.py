@@ -30,7 +30,7 @@ def _serialize_event(event) -> str:
 
 
 def _safe_data(obj):
-    """Ensure the event data is JSON-serialisable."""
+    """Ensure the event data is JSON-serializable."""
     if obj is None:
         return None
     if isinstance(obj, dict):
@@ -102,13 +102,13 @@ def event_history():
             return jsonify({"error": f"Unknown event type: {type_filter}"}), 400
 
     events = svc.event_bus.get_history(event_type=event_type, limit=limit)
-    serialised = []
+    serialized = []
     for e in events:
-        serialised.append({
+        serialized.append({
             "type": e.event_type.name,
             "data": _safe_data(e.data),
             "source": e.source,
             "timestamp": e.timestamp.isoformat() if e.timestamp else None,
         })
 
-    return jsonify({"events": serialised, "count": len(serialised)})
+    return jsonify({"events": serialized, "count": len(serialized)})

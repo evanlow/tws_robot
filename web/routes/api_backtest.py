@@ -164,7 +164,7 @@ def _run_backtest_thread(svc, run_id, strategy_name, symbols, start_date, end_da
         engine.set_strategy(strategy)
         result = engine.run()
 
-        # Serialise results
+        # Serialize results
         results_dict = {
             "metrics": {
                 "total_return": result.total_return,

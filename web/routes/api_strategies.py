@@ -78,7 +78,8 @@ def create_strategy():
             "strategy": strategy.get_performance_summary(),
         })
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
+        logger.error("Failed to create strategy: %s", exc)
+        return jsonify({"error": "Failed to create strategy. Check the strategy type and parameters."}), 400
 
 
 @bp.route("/<name>/start", methods=["POST"])
@@ -151,4 +152,5 @@ def update_config(name: str):
         svc.strategy_registry.reload_config(name, new_config)
         return jsonify({"status": "updated", "config": new_config.__dict__})
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
+        logger.error("Failed to update strategy config: %s", exc)
+        return jsonify({"error": "Failed to update strategy configuration."}), 400

@@ -109,7 +109,7 @@ def init_db():
     try:
         from data.database import init_database
         init_database()
-        return jsonify({"status": "ok", "message": "Database initialised"})
+        return jsonify({"status": "ok", "message": "Database initialized"})
     except ImportError:
         return jsonify({
             "status": "skipped",
@@ -117,4 +117,4 @@ def init_db():
         })
     except Exception as exc:
         logger.error("Database init failed: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 500
+        return jsonify({"status": "error", "message": "Database initialization failed. Check logs for details."}), 500
