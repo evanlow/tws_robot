@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("api_events", __name__, url_prefix="/api/events")
 
+# Keepalive interval (seconds) for SSE connections.
+# Browsers and reverse proxies may close idle connections after ~30s,
+# so we send a comment every 25s to keep the connection alive.
+SSE_KEEPALIVE_TIMEOUT = 25
+
 
 def _serialize_event(event) -> str:
     """Turn an EventBus Event into a JSON string for SSE."""
@@ -65,7 +70,7 @@ def event_stream():
             yield ": connected\n\n"
             while True:
                 try:
-                    event_name, data = q.get(timeout=25)
+                    event_name, data = q.get(timeout=SSE_KEEPALIVE_TIMEOUT)
                     yield f"event: {event_name}\ndata: {data}\n\n"
                 except queue.Empty:
                     # Send keepalive comment every 25s

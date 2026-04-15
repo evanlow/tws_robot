@@ -83,7 +83,7 @@
     const emergencyBtn = document.getElementById('emergencyBtn');
     if (emergencyBtn) {
       emergencyBtn.addEventListener('click', async () => {
-        if (!confirm('⚠️ EMERGENCY STOP\\n\\nThis will immediately halt ALL trading and stop ALL strategies.\\n\\nAre you sure?')) return;
+        if (!confirm('\u26a0\ufe0f EMERGENCY STOP\n\nThis will immediately halt ALL trading and stop ALL strategies.\n\nAre you sure?')) return;
         try {
           const res = await fetch('/api/emergency/halt', { method: 'POST',
             headers: { 'Content-Type': 'application/json' },
