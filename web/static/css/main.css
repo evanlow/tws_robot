@@ -1,4 +1,4 @@
-/* TWS Robot — main stylesheet (placeholder) */
+/* TWS Robot — main stylesheet */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -9,6 +9,27 @@ body {
   line-height: 1.6;
 }
 
+/* ---- Status Bar (top-of-page) ---------------------------------------- */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 2rem;
+  background: #12121a;
+  border-bottom: 1px solid #1e1e2e;
+  font-size: 0.8rem;
+}
+.status-bar-left { display: flex; align-items: center; gap: 0.75rem; }
+.status-bar-right { display: flex; align-items: center; gap: 0.75rem; }
+.status-indicator { display: flex; align-items: center; gap: 0.35rem; }
+.status-divider { color: #2d2d44; }
+.status-item { color: #a0aec0; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.dot-green { background: #48bb78; box-shadow: 0 0 4px #48bb78; }
+.dot-red { background: #fc8181; box-shadow: 0 0 4px #fc8181; }
+.dot-yellow { background: #ecc94b; box-shadow: 0 0 4px #ecc94b; }
+
+/* ---- Navbar ----------------------------------------------------------- */
 .navbar {
   display: flex;
   align-items: center;
@@ -44,13 +65,13 @@ body {
 
 .container {
   max-width: 1400px;
-  margin: 2rem auto;
+  margin: 1.5rem auto;
   padding: 0 2rem;
 }
 
 h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
 
-/* ---- Shared button styles -------------------------------------------- */
+/* ---- Buttons ---------------------------------------------------------- */
 .btn-primary {
   background: #3182ce;
   border: none;
@@ -73,6 +94,377 @@ h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
   font-size: 0.85rem;
   padding: 0.45rem 1rem;
   transition: border-color 0.15s, color 0.15s;
+  text-decoration: none;
+  display: inline-block;
 }
 .btn-secondary:hover { border-color: #63b3ed; color: #63b3ed; }
+
+.btn-danger {
+  background: #e53e3e;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.45rem 1rem;
+}
+.btn-danger:hover { background: #c53030; }
+
+.btn-success {
+  background: #38a169;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.45rem 1rem;
+}
+.btn-success:hover { background: #2f855a; }
+
+.btn-sm { font-size: 0.78rem; padding: 0.3rem 0.75rem; }
+
+.btn-emergency {
+  background: #e53e3e;
+  border: 2px solid #fc8181;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.3rem 1rem;
+  animation: pulse-border 2s infinite;
+}
+.btn-emergency:hover { background: #c53030; }
+
+@keyframes pulse-border {
+  0%, 100% { border-color: #fc8181; }
+  50% { border-color: #e53e3e; }
+}
+
+/* ---- Dashboard Grid --------------------------------------------------- */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 260px 1fr 300px;
+  gap: 1rem;
+  min-height: calc(100vh - 180px);
+}
+
+@media (max-width: 1200px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+}
+
+.panel {
+  background: #1a1a2e;
+  border: 1px solid #2d2d44;
+  border-radius: 6px;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.panel-title {
+  font-size: 0.95rem;
+  color: #63b3ed;
+  margin-bottom: 0.75rem;
+}
+
+/* ---- Strategy Cards --------------------------------------------------- */
+.strategy-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.strategy-card {
+  background: #16213e;
+  border: 1px solid #2d2d44;
+  border-radius: 4px;
+  padding: 0.6rem 0.75rem;
+}
+
+.strategy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.3rem;
+}
+.strategy-header a { color: #e2e8f0; text-decoration: none; font-size: 0.85rem; }
+.strategy-header a:hover { color: #63b3ed; }
+
+.strategy-stats {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: #718096;
+}
+
+.strategy-actions { margin-top: 0.4rem; }
+
+/* ---- Tabs ------------------------------------------------------------- */
+.tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #2d2d44;
+  margin-bottom: 1rem;
+}
+
+.tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #718096;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: #e2e8f0; }
+.tab-btn.active { color: #63b3ed; border-bottom-color: #63b3ed; }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ---- Data Table ------------------------------------------------------- */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.data-table th {
+  text-align: left;
+  color: #718096;
+  font-weight: 600;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #2d2d44;
+}
+.data-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #1a1a2e;
+  color: #e2e8f0;
+}
+.data-table tbody tr:hover { background: #16213e; }
+
+/* ---- State Badges ----------------------------------------------------- */
+.state-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+.state-badge.state-running, .state-badge.state-complete { background: #22543d; color: #68d391; }
+.state-badge.state-ready, .state-badge.state-paused   { background: #2c5282; color: #63b3ed; }
+.state-badge.state-stopped { background: #4a5568; color: #a0aec0; }
+.state-badge.state-error, .state-badge.state-failed  { background: #742a2a; color: #fc8181; }
+.state-badge.state-submitted { background: #553c1a; color: #ecc94b; }
+.state-badge.state-cancelled { background: #4a5568; color: #a0aec0; }
+
+/* ---- Risk Badges ------------------------------------------------------ */
+.risk-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+}
+.risk-badge.risk-normal { background: #22543d; color: #68d391; }
+.risk-badge.risk-warning { background: #553c1a; color: #ecc94b; }
+.risk-badge.risk-critical { background: #742a2a; color: #fc8181; }
+.risk-badge.risk-emergency_stop { background: #e53e3e; color: #fff; }
+
+/* ---- Risk Banner ------------------------------------------------------ */
+.risk-banner {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.risk-banner.risk-normal { background: #22543d; border: 1px solid #38a169; }
+.risk-banner.risk-warning { background: #553c1a; border: 1px solid #ecc94b; }
+.risk-banner.risk-critical { background: #742a2a; border: 1px solid #fc8181; }
+.risk-banner.risk-emergency_stop { background: #9b2c2c; border: 1px solid #fc8181; }
+
+/* ---- Alert Banner ----------------------------------------------------- */
+.alert-banner {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.alert-banner.alert-emergency { background: #9b2c2c; border: 1px solid #fc8181; }
+
+/* ---- P&L Colors ------------------------------------------------------- */
+.pnl-positive { color: #68d391; }
+.pnl-negative { color: #fc8181; }
+.text-buy { color: #68d391; }
+.text-sell { color: #fc8181; }
+
+/* ---- Stats Grid ------------------------------------------------------- */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.stat-card {
+  background: #16213e;
+  border: 1px solid #2d2d44;
+  border-radius: 4px;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.stat-card-sm { padding: 0.4rem 0.6rem; }
+.stat-label { font-size: 0.72rem; color: #718096; text-transform: uppercase; font-weight: 600; }
+.stat-sublabel { font-size: 0.7rem; color: #4a5568; }
+.stat-value { font-size: 1.1rem; font-weight: 700; color: #e2e8f0; }
+
+/* ---- Quick Stats (right panel) ---------------------------------------- */
+.quick-stats .stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+  font-size: 0.82rem;
+  border-bottom: 1px solid #2d2d44;
+}
+.quick-stats .stat-row span { color: #718096; }
+.quick-stats .stat-row strong { color: #e2e8f0; }
+
+.conn-status { font-size: 0.85rem; color: #a0aec0; margin-bottom: 0.5rem; }
+
+/* ---- Gauge Bars ------------------------------------------------------- */
+.gauge-bar {
+  height: 6px;
+  background: #2d2d44;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 0.25rem;
+}
+.gauge-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.gauge-drawdown { background: linear-gradient(90deg, #ecc94b, #e53e3e); }
+.gauge-daily { background: linear-gradient(90deg, #ecc94b, #e53e3e); }
+
+/* ---- Alert List ------------------------------------------------------- */
+.alert-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.alert-item {
+  background: #16213e;
+  border-left: 3px solid #4a5568;
+  border-radius: 0 4px 4px 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.alert-item.alert-emergency { border-left-color: #e53e3e; }
+.alert-item.alert-info { border-left-color: #63b3ed; }
+.alert-item.alert-warning { border-left-color: #ecc94b; }
+.alert-time { color: #718096; font-size: 0.75rem; }
+.alert-level { font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+.alert-msg { flex: 1; }
+
+/* ---- AI Chat (inline on dashboard) ------------------------------------ */
+.ai-chat-messages-inline {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+.ai-msg { padding: 0.4rem 0.6rem; border-radius: 5px; font-size: 0.78rem; line-height: 1.4; }
+.ai-msg.user { background: #2d3748; align-self: flex-end; }
+.ai-msg.assistant { background: #16213e; border: 1px solid #2d2d44; align-self: flex-start; }
+.ai-msg.system-info { color: #718096; font-style: italic; font-size: 0.72rem; }
+
+.ai-chat-input-row { display: flex; gap: 0.4rem; }
+.ai-chat-input-row textarea {
+  flex: 1;
+  background: #0f0f13;
+  border: 1px solid #2d2d44;
+  border-radius: 4px;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.5rem;
+  resize: none;
+  font-family: inherit;
+}
+.ai-send-btn {
+  background: #3182ce;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  padding: 0 0.6rem;
+  font-size: 0.78rem;
+}
+.ai-send-btn:hover { background: #2b6cb0; }
+
+/* ---- Event Ticker (bottom bar) ---------------------------------------- */
+.event-ticker {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.3rem 2rem;
+  background: #12121a;
+  border-top: 1px solid #1e1e2e;
+  font-size: 0.72rem;
+  color: #718096;
+  overflow: hidden;
+  z-index: 100;
+}
+.ticker-label { font-weight: 600; color: #63b3ed; white-space: nowrap; }
+.ticker-content { display: flex; gap: 1.5rem; overflow-x: auto; flex: 1; }
+.ticker-msg { white-space: nowrap; }
+
+/* ---- Log Container ---------------------------------------------------- */
+.log-container {
+  background: #0f0f13;
+  border: 1px solid #2d2d44;
+  border-radius: 4px;
+  padding: 0.75rem;
+  max-height: 500px;
+  overflow-y: auto;
+  font-family: 'SFMono-Regular', 'Consolas', monospace;
+  font-size: 0.78rem;
+}
+
+.log-entry {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #1a1a2e;
+  display: flex;
+  gap: 0.75rem;
+}
+.log-time { color: #4a5568; min-width: 170px; }
+.log-type { color: #63b3ed; min-width: 120px; font-weight: 600; }
+.log-source { color: #718096; min-width: 80px; }
+.log-data { color: #a0aec0; flex: 1; word-break: break-all; }
+
+/* ---- Form Inputs ------------------------------------------------------ */
+.form-label {
+  display: block;
+  font-size: 0.82rem;
+  color: #a0aec0;
+  margin-bottom: 0.25rem;
+}
+.form-input {
+  width: 100%;
+  background: #0f0f13;
+  border: 1px solid #2d2d44;
+  border-radius: 4px;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  font-family: inherit;
+}
+.form-input:focus { outline: none; border-color: #63b3ed; }
+
+/* ---- Empty State ------------------------------------------------------ */
+.empty-state {
+  color: #718096;
+  font-size: 0.85rem;
+  font-style: italic;
+  padding: 1rem 0;
+}
 

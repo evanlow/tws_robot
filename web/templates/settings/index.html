@@ -9,14 +9,63 @@
 
 <form method="POST" action="{{ url_for('settings.index') }}" style="max-width:640px;">
 
+  <!-- TWS Connection Settings -->
   <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
-    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">Connection</legend>
-    <p style="color:#718096;font-style:italic;font-size:0.85rem;">TWS connection settings — implementation coming soon.</p>
+    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🔌 TWS Connection</legend>
+
+    <div style="margin-bottom:1rem;">
+      <span style="font-size:0.85rem;color:#a0aec0;">Status:</span>
+      {% if connected %}
+      <span class="risk-badge risk-normal" style="margin-left:0.5rem;">Connected — {{ environment|upper }}</span>
+      {% else %}
+      <span class="risk-badge risk-critical" style="margin-left:0.5rem;">Disconnected</span>
+      {% endif %}
+    </div>
+
+    <div style="display:flex;gap:1rem;margin-bottom:1rem;">
+      <button type="button" class="btn-primary btn-sm" onclick="connectTWS('paper')">Connect Paper</button>
+      <button type="button" class="btn-secondary btn-sm" onclick="connectTWS('live')">Connect Live</button>
+      {% if connected %}
+      <button type="button" class="btn-danger btn-sm" onclick="disconnectTWS()">Disconnect</button>
+      {% endif %}
+    </div>
+
+    <div style="margin-bottom:0.75rem;">
+      <label class="form-label">Test Connection</label>
+      <div style="display:flex;gap:0.5rem;">
+        <input id="testHost" class="form-input" style="width:200px;" value="127.0.0.1" placeholder="Host" />
+        <input id="testPort" class="form-input" style="width:100px;" value="7497" placeholder="Port" />
+        <button type="button" class="btn-secondary btn-sm" onclick="testConnection()">Test</button>
+      </div>
+      <div id="testResult" style="margin-top:0.5rem;font-size:0.85rem;"></div>
+    </div>
   </fieldset>
 
-  <!-- ============================================================
-       AI Configuration (Enhancement — Settings)
-       ============================================================ -->
+  <!-- Risk Parameters -->
+  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">⚡ Risk Parameters</legend>
+    <div class="stats-grid" style="grid-template-columns:1fr 1fr;">
+      <div>
+        <label class="form-label">Max Positions</label>
+        <input class="form-input" value="{{ risk_limits.max_positions|default(10) }}" disabled />
+      </div>
+      <div>
+        <label class="form-label">Max Position %</label>
+        <input class="form-input" value="{{ "%.0f"|format((risk_limits.max_position_pct|default(0.25)) * 100) }}%" disabled />
+      </div>
+      <div>
+        <label class="form-label">Max Drawdown %</label>
+        <input class="form-input" value="{{ "%.0f"|format((risk_limits.max_drawdown_pct|default(0.20)) * 100) }}%" disabled />
+      </div>
+      <div>
+        <label class="form-label">Daily Loss Limit %</label>
+        <input class="form-input" value="{{ "%.0f"|format((risk_limits.daily_loss_limit_pct|default(0.05)) * 100) }}%" disabled />
+      </div>
+    </div>
+    <p style="color:#718096;font-size:0.78rem;margin-top:0.5rem;">Risk parameters are configured in env_config. A web editor is planned for a future release.</p>
+  </fieldset>
+
+  <!-- AI Configuration -->
   <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
     <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🤖 AI Configuration</legend>
 
@@ -32,28 +81,146 @@
     </div>
 
     <div style="margin-bottom:1rem;">
-      <label style="display:block;font-size:0.85rem;color:#a0aec0;margin-bottom:0.3rem;">
-        OpenAI API Key
-      </label>
-      <input type="password" name="openai_api_key" placeholder="sk-…"
-             style="width:100%;background:#0f0f13;border:1px solid #2d2d44;border-radius:4px;
-                    color:#e2e8f0;font-size:0.85rem;padding:0.4rem 0.6rem;">
+      <label class="form-label">OpenAI API Key</label>
+      <input type="password" name="openai_api_key" placeholder="sk-…" class="form-input">
       <p style="color:#718096;font-size:0.78rem;margin-top:0.2rem;">
-        Leave blank to keep the current key. The stored key is never displayed.
+        Leave blank to keep the current key.
       </p>
     </div>
 
     <div>
-      <label style="display:block;font-size:0.85rem;color:#a0aec0;margin-bottom:0.3rem;">
-        OpenAI Model
-      </label>
-      <input type="text" name="openai_model" value="{{ openai_model }}"
-             placeholder="gpt-4o"
-             style="width:100%;background:#0f0f13;border:1px solid #2d2d44;border-radius:4px;
-                    color:#e2e8f0;font-size:0.85rem;padding:0.4rem 0.6rem;">
+      <label class="form-label">OpenAI Model</label>
+      <input type="text" name="openai_model" value="{{ openai_model }}" placeholder="gpt-4o" class="form-input">
     </div>
   </fieldset>
 
-  <button type="submit" class="btn-primary">Save Settings</button>
+  <!-- Data Management -->
+  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">📁 Data Management</legend>
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+      <input id="dlSymbols" class="form-input" placeholder="AAPL, MSFT, GOOG" style="flex:1;" />
+      <button type="button" class="btn-primary btn-sm" onclick="downloadData()">Download Data</button>
+    </div>
+    <div id="dlStatus" style="font-size:0.85rem;color:#a0aec0;"></div>
+    <button type="button" class="btn-secondary btn-sm" onclick="viewDataStatus()" style="margin-top:0.5rem;">View Data Status</button>
+    <div id="dataStatusContainer" style="margin-top:0.5rem;"></div>
+  </fieldset>
+
+  <!-- System -->
+  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🔧 System</legend>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+      <button type="button" class="btn-secondary btn-sm" onclick="initDb()">Init Database</button>
+      <button type="button" class="btn-secondary btn-sm" onclick="checkHealth()">System Health</button>
+      <button type="button" class="btn-secondary btn-sm" onclick="checkMarket()">Market Status</button>
+    </div>
+    <div id="systemResult" style="margin-top:0.75rem;font-size:0.85rem;"></div>
+  </fieldset>
+
+  <button type="submit" class="btn-primary">Save AI Settings</button>
 </form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+window.connectTWS = async function(env) {
+  try {
+    const res = await fetch('/api/connection/connect', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ environment: env })
+    });
+    const data = await res.json();
+    if (data.error) alert(data.error);
+    else location.reload();
+  } catch(e) { alert('Error: ' + e); }
+};
+
+window.disconnectTWS = async function() {
+  try { await fetch('/api/connection/disconnect', { method: 'POST' }); location.reload(); }
+  catch(e) { alert('Error: ' + e); }
+};
+
+window.testConnection = async function() {
+  const result = document.getElementById('testResult');
+  result.textContent = 'Testing…';
+  try {
+    const res = await fetch('/api/diagnostics/test-connection', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        host: document.getElementById('testHost').value,
+        port: parseInt(document.getElementById('testPort').value)
+      })
+    });
+    const data = await res.json();
+    result.innerHTML = data.reachable
+      ? '<span class="pnl-positive">✅ Reachable</span>'
+      : '<span class="pnl-negative">❌ Not reachable</span>';
+  } catch(e) { result.textContent = 'Error: ' + e; }
+};
+
+window.downloadData = async function() {
+  const symbols = document.getElementById('dlSymbols').value.split(',').map(s => s.trim()).filter(Boolean);
+  const status = document.getElementById('dlStatus');
+  if (!symbols.length) { status.textContent = 'Enter at least one symbol'; return; }
+  status.textContent = 'Downloading…';
+  try {
+    const res = await fetch('/api/data/download', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols: symbols })
+    });
+    const data = await res.json();
+    status.textContent = `Download started for: ${symbols.join(', ')}`;
+  } catch(e) { status.textContent = 'Error: ' + e; }
+};
+
+window.viewDataStatus = async function() {
+  const container = document.getElementById('dataStatusContainer');
+  container.innerHTML = '<em>Loading…</em>';
+  try {
+    const res = await fetch('/api/data/status');
+    const data = await res.json();
+    if (data.files && data.files.length) {
+      let html = '<table class="data-table"><thead><tr><th>Symbol</th><th>Last Modified</th><th>Age</th><th>Fresh</th></tr></thead><tbody>';
+      for (const f of data.files) {
+        html += `<tr><td>${f.symbol}</td><td>${f.last_modified}</td><td>${f.age_days} days</td>
+          <td>${f.fresh ? '✅' : '⚠️'}</td></tr>`;
+      }
+      container.innerHTML = html + '</tbody></table>';
+    } else {
+      container.innerHTML = '<p class="empty-state">No historical data files found</p>';
+    }
+  } catch(e) { container.innerHTML = 'Error: ' + e; }
+};
+
+window.initDb = async function() {
+  const result = document.getElementById('systemResult');
+  result.textContent = 'Initialising…';
+  try {
+    const res = await fetch('/api/system/init-db', { method: 'POST' });
+    const data = await res.json();
+    result.textContent = data.message || data.status;
+  } catch(e) { result.textContent = 'Error: ' + e; }
+};
+
+window.checkHealth = async function() {
+  const result = document.getElementById('systemResult');
+  result.textContent = 'Checking…';
+  try {
+    const res = await fetch('/api/system/health');
+    const data = await res.json();
+    result.innerHTML = `<pre style="font-size:0.8rem;white-space:pre-wrap;">${JSON.stringify(data, null, 2)}</pre>`;
+  } catch(e) { result.textContent = 'Error: ' + e; }
+};
+
+window.checkMarket = async function() {
+  const result = document.getElementById('systemResult');
+  result.textContent = 'Checking…';
+  try {
+    const res = await fetch('/api/diagnostics/market-status');
+    const data = await res.json();
+    result.innerHTML = data.market_open ? '✅ Market OPEN' : '🔴 Market CLOSED';
+    result.innerHTML += ` — NY: ${data.current_time_ny || 'N/A'}`;
+  } catch(e) { result.textContent = 'Error: ' + e; }
+};
+</script>
 {% endblock %}

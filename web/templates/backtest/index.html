@@ -2,5 +2,139 @@
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
 <h1>{{ title }}</h1>
-<p><em>Backtest — implementation coming soon.</em></p>
+
+<!-- Backtest Run Form -->
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🧪 Run New Backtest</h2>
+  <div style="max-width:600px;">
+    <div style="margin-bottom:0.75rem;">
+      <label class="form-label">Strategy</label>
+      <input id="btStrategy" class="form-input" placeholder="e.g. MovingAverageCross" value="MovingAverageCross" />
+    </div>
+    <div style="margin-bottom:0.75rem;">
+      <label class="form-label">Symbols (comma-separated)</label>
+      <input id="btSymbols" class="form-input" placeholder="AAPL, MSFT" />
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;">
+        <label class="form-label">Start Date</label>
+        <input id="btStart" class="form-input" type="date" value="2024-01-01" />
+      </div>
+      <div style="flex:1;">
+        <label class="form-label">End Date</label>
+        <input id="btEnd" class="form-input" type="date" value="2024-12-31" />
+      </div>
+    </div>
+    <div style="margin-bottom:0.75rem;">
+      <label class="form-label">Initial Capital ($)</label>
+      <input id="btCapital" class="form-input" type="number" value="100000" />
+    </div>
+    <button class="btn-primary" onclick="runBacktest()">Run Backtest</button>
+    <span id="btStatus" style="margin-left:1rem;color:#a0aec0;font-size:0.85rem;"></span>
+  </div>
+</section>
+
+<!-- Backtest Runs -->
+<section>
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">📊 Backtest Runs</h2>
+  <div id="btRunsContainer">
+    <p class="empty-state">Loading…</p>
+  </div>
+</section>
+
+<!-- Results Modal -->
+<div id="btResultsPanel" style="display:none;margin-top:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Results</h2>
+  <div id="btResultsContent"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+window.runBacktest = async function() {
+  const status = document.getElementById('btStatus');
+  status.textContent = 'Submitting…';
+  try {
+    const res = await fetch('/api/backtest/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        strategy: document.getElementById('btStrategy').value,
+        symbols: document.getElementById('btSymbols').value.split(',').map(s => s.trim()).filter(Boolean),
+        start_date: document.getElementById('btStart').value,
+        end_date: document.getElementById('btEnd').value,
+        initial_capital: parseFloat(document.getElementById('btCapital').value)
+      })
+    });
+    const data = await res.json();
+    if (data.error) { status.textContent = 'Error: ' + data.error; return; }
+    status.textContent = `Running (ID: ${data.run_id})…`;
+    pollStatus(data.run_id);
+  } catch(e) { status.textContent = 'Error: ' + e; }
+};
+
+async function pollStatus(runId) {
+  const status = document.getElementById('btStatus');
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const res = await fetch(`/api/backtest/${runId}/status`);
+      const data = await res.json();
+      if (data.status === 'complete') {
+        status.textContent = 'Complete!';
+        loadResults(runId);
+        loadRuns();
+        return;
+      } else if (data.status === 'failed') {
+        status.textContent = 'Failed';
+        return;
+      }
+      status.textContent = `Running (${i * 2}s)…`;
+    } catch(e) {}
+  }
+  status.textContent = 'Timeout';
+}
+
+async function loadResults(runId) {
+  const panel = document.getElementById('btResultsPanel');
+  const content = document.getElementById('btResultsContent');
+  try {
+    const res = await fetch(`/api/backtest/${runId}/results`);
+    const data = await res.json();
+    if (data.results && data.results.metrics) {
+      const m = data.results.metrics;
+      content.innerHTML = `
+        <div class="stats-grid">
+          <div class="stat-card"><span class="stat-label">Return</span><span class="stat-value ${m.total_return >= 0 ? 'pnl-positive' : 'pnl-negative'}">${(m.total_return * 100).toFixed(2)}%</span></div>
+          <div class="stat-card"><span class="stat-label">P&L</span><span class="stat-value">$${m.total_pnl.toFixed(2)}</span></div>
+          <div class="stat-card"><span class="stat-label">Trades</span><span class="stat-value">${m.total_trades}</span></div>
+          <div class="stat-card"><span class="stat-label">Win Rate</span><span class="stat-value">${(m.win_rate * 100).toFixed(1)}%</span></div>
+          <div class="stat-card"><span class="stat-label">Max Drawdown</span><span class="stat-value pnl-negative">${(m.max_drawdown_pct * 100).toFixed(2)}%</span></div>
+          <div class="stat-card"><span class="stat-label">Final Equity</span><span class="stat-value">$${m.final_equity.toFixed(2)}</span></div>
+        </div>`;
+      panel.style.display = 'block';
+    }
+  } catch(e) { content.innerHTML = 'Error: ' + e; panel.style.display = 'block'; }
+}
+
+async function loadRuns() {
+  const container = document.getElementById('btRunsContainer');
+  try {
+    const res = await fetch('/api/backtest/runs');
+    const data = await res.json();
+    if (!data.runs || !data.runs.length) {
+      container.innerHTML = '<p class="empty-state">No backtest runs yet. Submit one above.</p>';
+      return;
+    }
+    let html = '<table class="data-table"><thead><tr><th>Run ID</th><th>Strategy</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+    for (const r of data.runs) {
+      html += `<tr><td><code>${r.run_id}</code></td><td>${r.strategy}</td><td><span class="state-badge state-${r.status}">${r.status}</span></td><td>${r.created}</td>
+        <td>${r.status === 'complete' ? `<button class="btn-sm btn-primary" onclick="loadResults('${r.run_id}')">View</button>` : ''}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch(e) { container.innerHTML = 'Error: ' + e; }
+}
+
+loadRuns();
+</script>
 {% endblock %}
