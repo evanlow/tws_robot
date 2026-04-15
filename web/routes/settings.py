@@ -8,16 +8,25 @@ import os
 
 from flask import Blueprint, render_template
 
+from web.services import get_services
+
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 
 
 @bp.route("/", methods=["GET"])
 def index():
+    svc = get_services()
+    risk_summary = svc.risk_manager.get_risk_summary()
+
     context = {
         "title": "Settings",
         "active_page": "settings",
         "openai_model": os.getenv("OPENAI_MODEL", "gpt-4o"),
         "ai_enabled": os.getenv("AI_ENABLED", "false").lower() == "true",
         "message": None,
+        "connected": svc.connected,
+        "environment": svc.connection_env,
+        "connection_info": svc.connection_info,
+        "risk_limits": risk_summary.get("limits", {}),
     }
     return render_template("settings/index.html", **context)

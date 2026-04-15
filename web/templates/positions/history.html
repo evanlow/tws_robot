@@ -1,5 +1,76 @@
 {% extends "base.html" %}
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
-<h1>Order History</h1>
+<h1>{{ title }}</h1>
+
+<div style="display:flex;gap:1rem;margin-bottom:1.5rem;">
+  <a href="/positions" class="btn-secondary">← Open Positions</a>
+</div>
+
+<!-- Orders -->
+<section>
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Orders</h2>
+  {% if orders %}
+  <table class="data-table">
+    <thead>
+      <tr><th>ID</th><th>Time</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Type</th><th>Status</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for o in orders %}
+      <tr>
+        <td><code>{{ o.id|default('') }}</code></td>
+        <td>{{ o.submitted_at|default('') }}</td>
+        <td><strong>{{ o.symbol }}</strong></td>
+        <td class="{{ 'text-buy' if o.action == 'BUY' else 'text-sell' }}">{{ o.action }}</td>
+        <td>{{ o.quantity }}</td>
+        <td>{{ o.order_type|default('MARKET') }}</td>
+        <td><span class="state-badge state-{{ o.status|default('SUBMITTED')|lower }}">{{ o.status|default('SUBMITTED') }}</span></td>
+        <td>
+          {% if o.status == 'SUBMITTED' %}
+          <button class="btn-sm btn-danger" onclick="cancelOrder('{{ o.id }}')">Cancel</button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">No orders recorded</p>
+  {% endif %}
+</section>
+
+<!-- Trades -->
+<section style="margin-top:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Trade History</h2>
+  {% if trades %}
+  <table class="data-table">
+    <thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th></tr></thead>
+    <tbody>
+      {% for t in trades %}
+      <tr>
+        <td>{{ t.timestamp|default(t.submitted_at|default('')) }}</td>
+        <td><strong>{{ t.symbol }}</strong></td>
+        <td class="{{ 'text-buy' if t.action == 'BUY' else 'text-sell' }}">{{ t.action }}</td>
+        <td>{{ t.quantity }}</td>
+        <td>${{ "%.2f"|format(t.price|default(0)) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">No trade history</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+window.cancelOrder = async function(orderId) {
+  if (!confirm('Cancel order ' + orderId + '?')) return;
+  try {
+    const res = await fetch('/api/orders/' + orderId, { method: 'DELETE' });
+    location.reload();
+  } catch(e) { alert('Error: ' + e); }
+};
+</script>
 {% endblock %}

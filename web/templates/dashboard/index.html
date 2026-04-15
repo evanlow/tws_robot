@@ -1,135 +1,277 @@
 {% extends "base.html" %}
 {% block title %}{{ title }}{% endblock %}
 
-{% block extra_head %}
-<style>
-  /* ---- AI Chat Panel ---------------------------------------------------- */
-  .ai-chat-panel {
-    position: fixed;
-    bottom: 0;
-    right: 2rem;
-    width: 380px;
-    background: #1a1a2e;
-    border: 1px solid #2d2d44;
-    border-bottom: none;
-    border-radius: 8px 8px 0 0;
-    display: flex;
-    flex-direction: column;
-    z-index: 1000;
-    transition: height 0.2s ease;
-  }
-  .ai-chat-panel.collapsed { height: 40px; overflow: hidden; }
-  .ai-chat-panel.expanded  { height: 420px; }
-
-  .ai-chat-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 1rem;
-    height: 40px;
-    cursor: pointer;
-    background: #16213e;
-    border-radius: 8px 8px 0 0;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #63b3ed;
-    user-select: none;
-  }
-  .ai-chat-header .toggle-icon { font-size: 1rem; }
-
-  .ai-chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    font-size: 0.82rem;
-  }
-  .ai-msg { padding: 0.5rem 0.75rem; border-radius: 6px; max-width: 95%; line-height: 1.4; }
-  .ai-msg.user      { background: #2d3748; align-self: flex-end; }
-  .ai-msg.assistant { background: #16213e; border: 1px solid #2d2d44; align-self: flex-start; }
-  .ai-msg.system-info { background: transparent; color: #718096; font-style: italic; font-size: 0.78rem; text-align: center; }
-
-  .ai-chat-input-row {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    border-top: 1px solid #2d2d44;
-  }
-  .ai-chat-input-row textarea {
-    flex: 1;
-    background: #0f0f13;
-    border: 1px solid #2d2d44;
-    border-radius: 4px;
-    color: #e2e8f0;
-    font-size: 0.82rem;
-    padding: 0.4rem 0.6rem;
-    resize: none;
-    height: 60px;
-    font-family: inherit;
-  }
-  .ai-chat-input-row textarea:focus { outline: none; border-color: #63b3ed; }
-  .ai-send-btn {
-    background: #3182ce;
-    border: none;
-    border-radius: 4px;
-    color: #fff;
-    cursor: pointer;
-    padding: 0 0.75rem;
-    font-size: 0.85rem;
-    align-self: flex-end;
-    height: 36px;
-  }
-  .ai-send-btn:hover { background: #2b6cb0; }
-  .ai-send-btn:disabled { background: #4a5568; cursor: not-allowed; }
-</style>
-{% endblock %}
-
 {% block content %}
-<h1>{{ title }}</h1>
-<p><em>Dashboard — implementation coming soon.</em></p>
-
 <!-- ============================================================
-     AI Copilot Chat Panel (Enhancement 1)
+     SUPER DASHBOARD — Multi-panel layout
      ============================================================ -->
-<div class="ai-chat-panel collapsed" id="aiChatPanel">
-  <div class="ai-chat-header" id="aiChatHeader">
-    <span>🤖 AI Copilot</span>
-    <span class="toggle-icon" id="aiToggleIcon">▲</span>
-  </div>
+<div class="dashboard-grid">
 
-  <div class="ai-chat-messages" id="aiChatMessages">
-    <div class="ai-msg system-info">Ask anything about your positions, strategies, or risk.</div>
-  </div>
+  <!-- ---- Left Panel: Strategies ---- -->
+  <section class="panel panel-strategies">
+    <h2 class="panel-title">📊 Active Strategies</h2>
+    {% if strategies %}
+    <div class="strategy-list">
+      {% for s in strategies %}
+      <div class="strategy-card">
+        <div class="strategy-header">
+          <a href="/strategies/{{ s.strategy_name }}"><strong>{{ s.strategy_name }}</strong></a>
+          <span class="state-badge state-{{ s.state|lower }}">{{ s.state }}</span>
+        </div>
+        <div class="strategy-stats">
+          <span>Signals: {{ s.signals_generated }}</span>
+          <span>Accepted: {{ s.signals_accepted }}</span>
+          <span>Rate: {{ "%.0f"|format(s.acceptance_rate * 100) }}%</span>
+        </div>
+        <div class="strategy-actions">
+          {% if s.state == 'RUNNING' %}
+          <button class="btn-sm btn-danger" onclick="controlStrategy('{{ s.strategy_name }}', 'stop')">Stop</button>
+          {% elif s.state in ['READY', 'PAUSED'] %}
+          <button class="btn-sm btn-success" onclick="controlStrategy('{{ s.strategy_name }}', 'start')">Start</button>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No strategies registered. <a href="/strategies">Create one →</a></p>
+    {% endif %}
+  </section>
 
-  <div class="ai-chat-input-row">
-    <textarea id="aiChatInput" placeholder="Type a question…" rows="2"></textarea>
-    <button class="ai-send-btn" id="aiSendBtn">Send</button>
+  <!-- ---- Center Panel: Tabs ---- -->
+  <section class="panel panel-center">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="portfolio">Portfolio</button>
+      <button class="tab-btn" data-tab="trades">Recent Trades</button>
+      <button class="tab-btn" data-tab="alerts">Alerts</button>
+      <button class="tab-btn" data-tab="market">Market</button>
+    </div>
+
+    <!-- Portfolio Tab -->
+    <div class="tab-content active" id="tab-portfolio">
+      <h3>Open Positions</h3>
+      {% if positions %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Qty</th><th>Entry</th><th>Current</th><th>P&L</th><th>P&L %</th><th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for symbol, pos in positions.items() %}
+          <tr>
+            <td><strong>{{ symbol }}</strong></td>
+            <td>{{ pos.quantity|default(0) }}</td>
+            <td>${{ "%.2f"|format(pos.entry_price|default(0)) }}</td>
+            <td>${{ "%.2f"|format(pos.current_price|default(0)) }}</td>
+            <td class="{{ 'pnl-positive' if (pos.unrealized_pnl|default(0)) >= 0 else 'pnl-negative' }}">
+              ${{ "%.2f"|format(pos.unrealized_pnl|default(0)) }}
+            </td>
+            <td class="{{ 'pnl-positive' if (pos.unrealized_pnl_pct|default(0)) >= 0 else 'pnl-negative' }}">
+              {{ "%.2f"|format((pos.unrealized_pnl_pct|default(0)) * 100) }}%
+            </td>
+            <td><button class="btn-sm btn-danger" onclick="closePosition('{{ symbol }}')">Close</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="empty-state">No open positions</p>
+      {% endif %}
+    </div>
+
+    <!-- Trades Tab -->
+    <div class="tab-content" id="tab-trades">
+      <h3>Recent Trades</h3>
+      {% if recent_trades %}
+      <table class="data-table">
+        <thead>
+          <tr><th>Time</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for t in recent_trades %}
+          <tr>
+            <td>{{ t.submitted_at|default(t.timestamp|default('')) }}</td>
+            <td><strong>{{ t.symbol }}</strong></td>
+            <td class="{{ 'text-buy' if t.action == 'BUY' else 'text-sell' }}">{{ t.action }}</td>
+            <td>{{ t.quantity }}</td>
+            <td>${{ "%.2f"|format(t.price|default(0)) }}</td>
+            <td>{{ t.status|default('FILLED') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="empty-state">No recent trades</p>
+      {% endif %}
+    </div>
+
+    <!-- Alerts Tab -->
+    <div class="tab-content" id="tab-alerts">
+      <h3>Risk Alerts</h3>
+      {% if alerts %}
+      <div class="alert-list">
+        {% for alert in alerts %}
+        <div class="alert-item alert-{{ alert.level|default('INFO')|lower }}">
+          <span class="alert-time">{{ alert.timestamp|default('') }}</span>
+          <span class="alert-level">{{ alert.level|default('INFO') }}</span>
+          <span class="alert-msg">{{ alert.message }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="empty-state">No alerts — system operating normally ✅</p>
+      {% endif %}
+    </div>
+
+    <!-- Market Tab -->
+    <div class="tab-content" id="tab-market">
+      <h3>Market Status</h3>
+      <div id="marketStatusContainer">
+        <button class="btn-primary" onclick="loadMarketStatus()">Check Market Status</button>
+        <div id="marketStatusResult" style="margin-top:1rem;"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Right Panel: Quick Info + AI Chat ---- -->
+  <section class="panel panel-right">
+    <!-- Quick Stats -->
+    <div class="quick-stats">
+      <h2 class="panel-title">📈 Quick Stats</h2>
+      <div class="stat-row">
+        <span>Peak Equity</span>
+        <strong>${{ "%.2f"|format(risk_summary.peak_equity|default(100000)) }}</strong>
+      </div>
+      <div class="stat-row">
+        <span>Drawdown</span>
+        <strong class="{{ 'pnl-negative' if (risk_summary.drawdown_pct|default(0)) > 0.05 else '' }}">
+          {{ "%.2f"|format((risk_summary.drawdown_pct|default(0)) * 100) }}%
+        </strong>
+      </div>
+      <div class="stat-row">
+        <span>Positions</span>
+        <strong>{{ positions|length }}</strong>
+      </div>
+      <div class="stat-row">
+        <span>Strategies</span>
+        <strong>{{ strategies|length }}</strong>
+      </div>
+      <div class="stat-row">
+        <span>Emergency Stop</span>
+        <strong class="{{ 'pnl-negative' if risk_summary.emergency_stop_active else 'pnl-positive' }}">
+          {{ 'ACTIVE' if risk_summary.emergency_stop_active else 'OFF' }}
+        </strong>
+      </div>
+    </div>
+
+    <!-- Connection Controls -->
+    <div class="connection-controls" style="margin-top:1rem;">
+      <h3 class="panel-title">🔌 Connection</h3>
+      {% if connected %}
+      <p class="conn-status">Connected to <strong>{{ environment|upper }}</strong></p>
+      <button class="btn-secondary btn-sm" onclick="disconnectTWS()">Disconnect</button>
+      {% else %}
+      <div style="display:flex;gap:0.5rem;">
+        <button class="btn-primary btn-sm" onclick="connectTWS('paper')">Paper</button>
+        <button class="btn-secondary btn-sm" onclick="connectTWS('live')">Live</button>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- AI Chat -->
+    <div class="ai-chat-embedded" style="margin-top:1rem;">
+      <h3 class="panel-title">🤖 AI Copilot</h3>
+      <div class="ai-chat-messages-inline" id="aiChatMessages">
+        <div class="ai-msg system-info">Ask anything about positions, strategies, or risk.</div>
+      </div>
+      <div class="ai-chat-input-row">
+        <textarea id="aiChatInput" placeholder="Type a question…" rows="2"></textarea>
+        <button class="ai-send-btn" id="aiSendBtn">Send</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ---- Bottom Bar: Event Ticker ---- -->
+<div class="event-ticker" id="eventTicker">
+  <span class="ticker-label">Events:</span>
+  <div class="ticker-content" id="tickerContent">
+    <span class="ticker-msg">System ready — connect to TWS to begin trading</span>
   </div>
 </div>
+
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
-(function () {
-  const panel    = document.getElementById('aiChatPanel');
-  const header   = document.getElementById('aiChatHeader');
-  const messages = document.getElementById('aiChatMessages');
-  const input    = document.getElementById('aiChatInput');
-  const sendBtn  = document.getElementById('aiSendBtn');
-  const icon     = document.getElementById('aiToggleIcon');
-
-  let expanded = false;
-
-  header.addEventListener('click', () => {
-    expanded = !expanded;
-    panel.classList.toggle('collapsed', !expanded);
-    panel.classList.toggle('expanded', expanded);
-    icon.textContent = expanded ? '▼' : '▲';
+(function() {
+  // Tab switching
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
   });
 
-  function appendMessage(role, text) {
+  // Strategy control
+  window.controlStrategy = async function(name, action) {
+    try {
+      const res = await fetch(`/api/strategies/${name}/${action}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.error) alert(data.error);
+      else location.reload();
+    } catch(e) { alert('Error: ' + e); }
+  };
+
+  // Position close
+  window.closePosition = async function(symbol) {
+    if (!confirm(`Close all ${symbol} positions?`)) return;
+    alert('Position close for ' + symbol + ' would be submitted to TWS.');
+  };
+
+  // Connection
+  window.connectTWS = async function(env) {
+    try {
+      const res = await fetch('/api/connection/connect', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ environment: env })
+      });
+      const data = await res.json();
+      if (data.error) alert(data.error);
+      else location.reload();
+    } catch(e) { alert('Error: ' + e); }
+  };
+
+  window.disconnectTWS = async function() {
+    try {
+      const res = await fetch('/api/connection/disconnect', { method: 'POST' });
+      const data = await res.json();
+      location.reload();
+    } catch(e) { alert('Error: ' + e); }
+  };
+
+  // Market status
+  window.loadMarketStatus = async function() {
+    const container = document.getElementById('marketStatusResult');
+    container.innerHTML = '<em>Checking...</em>';
+    try {
+      const res = await fetch('/api/diagnostics/market-status');
+      const data = await res.json();
+      const status = data.market_open ? '✅ Market OPEN' : '🔴 Market CLOSED';
+      container.innerHTML = `<strong>${status}</strong><br>NY Time: ${data.current_time_ny || 'N/A'}`;
+    } catch(e) { container.innerHTML = 'Error: ' + e; }
+  };
+
+  // AI Chat (inline)
+  const messages = document.getElementById('aiChatMessages');
+  const input = document.getElementById('aiChatInput');
+  const sendBtn = document.getElementById('aiSendBtn');
+
+  function appendMsg(role, text) {
     const div = document.createElement('div');
     div.className = `ai-msg ${role}`;
     div.textContent = text;
@@ -137,35 +279,58 @@
     messages.scrollTop = messages.scrollHeight;
   }
 
-  async function sendMessage() {
+  async function sendChat() {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
     sendBtn.disabled = true;
-
-    appendMessage('user', text);
-    appendMessage('assistant', '…');
-
+    appendMsg('user', text);
+    appendMsg('assistant', '…');
     try {
-      const res  = await fetch('/ai/chat', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ message: text }),
+      const res = await fetch('/ai/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
       });
       const data = await res.json();
-      messages.lastChild.textContent = data.reply || data.error || '(empty response)';
-    } catch (err) {
-      messages.lastChild.textContent = 'Error contacting AI service.';
-    } finally {
-      sendBtn.disabled = false;
-      messages.scrollTop = messages.scrollHeight;
-    }
+      messages.lastChild.textContent = data.reply || data.error || '(empty)';
+    } catch(e) { messages.lastChild.textContent = 'Error: ' + e; }
+    finally { sendBtn.disabled = false; messages.scrollTop = messages.scrollHeight; }
   }
 
-  sendBtn.addEventListener('click', sendMessage);
+  sendBtn.addEventListener('click', sendChat);
   input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
   });
+
+  // SSE Event Stream
+  try {
+    const sse = new EventSource('/api/events/stream');
+    const ticker = document.getElementById('tickerContent');
+    sse.addEventListener('event', function(e) {
+      const ev = JSON.parse(e.data);
+      const msg = document.createElement('span');
+      msg.className = 'ticker-msg';
+      msg.textContent = `[${ev.type}] ${JSON.stringify(ev.data || '').substring(0, 80)}`;
+      ticker.appendChild(msg);
+      // Keep last 20 messages
+      while (ticker.children.length > 20) ticker.removeChild(ticker.firstChild);
+    });
+  } catch(e) { console.log('SSE not available:', e); }
+
+  // Auto-refresh status bar every 15s
+  setInterval(async () => {
+    try {
+      const res = await fetch('/api/account/summary');
+      const d = await res.json();
+      document.getElementById('equityVal').textContent = '$' + (d.equity || 0).toFixed(2);
+      const pnl = ((d.daily_pnl_pct || 0) * 100).toFixed(2);
+      const pnlEl = document.getElementById('pnlVal');
+      pnlEl.textContent = pnl + '%';
+      pnlEl.className = parseFloat(pnl) >= 0 ? 'pnl-positive' : 'pnl-negative';
+      document.getElementById('riskBadge').textContent = d.risk_status || 'NORMAL';
+      document.getElementById('riskBadge').className = 'risk-badge risk-' + (d.risk_status || 'NORMAL').toLowerCase();
+    } catch(e) {}
+  }, 15000);
 })();
 </script>
 {% endblock %}

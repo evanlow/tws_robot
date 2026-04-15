@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+
+<!-- Event Stats -->
+<div class="stats-grid" style="margin-bottom:1.5rem;">
+  {% for etype, count in event_stats.items() %}
+  <div class="stat-card stat-card-sm">
+    <span class="stat-label">{{ etype.name if etype.name is defined else etype }}</span>
+    <span class="stat-value">{{ count }}</span>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Filters -->
+<div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <input id="logSearch" class="form-input" style="width:300px;" placeholder="Search events…" />
+  <button class="btn-primary" onclick="filterLogs()">Filter</button>
+  <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;color:#a0aec0;">
+    <input type="checkbox" id="logAutoScroll" checked /> Auto-scroll
+  </label>
+</div>
+
+<!-- Event Stream -->
+<section>
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">📋 Event Stream
+    <span style="font-size:0.8rem;color:#718096;font-weight:400;"> (live via SSE)</span>
+  </h2>
+  <div id="logContainer" class="log-container">
+    {% for e in events %}
+    <div class="log-entry">
+      <span class="log-time">{{ e.timestamp }}</span>
+      <span class="log-type">{{ e.type }}</span>
+      <span class="log-source">{{ e.source }}</span>
+      <span class="log-data">{{ e.data }}</span>
+    </div>
+    {% endfor %}
+    {% if not events %}
+    <p class="empty-state">No events recorded yet. Events will appear here in real-time.</p>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Violation Logs -->
+<section style="margin-top:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🛡️ Violation Log</h2>
+  <button class="btn-secondary" onclick="loadViolations()">Load Violations</button>
+  <div id="violationsContainer" style="margin-top:0.75rem;"></div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// SSE live stream
+try {
+  const sse = new EventSource('/api/events/stream');
+  const container = document.getElementById('logContainer');
+  const autoScroll = document.getElementById('logAutoScroll');
+
+  sse.addEventListener('event', function(e) {
+    const ev = JSON.parse(e.data);
+    const div = document.createElement('div');
+    div.className = 'log-entry';
+    div.innerHTML = `<span class="log-time">${ev.timestamp || ''}</span>
+      <span class="log-type">${ev.type || ''}</span>
+      <span class="log-source">${ev.source || ''}</span>
+      <span class="log-data">${JSON.stringify(ev.data || '').substring(0, 200)}</span>`;
+    container.appendChild(div);
+    while (container.children.length > 500) container.removeChild(container.firstChild);
+    if (autoScroll.checked) container.scrollTop = container.scrollHeight;
+  });
+} catch(e) { console.log('SSE:', e); }
+
+window.filterLogs = function() {
+  const search = document.getElementById('logSearch').value.toLowerCase();
+  document.querySelectorAll('.log-entry').forEach(el => {
+    el.style.display = (!search || el.textContent.toLowerCase().includes(search)) ? '' : 'none';
+  });
+};
+
+window.loadViolations = async function() {
+  const container = document.getElementById('violationsContainer');
+  container.innerHTML = '<em>Loading…</em>';
+  try {
+    const res = await fetch('/logs/violations');
+    const data = await res.json();
+    if (data.lines && data.lines.length) {
+      container.innerHTML = '<pre class="log-container" style="max-height:300px;">' +
+        data.lines.map(l => l.replace(/</g, '&lt;')).join('\n') + '</pre>';
+    } else {
+      container.innerHTML = '<p class="empty-state">No violations recorded ✅</p>';
+    }
+  } catch(e) { container.innerHTML = 'Error: ' + e; }
+};
+</script>
+{% endblock %}

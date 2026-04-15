@@ -2,5 +2,106 @@
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
 <h1>{{ title }}</h1>
-<p><em>Positions — implementation coming soon.</em></p>
+
+<!-- Emergency controls -->
+<div style="display:flex;gap:1rem;margin-bottom:1.5rem;">
+  {% if emergency_stop %}
+  <div class="alert-banner alert-emergency">
+    🚨 Emergency stop is ACTIVE — all trading halted
+    <button class="btn-sm btn-success" onclick="resumeTrading()" style="margin-left:1rem;">Resume Trading</button>
+  </div>
+  {% endif %}
+  <button class="btn-danger" onclick="closeAllPositions()">Close All Positions</button>
+  <a href="/positions/history" class="btn-secondary">Order History →</a>
+</div>
+
+<!-- Open Positions Table -->
+<section>
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Open Positions</h2>
+  {% if positions %}
+  <table class="data-table" id="positionsTable">
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Side</th>
+        <th>Qty</th>
+        <th>Entry Price</th>
+        <th>Current Price</th>
+        <th>Market Value</th>
+        <th>Unrealized P&L</th>
+        <th>P&L %</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for symbol, pos in positions.items() %}
+      <tr>
+        <td><strong>{{ symbol }}</strong></td>
+        <td>{{ pos.side|default('LONG') }}</td>
+        <td>{{ pos.quantity|default(0) }}</td>
+        <td>${{ "%.2f"|format(pos.entry_price|default(0)) }}</td>
+        <td>${{ "%.2f"|format(pos.current_price|default(0)) }}</td>
+        <td>${{ "%.2f"|format(pos.market_value|default(0)) }}</td>
+        <td class="{{ 'pnl-positive' if (pos.unrealized_pnl|default(0)) >= 0 else 'pnl-negative' }}">
+          ${{ "%.2f"|format(pos.unrealized_pnl|default(0)) }}
+        </td>
+        <td class="{{ 'pnl-positive' if (pos.unrealized_pnl_pct|default(0)) >= 0 else 'pnl-negative' }}">
+          {{ "%.2f"|format((pos.unrealized_pnl_pct|default(0)) * 100) }}%
+        </td>
+        <td>
+          <button class="btn-sm btn-danger" onclick="closePosition('{{ symbol }}')">Close</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">No open positions</p>
+  {% endif %}
+</section>
+
+<!-- Risk Summary -->
+<section style="margin-top:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Portfolio Risk</h2>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">Risk Status</span>
+      <span class="risk-badge risk-{{ risk_summary.risk_status|default('NORMAL')|lower }}">{{ risk_summary.risk_status|default('NORMAL') }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Drawdown</span>
+      <span class="stat-value">{{ "%.2f"|format((risk_summary.drawdown_pct|default(0)) * 100) }}%</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Daily P&L</span>
+      <span class="stat-value {{ 'pnl-positive' if (risk_summary.daily_pnl_pct|default(0)) >= 0 else 'pnl-negative' }}">
+        {{ "%.2f"|format((risk_summary.daily_pnl_pct|default(0)) * 100) }}%
+      </span>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+window.closePosition = async function(symbol) {
+  if (!confirm(`Close all ${symbol} positions?`)) return;
+  alert(`Position close for ${symbol} would be submitted to TWS.`);
+};
+window.closeAllPositions = async function() {
+  if (!confirm('⚠️ Close ALL positions? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/emergency/close-all', { method: 'POST' });
+    const data = await res.json();
+    alert('Positions closed: ' + (data.positions_closed || 0));
+    location.reload();
+  } catch(e) { alert('Error: ' + e); }
+};
+window.resumeTrading = async function() {
+  try {
+    const res = await fetch('/api/emergency/resume', { method: 'POST' });
+    location.reload();
+  } catch(e) { alert('Error: ' + e); }
+};
+</script>
 {% endblock %}

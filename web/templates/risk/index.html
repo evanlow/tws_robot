@@ -2,81 +2,154 @@
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
 <h1>{{ title }}</h1>
-<p><em>Risk — implementation coming soon.</em></p>
 
-<!-- ============================================================
-     AI Daily Risk Digest (Enhancement 4)
-     ============================================================ -->
-<section class="ai-digest-section" style="margin-top:2rem;">
+<!-- Risk Status Banner -->
+<div class="risk-banner risk-{{ risk_summary.risk_status|default('NORMAL')|lower }}" style="margin-bottom:1.5rem;">
+  <span class="risk-banner-icon">
+    {% if risk_summary.risk_status == 'EMERGENCY_STOP' %}🚨{% elif risk_summary.risk_status == 'CRITICAL' %}🔴{% elif risk_summary.risk_status == 'WARNING' %}🟡{% else %}🟢{% endif %}
+  </span>
+  <span>Risk Status: <strong>{{ risk_summary.risk_status|default('NORMAL') }}</strong></span>
+  {% if risk_summary.emergency_stop_active %}
+  <span style="margin-left:1rem;">— Emergency stop ACTIVE</span>
+  <button class="btn-sm btn-success" onclick="resumeTrading()" style="margin-left:1rem;">Resume</button>
+  {% endif %}
+</div>
+
+<!-- Risk Gauges -->
+<div class="stats-grid" style="margin-bottom:1.5rem;">
+  <div class="stat-card">
+    <span class="stat-label">Account Equity</span>
+    <span class="stat-value">${{ "%.2f"|format(risk_summary.current_equity|default(100000)) }}</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">Peak Equity</span>
+    <span class="stat-value">${{ "%.2f"|format(risk_summary.peak_equity|default(100000)) }}</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">Drawdown</span>
+    <span class="stat-value {{ 'pnl-negative' if (risk_summary.drawdown_pct|default(0)) > 0.05 else '' }}">
+      {{ "%.2f"|format((risk_summary.drawdown_pct|default(0)) * 100) }}%
+    </span>
+    <div class="gauge-bar"><div class="gauge-fill gauge-drawdown" style="width:{{ [(risk_summary.drawdown_pct|default(0)) * 500, 100]|min }}%"></div></div>
+    <span class="stat-sublabel">Limit: {{ "%.0f"|format((risk_summary.limits.max_drawdown_pct|default(0.20)) * 100) }}%</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">Daily P&L</span>
+    <span class="stat-value {{ 'pnl-positive' if (risk_summary.daily_pnl_pct|default(0)) >= 0 else 'pnl-negative' }}">
+      {{ "%.2f"|format((risk_summary.daily_pnl_pct|default(0)) * 100) }}%
+    </span>
+    <div class="gauge-bar"><div class="gauge-fill gauge-daily" style="width:{{ [((risk_summary.daily_pnl_pct|default(0))|abs) * 2000, 100]|min }}%"></div></div>
+    <span class="stat-sublabel">Limit: {{ "%.0f"|format((risk_summary.limits.daily_loss_limit_pct|default(0.05)) * 100) }}%</span>
+  </div>
+</div>
+
+<!-- Risk Limits -->
+<section style="margin-bottom:1.5rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Risk Limits</h2>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">Max Positions</span>
+      <span class="stat-value">{{ risk_summary.limits.max_positions|default(10) }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Max Position %</span>
+      <span class="stat-value">{{ "%.0f"|format((risk_summary.limits.max_position_pct|default(0.25)) * 100) }}%</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Max Leverage</span>
+      <span class="stat-value">{{ risk_summary.limits.max_leverage|default(1.0) }}x</span>
+    </div>
+  </div>
+</section>
+
+<!-- Open Positions Risk -->
+{% if positions %}
+<section style="margin-bottom:1.5rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Position Exposure</h2>
+  <table class="data-table">
+    <thead><tr><th>Symbol</th><th>Value</th><th>P&L</th><th>Side</th></tr></thead>
+    <tbody>
+      {% for symbol, pos in positions.items() %}
+      <tr>
+        <td><strong>{{ symbol }}</strong></td>
+        <td>${{ "%.2f"|format(pos.market_value|default(0)) }}</td>
+        <td class="{{ 'pnl-positive' if (pos.unrealized_pnl|default(0)) >= 0 else 'pnl-negative' }}">
+          ${{ "%.2f"|format(pos.unrealized_pnl|default(0)) }}
+        </td>
+        <td>{{ pos.side|default('LONG') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<!-- Alerts -->
+<section>
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Recent Risk Alerts</h2>
+  {% if alerts %}
+  <div class="alert-list">
+    {% for alert in alerts %}
+    <div class="alert-item alert-{{ alert.level|default('INFO')|lower }}">
+      <span class="alert-time">{{ alert.timestamp|default('') }}</span>
+      <span class="alert-level">{{ alert.level|default('INFO') }}</span>
+      <span class="alert-msg">{{ alert.message }}</span>
+      <button class="btn-sm btn-secondary" onclick="loadAlertExplanation('{{ alert.id }}', this.nextElementSibling)">Explain</button>
+      <div class="alert-explanation" style="display:none;margin-top:0.5rem;"></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-state">No alerts — system operating within all risk limits ✅</p>
+  {% endif %}
+</section>
+
+<hr style="border-color:#2d2d44;margin:2rem 0;" />
+
+<!-- AI Digest -->
+<section>
   <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
     <h2 style="font-size:1.1rem;color:#63b3ed;">🤖 AI Daily Risk Digest</h2>
     <button id="digestBtn" class="btn-primary">Generate Digest</button>
   </div>
-
-  <div id="digestSpinner" style="display:none;color:#a0aec0;font-style:italic;font-size:0.85rem;">
-    Generating digest…
-  </div>
-
-  <div id="digestContent" style="display:none;
-       background:#16213e;border:1px solid #2d2d44;border-radius:6px;
-       padding:1.25rem;font-size:0.85rem;line-height:1.7;white-space:pre-wrap;">
-  </div>
-</section>
-
-<!-- ============================================================
-     Alert Table (placeholder — shows AI explanation on expand)
-     ============================================================ -->
-<section style="margin-top:2rem;">
-  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Recent Alerts</h2>
-  <p style="color:#718096;font-size:0.85rem;">
-    Click <strong>Explain</strong> next to any alert to get an AI explanation.
-    (Alert rows will be populated here once the risk monitor is connected.)
-  </p>
-  <div id="alertsContainer"></div>
+  <div id="digestSpinner" style="display:none;color:#a0aec0;font-style:italic;font-size:0.85rem;">Generating digest…</div>
+  <div id="digestContent" style="display:none;background:#16213e;border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;font-size:0.85rem;line-height:1.7;white-space:pre-wrap;"></div>
 </section>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
+window.resumeTrading = async function() {
+  try { await fetch('/api/emergency/resume', { method: 'POST' }); location.reload(); }
+  catch(e) { alert('Error: ' + e); }
+};
+
+// Digest
 (function () {
-  // --- Daily Digest ---
-  const digestBtn     = document.getElementById('digestBtn');
-  const digestSpinner = document.getElementById('digestSpinner');
-  const digestContent = document.getElementById('digestContent');
-
-  digestBtn.addEventListener('click', async () => {
-    digestBtn.disabled = true;
-    digestSpinner.style.display = 'block';
-    digestContent.style.display = 'none';
-
+  const btn = document.getElementById('digestBtn');
+  const spinner = document.getElementById('digestSpinner');
+  const content = document.getElementById('digestContent');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; spinner.style.display = 'block'; content.style.display = 'none';
     try {
-      const res  = await fetch('/risk/alerts/digest?hours=24');
+      const res = await fetch('/risk/alerts/digest?hours=24');
       const data = await res.json();
-      digestContent.textContent = data.digest || data.error || '(empty)';
-      digestContent.style.display = 'block';
-    } catch (err) {
-      digestContent.textContent = 'Error: ' + err;
-      digestContent.style.display = 'block';
-    } finally {
-      digestBtn.disabled = false;
-      digestSpinner.style.display = 'none';
-    }
+      content.textContent = data.digest || data.error || '(empty)';
+      content.style.display = 'block';
+    } catch(e) { content.textContent = 'Error: ' + e; content.style.display = 'block'; }
+    finally { btn.disabled = false; spinner.style.display = 'none'; }
   });
-
-  // --- Per-alert AI explanation (lazy-loaded) ---
-  async function loadExplanation(alertId, container) {
-    container.textContent = 'Loading AI explanation…';
-    try {
-      const res  = await fetch(`/risk/alerts/${alertId}/ai-explanation`);
-      const data = await res.json();
-      container.textContent = data.explanation || data.error || '(empty)';
-    } catch (err) {
-      container.textContent = 'Error: ' + err;
-    }
-  }
-
-  // Expose helper so dynamically rendered alert rows can call it
-  window.loadAlertExplanation = loadExplanation;
 })();
+
+// Alert explanations
+window.loadAlertExplanation = async function(alertId, container) {
+  container.style.display = 'block';
+  container.textContent = 'Loading…';
+  try {
+    const res = await fetch(`/risk/alerts/${alertId}/ai-explanation`);
+    const data = await res.json();
+    container.textContent = data.explanation || data.error || '(empty)';
+  } catch(e) { container.textContent = 'Error: ' + e; }
+};
 </script>
 {% endblock %}
