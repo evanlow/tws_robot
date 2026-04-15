@@ -106,6 +106,47 @@ class TestServiceManager:
         assert rm is not None
         summary = rm.get_risk_summary()
         assert "risk_status" in summary
+    
+    def test_get_account_insights(self, services):
+        """Test get_account_insights() method returns calculated metrics."""
+        # Set up test data
+        services.risk_manager.current_equity = 105000.0
+        services.risk_manager.daily_start_equity = 100000.0
+        services.update_account_summary({"buying_power": 200000.0})
+        
+        # Add a position with unrealized P&L
+        services.update_position("AAPL", {
+            "quantity": 100,
+            "entry_price": 150.0,
+            "current_price": 155.0,
+            "unrealized_pnl": 500.0,
+        })
+        services.update_position("MSFT", {
+            "quantity": 50,
+            "entry_price": 300.0,
+            "current_price": 310.0,
+            "unrealized_pnl": 500.0,
+        })
+        
+        # Get insights
+        insights = services.get_account_insights()
+        
+        # Verify calculated values
+        assert insights["total_unrealized_pnl"] == 1000.0  # 500 + 500
+        assert insights["daily_pnl_dollar"] == 5000.0  # 105000 - 100000
+        assert insights["buying_power"] == 200000.0
+    
+    def test_get_account_insights_no_positions(self, services):
+        """Test get_account_insights() with no positions."""
+        services.risk_manager.current_equity = 100000.0
+        services.risk_manager.daily_start_equity = 100000.0
+        services.update_account_summary({"buying_power": 150000.0})
+        
+        insights = services.get_account_insights()
+        
+        assert insights["total_unrealized_pnl"] == 0.0
+        assert insights["daily_pnl_dollar"] == 0.0
+        assert insights["buying_power"] == 150000.0
 
 
 # ==============================================================================
@@ -167,6 +208,29 @@ class TestAccountAPI:
         assert resp.status_code == 200
         assert "equity" in data
         assert "risk_status" in data
+        # Verify new fields from get_account_insights()
+        assert "daily_pnl_dollar" in data
+        assert "unrealized_pnl" in data
+        assert "buying_power" in data
+    
+    def test_summary_with_positions(self, client, services):
+        """Test /api/account/summary includes calculated insights."""
+        # Set up equity and positions
+        services.risk_manager.current_equity = 105000.0
+        services.risk_manager.daily_start_equity = 100000.0
+        services.update_account_summary({"buying_power": 200000.0})
+        services.update_position("AAPL", {
+            "quantity": 100,
+            "unrealized_pnl": 1500.0,
+        })
+        
+        resp = client.get("/api/account/summary")
+        data = resp.get_json()
+        
+        assert resp.status_code == 200
+        assert data["daily_pnl_dollar"] == 5000.0  # 105000 - 100000
+        assert data["unrealized_pnl"] == 1500.0
+        assert data["buying_power"] == 200000.0
 
     def test_positions_empty(self, client):
         resp = client.get("/api/account/positions")
