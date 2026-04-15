@@ -37,6 +37,16 @@ def create_app(config_override: dict | None = None) -> "Flask":
     if "services" not in app.config:
         app.config["services"] = ServiceManager()
 
+    # Context processor: inject status bar data into every template
+    @app.context_processor
+    def inject_status_bar():
+        svc = app.config["services"]
+        return {
+            "connected": svc.connected,
+            "environment": svc.connection_env or "disconnected",
+            "risk_summary": svc.risk_manager.get_risk_summary(),
+        }
+
     # ---- Page blueprints (server-rendered HTML) ----
     from web.routes.dashboard import bp as dashboard_bp
     from web.routes.strategies import bp as strategies_bp

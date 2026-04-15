@@ -15,25 +15,25 @@
   <div class="status-bar" id="statusBar">
     <div class="status-bar-left">
       <span class="status-indicator" id="connIndicator" title="TWS Connection">
-        <span class="status-dot {{ 'dot-green' if connected is defined and connected else 'dot-red' }}"></span>
-        <span id="connLabel">{{ environment | default('disconnected') | upper }}</span>
+        <span class="status-dot {{ 'dot-green' if connected else 'dot-red' }}"></span>
+        <span id="connLabel">{{ environment | upper }}</span>
       </span>
       <span class="status-divider">|</span>
       <span class="status-item" id="equityDisplay">
-        Equity: <strong id="equityVal">${{ "%.2f"|format(risk_summary.current_equity|default(100000)) }}</strong>
+        Equity: <strong id="equityVal">${{ "%.2f"|format(risk_summary.current_equity) }}</strong>
       </span>
       <span class="status-divider">|</span>
       <span class="status-item" id="pnlDisplay">
         Daily P&L:
-        <strong id="pnlVal" class="{{ 'pnl-positive' if (risk_summary.daily_pnl_pct|default(0)) >= 0 else 'pnl-negative' }}">
-          {{ "%.2f"|format((risk_summary.daily_pnl_pct|default(0)) * 100) }}%
+        <strong id="pnlVal" class="{{ 'pnl-positive' if risk_summary.daily_pnl_pct >= 0 else 'pnl-negative' }}">
+          {{ "%.2f"|format(risk_summary.daily_pnl_pct * 100) }}%
         </strong>
       </span>
       <span class="status-divider">|</span>
       <span class="status-item">
         Risk:
-        <span class="risk-badge risk-{{ risk_summary.risk_status|default('NORMAL')|lower }}" id="riskBadge">
-          {{ risk_summary.risk_status|default('NORMAL') }}
+        <span class="risk-badge risk-{{ risk_summary.risk_status|lower }}" id="riskBadge">
+          {{ risk_summary.risk_status }}
         </span>
       </span>
     </div>

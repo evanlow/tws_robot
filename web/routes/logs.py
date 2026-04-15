@@ -28,11 +28,17 @@ def index():
             "timestamp": e.timestamp.isoformat() if e.timestamp else "",
         })
 
+    raw_stats = svc.event_bus.get_stats()
+    event_stats = {
+        (k.name if hasattr(k, 'name') else str(k)): v
+        for k, v in raw_stats.items()
+    }
+
     context = {
         "title": "Logs & Events",
         "active_page": "logs",
         "events": event_list,
-        "event_stats": svc.event_bus.get_stats(),
+        "event_stats": event_stats,
     }
     return render_template("logs/index.html", **context)
 
