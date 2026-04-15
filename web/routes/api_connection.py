@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("api_connection", __name__, url_prefix="/api/connection")
 
 
+def _connection_info(cfg: dict) -> dict:
+    """Build the connection-info dict stored in ServiceManager."""
+    return {
+        "host": cfg["host"],
+        "port": cfg["port"],
+        "client_id": cfg["client_id"],
+        "account": cfg.get("account", ""),
+    }
+
+
 @bp.route("/status", methods=["GET"])
 def status():
     """Return current TWS connection state."""
@@ -56,12 +66,7 @@ def connect():
     if not ok:
         # TWS is not reachable – fall back to storing intent so the UI
         # still reflects the selected environment.
-        svc.set_connected(env, {
-            "host": cfg["host"],
-            "port": cfg["port"],
-            "client_id": cfg["client_id"],
-            "account": cfg.get("account", ""),
-        })
+        svc.set_connected(env, _connection_info(cfg))
         logger.warning("TWS not reachable; stored connection intent for %s",
                         env)
 

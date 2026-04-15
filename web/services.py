@@ -135,12 +135,13 @@ class ServiceManager:
 
         with self._lock:
             self._tws_bridge = bridge
-        self.set_connected(env, {
+        info = {
             "host": config["host"],
             "port": config["port"],
             "client_id": config["client_id"],
             "account": config.get("account", ""),
-        })
+        }
+        self.set_connected(env, info)
         return True
 
     def disconnect_tws(self) -> None:

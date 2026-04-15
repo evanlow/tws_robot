@@ -76,13 +76,15 @@ class _BridgeApp(EWrapper, EClient):
         elif key == "NetLiquidationByCurrency":
             equity = _to_float(val)
             self._svc.update_account_summary({"equity": equity})
-            # Keep the risk-manager equity in sync
-            self._svc.risk_manager.current_equity = equity
-            if equity > self._svc.risk_manager.peak_equity:
-                self._svc.risk_manager.peak_equity = equity
-            # First equity update also sets the daily start if still default
-            if self._svc.risk_manager.daily_start_equity == self._svc.risk_manager.initial_capital:
-                self._svc.risk_manager.daily_start_equity = equity
+            # Keep the risk-manager equity in sync (hold lock for atomicity)
+            rm = self._svc.risk_manager
+            with self._svc._lock:
+                rm.current_equity = equity
+                if equity > rm.peak_equity:
+                    rm.peak_equity = equity
+                # First equity update also sets the daily start if still default
+                if rm.daily_start_equity == rm.initial_capital:
+                    rm.daily_start_equity = equity
         elif key == "BuyingPower":
             self._svc.update_account_summary({"buying_power": _to_float(val)})
 
@@ -105,7 +107,7 @@ class _BridgeApp(EWrapper, EClient):
             entry_price = averageCost
             current_price = marketPrice
             pnl_pct = (
-                (current_price - entry_price) / entry_price
+                (current_price - entry_price) / abs(entry_price)
                 if entry_price else 0.0
             )
             self._svc.update_position(symbol, {
@@ -136,7 +138,7 @@ class _BridgeApp(EWrapper, EClient):
 
     # -- error handling -----------------------------------------------------
 
-    def error(self, reqId, errorTime, errorCode: int, errorString: str,
+    def error(self, reqId, _errorTime, errorCode: int, errorString: str,
               advancedOrderRejectJson="") -> None:
         # Informational messages (data-farm connections)
         if errorCode in (2104, 2106, 2158):
