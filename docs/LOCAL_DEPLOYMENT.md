@@ -1,10 +1,12 @@
-# TWS Robot - Deployment Guide
+# TWS Robot - Local Deployment Guide
 
 ## Overview
 
-This guide covers running TWS Robot with your Interactive Brokers accounts:
-- **Paper Account (DU2746208, port 7497)**: For testing and 30-day validation
-- **Live Account (U6801816, port 7496)**: For production trading after validation
+This guide covers running TWS Robot locally with your Interactive Brokers accounts:
+- **Paper Account (port 7497)**: For testing and 30-day validation
+- **Live Account (port 7496)**: For production trading after validation
+
+> 💡 **Tip:** The **web dashboard** is the recommended way to use TWS Robot. See [Web Dashboard](#web-dashboard) section.
 
 ---
 
@@ -12,10 +14,30 @@ This guide covers running TWS Robot with your Interactive Brokers accounts:
 
 - ✅ TWS (Trader Workstation) installed and running
 - ✅ Paper trading account active in TWS (port 7497)
-- ✅ Python 3.12+ virtual environment activated
+- ✅ Python 3.8+ with virtual environment activated
 - ✅ All dependencies installed: `pip install -r requirements.txt`
-- ✅ All 647 tests passing: `pytest`
-- ✅ `.env` file configured
+- ✅ All tests passing: `pytest`
+- ✅ `.env` file configured (copy from `.env.example`)
+
+---
+
+## Web Dashboard
+
+The **recommended way** to use TWS Robot day-to-day is through the web dashboard:
+
+```bash
+# Start the web dashboard
+python scripts/run_web.py
+
+# Open in your browser: http://127.0.0.1:5000
+```
+
+From the dashboard you can:
+- View connection status, equity, and P&L at a glance
+- Start, stop, and monitor trading strategies
+- Run backtests and review results
+- Monitor risk levels and emergency stop with one click
+- Browse logs and configure settings
 
 ---
 
@@ -23,48 +45,57 @@ This guide covers running TWS Robot with your Interactive Brokers accounts:
 
 ### 1. Verify TWS Running
 
-```powershell
-# TWS should be running with:
-# - API enabled (Configure → API → Settings)
-# - Socket port 7497 (paper trading)
-# - Paper account DU2746208 logged in
+TWS should be running with:
+- API enabled: **Edit → Global Configuration → API → Settings**
+- Enable "**Enable ActiveX and Socket Clients**"
+- Socket port: **7497** (paper trading)
+- Your paper account logged in
+
+### 2. Configure Your .env File
+
+```bash
+# Copy the template
+cp .env.example .env
+
+# Edit with your details (use any text editor)
 ```
 
-### 2. Check Your .env Configuration
-
-```powershell
-# Verify .env has paper account settings:
-notepad .env
-
-# Should contain:
-# TRADING_ENV=paper
-# PAPER_HOST=127.0.0.1
-# PAPER_PORT=7497
-# PAPER_ACCOUNT=DU2746208
+Your `.env` should contain:
+```env
+TRADING_ENV=paper
+PAPER_HOST=127.0.0.1
+PAPER_PORT=7497
+PAPER_ACCOUNT=YOUR_PAPER_ACCOUNT_ID    # Replace with your paper account ID
 ```
 
 ### 3. Initialize Database
 
-```powershell
+```bash
 # Activate virtual environment
-.\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1  # Windows
+source venv/bin/activate       # Mac/Linux
 
 # Initialize database schema
-python init_database.py
+python scripts/init_database.py
 ```
 
 ### 4. Run Tests
 
-```powershell
+```bash
 # Validate everything works
 pytest --tb=short
-
-# Expected: 647/647 tests passing (100%)
 ```
 
 ### 5. Start TWS Robot
 
-```powershell
+**Option A: Web Dashboard (Recommended)**
+```bash
+python scripts/run_web.py
+# Open http://127.0.0.1:5000
+```
+
+**Option B: Terminal**
+```bash
 # Run with paper account (default)
 python tws_client.py
 
@@ -77,34 +108,40 @@ python tws_client.py --show-config
 
 ### 6. Monitor Operation
 
-```powershell
-# Check logs
-Get-Content .\logs\*.log -Tail 50
+**From the web dashboard:** The Dashboard page shows connection status, positions, and alerts.
 
-# Monitor TWS connection in TWS window
-# Verify strategies executing (if implemented)
+**From the terminal:**
+```bash
+# View recent logs (Windows)
+type logs\*.log | more
+
+# View recent logs (Mac/Linux)
+tail -50 logs/*.log
 ```
 
 ---
 
 ## 30-Day Validation Period
 
-### Daily Checks (10-15 min/day)
+### Daily Checks (5-10 min/day)
 
-```powershell
-# 1. Verify system running
-Get-Process python
+**From the web dashboard (recommended):**
+1. Open http://127.0.0.1:5000
+2. Check the Dashboard page for connection status and alerts
+3. Review the Positions page for open trades
+4. Glance at the Risk page for any warnings
 
-# 2. Check logs for errors
-Get-Content .\logs\*.log -Tail 100
+**From the terminal:**
+```bash
+# Check if system is running
+# Windows: tasklist | findstr python
+# Mac/Linux: ps aux | grep python
 
-# 3. Monitor TWS connection
-# - Check TWS window for connection status
-# - Verify no error messages
+# Check logs for errors (Windows)
+findstr "ERROR" logs\*.log
 
-# 4. Review performance (if strategies active)
-# - Check positions in TWS
-# - Review trade history
+# Check logs for errors (Mac/Linux)
+grep "ERROR" logs/*.log
 ```
 
 ### Weekly Checks (30-60 min/week)
@@ -113,7 +150,7 @@ Get-Content .\logs\*.log -Tail 100
   - Sharpe Ratio (target > 1.0)
   - Max Drawdown (target < 10%)
   - Win Rate (target > 50%)
-- Backup database: `.\deployment_scripts\backup_database.ps1`
+- Backup database regularly
 - Document any issues or observations
 - Verify risk limits are being enforced
 
@@ -126,8 +163,6 @@ After 30 days, verify:
 - ✅ **Win Rate** > 50%
 - ✅ **Zero** risk limit violations
 - ✅ **No** system crashes
-
-**Validation Period:** November 24 - December 24, 2025
 
 ---
 
@@ -143,21 +178,22 @@ After 30 days, verify:
    - Document lessons learned
 
 2. **Verify Live Account Setup**
-   - Live account U6801816 active in TWS
+   - Live account active in TWS
    - TWS configured for live trading (port 7496)
    - Risk controls in place
    - Emergency procedures documented
 
 3. **Update Configuration**
 
-```powershell
-# Verify .env has correct live account settings
-notepad .env
+```bash
+# Edit your .env file
+```
 
-# Should contain:
-# LIVE_HOST=127.0.0.1
-# LIVE_PORT=7496
-# LIVE_ACCOUNT=U6801816
+Your `.env` should contain:
+```env
+LIVE_HOST=127.0.0.1
+LIVE_PORT=7496
+LIVE_ACCOUNT=YOUR_LIVE_ACCOUNT_ID    # Replace with your live account ID
 
 # ⚠️ CRITICAL: Verify risk limits are appropriate for live capital
 ```
@@ -169,12 +205,16 @@ notepad .env
 
 5. **Launch Live Trading**
 
-```powershell
+```bash
 # Restart TWS with live account (port 7496)
 # Run full test suite
 pytest
 
-# Start TWS Robot in LIVE mode
+# Option A: Web Dashboard (Recommended)
+python scripts/run_web.py
+# Open http://127.0.0.1:5000 and connect via Settings
+
+# Option B: Terminal
 python tws_client.py --env live
 
 # Monitor closely!
@@ -186,24 +226,26 @@ python tws_client.py --env live
 
 ### Starting the System
 
-```powershell
+```bash
 # 1. Start TWS (paper port 7497 or live port 7496)
+
 # 2. Activate Python environment
-.\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1  # Windows
+source venv/bin/activate       # Mac/Linux
 
-# 3. Start TWS Robot
-# Paper trading:
-python tws_client.py --env paper
+# 3. Start TWS Robot (Web Dashboard - Recommended)
+python scripts/run_web.py
 
-# Live trading:
-python tws_client.py --env live
+# Or via terminal:
+python tws_client.py --env paper   # Paper trading
+python tws_client.py --env live    # Live trading
 ```
 
 ### Stopping the System
 
-```powershell
-# Graceful shutdown: Press Ctrl+C in terminal
-# Or close TWS Robot window
+```bash
+# From web dashboard: Click 🚨 EMERGENCY STOP in the top bar
+# From terminal: Press Ctrl+C for graceful shutdown
 
 # Always verify:
 # - All positions closed (if end of day)
@@ -213,21 +255,22 @@ python tws_client.py --env live
 
 ### Emergency Stop
 
-```powershell
-# If something goes wrong:
-# 1. Press Ctrl+C to stop Python application
-# 2. In TWS: Manually close all positions
-# 3. Review logs to understand what happened
-# 4. Fix issue before restarting
+```bash
+# 1. From web dashboard: Click 🚨 EMERGENCY STOP button
+# 2. From terminal: Press Ctrl+C to stop Python application
+# 3. In TWS: Manually close all positions
+# 4. Review logs to understand what happened
+# 5. Fix issue before restarting
 ```
 
 ### Database Backup
 
-```powershell
-# Manual backup
-.\deployment_scripts\backup_database.ps1
+```bash
+# Windows
+copy strategy_lifecycle.db strategy_lifecycle.db.backup
 
-# Automatic: Runs daily via backup script
+# Mac/Linux
+cp strategy_lifecycle.db strategy_lifecycle.db.backup
 ```
 
 ---
@@ -282,32 +325,28 @@ python tws_client.py --env live
 
 ## Monitoring & Metrics
 
-### Key Performance Indicators
+### Web Dashboard Monitoring (Recommended)
 
-```sql
--- Query database for metrics (if implemented)
-SELECT 
-    strategy_name,
-    COUNT(*) as total_trades,
-    SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rate,
-    AVG(pnl) as avg_pnl,
-    SUM(pnl) as total_pnl
-FROM trades
-WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
-GROUP BY strategy_name;
-```
+Open http://127.0.0.1:5000 and use:
+- **Dashboard** — Real-time equity, P&L, strategy status
+- **Positions** — Open positions and trade history
+- **Risk** — Risk levels, drawdown, circuit breaker status
+- **Logs** — Browse application logs
 
-### Log Files
+### Terminal Monitoring
 
-```powershell
-# View recent logs
-Get-Content .\logs\*.log -Tail 100
+```bash
+# View recent logs (Windows)
+type logs\*.log | more
 
-# Search for errors
-Select-String -Path .\logs\*.log -Pattern "ERROR"
+# View recent logs (Mac/Linux)
+tail -50 logs/*.log
 
-# Monitor live logs
-Get-Content .\logs\*.log -Wait -Tail 50
+# Search for errors (Windows)
+findstr "ERROR" logs\*.log
+
+# Search for errors (Mac/Linux)
+grep "ERROR" logs/*.log
 ```
 
 ---
@@ -337,15 +376,12 @@ AWS deployment guide will be created when ready.
 
 ### Useful Commands
 
-```powershell
-# Check Python processes
-Get-Process python
-
-# Kill stuck Python processes
-Stop-Process -Name python -Force
+```bash
+# Start the web dashboard
+python scripts/run_web.py
 
 # View environment variables
-Get-Content .env
+cat .env
 
 # Test database connection
 python -c "from data.database import Database; db = Database(); print('Connected!')"
@@ -354,23 +390,26 @@ python -c "from data.database import Database; db = Database(); print('Connected
 pytest tests/test_connection.py -v
 
 # Check TWS API status
-python quick_connection_test.py
+python scripts/quick_connection_test.py
 ```
 
 ---
 
 ## Summary
 
-**Paper Trading (Now → Dec 24, 2025):**
+**Paper Trading:**
 - Port: 7497
-- Account: DU2746208
 - Goal: 30-day validation
 - Focus: Verify system stability and performance
 
-**Live Trading (After Dec 24, 2025):**
+**Live Trading (After Validation):**
 - Port: 7496
-- Account: U6801816
 - Prerequisites: Successful 30-day validation
 - Approach: Start small, scale gradually
+
+**Web Dashboard:**
+- Launch: `python scripts/run_web.py`
+- URL: http://127.0.0.1:5000
+- Features: Dashboard, strategies, backtest, positions, risk, logs, settings
 
 Good luck with your trading! 🚀📈

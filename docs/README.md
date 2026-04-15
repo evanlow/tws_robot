@@ -8,21 +8,30 @@
 
 ```bash
 # Activate environment
-.\Scripts\activate.ps1
+.\venv\Scripts\Activate.ps1  # Windows
+source venv/bin/activate       # Mac/Linux
+
+# Launch the web dashboard (recommended)
+python scripts/run_web.py
+# Open: http://127.0.0.1:5000
 
 # Run tests (Prime Directive: 100% pass rate)
 pytest -v
 
 # Check coverage
 pytest --cov
-
-# Start trading (paper mode)
-python main.py --mode paper
 ```
 
 ---
 
 ## 📚 Documentation Index
+
+### For New Users — Start Here
+
+- **[Getting Started (30 min)](GETTING_STARTED_30MIN.md)** - Complete beginner tutorial ⭐
+- **[User Guide](USER_GUIDE.md)** - Strategies, risk management, weekly routines
+- **[Quick Reference](QUICK_REFERENCE.md)** - Commands cheat sheet and emergency procedures
+- **[Examples Guide](EXAMPLES_GUIDE.md)** - What each example script does
 
 ### Architecture
 
@@ -50,9 +59,18 @@ Practical guides for common tasks:
 - **[Debugging Strategies](runbooks/debugging-strategies.md)** - Systematic debugging procedures and tools
 - **[Emergency Procedures](runbooks/emergency-procedures.md)** - Critical incident response (⚠️ READ BEFORE TRADING)
 
-### Testing
+### Developer Guides
 
-- **[Testing Guide](TESTING.md)** - Complete testing documentation, Prime Directive, coverage goals
+- **[API Reference](API_REFERENCE.md)** - Developer API documentation
+- **[Contributing](CONTRIBUTING.md)** - How to contribute
+- **[Technical Specs](TECHNICAL_SPECS.md)** - Architecture details
+- **[Testing Guide](TESTING.md)** - Testing documentation, Prime Directive, coverage goals
+
+### Operations
+
+- **[Deployment Guide](DEPLOYMENT_GUIDE.md)** - Production setup and 30-day validation
+- **[Local Deployment](LOCAL_DEPLOYMENT.md)** - Local development setup with web UI
+- **[Live Trading Safety](LIVE_TRADING_SAFETY.md)** - Critical safety guide for live trading
 
 ---
 
@@ -96,58 +114,55 @@ git clone <repository-url>
 cd tws_robot
 
 # Create virtual environment
-python -m venv .
+python -m venv venv
 
-# Activate environment (Windows)
-.\Scripts\activate.ps1
+# Activate environment
+.\venv\Scripts\Activate.ps1  # Windows PowerShell
+source venv/bin/activate       # Mac/Linux
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configuration
+### 2. Launch the Web Dashboard
 
-```python
-# config_paper.py for paper trading
-TWS_HOST = '127.0.0.1'
-TWS_PORT = 7497  # Paper trading port
-ACCOUNT_SIZE = 100000
-
-# config_live.py for live trading (use with extreme caution)
-TWS_HOST = '127.0.0.1'
-TWS_PORT = 7496  # Live trading port
+```bash
+python scripts/run_web.py
+# Open http://127.0.0.1:5000 in your browser
 ```
 
-### 3. Run Tests
+The web dashboard is the primary interface for TWS Robot. From there you can:
+- Monitor connection status, equity, and P&L
+- Manage and run trading strategies
+- Execute backtests and review results
+- Monitor risk levels and emergency stop
+
+### 3. Configuration
+
+```bash
+# Copy the example configuration
+cp .env.example .env
+# Edit .env with your Interactive Brokers details
+```
+
+```env
+# Paper trading settings
+TRADING_ENV=paper
+PAPER_HOST=127.0.0.1
+PAPER_PORT=7497              # Paper trading port
+PAPER_ACCOUNT=YOUR_PAPER_ID  # Your paper account ID
+
+# Live trading settings
+LIVE_HOST=127.0.0.1
+LIVE_PORT=7496               # Live trading port
+LIVE_ACCOUNT=YOUR_LIVE_ID    # Your live account ID
+```
+
+### 4. Run Tests
 
 ```bash
 # All tests must pass (Prime Directive)
 pytest -v
-
-# Expected output:
-# ===== 690 passed in 12.34s =====
-```
-
-### 4. Start Trading
-
-```python
-from strategies.strategy_registry import StrategyRegistry
-from strategies.bollinger_bands import BollingerBandsStrategy
-
-# Create registry
-registry = StrategyRegistry(event_bus)
-
-# Register strategy
-config = StrategyConfig(
-    name="BB_AAPL",
-    symbols=["AAPL"],
-    enabled=True
-)
-
-strategy = registry.create_strategy("BollingerBands", config)
-
-# Start in paper mode
-strategy.start()
 ```
 
 ---
@@ -204,10 +219,10 @@ See [Testing Guide](TESTING.md) for full details.
 
 ### New Users
 
-1. Read [System Overview](architecture/overview.md)
-2. Review [Testing Guide](TESTING.md)
-3. Run all tests: `pytest -v`
-4. Try [example_strategy_templates.py](../example_strategy_templates.py)
+1. Launch the web dashboard: `python scripts/run_web.py`
+2. Read [Getting Started (30 min)](GETTING_STARTED_30MIN.md)
+3. Read [User Guide](USER_GUIDE.md) for strategy details
+4. Run your first backtest: `python scripts/quick_start.py`
 5. Read [Adding a New Strategy](runbooks/adding-new-strategy.md)
 
 ### Developers
@@ -253,12 +268,18 @@ See [Paper Trading Approach ADR](decisions/002-paper-trading-approach.md).
 
 ```
 tws_robot/
+├── web/                        # ⭐ Web dashboard (primary UI)
+│   ├── routes/                #   One Blueprint per page
+│   ├── templates/             #   Jinja2 HTML templates
+│   └── static/                #   CSS, JavaScript assets
 ├── docs/                       # ← You are here
 │   ├── README.md              # This file
+│   ├── USER_GUIDE.md          # User guide
 │   ├── TESTING.md             # Testing guide
 │   ├── architecture/          # System design docs
 │   ├── decisions/             # ADRs
 │   └── runbooks/              # Operational guides
+├── scripts/                   # CLI utilities (run_web.py, etc.)
 ├── strategies/                # Trading strategies
 │   ├── base_strategy.py       # Base class
 │   ├── bollinger_bands.py     # BB strategy
@@ -277,7 +298,8 @@ tws_robot/
 ├── monitoring/                # Monitoring and metrics
 │   ├── metrics_tracker.py     # Metrics collection
 │   └── event_bus.py           # Event system
-├── tests/                     # Test suite (690 tests)
+├── examples/                  # Example scripts
+├── tests/                     # Test suite
 ├── requirements.txt           # Dependencies
 └── pytest.ini                 # Test configuration
 ```
@@ -319,9 +341,13 @@ inspector.print_full_state()
 
 See [Emergency Procedures](runbooks/emergency-procedures.md) runbook.
 
-**Quick emergency stop:**
+**Quick emergency stop (web dashboard):**
+Click the 🚨 **EMERGENCY STOP** button in the top status bar of the web dashboard.
+
+**Quick emergency stop (terminal):**
 ```bash
-python emergency_shutdown.py
+# Press Ctrl+C to stop the running application
+# Or close TWS/IB Gateway to disconnect all API clients
 ```
 
 ---
@@ -343,13 +369,12 @@ python emergency_shutdown.py
 ### Emergency
 
 - **IB Support:** 877-442-2757
-- **Emergency Shutdown:** `python emergency_shutdown.py`
+- **Emergency Stop (web):** Click 🚨 EMERGENCY STOP in the dashboard top bar
+- **Emergency Stop (terminal):** Press Ctrl+C or close TWS
 
 ---
 
 ## 📈 Roadmap
-
-See [WEEK4_PLUS_ROADMAP.md](../WEEK4_PLUS_ROADMAP.md) for future enhancements.
 
 **Planned:**
 - Additional strategy implementations
@@ -394,8 +419,6 @@ See [WEEK4_PLUS_ROADMAP.md](../WEEK4_PLUS_ROADMAP.md) for future enhancements.
 
 ---
 
-**Last Updated:** January 2025  
-**Test Status:** ✅ 690/690 passing  
-**Coverage:** 44% overall, 95%+ critical modules  
+**Last Updated:** April 2026  
 **Prime Directive:** ✅ Maintained
 

@@ -18,19 +18,19 @@ Each example script in TWS Robot demonstrates specific functionality. This guide
 
 **You are here:** Examples Guide - Detailed script explanations  
 **New user?** [Your First 30 Minutes](GETTING_STARTED_30MIN.md) - Complete beginner tutorial ⭐  
-**Start here:** [README](README.md) - Installation and quick start  
+**Start here:** [README](../README.md) - Installation and quick start  
 **Learn concepts:** [User Guide](USER_GUIDE.md) - Strategy explanations  
 **Quick lookup:** [Quick Reference](QUICK_REFERENCE.md) - Commands cheat sheet
 
 **Need help?**
 - [API Reference](API_REFERENCE.md) - Developer documentation
 - [Contributing](CONTRIBUTING.md) - How to contribute
-- [Debugging Guide](docs/runbooks/debugging-strategies.md) - Troubleshooting
-- [Architecture Docs](docs/architecture/overview.md) - System design
+- [Debugging Guide](runbooks/debugging-strategies.md) - Troubleshooting
+- [Architecture Docs](architecture/overview.md) - System design
 
 ---
 
-## � Connection and Account Management
+## 🔗 Connection and Account Management
 
 ### `check_account.py`
 
@@ -38,9 +38,9 @@ Each example script in TWS Robot demonstrates specific functionality. This guide
 
 **Usage:**
 ```bash
-python check_account.py          # Check paper account (default)
-python check_account.py paper    # Check paper account (explicit)
-python check_account.py live     # Check live account
+python scripts/check_account.py          # Check paper account (default)
+python scripts/check_account.py paper    # Check paper account (explicit)
+python scripts/check_account.py live     # Check live account
 ```
 
 **What You'll See:**
@@ -104,7 +104,7 @@ STATUS CHECK COMPLETE
 
 ---
 
-## �📊 Profile Comparison Examples
+## 📊 Profile Comparison Examples
 
 ### `example_profile_comparison.py`
 
