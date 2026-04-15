@@ -208,6 +208,7 @@ class TestBridgeApp:
         contract = Contract()
         contract.symbol = "AAPL"
         contract.localSymbol = "AAPL"
+        contract.secType = "STK"
         
         app.updatePortfolio(
             contract=contract,
@@ -231,7 +232,7 @@ class TestBridgeApp:
         assert call_args[1]["market_value"] == 15000.0
         assert call_args[1]["unrealized_pnl"] == 500.0
         assert call_args[1]["side"] == "LONG"
-        assert call_args[1]["sec_type"] == ""
+        assert call_args[1]["sec_type"] == "STK"
         
         # Verify PnL percentage calculated correctly
         expected_pnl_pct = (150.0 - 145.0) / 145.0
@@ -244,6 +245,7 @@ class TestBridgeApp:
         
         contract = Contract()
         contract.symbol = "TSLA"
+        contract.secType = "STK"
         
         app.updatePortfolio(
             contract=contract,
@@ -259,7 +261,7 @@ class TestBridgeApp:
         call_args = mock_service_manager.update_position.call_args[0]
         assert call_args[1]["quantity"] == -50.0
         assert call_args[1]["side"] == "SHORT"
-        assert call_args[1]["sec_type"] == ""
+        assert call_args[1]["sec_type"] == "STK"
     
     @pytest.mark.unit
     def test_update_portfolio_short_option_stores_sec_type(self, mock_service_manager):
