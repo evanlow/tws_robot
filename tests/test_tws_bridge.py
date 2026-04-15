@@ -231,6 +231,7 @@ class TestBridgeApp:
         assert call_args[1]["market_value"] == 15000.0
         assert call_args[1]["unrealized_pnl"] == 500.0
         assert call_args[1]["side"] == "LONG"
+        assert call_args[1]["sec_type"] == ""
         
         # Verify PnL percentage calculated correctly
         expected_pnl_pct = (150.0 - 145.0) / 145.0
@@ -258,6 +259,35 @@ class TestBridgeApp:
         call_args = mock_service_manager.update_position.call_args[0]
         assert call_args[1]["quantity"] == -50.0
         assert call_args[1]["side"] == "SHORT"
+        assert call_args[1]["sec_type"] == ""
+    
+    @pytest.mark.unit
+    def test_update_portfolio_short_option_stores_sec_type(self, mock_service_manager):
+        """Test updatePortfolio stores sec_type for option contracts."""
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        
+        contract = Contract()
+        contract.symbol = "GOOG"
+        contract.localSymbol = "GOOG 260515P00240000"
+        contract.secType = "OPT"
+        
+        app.updatePortfolio(
+            contract=contract,
+            position=-1,
+            marketPrice=0.28,
+            marketValue=-28.0,
+            averageCost=273.95,
+            unrealizedPNL=245.54,
+            realizedPNL=0.0,
+            accountName="DU12345"
+        )
+        
+        call_args = mock_service_manager.update_position.call_args[0]
+        assert call_args[0] == "GOOG 260515P00240000"
+        assert call_args[1]["quantity"] == -1.0
+        assert call_args[1]["side"] == "SHORT"
+        assert call_args[1]["sec_type"] == "OPT"
+        assert call_args[1]["unrealized_pnl"] == 245.54
     
     @pytest.mark.unit
     def test_update_portfolio_zero_position_removes(self, mock_service_manager):
