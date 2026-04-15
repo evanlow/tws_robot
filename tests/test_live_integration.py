@@ -67,13 +67,15 @@ def order_executor(mock_tws_adapter, risk_manager, tmp_path):
 @pytest.fixture
 def strategy():
     """BollingerBandsStrategy instance"""
-    return BollingerBandsStrategy(
+    strat = BollingerBandsStrategy(
         name='TestStrategy',
         symbols=['AAPL'],
         period=20,
         std_dev=2.0,
         position_size=0.1
     )
+    strat.start()
+    return strat
 
 
 # =============================================================================
@@ -106,24 +108,22 @@ def test_market_data_to_strategy_flow(mock_tws_adapter, strategy):
     # Track if callback was invoked
     callback_invoked = []
     
-    def on_bar_callback(symbol: str, bars: list):
-        callback_invoked.append((symbol, len(bars)))
+    def on_bar_callback(symbol: str, aggregated_bar):
+        callback_invoked.append((symbol, 1))
         
         # Feed to strategy
-        if len(bars) > 0:
-            bar = bars[-1]
-            signal = strategy.on_bar(
-                symbol=symbol,
-                bar={
-                    'timestamp': bar.timestamp,
-                    'open': bar.open,
-                    'high': bar.high,
-                    'low': bar.low,
-                    'close': bar.close,
-                    'volume': bar.volume
-                }
-            )
-            callback_invoked.append(('signal', signal))
+        signal = strategy.on_bar(
+            symbol=symbol,
+            bar={
+                'timestamp': aggregated_bar.timestamp,
+                'open': aggregated_bar.open,
+                'high': aggregated_bar.high,
+                'low': aggregated_bar.low,
+                'close': aggregated_bar.close,
+                'volume': aggregated_bar.volume
+            }
+        )
+        callback_invoked.append(('signal', signal))
     
     # Subscribe (callback will receive symbol)
     market_data_feed.subscribe(on_bar_callback)
@@ -139,10 +139,13 @@ def test_market_data_to_strategy_flow(mock_tws_adapter, strategy):
         volume=1000000
     )
     
-    # Manually trigger aggregator (simulating 60 5-sec bars)
+    # Manually trigger aggregator (simulating 60 5-sec bars) and notify subscribers
     aggregator = market_data_feed.aggregators['AAPL']
     for i in range(60):
-        aggregator.add_bar(bar)
+        result = aggregator.add_bar(bar)
+        if result:
+            for subscriber in market_data_feed.subscribers:
+                subscriber('AAPL', result)
     
     # Check callback was invoked
     assert len(callback_invoked) > 0
@@ -215,23 +218,18 @@ def test_complete_pipeline_integration(mock_tws_adapter, risk_manager, strategy)
     # Track orders executed
     orders_executed = []
     
-    def on_bar_callback(symbol: str, bars: list):
+    def on_bar_callback(symbol: str, aggregated_bar):
         """Pipeline callback: Data → Strategy → Executor"""
-        if len(bars) == 0:
-            return
-        
-        bar = bars[-1]
-        
         # Feed to strategy
         signal = strategy.on_bar(
             symbol=symbol,
             bar={
-                'timestamp': bar.timestamp,
-                'open': bar.open,
-                'high': bar.high,
-                'low': bar.low,
-                'close': bar.close,
-                'volume': bar.volume
+                'timestamp': aggregated_bar.timestamp,
+                'open': aggregated_bar.open,
+                'high': aggregated_bar.high,
+                'low': aggregated_bar.low,
+                'close': aggregated_bar.close,
+                'volume': aggregated_bar.volume
             }
         )
         
@@ -252,18 +250,25 @@ def test_complete_pipeline_integration(mock_tws_adapter, risk_manager, strategy)
     aggregator = market_data_feed.aggregators['AAPL']
     for bar_num in range(25):
         # Each 5-min bar needs 60 5-sec bars to aggregate
+        # Use constant base price for 20 bars, then spike to trigger Bollinger Bands signal
+        if bar_num < 20:
+            price = 150.0  # Constant baseline to make std dev near zero
+        else:
+            price = 165.0  # Spike well above upper band
         for tick in range(60):
-            price = 150.0 + bar_num * 0.5
-            bar = BarData(
+            tick_bar = BarData(
                 symbol='AAPL',
                 timestamp=datetime.now(),
                 open=price,
                 high=price + 0.5,
                 low=price - 0.5,
                 close=price + 0.25,
-                volume=100000
+                volume=1000000
             )
-            aggregator.add_bar(bar)
+            result = aggregator.add_bar(tick_bar)
+            if result:
+                for subscriber in market_data_feed.subscribers:
+                    subscriber('AAPL', result)
     
     # Verify pipeline executed
     assert len(orders_executed) > 0, "Pipeline should have generated at least one order"

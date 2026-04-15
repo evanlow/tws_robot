@@ -30,7 +30,7 @@ def test_basic_monitoring():
     )
     
     print("\n✓ Test 1a: Healthy State")
-    drawdown_monitor.update_equity(100000, datetime.now())
+    drawdown_monitor.update(100000, datetime.now())
     status = monitor.check_all_risks(100000)
     print(f"  Health: {status.overall_health} ({status.health_score:.1f}/100)")
     print(f"  Alerts: {len(status.active_alerts)}")
@@ -38,7 +38,7 @@ def test_basic_monitoring():
     print("  ✓ Monitoring working")
     
     print("\n✓ Test 1b: Drawdown State")
-    drawdown_monitor.update_equity(90000, datetime.now())
+    drawdown_monitor.update(90000, datetime.now())
     status = monitor.check_all_risks(90000)
     print(f"  Health: {status.overall_health} ({status.health_score:.1f}/100)")
     print(f"  Alerts: {len(status.active_alerts)}")
@@ -65,7 +65,7 @@ def test_alert_levels():
     )
     
     print("\n✓ Test 2a: Warning Level (10% DD)")
-    drawdown_monitor.update_equity(90000, datetime.now())
+    drawdown_monitor.update(90000, datetime.now())
     status = monitor.check_all_risks(90000)
     warnings = status.get_warning_alerts()
     print(f"  Warnings: {len(warnings)}")
@@ -74,7 +74,7 @@ def test_alert_levels():
     
     print("\n✓ Test 2b: Critical Level (15% DD)")
     monitor.clear_alerts()
-    drawdown_monitor.update_equity(85000, datetime.now())
+    drawdown_monitor.update(85000, datetime.now())
     status = monitor.check_all_risks(85000)
     criticals = status.get_critical_alerts()
     print(f"  Criticals: {len(criticals)}")
@@ -135,7 +135,7 @@ def test_dashboard_data():
     )
     
     print("\n✓ Test 4a: Get Dashboard Data")
-    drawdown_monitor.update_equity(95000, datetime.now())
+    drawdown_monitor.update(95000, datetime.now())
     status = monitor.check_all_risks(95000)
     dashboard = monitor.get_dashboard_data()
     
@@ -179,7 +179,7 @@ def test_alert_management():
     )
     
     print("\n✓ Test 5a: Generate Alerts")
-    drawdown_monitor.update_equity(85000, datetime.now())
+    drawdown_monitor.update(85000, datetime.now())
     status = monitor.check_all_risks(85000)
     initial_count = len(status.active_alerts)
     print(f"  Alerts Generated: {initial_count}")
@@ -235,7 +235,7 @@ def test_health_scoring():
     for equity, description in scenarios:
         print(f"\n✓ {description}")
         monitor.clear_alerts()
-        drawdown_monitor.update_equity(equity, datetime.now())
+        drawdown_monitor.update(equity, datetime.now())
         status = monitor.check_all_risks(equity)
         print(f"  Equity: ${equity:,.0f}")
         print(f"  Health: {status.overall_health} ({status.health_score:.1f}/100)")
@@ -266,7 +266,7 @@ def test_deduplication():
     monitor._alert_cooldown_minutes = 1
     
     print("\n✓ Test 7a: First Check")
-    drawdown_monitor.update_equity(90000, datetime.now())
+    drawdown_monitor.update(90000, datetime.now())
     status1 = monitor.check_all_risks(90000)
     count1 = len(status1.active_alerts)
     print(f"  Alerts: {count1}")

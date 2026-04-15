@@ -204,13 +204,16 @@ class BollingerBandsStrategy(BaseStrategy):
             self.last_signal[symbol] = None
             logger.debug(f"{symbol}: Short cooldown reset at middle band")
         
-        # Check for entry signals
+        # Check for entry signals and capture any generated signal
+        self._pending_signal = None
         self._check_entry_signals(symbol, close, upper, lower, timestamp)
         
         # Store previous values for next bar
         self.prev_close[symbol] = close
         self.prev_upper[symbol] = upper
         self.prev_lower[symbol] = lower
+        
+        return self._pending_signal
     
     def _check_entry_signals(
         self,
@@ -264,6 +267,7 @@ class BollingerBandsStrategy(BaseStrategy):
             )
             self.generate_signal(signal)
             self.last_signal[symbol] = SignalType.BUY
+            self._pending_signal = signal
         
         # Short signal: Price crosses above upper band (overbought)
         elif prev_close <= prev_upper and close > upper and self.last_signal.get(symbol) != SignalType.SELL:
@@ -291,6 +295,7 @@ class BollingerBandsStrategy(BaseStrategy):
             )
             self.generate_signal(signal)
             self.last_signal[symbol] = SignalType.SELL
+            self._pending_signal = signal
     
     def get_indicator_values(self, symbol: str) -> Dict:
         """
