@@ -257,6 +257,7 @@ pytest test_backtest_engine.py -v
 
 **Development:**
 - [API Reference](docs/API_REFERENCE.md) - Complete developer API documentation
+- [Web API Reference](docs/WEB_API_REFERENCE.md) - REST API for web dashboard
 - [Contributing Guide](docs/CONTRIBUTING.md) - How to contribute
 - [Technical Specs](docs/TECHNICAL_SPECS.md) - Architecture details
 - [Architecture Docs](docs/architecture/overview.md) - System design

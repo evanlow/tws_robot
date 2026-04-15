@@ -17,6 +17,7 @@
 - [Adding New Strategy](runbooks/adding-new-strategy.md) - Step-by-step guide
 - [Debugging Guide](runbooks/debugging-strategies.md) - Troubleshooting
 - [Architecture Overview](architecture/overview.md) - System design
+- [Web API Reference](WEB_API_REFERENCE.md) - REST API for web dashboard
 
 ---
 
@@ -27,7 +28,8 @@
 3. [Backtest Engine API](#backtest-engine-api)
 4. [Data Management API](#data-management-api)
 5. [Event System API](#event-system-api)
-6. [Common Patterns](#common-patterns)
+6. [Core Modules API](#core-modules-api)
+7. [Common Patterns](#common-patterns)
 
 ---
 
@@ -435,6 +437,331 @@ EventType.RISK_VIOLATION         # Risk limit breached
 EventType.STRATEGY_STARTED       # Strategy started
 EventType.STRATEGY_STOPPED       # Strategy stopped
 EventType.ERROR_OCCURRED         # Error happened
+```
+
+---
+
+## Core Modules API
+
+### TWSBridge - TWS Connection Bridge
+
+The `TWSBridge` module manages real-time connections to Interactive Brokers TWS/Gateway, forwarding account and portfolio updates to the web dashboard.
+
+#### Overview
+
+`TWSBridge` acts as a bridge between the IB API and the `ServiceManager`, automatically forwarding:
+- Account updates (equity, cash, buying power)
+- Portfolio updates (positions, P&L)
+- Connection events (connected, disconnected, errors)
+
+#### Basic Usage
+
+```python
+from core.tws_bridge import TWSBridge
+from web.services import get_services
+
+# Get service manager
+service_manager = get_services()
+
+# Configure connection
+config = {
+    "host": "127.0.0.1",
+    "port": 7497,           # Paper trading: 7497, Live: 7496
+    "client_id": 1,
+    "account": "DU12345"    # Your account number
+}
+
+# Create and connect bridge
+bridge = TWSBridge(service_manager, config)
+connected = bridge.connect(timeout=10)
+
+if connected:
+    print(f"Connected to TWS")
+    print(f"Status: {bridge.is_connected}")
+    # Bridge now automatically forwards all updates
+
+# Later, disconnect
+bridge.disconnect()
+```
+
+#### Connection Management
+
+```python
+# Connect with custom timeout
+success = bridge.connect(timeout=15)  # Wait up to 15 seconds
+
+# Check connection status
+if bridge.is_connected:
+    print("Bridge is connected and ready")
+
+# Disconnect gracefully
+bridge.disconnect()
+```
+
+#### Automatic Data Forwarding
+
+The bridge automatically forwards TWS callbacks:
+
+**Account Updates:**
+- `TotalCashBalance` → `service_manager.update_account_summary({"cash_balance": value})`
+- `NetLiquidationByCurrency` → Updates equity and risk manager
+- `BuyingPower` → `service_manager.update_account_summary({"buying_power": value})`
+
+**Portfolio Updates:**
+- Position changes → `service_manager.update_position(symbol, position_data)`
+- Zero positions → `service_manager.remove_position(symbol)`
+- P&L updates → Included in position data
+
+**Events Published:**
+- `EventType.CONNECTION_LOST` - When TWS connection drops
+- `EventType.ACCOUNT_UPDATE` - On account value changes
+- `EventType.PORTFOLIO_UPDATE` - On position changes
+
+#### Error Handling
+
+```python
+try:
+    bridge = TWSBridge(service_manager, config)
+    if not bridge.connect(timeout=10):
+        print("Connection timeout - TWS may not be running")
+except Exception as exc:
+    print(f"Bridge error: {exc}")
+finally:
+    if bridge:
+        bridge.disconnect()
+```
+
+#### Integration with ServiceManager
+
+```python
+from web.services import get_services
+
+services = get_services()
+
+# After bridge connects, data is available via ServiceManager:
+account = services.get_account_summary()
+print(f"Equity: ${account['equity']:,.2f}")
+print(f"Cash: ${account['cash_balance']:,.2f}")
+
+positions = services.get_positions()
+for symbol, pos in positions.items():
+    print(f"{symbol}: {pos['quantity']} shares @ ${pos['current_price']}")
+```
+
+### ServiceManager - Web Dashboard Backend
+
+The `ServiceManager` acts as the central singleton for managing state in the web dashboard.
+
+#### Accessing ServiceManager
+
+```python
+from web.services import get_services
+
+# Get singleton instance
+services = get_services()
+```
+
+#### Connection State
+
+```python
+# Check connection
+if services.connected:
+    print(f"Connected to {services.connection_env}")  # "paper" or "live"
+    print(f"Info: {services.connection_info}")
+
+# Set connection state (typically done by TWSBridge)
+services.set_connected("paper", {
+    "host": "127.0.0.1",
+    "port": 7497,
+    "client_id": 1,
+    "account": "DU12345"
+})
+
+# Disconnect
+services.set_disconnected()
+```
+
+#### TWS Bridge Integration
+
+```python
+# Connect via TWSBridge
+success = services.connect_tws(env="paper", config=tws_config, timeout=10)
+
+# Disconnect
+services.disconnect_tws()
+```
+
+#### Account Data
+
+```python
+# Get account summary
+summary = services.get_account_summary()
+# Returns: {"equity": float, "cash_balance": float, "buying_power": float, ...}
+
+# Update account summary (called by TWSBridge)
+services.update_account_summary({"equity": 105000.0, "cash_balance": 50000.0})
+```
+
+#### Position Management
+
+```python
+# Get all positions
+positions = services.get_positions()
+# Returns: {"AAPL": {...}, "MSFT": {...}}
+
+# Update a position (called by TWSBridge)
+services.update_position("AAPL", {
+    "quantity": 100,
+    "entry_price": 145.00,
+    "current_price": 150.00,
+    "market_value": 15000.00,
+    "unrealized_pnl": 500.00,
+    "unrealized_pnl_pct": 3.45,
+    "realized_pnl": 0.00,
+    "side": "LONG"
+})
+
+# Remove a position
+services.remove_position("AAPL")
+```
+
+#### Order Management
+
+```python
+# Get all orders
+orders = services.get_orders()
+# Returns: [{"id": "ord_1", "symbol": "AAPL", ...}, ...]
+
+# Add an order
+services.add_order({
+    "id": "ord_123",
+    "symbol": "AAPL",
+    "action": "BUY",
+    "quantity": 100,
+    "status": "SUBMITTED"
+})
+```
+
+#### Alert Management
+
+```python
+# Get alerts
+alerts = services.get_alerts()
+# Returns: [{"id": "alert_1", "level": "WARNING", ...}, ...]
+
+# Add an alert
+services.add_alert({
+    "id": "alert_2",
+    "level": "WARNING",
+    "type": "RISK_LIMIT",
+    "message": "Daily loss limit approaching",
+    "timestamp": "2026-04-15T14:30:00Z"
+})
+
+# Dismiss an alert
+dismissed = services.dismiss_alert("alert_1")  # Returns True if found
+```
+
+#### Backtest Management
+
+```python
+# Store backtest run
+services.store_backtest_run("bt_123", {
+    "strategy_name": "Bollinger Bands",
+    "status": "complete",
+    "final_equity": 112500.00,
+    "created": "2026-04-15T10:00:00Z"
+})
+
+# List all runs
+runs = services.list_backtest_runs()
+# Returns: [{"run_id": "bt_123", ...}, ...]
+
+# Get specific run
+run = services.get_backtest_run("bt_123")
+# Returns: {"run_id": "bt_123", "strategy_name": ..., ...}
+```
+
+#### System Health
+
+```python
+# Get system health status
+health = services.get_system_health()
+# Returns: {
+#   "status": "ok",
+#   "uptime_seconds": 3600,
+#   "connected": True,
+#   "strategies_running": 0,
+#   "last_heartbeat": "2026-04-15T15:45:00Z"
+# }
+```
+
+#### Event Bus Integration
+
+```python
+# ServiceManager has an event bus for real-time updates
+from core.event_bus import EventType
+
+def on_account_update(event):
+    print(f"Account updated: {event.data}")
+
+services.event_bus.subscribe(EventType.ACCOUNT_UPDATE, on_account_update)
+```
+
+### OrderManager - Order Execution
+
+```python
+from core.order_manager import OrderManager, Order, OrderType
+
+# Initialize order manager
+ib_client = EClient()  # Your IB API client
+order_mgr = OrderManager(ib_client)
+
+# Submit market order
+order = order_mgr.submit_market_order(
+    symbol="AAPL",
+    action="BUY",
+    quantity=100
+)
+
+# Submit limit order
+order = order_mgr.submit_limit_order(
+    symbol="AAPL",
+    action="BUY",
+    quantity=100,
+    limit_price=148.50
+)
+
+# Cancel order
+order_mgr.cancel_order(order_id)
+
+# Get order status
+status = order_mgr.get_order_status(order_id)
+```
+
+### ContractBuilder - Create IB Contracts
+
+```python
+from core.contract_builder import ContractBuilder
+
+# Build stock contract
+contract = ContractBuilder.stock("AAPL", "SMART", "USD")
+
+# Build option contract
+contract = ContractBuilder.option(
+    symbol="AAPL",
+    strike=150.0,
+    expiry="20260619",  # YYYYMMDD
+    right="C",  # Call
+    exchange="SMART"
+)
+
+# Build futures contract
+contract = ContractBuilder.future(
+    symbol="ES",
+    expiry="202606",
+    exchange="CME"
+)
 ```
 
 ---
