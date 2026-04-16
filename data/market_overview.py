@@ -444,14 +444,23 @@ class MarketOverviewService:
 
         # Derive last_updated from the newest snapshot timestamp rather
         # than datetime.now() so that DB-loaded data does not appear fresh.
-        last_updated = None
+        # Compare as datetime objects to avoid inconsistent ISO format issues.
+        newest_ts: Optional[datetime] = None
         for s in snapshots:
             ts = s.get("timestamp")
             if ts is None:
                 continue
-            ts_str = ts.isoformat() if isinstance(ts, datetime) else str(ts)
-            if last_updated is None or ts_str > last_updated:
-                last_updated = ts_str
+            if isinstance(ts, str):
+                try:
+                    ts = datetime.fromisoformat(ts)
+                except (ValueError, TypeError):
+                    continue
+            if not isinstance(ts, datetime):
+                continue
+            if newest_ts is None or ts > newest_ts:
+                newest_ts = ts
+
+        last_updated = newest_ts.isoformat() if newest_ts else None
 
         return {
             "regions": [
