@@ -6,14 +6,13 @@ Covers:
 - /api/market/* API endpoints
 """
 
-import json
 from datetime import datetime, date
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
 from web import create_app
-from data.models import Base, MarketSnapshot
+from data.models import MarketSnapshot
 from data.market_overview import (
     MarketOverviewService,
     _market_status,
