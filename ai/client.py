@@ -1,9 +1,10 @@
 """AI client — thin OpenAI wrapper with retry logic.
 
 Reads configuration from environment variables:
-- OPENAI_API_KEY   — required when AI_ENABLED=true
+- OPENAI_API_KEY   — when set, AI is auto-enabled (no need for AI_ENABLED)
 - OPENAI_MODEL     — model name, default "gpt-4o"
-- AI_ENABLED       — "true"/"false", default "false"
+- AI_ENABLED       — optional override: set to "false" to force-disable AI
+                     even when OPENAI_API_KEY is present
 
 Usage::
 
@@ -21,18 +22,32 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Feature flag — set AI_ENABLED=true in the environment to activate.
+# Feature flag — auto-enabled when OPENAI_API_KEY is present.
+# Set AI_ENABLED=false explicitly to force-disable even with a key.
 _AI_ENABLED: Optional[bool] = None
 _DEFAULT_MODEL = "gpt-4o"
 _MAX_RETRIES = 3
 _RETRY_BASE_SECONDS = 2
 
 
-def _ai_enabled() -> bool:
-    """Return True when AI integration is configured and enabled."""
+def is_ai_enabled() -> bool:
+    """Return True when AI integration is configured and enabled.
+
+    Auto-enables when ``OPENAI_API_KEY`` is set, unless the user
+    explicitly sets ``AI_ENABLED=false`` to force-disable.
+
+    This is a public helper so other modules (e.g. settings route) can
+    query AI status without duplicating the logic.
+    """
     global _AI_ENABLED
     if _AI_ENABLED is None:
-        _AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
+        explicit = os.getenv("AI_ENABLED")
+        if explicit is not None:
+            # Honor the explicit flag when set
+            _AI_ENABLED = explicit.lower() == "true"
+        else:
+            # Auto-enable when an API key is present
+            _AI_ENABLED = bool(os.getenv("OPENAI_API_KEY", "").strip())
     return _AI_ENABLED
 
 
@@ -131,7 +146,7 @@ def get_client() -> Optional[AIClient]:
     """
     global _client_instance
 
-    if not _ai_enabled():
+    if not is_ai_enabled():
         return None
 
     if _client_instance is None:
