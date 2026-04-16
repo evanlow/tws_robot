@@ -100,6 +100,8 @@ class _BridgeApp(EWrapper, EClient):
                         accountName: str) -> None:
         symbol = contract.localSymbol or contract.symbol
         pos_float = float(position)
+        sec_type = contract.secType or ""
+        is_short_option = (pos_float < 0 and sec_type == "OPT")
 
         if pos_float == 0:
             self._svc.remove_position(symbol)
@@ -110,7 +112,7 @@ class _BridgeApp(EWrapper, EClient):
                 (current_price - entry_price) / abs(entry_price)
                 if entry_price else 0.0
             )
-            self._svc.update_position(symbol, {
+            pos_data = {
                 "quantity": pos_float,
                 "entry_price": entry_price,
                 "current_price": current_price,
@@ -119,8 +121,19 @@ class _BridgeApp(EWrapper, EClient):
                 "unrealized_pnl_pct": pnl_pct,
                 "realized_pnl": realizedPNL,
                 "side": "LONG" if pos_float > 0 else "SHORT",
-                "sec_type": contract.secType or "",
-            })
+                "sec_type": sec_type,
+            }
+            # For short options, store premium collected (entry cost) for
+            # retention tracking.  averageCost from TWS is the per-unit cost
+            # the seller received (positive value).
+            if is_short_option:
+                pos_data["premium_collected"] = abs(pos_float) * abs(entry_price)
+                pos_data["current_liability"] = abs(marketValue)
+            self._svc.update_position(symbol, pos_data)
+
+        # After each portfolio update, recompute stock-only equity and
+        # short-option premium aggregates from the full position set.
+        self._svc.recompute_strategy_metrics()
 
         self._svc.event_bus.publish(Event(
             EventType.PORTFOLIO_UPDATE,

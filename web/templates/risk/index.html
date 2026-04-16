@@ -26,12 +26,26 @@
     <span class="stat-value">${{ "%.2f"|format(risk_summary.peak_equity|default(100000)) }}</span>
   </div>
   <div class="stat-card">
-    <span class="stat-label">Drawdown</span>
-    <span class="stat-value {{ 'pnl-negative' if (risk_summary.drawdown_pct|default(0)) > 0.05 else '' }}">
-      {{ "%.2f"|format((risk_summary.drawdown_pct|default(0)) * 100) }}%
+    <span class="stat-label">Stock Drawdown</span>
+    <span class="stat-value {{ 'pnl-negative' if (risk_summary.stock_drawdown_pct|default(0)) > 0.05 else '' }}">
+      {{ "%.2f"|format((risk_summary.stock_drawdown_pct|default(0)) * 100) }}%
     </span>
-    <div class="gauge-bar"><div class="gauge-fill gauge-drawdown" style="width:{{ [(risk_summary.drawdown_pct|default(0)) * 500, 100]|min }}%"></div></div>
+    <div class="gauge-bar"><div class="gauge-fill gauge-drawdown" style="width:{{ [(risk_summary.stock_drawdown_pct|default(0)) * 500, 100]|min }}%"></div></div>
     <span class="stat-sublabel">Limit: {{ "%.0f"|format((risk_summary.limits.max_drawdown_pct|default(0.20)) * 100) }}%</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">Options Premium Retention</span>
+    <span class="stat-value {{ 'pnl-positive' if (risk_summary.premium_retention_pct|default(1)) >= 0.80 else 'pnl-negative' }}">
+      {{ "%.1f"|format((risk_summary.premium_retention_pct|default(1)) * 100) }}%
+    </span>
+    {% if risk_summary.short_options_premium_collected|default(0) > 0 %}
+    <span class="stat-sublabel">
+      Collected: ${{ "%.0f"|format(risk_summary.short_options_premium_collected|default(0)) }}
+      · Liability: ${{ "%.0f"|format(risk_summary.short_options_current_liability|default(0)) }}
+    </span>
+    {% else %}
+    <span class="stat-sublabel">No short options</span>
+    {% endif %}
   </div>
   <div class="stat-card">
     <span class="stat-label">Daily P&L</span>
