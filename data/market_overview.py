@@ -251,19 +251,16 @@ class MarketOverviewService:
             with self._lock:
                 self._cache = overview
                 self._cache_time = datetime.now()
+            result = overview
+        else:
+            result = self._empty_overview()
 
-            # Data came from DB — may be stale; kick off a background
-            # refresh so the *next* request gets fresh data.
-            if auto_refresh:
-                self.refresh_async()
-
-            return overview
-
-        # No data at all — trigger a fetch for next time
+        # Data is from DB or missing — kick off a background refresh
+        # so the *next* request gets fresh data.
         if auto_refresh:
             self.refresh_async()
 
-        return self._empty_overview()
+        return result
 
     def refresh(self) -> Dict[str, Any]:
         """Fetch fresh data from yfinance, persist to DB, and update cache.
