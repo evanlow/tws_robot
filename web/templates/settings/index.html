@@ -100,7 +100,7 @@
 
     <div>
       <label class="form-label">OpenAI Model</label>
-      <input type="text" name="openai_model" value="{{ openai_model }}" placeholder="gpt-4o" class="form-input" {% if has_env_key %}disabled{% endif %}>
+      <input type="text" name="openai_model" value="{{ openai_model }}" placeholder="gpt-4o" class="form-input" {% if has_env_key %}disabled aria-label="OpenAI model (configured via .env file)"{% endif %}>
     </div>
   </fieldset>
 

@@ -40,7 +40,7 @@ def _ai_enabled() -> bool:
     if _AI_ENABLED is None:
         explicit = os.getenv("AI_ENABLED")
         if explicit is not None:
-            # Honour the explicit flag when set
+            # Honor the explicit flag when set
             _AI_ENABLED = explicit.lower() == "true"
         else:
             # Auto-enable when an API key is present
