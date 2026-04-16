@@ -65,9 +65,11 @@ def _market_status() -> Dict[str, str]:
     status: Dict[str, str] = {}
 
     # US: NYSE 14:30–21:00 UTC (Mon-Fri)
-    if 0 <= weekday <= 4 and 14 <= now.hour < 21:
-        status["US"] = "open"
-    elif 0 <= weekday <= 4 and now.hour == 14 and now.minute >= 30:
+    if (
+        0 <= weekday <= 4
+        and now.hour < 21
+        and (now.hour > 14 or (now.hour == 14 and now.minute >= 30))
+    ):
         status["US"] = "open"
     else:
         status["US"] = "closed"
