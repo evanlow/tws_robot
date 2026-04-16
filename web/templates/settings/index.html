@@ -71,11 +71,18 @@
 
     {% if has_env_key %}
     <div style="margin-bottom:1rem;padding:0.75rem;background:#1a365d;border-radius:4px;">
+      {% if ai_enabled %}
       <span style="color:#68d391;font-size:0.9rem;">✅ AI features auto-enabled — API key loaded from <code>.env</code></span>
       <p style="color:#a0aec0;font-size:0.78rem;margin-top:0.25rem;">
         To change the key or model, edit <code>OPENAI_API_KEY</code> / <code>OPENAI_MODEL</code> in your <code>.env</code> file and restart the server.
         Set <code>AI_ENABLED=false</code> in <code>.env</code> to disable.
       </p>
+      {% else %}
+      <span style="color:#f6ad55;font-size:0.9rem;">⚠️ AI is disabled — API key loaded from <code>.env</code>, but <code>AI_ENABLED=false</code></span>
+      <p style="color:#a0aec0;font-size:0.78rem;margin-top:0.25rem;">
+        To enable AI, remove <code>AI_ENABLED=false</code> from your <code>.env</code> file and restart the server.
+      </p>
+      {% endif %}
     </div>
     {% else %}
     <div style="margin-bottom:1rem;">
@@ -96,12 +103,12 @@
         Leave blank to keep the current key. <strong>Tip:</strong> add <code>OPENAI_API_KEY</code> to your <code>.env</code> file to auto-enable AI on startup.
       </p>
     </div>
-    {% endif %}
 
     <div>
       <label class="form-label">OpenAI Model</label>
-      <input type="text" name="openai_model" value="{{ openai_model }}" placeholder="gpt-4o" class="form-input" {% if has_env_key %}disabled aria-label="OpenAI model (configured via .env file)"{% endif %}>
+      <input type="text" name="openai_model" value="{{ openai_model }}" placeholder="gpt-4o" class="form-input">
     </div>
+    {% endif %}
   </fieldset>
 
   <!-- Data Management -->

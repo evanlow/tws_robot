@@ -30,11 +30,14 @@ _MAX_RETRIES = 3
 _RETRY_BASE_SECONDS = 2
 
 
-def _ai_enabled() -> bool:
+def is_ai_enabled() -> bool:
     """Return True when AI integration is configured and enabled.
 
     Auto-enables when ``OPENAI_API_KEY`` is set, unless the user
     explicitly sets ``AI_ENABLED=false`` to force-disable.
+
+    This is a public helper so other modules (e.g. settings route) can
+    query AI status without duplicating the logic.
     """
     global _AI_ENABLED
     if _AI_ENABLED is None:
@@ -143,7 +146,7 @@ def get_client() -> Optional[AIClient]:
     """
     global _client_instance
 
-    if not _ai_enabled():
+    if not is_ai_enabled():
         return None
 
     if _client_instance is None:
