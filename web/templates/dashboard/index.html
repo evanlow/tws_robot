@@ -376,7 +376,7 @@
     const range = max - min || 1;
     const step = w / (values.length - 1);
 
-    // Determine colour: green if last > first, else red
+    // Determine color: green if last > first, else red
     const up = values[values.length - 1] >= values[0];
     ctx.strokeStyle = up ? '#68d391' : '#fc8181';
     ctx.lineWidth = 1.5;
