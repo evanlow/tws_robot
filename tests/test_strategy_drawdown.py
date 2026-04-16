@@ -362,6 +362,36 @@ class TestRecomputeStrategyMetrics:
         assert rm.short_options_premium_collected == 900.0
         assert rm.short_options_current_liability == 600.0
 
+    def test_skips_update_when_cash_balance_missing(self, svc):
+        """recompute_strategy_metrics should not set the flag when cash_balance is missing."""
+        # Only add a position, no cash_balance in account summary
+        svc.update_position("GOOG", {
+            "quantity": 10, "market_value": 15000.0,
+            "side": "LONG", "sec_type": "STK",
+        })
+        svc.recompute_strategy_metrics()
+        rm = svc.risk_manager
+        # Flag should remain False — fallback sync in RiskManager.update()
+        # must continue to operate until cash_balance is known
+        assert rm._stock_equity_from_positions is False
+
+    def test_proceeds_once_cash_balance_arrives(self, svc):
+        """recompute_strategy_metrics should work once cash_balance is present."""
+        svc.update_position("GOOG", {
+            "quantity": 10, "market_value": 15000.0,
+            "side": "LONG", "sec_type": "STK",
+        })
+        # First call — no cash_balance yet
+        svc.recompute_strategy_metrics()
+        assert svc.risk_manager._stock_equity_from_positions is False
+
+        # Now cash balance arrives
+        svc.update_account_summary({"cash_balance": 50000.0})
+        svc.recompute_strategy_metrics()
+        rm = svc.risk_manager
+        assert rm._stock_equity_from_positions is True
+        assert rm.stock_equity == 65000.0  # 50k cash + 15k stock
+
 
 # ==============================================================================
 # API response

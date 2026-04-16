@@ -228,7 +228,15 @@ class ServiceManager:
             positions = dict(self._positions)
             account = dict(self._account_summary)
 
-            cash = account.get("cash_balance", 0.0)
+            # Only proceed when we actually have a cash balance — during
+            # initial TWS callbacks portfolio positions may arrive before the
+            # cash balance update.  Computing stock_equity without cash and
+            # setting the ``_stock_equity_from_positions`` flag would prevent
+            # the fallback sync in ``RiskManager.update()`` from ever running.
+            if "cash_balance" not in account:
+                return
+
+            cash = account["cash_balance"]
 
             # Accumulate stock-only value (long stocks + any non-option longs)
             stock_value = 0.0

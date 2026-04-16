@@ -133,9 +133,8 @@ class _BridgeApp(EWrapper, EClient):
                 pos_data["current_liability"] = abs(marketValue)
             self._svc.update_position(symbol, pos_data)
 
-        # After each portfolio update, recompute stock-only equity and
-        # short-option premium aggregates from the full position set.
-        self._svc.recompute_strategy_metrics()
+        # Strategy metrics are recomputed once at accountDownloadEnd() to
+        # avoid O(N²) work during burst position updates.
 
         self._svc.event_bus.publish(Event(
             EventType.PORTFOLIO_UPDATE,
@@ -145,6 +144,10 @@ class _BridgeApp(EWrapper, EClient):
 
     def accountDownloadEnd(self, accountName: str) -> None:
         logger.info("Account download complete for %s", accountName)
+        # Recompute strategy metrics once after the full position snapshot
+        # has been received, rather than after every individual position
+        # callback, to avoid O(N²) work during burst updates.
+        self._svc.recompute_strategy_metrics()
 
     # -- market data (tick prices) ------------------------------------------
 
