@@ -85,6 +85,12 @@ class RiskMetrics:
     portfolio_heat: float = field(default=0.0)   # total positions / equity (0-1+)
     daily_loss_pct: float = field(default=0.0)   # magnitude of daily loss as decimal
     daily_loss: float = field(default=0.0)        # dollar amount of daily loss
+    # Strategy-aware drawdown fields
+    stock_drawdown: float = field(default=0.0)           # $ drawdown for stock/long-only equity
+    stock_drawdown_pct: float = field(default=0.0)       # % drawdown for stock/long-only equity
+    premium_retention_pct: float = field(default=1.0)    # fraction of collected premium retained (0-1)
+    short_options_premium_collected: float = field(default=0.0)  # total premium collected from short options
+    short_options_current_liability: float = field(default=0.0)  # current mark-to-market of short options
 
 
 class RiskManager:
@@ -161,6 +167,15 @@ class RiskManager:
         self.risk_status = RiskStatus.NORMAL
         self.emergency_stop_active = False
         
+        # Strategy-aware equity tracking (stock-only, excludes short options)
+        self.stock_equity = initial_capital       # cash + long stock value only
+        self.peak_stock_equity = initial_capital   # peak of stock-only equity
+        self._stock_equity_from_positions = False  # True once recompute_strategy_metrics sets it
+        
+        # Short options premium tracking
+        self.short_options_premium_collected = 0.0   # total premium received
+        self.short_options_current_liability = 0.0   # current mark-to-market cost
+        
         # Risk metrics history
         self.equity_history: List[float] = [initial_capital]
         self.daily_returns: List[float] = []
@@ -199,6 +214,14 @@ class RiskManager:
         # Update peak equity
         if equity > self.peak_equity:
             self.peak_equity = equity
+        
+        # Fallback: if stock_equity has not been set via position-level
+        # breakdown (recompute_strategy_metrics), keep it in sync with
+        # total equity so drawdown checks work correctly.
+        if not self._stock_equity_from_positions:
+            self.stock_equity = equity
+            if equity > self.peak_stock_equity:
+                self.peak_stock_equity = equity
         
         # Reset daily tracking on new day
         if self.current_date is None or current_date.date() != self.current_date.date():
@@ -410,9 +433,21 @@ class RiskManager:
         daily_pnl = equity - self.daily_start_equity
         daily_pnl_pct = daily_pnl / self.daily_start_equity if self.daily_start_equity > 0 else 0.0
         
-        # Drawdown
+        # Drawdown (total portfolio — kept for backward compatibility)
         drawdown = self.peak_equity - equity
         drawdown_pct = drawdown / self.peak_equity if self.peak_equity > 0 else 0.0
+        
+        # Stock-only drawdown (excludes short options mark-to-market)
+        stock_dd = self.peak_stock_equity - self.stock_equity
+        stock_dd_pct = stock_dd / self.peak_stock_equity if self.peak_stock_equity > 0 else 0.0
+        
+        # Premium retention for short options
+        prem_collected = self.short_options_premium_collected
+        prem_liability = self.short_options_current_liability
+        if prem_collected > 0:
+            prem_retention = max(0.0, (prem_collected - prem_liability) / prem_collected)
+        else:
+            prem_retention = 1.0
         
         # Cash (simplified - equity minus position value)
         cash = equity - total_position_value
@@ -437,20 +472,29 @@ class RiskManager:
             portfolio_heat=total_position_value / equity if equity > 0 else 0.0,
             daily_loss_pct=max(0.0, -daily_pnl_pct),
             daily_loss=max(0.0, -daily_pnl),
+            stock_drawdown=stock_dd,
+            stock_drawdown_pct=stock_dd_pct,
+            premium_retention_pct=prem_retention,
+            short_options_premium_collected=prem_collected,
+            short_options_current_liability=prem_liability,
         )
     
     def _check_risk_limits(self, metrics: RiskMetrics):
-        """Check if any risk limits are breached."""
+        """Check if any risk limits are breached.
         
-        # Check drawdown
-        if metrics.drawdown_pct >= self.max_drawdown_pct:
+        Uses stock-only drawdown for breach checks so that short option
+        mark-to-market fluctuations don't trigger emergency stops.
+        """
+        
+        # Check drawdown — use stock-only drawdown (excludes short options)
+        if metrics.stock_drawdown_pct >= self.max_drawdown_pct:
             if not self.drawdown_breached:
                 self.drawdown_breached = True
-                logger.error(f"❌ Maximum drawdown breached: {metrics.drawdown_pct:.2%}")
+                logger.error(f"❌ Maximum stock drawdown breached: {metrics.stock_drawdown_pct:.2%}")
                 
                 if self.emergency_stop_enabled:
                     self.trigger_emergency_stop(
-                        f"Maximum drawdown ({self.max_drawdown_pct:.1%}) exceeded"
+                        f"Maximum stock drawdown ({self.max_drawdown_pct:.1%}) exceeded"
                     )
         
         # Check daily loss limit
@@ -468,16 +512,20 @@ class RiskManager:
             logger.warning(f"⚠️  Concentration risk ({metrics.concentration_risk:.1%}) exceeds limit ({self.concentration_limit:.1%})")
     
     def _update_risk_status(self, metrics: RiskMetrics):
-        """Update overall risk status."""
+        """Update overall risk status.
+        
+        Uses stock-only drawdown so short option volatility doesn't
+        artificially inflate the risk level.
+        """
         
         if self.emergency_stop_active:
             self.risk_status = RiskStatus.EMERGENCY_STOP
             return
         
-        # Check for critical conditions
-        if metrics.drawdown_pct >= self.max_drawdown_pct * 0.95:
+        # Check for critical conditions (based on stock drawdown)
+        if metrics.stock_drawdown_pct >= self.max_drawdown_pct * 0.95:
             self.risk_status = RiskStatus.CRITICAL
-        elif metrics.drawdown_pct >= self.max_drawdown_pct * 0.80 or \
+        elif metrics.stock_drawdown_pct >= self.max_drawdown_pct * 0.80 or \
              abs(metrics.daily_pnl_pct) >= self.daily_loss_limit_pct * 0.80:
             self.risk_status = RiskStatus.WARNING
         else:
@@ -490,6 +538,21 @@ class RiskManager:
         Returns:
             Dictionary with risk summary
         """
+        # Stock-only drawdown
+        stock_dd_pct = (
+            (self.peak_stock_equity - self.stock_equity) / self.peak_stock_equity
+            if self.peak_stock_equity > 0 else 0.0
+        )
+        # Premium retention
+        if self.short_options_premium_collected > 0:
+            prem_retention = max(
+                0.0,
+                (self.short_options_premium_collected - self.short_options_current_liability)
+                / self.short_options_premium_collected,
+            )
+        else:
+            prem_retention = 1.0
+
         return {
             'risk_status': self.risk_status.value,
             'emergency_stop_active': self.emergency_stop_active,
@@ -500,6 +563,13 @@ class RiskManager:
             'daily_pnl_pct': (self.current_equity - self.daily_start_equity) / self.daily_start_equity if self.daily_start_equity > 0 else 0.0,
             'drawdown_breached': self.drawdown_breached,
             'daily_limit_breached': self.daily_limit_breached,
+            # Strategy-aware drawdown
+            'stock_drawdown_pct': stock_dd_pct,
+            'stock_equity': self.stock_equity,
+            'peak_stock_equity': self.peak_stock_equity,
+            'premium_retention_pct': prem_retention,
+            'short_options_premium_collected': self.short_options_premium_collected,
+            'short_options_current_liability': self.short_options_current_liability,
             'limits': {
                 'max_positions': self.max_positions,
                 'max_position_pct': self.max_position_pct,
@@ -521,4 +591,10 @@ class RiskManager:
         self.daily_limit_breached = False
         self.equity_history = [self.initial_capital]
         self.daily_returns = []
+        # Reset strategy-aware tracking
+        self.stock_equity = self.initial_capital
+        self.peak_stock_equity = self.initial_capital
+        self._stock_equity_from_positions = False
+        self.short_options_premium_collected = 0.0
+        self.short_options_current_liability = 0.0
         logger.debug("RiskManager reset to initial state")

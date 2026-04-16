@@ -212,6 +212,60 @@ class ServiceManager:
             return dict(self._positions)
 
     # ------------------------------------------------------------------
+    # Strategy-aware metrics (stock-only equity, options premium)
+    # ------------------------------------------------------------------
+
+    def recompute_strategy_metrics(self) -> None:
+        """Recompute stock-only equity and short-option premium aggregates.
+
+        Called after each portfolio update so the risk manager always has
+        up-to-date strategy-aware figures.
+
+        Stock equity = cash_balance + sum(market_value for long stock/non-option positions)
+        Short options tracking = sum of premium_collected and current_liability
+        """
+        with self._lock:
+            positions = dict(self._positions)
+            account = dict(self._account_summary)
+
+            # Only proceed when we actually have a cash balance — during
+            # initial TWS callbacks portfolio positions may arrive before the
+            # cash balance update.  Computing stock_equity without cash and
+            # setting the ``_stock_equity_from_positions`` flag would prevent
+            # the fallback sync in ``RiskManager.update()`` from ever running.
+            if "cash_balance" not in account:
+                return
+
+            cash = account["cash_balance"]
+
+            # Accumulate stock-only value (long stocks + any non-option longs)
+            stock_value = 0.0
+            total_premium_collected = 0.0
+            total_current_liability = 0.0
+
+            for pos in positions.values():
+                side = pos.get("side", "LONG")
+                sec_type = pos.get("sec_type", "")
+
+                if side == "SHORT" and sec_type == "OPT":
+                    # Short options — track premium retention separately
+                    total_premium_collected += pos.get("premium_collected", 0.0)
+                    total_current_liability += pos.get("current_liability", 0.0)
+                elif side == "LONG" and sec_type in ("STK", ""):
+                    # Only include long stock positions in stock equity
+                    stock_value += pos.get("market_value", 0.0)
+
+            stock_equity = cash + stock_value
+
+            rm = self._risk_manager or self.risk_manager
+            rm.stock_equity = stock_equity
+            rm._stock_equity_from_positions = True
+            if stock_equity > rm.peak_stock_equity:
+                rm.peak_stock_equity = stock_equity
+            rm.short_options_premium_collected = total_premium_collected
+            rm.short_options_current_liability = total_current_liability
+
+    # ------------------------------------------------------------------
     # Computed account insights (derived from live state)
     # ------------------------------------------------------------------
 

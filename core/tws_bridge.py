@@ -100,6 +100,8 @@ class _BridgeApp(EWrapper, EClient):
                         accountName: str) -> None:
         symbol = contract.localSymbol or contract.symbol
         pos_float = float(position)
+        sec_type = contract.secType or ""
+        is_short_option = (pos_float < 0 and sec_type == "OPT")
 
         if pos_float == 0:
             self._svc.remove_position(symbol)
@@ -110,7 +112,7 @@ class _BridgeApp(EWrapper, EClient):
                 (current_price - entry_price) / abs(entry_price)
                 if entry_price else 0.0
             )
-            self._svc.update_position(symbol, {
+            pos_data = {
                 "quantity": pos_float,
                 "entry_price": entry_price,
                 "current_price": current_price,
@@ -119,8 +121,20 @@ class _BridgeApp(EWrapper, EClient):
                 "unrealized_pnl_pct": pnl_pct,
                 "realized_pnl": realizedPNL,
                 "side": "LONG" if pos_float > 0 else "SHORT",
-                "sec_type": contract.secType or "",
-            })
+                "sec_type": sec_type,
+            }
+            # For short options, store premium collected (entry cost) for
+            # retention tracking.  averageCost from TWS is the per-unit cost
+            # the seller received (positive value).  pos_float is negative
+            # for short positions and marketValue is negative for shorts,
+            # so abs() normalises both to positive dollar amounts.
+            if is_short_option:
+                pos_data["premium_collected"] = abs(pos_float) * abs(entry_price)
+                pos_data["current_liability"] = abs(marketValue)
+            self._svc.update_position(symbol, pos_data)
+
+        # Strategy metrics are recomputed once at accountDownloadEnd() to
+        # avoid O(N²) work during burst position updates.
 
         self._svc.event_bus.publish(Event(
             EventType.PORTFOLIO_UPDATE,
@@ -130,6 +144,10 @@ class _BridgeApp(EWrapper, EClient):
 
     def accountDownloadEnd(self, accountName: str) -> None:
         logger.info("Account download complete for %s", accountName)
+        # Recompute strategy metrics once after the full position snapshot
+        # has been received, rather than after every individual position
+        # callback, to avoid O(N²) work during burst updates.
+        self._svc.recompute_strategy_metrics()
 
     # -- market data (tick prices) ------------------------------------------
 
