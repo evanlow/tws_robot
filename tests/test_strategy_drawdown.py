@@ -311,6 +311,57 @@ class TestRecomputeStrategyMetrics:
         assert svc.risk_manager.stock_equity == 90000.0
         assert svc.risk_manager.peak_stock_equity == 100000.0  # unchanged
 
+    def test_short_stock_excluded_from_stock_equity(self, svc):
+        """Short stock positions should NOT be included in stock equity."""
+        svc.update_account_summary({"cash_balance": 50000.0})
+        svc.update_position("TSLA", {
+            "quantity": -10, "market_value": -5000.0,
+            "side": "SHORT", "sec_type": "STK",
+        })
+        svc.recompute_strategy_metrics()
+        rm = svc.risk_manager
+        # Short stock excluded — stock equity is cash only
+        assert rm.stock_equity == 50000.0
+
+    def test_long_option_excluded_from_stock_equity(self, svc):
+        """Long option positions should NOT be included in stock equity."""
+        svc.update_account_summary({"cash_balance": 50000.0})
+        svc.update_position("AAPL 250418C200", {
+            "quantity": 5, "market_value": 2500.0,
+            "side": "LONG", "sec_type": "OPT",
+        })
+        svc.recompute_strategy_metrics()
+        rm = svc.risk_manager
+        # Long options excluded — stock equity is cash only
+        assert rm.stock_equity == 50000.0
+
+    def test_mixed_portfolio_only_long_stocks_in_stock_equity(self, svc):
+        """Only long STK positions contribute to stock equity."""
+        svc.update_account_summary({"cash_balance": 40000.0})
+        svc.update_position("GOOG", {
+            "quantity": 10, "market_value": 15000.0,
+            "side": "LONG", "sec_type": "STK",
+        })
+        svc.update_position("TSLA", {
+            "quantity": -5, "market_value": -3000.0,
+            "side": "SHORT", "sec_type": "STK",
+        })
+        svc.update_position("AAPL 250418C200", {
+            "quantity": 2, "market_value": 1000.0,
+            "side": "LONG", "sec_type": "OPT",
+        })
+        svc.update_position("SPY 250418P400", {
+            "quantity": -3, "market_value": -600.0,
+            "side": "SHORT", "sec_type": "OPT",
+            "premium_collected": 900.0, "current_liability": 600.0,
+        })
+        svc.recompute_strategy_metrics()
+        rm = svc.risk_manager
+        # Only cash + long GOOG stock
+        assert rm.stock_equity == 55000.0  # 40k cash + 15k GOOG
+        assert rm.short_options_premium_collected == 900.0
+        assert rm.short_options_current_liability == 600.0
+
 
 # ==============================================================================
 # API response

@@ -238,13 +238,13 @@ class ServiceManager:
             for pos in positions.values():
                 side = pos.get("side", "LONG")
                 sec_type = pos.get("sec_type", "")
-                is_short_option = (side == "SHORT" and sec_type == "OPT")
 
-                if is_short_option:
+                if side == "SHORT" and sec_type == "OPT":
+                    # Short options — track premium retention separately
                     total_premium_collected += pos.get("premium_collected", 0.0)
                     total_current_liability += pos.get("current_liability", 0.0)
-                else:
-                    # Include long stocks and any other non-short-option positions
+                elif side == "LONG" and sec_type in ("STK", ""):
+                    # Only include long stock positions in stock equity
                     stock_value += pos.get("market_value", 0.0)
 
             stock_equity = cash + stock_value
