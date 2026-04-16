@@ -141,6 +141,11 @@ LOG_LEVEL=INFO
 - **Live account ID:** Shown in the TWS title bar when logged into live trading (e.g., `U1234567`)
 - Also visible in **IBKR Account Management** → **Settings → Account Settings**
 
+**Optional: Enable AI Features** (for strategy analysis and recommendations):
+- Add your OpenAI API key to `.env`: `OPENAI_API_KEY=sk-...`
+- AI features auto-enable when the key is present
+- See [API Reference - AIClient](API_REFERENCE.md#aiclient---openai-integration) for details
+
 > ⚠️ **Never commit your `.env` file to version control.** It's already in `.gitignore`.
 
 ---

@@ -797,6 +797,189 @@ contract = ContractBuilder.future(
 )
 ```
 
+### AIClient - OpenAI Integration
+
+The `ai.client` module provides a thin wrapper around OpenAI's API with automatic retry logic and environment-based configuration.
+
+#### Configuration
+
+AI features are configured via environment variables (in `.env`):
+
+```bash
+# Auto-enable AI when API key is present
+OPENAI_API_KEY=sk-...
+
+# Optional: Choose model (default: gpt-4o)
+OPENAI_MODEL=gpt-4o
+
+# Optional: Force-disable AI even with key present
+AI_ENABLED=false
+```
+
+**Behavior:**
+- When `OPENAI_API_KEY` is set → AI auto-enabled
+- When `AI_ENABLED=false` → AI disabled (even with key)
+- When `AI_ENABLED=true` → AI enabled (but requires key to work)
+
+#### Check AI Status
+
+```python
+from ai.client import is_ai_enabled
+
+if is_ai_enabled():
+    print("AI features are enabled")
+else:
+    print("AI features are disabled")
+```
+
+**Use Case:** Routes and features can check `is_ai_enabled()` to conditionally show/hide AI-powered functionality.
+
+```python
+# Example: Settings page shows AI status
+from ai.client import is_ai_enabled
+
+def settings_view():
+    return {
+        "ai_enabled": is_ai_enabled(),
+        "has_api_key": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "model": os.getenv("OPENAI_MODEL", "gpt-4o")
+    }
+```
+
+#### Get AI Client
+
+```python
+from ai.client import get_client
+
+# Returns AIClient instance or None
+client = get_client()
+
+if client:
+    # AI is enabled and configured
+    reply = client.chat([
+        {"role": "user", "content": "Analyze this trading strategy"}
+    ])
+    print(reply)
+else:
+    print("AI not available - check OPENAI_API_KEY in .env")
+```
+
+#### Chat Completion
+
+```python
+from ai.client import get_client
+
+client = get_client()
+if not client:
+    return  # AI disabled
+
+# Basic chat
+messages = [
+    {"role": "system", "content": "You are a trading strategy advisor."},
+    {"role": "user", "content": "Explain Bollinger Bands"}
+]
+
+reply = client.chat(messages)
+print(reply)
+
+# Custom temperature (default: 0.3)
+reply = client.chat(
+    messages,
+    temperature=0.7  # More creative responses
+)
+
+# Override model per-call
+reply = client.chat(
+    messages,
+    model="gpt-3.5-turbo"  # Use faster/cheaper model
+)
+```
+
+#### Error Handling & Retries
+
+The AI client automatically retries on rate limits with exponential backoff (max 3 attempts):
+
+```python
+from ai.client import get_client
+
+client = get_client()
+
+try:
+    reply = client.chat(messages)
+except RuntimeError as exc:
+    print(f"AI request failed after retries: {exc}")
+    # Handle gracefully - show cached response or disable feature
+```
+
+**Retry Behavior:**
+- **Rate limits:** Automatically retry with exponential backoff (2s, 4s, 8s)
+- **API errors:** No retry, fails immediately
+- **Other errors:** No retry, fails immediately
+
+#### Reset Configuration
+
+Call `reset_client()` after changing environment variables:
+
+```python
+from ai.client import reset_client
+import os
+
+# Change configuration
+os.environ["OPENAI_API_KEY"] = "new-key"
+os.environ["OPENAI_MODEL"] = "gpt-4"
+
+# Reset to pick up new values
+reset_client()
+
+# Next get_client() call uses new config
+client = get_client()
+```
+
+**Use Case:** Hot-reloading AI config without restarting the application.
+
+#### Integration Example: Strategy Analysis
+
+```python
+from ai.client import get_client
+
+def analyze_strategy(strategy_code: str) -> str:
+    """Use AI to analyze a trading strategy."""
+    client = get_client()
+    
+    if not client:
+        return "AI analysis not available (set OPENAI_API_KEY)"
+    
+    messages = [
+        {
+            "role": "system",
+            "content": "You are an expert at analyzing trading strategies. "
+                      "Provide concise, actionable feedback."
+        },
+        {
+            "role": "user",
+            "content": f"Analyze this strategy:\n\n{strategy_code}"
+        }
+    ]
+    
+    try:
+        reply = client.chat(messages, temperature=0.3)
+        return reply
+    except RuntimeError as exc:
+        return f"Analysis failed: {exc}"
+
+# Usage
+strategy_code = """
+class MyStrategy(Strategy):
+    def on_bar(self, market_data):
+        # Buy when RSI < 30
+        if rsi < 30:
+            self.buy("AAPL", 100)
+"""
+
+analysis = analyze_strategy(strategy_code)
+print(analysis)
+```
+
 ---
 
 ## Common Patterns
