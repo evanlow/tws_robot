@@ -228,29 +228,28 @@ class ServiceManager:
             positions = dict(self._positions)
             account = dict(self._account_summary)
 
-        cash = account.get("cash_balance", 0.0)
+            cash = account.get("cash_balance", 0.0)
 
-        # Accumulate stock-only value (long stocks + any non-option longs)
-        stock_value = 0.0
-        total_premium_collected = 0.0
-        total_current_liability = 0.0
+            # Accumulate stock-only value (long stocks + any non-option longs)
+            stock_value = 0.0
+            total_premium_collected = 0.0
+            total_current_liability = 0.0
 
-        for pos in positions.values():
-            side = pos.get("side", "LONG")
-            sec_type = pos.get("sec_type", "")
-            is_short_option = (side == "SHORT" and sec_type == "OPT")
+            for pos in positions.values():
+                side = pos.get("side", "LONG")
+                sec_type = pos.get("sec_type", "")
+                is_short_option = (side == "SHORT" and sec_type == "OPT")
 
-            if is_short_option:
-                total_premium_collected += pos.get("premium_collected", 0.0)
-                total_current_liability += pos.get("current_liability", 0.0)
-            else:
-                # Include long stocks and any other non-short-option positions
-                stock_value += pos.get("market_value", 0.0)
+                if is_short_option:
+                    total_premium_collected += pos.get("premium_collected", 0.0)
+                    total_current_liability += pos.get("current_liability", 0.0)
+                else:
+                    # Include long stocks and any other non-short-option positions
+                    stock_value += pos.get("market_value", 0.0)
 
-        stock_equity = cash + stock_value
+            stock_equity = cash + stock_value
 
-        rm = self.risk_manager
-        with self._lock:
+            rm = self._risk_manager or self.risk_manager
             rm.stock_equity = stock_equity
             rm._stock_equity_from_positions = True
             if stock_equity > rm.peak_stock_equity:

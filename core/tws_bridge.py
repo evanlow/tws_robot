@@ -125,7 +125,9 @@ class _BridgeApp(EWrapper, EClient):
             }
             # For short options, store premium collected (entry cost) for
             # retention tracking.  averageCost from TWS is the per-unit cost
-            # the seller received (positive value).
+            # the seller received (positive value).  pos_float is negative
+            # for short positions and marketValue is negative for shorts,
+            # so abs() normalises both to positive dollar amounts.
             if is_short_option:
                 pos_data["premium_collected"] = abs(pos_float) * abs(entry_price)
                 pos_data["current_liability"] = abs(marketValue)
