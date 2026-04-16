@@ -160,7 +160,7 @@
           </div>
         </div>
         {% else %}
-        <p class="empty-state">No positions to analyse</p>
+        <p class="empty-state">No positions to analyze</p>
         {% endif %}
       </div>
 
@@ -656,6 +656,7 @@
     const cy = canvas.height / 2;
     const radius = Math.min(cx, cy) - 10;
     const inner = radius * 0.55;
+    const labelRadius = (radius + inner) / 2;
     let startAngle = -Math.PI / 2;
 
     allocation.forEach(function(item, i) {
@@ -669,8 +670,8 @@
       // Label
       if (item.weight > 0.05) {
         const mid = startAngle + slice / 2;
-        const lx = cx + Math.cos(mid) * (radius + inner) / 2;
-        const ly = cy + Math.sin(mid) * (radius + inner) / 2;
+        const lx = cx + Math.cos(mid) * labelRadius;
+        const ly = cy + Math.sin(mid) * labelRadius;
         ctx.fillStyle = '#fff';
         ctx.font = '11px sans-serif';
         ctx.textAlign = 'center';

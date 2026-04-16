@@ -21,7 +21,7 @@ import logging
 import os
 import threading
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.event_bus import Event, EventBus, EventType, get_event_bus
 
@@ -323,7 +323,7 @@ class ServiceManager:
             pos.get("market_value", 0) for pos in positions.values()
         )
         allocation: List[Dict[str, Any]] = []
-        corr_positions: List[Any] = []
+        corr_positions: List["PositionInfo"] = []
         for symbol, pos in positions.items():
             mv = pos.get("market_value", 0)
             weight = mv / total_value if total_value > 0 else 0
@@ -368,8 +368,8 @@ class ServiceManager:
                                      "quantity", "pnl", "strategy")):
                 pa.add_trade(t)
 
-        by_symbol: List[tuple] = []
-        by_strategy: List[tuple] = []
+        by_symbol: List[Tuple[str, float]] = []
+        by_strategy: List[Tuple[str, float]] = []
         win_rate = 0.0
         total_pnl = 0.0
         if pa.trades:
