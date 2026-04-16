@@ -11,7 +11,7 @@ Models:
 """
 
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, 
+    Column, Integer, String, Float, DateTime, Date,
     Boolean, ForeignKey, Text, JSON, Enum as SQLEnum
 )
 from sqlalchemy.orm import declarative_base, relationship
@@ -281,3 +281,53 @@ class PerformanceMetric(Base):
                 f"pnl=${self.daily_pnl:.2f})>")
 
 
+class MarketSnapshot(Base):
+    """
+    Point-in-time snapshot of a market index.
+
+    Append-only: each fetch creates new rows so historical sparklines
+    and offline viewing are possible.
+    """
+    __tablename__ = 'market_snapshots'
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    region = Column(String(20), nullable=False, index=True)  # US / Europe / Asia
+
+    # Price data
+    price = Column(Float, nullable=False)
+    change = Column(Float, nullable=True)       # absolute day change
+    change_pct = Column(Float, nullable=True)    # percentage day change
+    day_high = Column(Float, nullable=True)
+    day_low = Column(Float, nullable=True)
+    prev_close = Column(Float, nullable=True)
+    volume = Column(Integer, nullable=True)
+
+    # Timestamps
+    timestamp = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    market_date = Column(Date, nullable=True)
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return (f"<MarketSnapshot(symbol={self.symbol}, "
+                f"price={self.price}, change_pct={self.change_pct})>")
+
+    def to_dict(self):
+        """Serialise to a plain dict for JSON responses."""
+        return {
+            "symbol": self.symbol,
+            "name": self.name,
+            "region": self.region,
+            "price": self.price,
+            "change": self.change,
+            "change_pct": self.change_pct,
+            "day_high": self.day_high,
+            "day_low": self.day_low,
+            "prev_close": self.prev_close,
+            "volume": self.volume,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "market_date": self.market_date.isoformat() if self.market_date else None,
+        }

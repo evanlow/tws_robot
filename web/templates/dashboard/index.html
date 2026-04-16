@@ -130,10 +130,90 @@
 
     <!-- Market Tab -->
     <div class="tab-content" id="tab-market">
-      <h3>Market Status</h3>
-      <div id="marketStatusContainer">
-        <button class="btn-primary" onclick="loadMarketStatus()">Check Market Status</button>
-        <div id="marketStatusResult" style="margin-top:1rem;"></div>
+      <div class="market-overview">
+        <div class="market-header">
+          <h3>🌍 Global Markets</h3>
+          <div class="market-header-right">
+            <span class="market-updated" id="marketUpdatedTime">
+              {% if market_overview.last_updated %}
+                Last updated: <time id="marketLastUpdated" datetime="{{ market_overview.last_updated }}">{{ market_overview.last_updated }}</time>
+              {% else %}
+                No data yet
+              {% endif %}
+            </span>
+            <button class="btn-sm btn-secondary" id="marketRefreshBtn" onclick="refreshMarketData()">↻ Refresh</button>
+          </div>
+        </div>
+
+        {% for region in market_overview.regions %}
+        <div class="market-region">
+          <div class="market-region-header">
+            <span class="market-region-label">{{ region.flag }} {{ region.label }}</span>
+            <span class="market-status-badge market-status-{{ region.status }}">
+              {% if region.status == 'open' %}🟢 OPEN{% else %}🔴 CLOSED{% endif %}
+            </span>
+          </div>
+
+          {% if region.indices %}
+          <table class="data-table market-table">
+            <thead>
+              <tr>
+                <th>Index</th>
+                <th class="text-right">Price</th>
+                <th class="text-right">Change</th>
+                <th class="text-right">Change %</th>
+                <th class="text-right">Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for idx in region.indices %}
+              <tr>
+                <td><strong>{{ idx.name }}</strong></td>
+                <td class="text-right">{{ "{:,.2f}".format(idx.price) }}</td>
+                <td class="text-right {{ 'pnl-positive' if (idx.change or 0) >= 0 else 'pnl-negative' }}">
+                  {% if idx.change is not none %}
+                    {{ "{:+,.2f}".format(idx.change) }}
+                  {% else %}—{% endif %}
+                </td>
+                <td class="text-right {{ 'pnl-positive' if (idx.change_pct or 0) >= 0 else 'pnl-negative' }}">
+                  {% if idx.change_pct is not none %}
+                    {{ "{:+.2f}".format(idx.change_pct) }}%
+                  {% else %}—{% endif %}
+                </td>
+                <td class="text-right">
+                  {% if idx.sparkline %}
+                  <canvas class="sparkline-canvas" data-values="{{ idx.sparkline | join(',') }}" width="60" height="20"></canvas>
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <p class="empty-state">No data available — click Refresh to load market data.</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+
+        <!-- VIX summary bar -->
+        {% set vix_data = namespace(price=none, change_pct=none) %}
+        {% for s in market_overview.snapshots %}
+          {% if s.symbol == '^VIX' %}
+            {% set vix_data.price = s.price %}
+            {% set vix_data.change_pct = s.change_pct %}
+          {% endif %}
+        {% endfor %}
+        {% if vix_data.price is not none %}
+        <div class="market-footer-bar">
+          <span>📊 VIX: <strong class="{{ 'pnl-negative' if vix_data.price > 20 else 'pnl-positive' }}">{{ "%.2f"|format(vix_data.price) }}</strong>
+            {% if vix_data.change_pct is not none %}
+              <span class="{{ 'pnl-negative' if vix_data.change_pct > 0 else 'pnl-positive' }}">
+                ({{ "{:+.2f}".format(vix_data.change_pct) }}%)
+              </span>
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
       </div>
     </div>
   </section>
@@ -264,17 +344,65 @@
     } catch(e) { alert('Error: ' + e); }
   };
 
-  // Market status
-  window.loadMarketStatus = async function() {
-    const container = document.getElementById('marketStatusResult');
-    container.innerHTML = '<em>Checking...</em>';
+  // Market data refresh
+  window.refreshMarketData = async function() {
+    const btn = document.getElementById('marketRefreshBtn');
+    btn.disabled = true;
+    btn.textContent = '↻ Loading…';
     try {
-      const res = await fetch('/api/diagnostics/market-status');
+      const res = await fetch('/api/market/refresh', { method: 'POST' });
       const data = await res.json();
-      const status = data.market_open ? '✅ Market OPEN' : '🔴 Market CLOSED';
-      container.innerHTML = `<strong>${status}</strong><br>NY Time: ${data.current_time_ny || 'N/A'}`;
-    } catch(e) { container.innerHTML = 'Error: ' + e; }
+      // Reload page to render fresh server-side data
+      location.reload();
+    } catch(e) {
+      alert('Market refresh failed: ' + e);
+      btn.disabled = false;
+      btn.textContent = '↻ Refresh';
+    }
   };
+
+  // Sparkline rendering (tiny canvas charts)
+  document.querySelectorAll('.sparkline-canvas').forEach(canvas => {
+    const raw = canvas.dataset.values;
+    if (!raw) return;
+    const values = raw.split(',').map(Number).filter(v => !isNaN(v));
+    if (values.length < 2) return;
+
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const step = w / (values.length - 1);
+
+    // Determine color: green if last > first, else red
+    const up = values[values.length - 1] >= values[0];
+    ctx.strokeStyle = up ? '#68d391' : '#fc8181';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    values.forEach((v, i) => {
+      const x = i * step;
+      const y = h - ((v - min) / range) * (h - 4) - 2;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  // Auto-format "last updated" time
+  (function() {
+    const el = document.getElementById('marketLastUpdated');
+    if (!el) return;
+    try {
+      const ts = new Date(el.getAttribute('datetime'));
+      if (isNaN(ts)) return;
+      const ago = Math.round((Date.now() - ts.getTime()) / 60000);
+      if (ago < 1) el.textContent = 'just now';
+      else if (ago < 60) el.textContent = ago + 'm ago';
+      else el.textContent = Math.round(ago / 60) + 'h ago';
+    } catch(e) {}
+  })();
 
   // AI Chat (inline)
   const messages = document.getElementById('aiChatMessages');

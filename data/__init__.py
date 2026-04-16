@@ -11,13 +11,13 @@ Provides PostgreSQL integration using SQLAlchemy ORM for:
 from .database import Database, get_database
 from .models import (
     Trade, Position, Order, Strategy, 
-    MarketData, PerformanceMetric
+    MarketData, PerformanceMetric, MarketSnapshot
 )
 from .realtime_pipeline import RealtimeDataManager, DataSubscription
 
 __all__ = [
     'Database', 'get_database',
     'Trade', 'Position', 'Order', 'Strategy',
-    'MarketData', 'PerformanceMetric',
+    'MarketData', 'PerformanceMetric', 'MarketSnapshot',
     'RealtimeDataManager', 'DataSubscription'
 ]

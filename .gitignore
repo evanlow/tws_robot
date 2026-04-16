@@ -47,3 +47,4 @@ test_logs.log
 _tmp.py
 test_output.txt
 coverage_output.txt
+tws_robot.db
