@@ -20,12 +20,13 @@
 3. [Account & Portfolio API](#account--portfolio-api)
 4. [Orders API](#orders-api)
 5. [Data API](#data-api)
-6. [Strategies API](#strategies-api)
-7. [Backtest API](#backtest-api)
-8. [Emergency Controls API](#emergency-controls-api)
-9. [Events & Monitoring API](#events--monitoring-api)
-10. [System API](#system-api)
-11. [AI Assistant APIs](#ai-assistant-apis)
+6. [Market Data API](#market-data-api)
+7. [Strategies API](#strategies-api)
+8. [Backtest API](#backtest-api)
+9. [Emergency Controls API](#emergency-controls-api)
+10. [Events & Monitoring API](#events--monitoring-api)
+11. [System API](#system-api)
+12. [AI Assistant APIs](#ai-assistant-apis)
 
 ---
 
@@ -123,6 +124,10 @@ Get comprehensive account summary including equity, P&L, risk status, and buying
   "daily_pnl_pct": 2.43,
   "daily_pnl_dollar": 2500.00,
   "drawdown_pct": 4.55,
+  "stock_drawdown_pct": 3.21,
+  "premium_retention_pct": 0.85,
+  "short_options_premium_collected": 2500.00,
+  "short_options_current_liability": 2125.00,
   "risk_status": "NORMAL",
   "emergency_stop": false,
   "buying_power": 200000.00,
@@ -142,13 +147,35 @@ Get comprehensive account summary including equity, P&L, risk status, and buying
 - `peak_equity` - Highest equity reached today
 - `daily_pnl_pct` - Daily P&L as percentage of starting equity
 - `daily_pnl_dollar` - Daily P&L in dollars (calculated: current_equity - daily_start_equity)
-- `drawdown_pct` - Current drawdown from peak as percentage
+- `drawdown_pct` - Current drawdown from peak as percentage (total portfolio)
+- `stock_drawdown_pct` - Drawdown from peak for stock/long-only positions (excludes short option mark-to-market fluctuations)
+- `premium_retention_pct` - Fraction of collected premium retained for short options (0-1, where 1.0 = 100% retained)
+- `short_options_premium_collected` - Total premium collected from short option positions
+- `short_options_current_liability` - Current mark-to-market liability of short option positions
 - `risk_status` - Risk status: `"NORMAL"`, `"WARNING"`, or `"CRITICAL"`
-- `emergency_stop` - Whether emergency stop is active
+- `emergency_stop` - Whether emergency stop is active (triggered by stock_drawdown_pct, not total drawdown)
 - `buying_power` - Available buying power
 - `cash_balance` - Cash balance
 - `unrealized_pnl` - Total unrealized P&L across all positions (calculated: sum of all position unrealized P&L)
 - `limits` - Configured risk limits
+
+**Strategy-Aware Risk Tracking:**
+
+The API now provides separate tracking for stock-only positions vs. short options:
+
+- **Stock Drawdown** (`stock_drawdown_pct`): Tracks drawdown for long stock positions only, excluding short option mark-to-market. This prevents false emergency stops from short option premium fluctuations when the underlying stock strategy is performing well.
+
+- **Premium Retention** (`premium_retention_pct`): Monitors how much of the collected premium from short options you're retaining. Formula: `1 - (current_liability / premium_collected)`. A value of 0.85 means you're retaining 85% of collected premium (15% has been given back to mark-to-market).
+
+- **Emergency Stops**: Triggered based on `stock_drawdown_pct` (not total `drawdown_pct`), ensuring risk limits focus on the actual trading strategy performance rather than expected option premium variations.
+
+**Use Case Example:**
+
+You sell covered calls (short options) against long stock positions. The stock rises, increasing your stock equity, but the short calls also increase in value (negative mark-to-market). Traditional drawdown tracking would show a loss from the calls, potentially triggering false emergency stops. Stock-aware tracking separates these:
+
+- Stock equity up 5% → `stock_drawdown_pct` improving
+- Short calls liability up 20% → `premium_retention_pct` down to 0.80
+- Emergency stops won't trigger unless stock positions actually decline
 
 ### `GET /api/account/positions`
 
@@ -289,6 +316,101 @@ Get historical bars.
   ]
 }
 ```
+
+---
+
+## Market Data API
+
+### `GET /api/market/overview`
+
+Get latest global market overview with index snapshots.
+
+**Description:**
+Returns real-time data for major market indices (S&P 500, Dow, Nasdaq, VIX, FTSE, DAX, Nikkei, etc.) with 5-minute caching. Automatically triggers background refresh when data is stale.
+
+**Response:**
+```json
+{
+  "snapshots": [
+    {
+      "symbol": "^GSPC",
+      "name": "S&P 500",
+      "region": "US",
+      "price": 5234.18,
+      "change": 12.45,
+      "change_pct": 0.24,
+      "day_high": 5245.67,
+      "day_low": 5220.34,
+      "prev_close": 5221.73,
+      "volume": null,
+      "timestamp": "2026-04-17T14:30:00+00:00",
+      "market_date": "2026-04-17"
+    },
+    {
+      "symbol": "^VIX",
+      "name": "VIX",
+      "region": "US",
+      "price": 15.23,
+      "change": -0.45,
+      "change_pct": -2.87,
+      "day_high": 15.89,
+      "day_low": 15.10,
+      "prev_close": 15.68,
+      "volume": null,
+      "timestamp": "2026-04-17T14:30:00+00:00",
+      "market_date": "2026-04-17"
+    }
+  ],
+  "sparklines": {
+    "^GSPC": [5180.23, 5195.67, 5210.45, 5220.12, 5234.18],
+    "^VIX": [16.45, 15.89, 15.67, 15.34, 15.23]
+  },
+  "market_status": {
+    "US": "open",
+    "Europe": "closed",
+    "Asia": "closed"
+  },
+  "last_updated": "2026-04-17T14:30:00+00:00"
+}
+```
+
+**Response Fields:**
+- `snapshots` - Array of index snapshots with latest prices
+  - `symbol` - Index ticker symbol (e.g., "^GSPC", "^DJI")
+  - `name` - Display name (e.g., "S&P 500")
+  - `region` - Market region: "US", "Europe", or "Asia"
+  - `price` - Current/latest price
+  - `change` - Absolute price change from previous close
+  - `change_pct` - Percentage change from previous close
+  - `day_high` - Day's high price
+  - `day_low` - Day's low price
+  - `prev_close` - Previous close price
+  - `volume` - Trading volume (often null for indices)
+  - `timestamp` - When this snapshot was captured
+  - `market_date` - Market date for this data
+- `sparklines` - Historical prices for 5-day trend visualization (symbol → array of closes)
+- `market_status` - Current market open/closed status by region
+- `last_updated` - Timestamp of most recent data refresh
+
+**Tracked Indices:**
+- **US:** S&P 500 (^GSPC), Dow Jones (^DJI), Nasdaq (^IXIC), Russell 2000 (^RUT), VIX (^VIX)
+- **Europe:** FTSE 100 (^FTSE), DAX (^GDAXI), Euro Stoxx 50 (^STOXX50E), CAC 40 (^FCHI)
+- **Asia:** Nikkei 225 (^N225), Hang Seng (^HSI), Shanghai Composite (000001.SS), KOSPI (^KS11), ASX 200 (^AXJO)
+
+**Caching:**
+Data is cached for 5 minutes. When stale, a background refresh is triggered automatically so subsequent requests receive fresh data.
+
+### `POST /api/market/refresh`
+
+Manually trigger market data refresh from Yahoo Finance.
+
+**Description:**
+Synchronous call that fetches fresh data immediately and returns the updated overview. Use this when you need guaranteed fresh data without waiting for the auto-refresh cycle.
+
+**Response:**
+Same format as `GET /api/market/overview`
+
+**Note:** This endpoint blocks until the fetch completes (typically 2-5 seconds).
 
 ---
 

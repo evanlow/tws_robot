@@ -266,6 +266,132 @@ print(f"Drawdown: {metrics.drawdown_pct:.1%}")
 print(f"Risk Status: {metrics.risk_status}")
 ```
 
+### Strategy-Aware Drawdown Tracking
+
+The RiskManager now provides separate tracking for stock-only positions vs. short options, preventing false emergency stops from option premium fluctuations.
+
+#### Stock-Only Drawdown
+
+Tracks drawdown for long stock positions, excluding short option mark-to-market:
+
+```python
+from risk.risk_manager import RiskManager
+
+risk_mgr = RiskManager(
+    initial_capital=100000.0,
+    max_drawdown_pct=0.15,  # 15% stock drawdown triggers emergency stop
+    emergency_stop_enabled=True
+)
+
+# Update with total equity
+metrics = risk_mgr.update(equity=105000, positions={}, timestamp=datetime.now())
+
+# Check stock-specific metrics
+print(f"Stock Drawdown: {metrics.stock_drawdown_pct:.2%}")
+print(f"Stock Equity: ${risk_mgr.stock_equity:,.2f}")
+print(f"Peak Stock Equity: ${risk_mgr.peak_stock_equity:,.2f}")
+
+# Emergency stop triggers on stock_drawdown_pct, not total drawdown_pct
+if metrics.risk_status == RiskStatus.EMERGENCY_STOP:
+    print("Emergency stop triggered by stock position losses")
+```
+
+**How It Works:**
+
+- **Without position data**: `stock_equity` mirrors total `equity` (fallback mode)
+- **With positions**: `stock_equity = cash_balance + sum(market_value for LONG STK positions)`
+- Short option positions are excluded from stock equity calculations
+- Emergency stops trigger when `stock_drawdown_pct` exceeds `max_drawdown_pct`
+
+#### Premium Retention for Short Options
+
+Tracks collected premium vs. current liability for short option positions:
+
+```python
+# Metrics include premium retention data
+print(f"Premium Collected: ${metrics.short_options_premium_collected:,.2f}")
+print(f"Current Liability: ${metrics.short_options_current_liability:,.2f}")
+print(f"Premium Retention: {metrics.premium_retention_pct:.1%}")
+
+# Calculate how much premium has been given back
+giveback = metrics.short_options_premium_collected - metrics.short_options_current_liability
+print(f"Premium Giveback: ${giveback:,.2f}")
+```
+
+**Premium Retention Formula:**
+```
+premium_retention_pct = 1 - (current_liability / premium_collected)
+```
+
+- `1.0` (100%) = Retaining all collected premium (options expired or decreased in value)
+- `0.85` (85%) = Given back 15% of premium to mark-to-market
+- `0.0` (0%) = Current liability equals collected premium (break-even)
+
+#### Integration with ServiceManager
+
+When using the web dashboard, position data is automatically processed:
+
+```python
+from web.services import get_services
+
+services = get_services()
+
+# After TWSBridge updates positions, ServiceManager automatically calls
+# recompute_strategy_metrics() to update stock_equity and premium tracking
+services.update_position("AAPL", {
+    "quantity": 100,
+    "side": "LONG",
+    "sec_type": "STK",
+    "market_value": 15000.00,
+    # ... other fields
+})
+
+# This triggers:
+# - Stock equity recalculation (cash + long stock value)
+# - Premium retention updates (if short options exist)
+# - Risk manager state updates
+
+# Access updated metrics
+risk = services.risk_manager.get_risk_summary()
+print(f"Stock Drawdown: {risk['stock_drawdown_pct']:.2%}")
+```
+
+#### Use Case: Covered Call Strategy
+
+Strategy-aware tracking prevents false stops when selling covered calls:
+
+```python
+# Scenario: Long 1000 shares AAPL @ $150, sold 10 covered calls
+# Stock rises to $165 (+10% gain)
+# Calls rise from $2 to $8 premium ($6 loss per call)
+
+positions = {
+    "AAPL": {
+        "quantity": 1000,
+        "side": "LONG",
+        "sec_type": "STK",
+        "entry_price": 150.00,
+        "current_price": 165.00,
+        "market_value": 165000.00,
+        "unrealized_pnl": 15000.00  # +$15k profit
+    },
+    "AAPL_CALL": {
+        "quantity": -10,
+        "side": "SHORT",
+        "sec_type": "OPT",
+        "premium_collected": 2000.00,    # Collected $2 * 10 * 100
+        "current_liability": 8000.00,    # Now worth $8 * 10 * 100
+        "unrealized_pnl": -6000.00       # -$6k loss
+    }
+}
+
+# Traditional drawdown: ($165k stock - $6k calls) - $150k start = +$9k (+6%)
+# Stock drawdown: $165k - $150k = +$15k (+10%) ← No emergency stop
+# Premium retention: 1 - (8000 / 2000) = -3.0 (gave back 300% - need more premium!)
+
+# Emergency stops won't trigger because stock positions are profitable
+```
+
 ---
 
 ## Backtest Engine API
@@ -386,6 +512,153 @@ price = bar.close
 high_price = bar.high
 volume = bar.volume
 date = bar.timestamp
+```
+
+### MarketOverviewService - Global Market Indices
+
+The `MarketOverviewService` fetches and caches real-time data for major global market indices from Yahoo Finance.
+
+#### Overview
+
+Tracks 14 major indices across US, European, and Asian markets including S&P 500, Dow Jones, Nasdaq, VIX, FTSE 100, DAX, Nikkei 225, Hang Seng, and more. Data is cached for 5 minutes with automatic background refresh.
+
+#### Basic Usage
+
+```python
+from data.market_overview import get_market_overview_service
+
+# Get singleton instance
+svc = get_market_overview_service()
+
+# Get latest market overview (from cache or DB)
+overview = svc.get_overview()
+
+# Access data
+snapshots = overview["snapshots"]
+for snap in snapshots:
+    print(f"{snap['name']}: ${snap['price']} ({snap['change_pct']:.2f}%)")
+
+# Check market status
+status = overview["market_status"]
+if status["US"] == "open":
+    print("US markets are open")
+
+# Get sparklines for charts
+sparklines = overview["sparklines"]
+sp500_trend = sparklines["^GSPC"]  # 5-day close prices
+```
+
+#### Manual Refresh
+
+```python
+# Trigger immediate refresh (blocks until complete)
+fresh_data = svc.refresh()
+
+# Refresh runs automatically in background when data is stale (>5 min),
+# but you can force a refresh if needed
+```
+
+#### Data Model
+
+Each snapshot contains:
+
+```python
+{
+    "symbol": "^GSPC",           # Index ticker
+    "name": "S&P 500",           # Display name
+    "region": "US",              # US / Europe / Asia
+    "price": 5234.18,            # Current price
+    "change": 12.45,             # Absolute change from previous close
+    "change_pct": 0.24,          # Percentage change
+    "day_high": 5245.67,         # Day's high
+    "day_low": 5220.34,          # Day's low
+    "prev_close": 5221.73,       # Previous close
+    "volume": null,              # Volume (often null for indices)
+    "timestamp": "2026-04-17T14:30:00+00:00",
+    "market_date": "2026-04-17"
+}
+```
+
+#### Tracked Indices
+
+**US:**
+- S&P 500 (^GSPC), Dow Jones (^DJI), Nasdaq (^IXIC), Russell 2000 (^RUT), VIX (^VIX)
+
+**Europe:**
+- FTSE 100 (^FTSE), DAX (^GDAXI), Euro Stoxx 50 (^STOXX50E), CAC 40 (^FCHI)
+
+**Asia:**
+- Nikkei 225 (^N225), Hang Seng (^HSI), Shanghai Composite (000001.SS), KOSPI (^KS11), ASX 200 (^AXJO)
+
+#### Market Status Detection
+
+```python
+# Get market open/closed status by region
+status = svc.get_overview()["market_status"]
+
+if status["US"] == "open":
+    print("NYSE/Nasdaq trading hours")
+if status["Europe"] == "open":
+    print("LSE/Xetra trading hours")
+if status["Asia"] == "open":
+    print("TSE/HSI trading hours")
+```
+
+**Note:** Market status is a heuristic based on typical trading hours in UTC. It does not account for holidays.
+
+#### Integration with Dashboard
+
+The service is automatically used by the web dashboard to display the market overview section:
+
+```python
+# In your Flask route (handled automatically by dashboard)
+from data.market_overview import get_market_overview_service
+
+@app.route("/dashboard")
+def dashboard():
+    svc = get_market_overview_service()
+    overview = svc.get_overview()
+    return render_template("dashboard.html", market_data=overview)
+```
+
+#### Database Persistence
+
+Market snapshots are stored in SQLite for:
+- Offline viewing when Yahoo Finance is unavailable
+- Historical sparklines (5-day trends)
+- Reduced API calls through caching
+
+```python
+# Snapshots are automatically persisted to database
+# Old snapshots (>30 days) are periodically cleaned up
+```
+
+#### Configuration
+
+Service configuration is built-in with sensible defaults:
+
+```python
+# Cache TTL: 5 minutes (300 seconds)
+# Sparkline history: 5 days
+# Tracked indices: Defined in INDEX_DEFINITIONS dict
+
+# To customize tracked indices, modify data/market_overview.py:
+INDEX_DEFINITIONS = {
+    "^GSPC": {"name": "S&P 500", "region": "US"},
+    # Add your custom indices here
+}
+```
+
+#### Error Handling
+
+```python
+try:
+    overview = svc.get_overview()
+    if not overview["snapshots"]:
+        print("No market data available - check yfinance installation")
+except Exception as exc:
+    print(f"Market data error: {exc}")
+    # Service returns cached/empty data on errors
 ```
 
 ---
@@ -656,6 +929,64 @@ services.update_position("AAPL", {
 
 # Remove a position
 services.remove_position("AAPL")
+```
+
+#### Strategy-Aware Metrics Computation
+
+```python
+# Recompute stock-only equity and short-option premium aggregates
+# (automatically called after portfolio updates, but can be triggered manually)
+services.recompute_strategy_metrics()
+
+# This updates the risk manager with:
+# - stock_equity: cash_balance + sum(market_value for LONG STK positions)
+# - peak_stock_equity: highest stock_equity reached
+# - short_options_premium_collected: sum of premium from SHORT OPT positions
+# - short_options_current_liability: sum of current mark-to-market for SHORT OPT
+
+# The method intelligently handles position types:
+positions = {
+    "AAPL": {
+        "side": "LONG",
+        "sec_type": "STK",           # Included in stock_equity
+        "market_value": 15000.00
+    },
+    "AAPL_CALL": {
+        "side": "SHORT",
+        "sec_type": "OPT",           # Tracked separately for premium retention
+        "premium_collected": 2000.00,
+        "current_liability": 1500.00
+    },
+    "SPY_PUT": {
+        "side": "LONG",
+        "sec_type": "OPT",           # Excluded from stock_equity (not a stock)
+        "market_value": 3000.00
+    }
+}
+
+# After recompute_strategy_metrics():
+# stock_equity = cash_balance + 15000 (only AAPL stock)
+# short_options_premium_collected = 2000
+# short_options_current_liability = 1500
+# premium_retention_pct = 1 - (1500 / 2000) = 0.25 (25% retained)
+```
+
+**When to Call:**
+
+- **Automatically called**: After `update_position()`, `remove_position()`, or `update_account_summary()` with cash balance changes
+- **Manual call**: When positions are bulk-updated or you need to force recalculation
+- **Requires**: `cash_balance` must be present in account summary (skips silently otherwise)
+
+**Thread Safety:**
+
+The method is thread-safe (uses internal lock) and safe to call from TWSBridge callbacks.
+
+```python
+# Example: Manual recalculation after bulk position update
+services._positions = {
+    # ... bulk position data from external source
+}
+services.recompute_strategy_metrics()  # Update derived metrics
 ```
 
 #### Order Management
