@@ -528,3 +528,188 @@ h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
   gap: 1.5rem;
 }
 
+/* ===========================================================
+   Portfolio Analysis Tab
+   =========================================================== */
+
+.analysis-section {
+  margin-bottom: 1.5rem;
+}
+
+.analysis-section h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.analysis-section h4 {
+  margin: 0.5rem 0 0.4rem;
+  font-size: 0.88rem;
+  color: #cbd5e0;
+}
+
+/* Metrics grid (HHI, Diversification, Top Position, Top 3) */
+.analysis-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.metric-card {
+  background: #16213e;
+  border: 1px solid #2d2d44;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.metric-card .metric-label {
+  font-size: 0.72rem;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.metric-card strong {
+  font-size: 1.1rem;
+}
+
+.metric-card .metric-hint {
+  font-size: 0.72rem;
+  color: #718096;
+}
+
+/* Drawdown progress bar */
+.drawdown-bar-container {
+  background: #1a202c;
+  border: 1px solid #2d2d44;
+  border-radius: 4px;
+  height: 22px;
+  overflow: hidden;
+  margin-bottom: 0.4rem;
+}
+
+.drawdown-bar {
+  height: 100%;
+  min-width: 2px;
+  background: linear-gradient(90deg, #48bb78, #ecc94b 50%, #f56565);
+  border-radius: 4px 0 0 4px;
+  transition: width 0.4s ease;
+}
+
+.drawdown-stats {
+  display: flex;
+  gap: 1.2rem;
+  font-size: 0.82rem;
+  color: #a0aec0;
+}
+
+/* Chart row (donut + sector bars side by side) */
+.chart-row {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.chart-container {
+  flex: 1 1 200px;
+  min-width: 200px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: #a0aec0;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 3px;
+  vertical-align: middle;
+}
+
+/* Sector exposure bars */
+.sector-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sector-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.sector-label {
+  width: 80px;
+  text-align: right;
+  color: #a0aec0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sector-bar-track {
+  flex: 1;
+  height: 14px;
+  background: #1a202c;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sector-bar-fill {
+  height: 100%;
+  background: #4299e1;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.sector-pct {
+  width: 42px;
+  text-align: right;
+  color: #a0aec0;
+}
+
+/* Attribution tables side by side */
+.attribution-tables {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.attribution-tables > div {
+  flex: 1 1 200px;
+  min-width: 200px;
+}
+
+.data-table.compact {
+  font-size: 0.82rem;
+}
+
+.data-table.compact td,
+.data-table.compact th {
+  padding: 0.3rem 0.5rem;
+}
+
+/* Suggestion list */
+.suggestion-list {
+  list-style: disc;
+  padding-left: 1.5rem;
+  font-size: 0.85rem;
+  color: #a0aec0;
+}
+
+.suggestion-list li {
+  margin-bottom: 0.35rem;
+}
+

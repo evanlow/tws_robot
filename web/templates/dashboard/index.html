@@ -42,6 +42,7 @@
   <section class="panel panel-center">
     <div class="tab-bar">
       <button class="tab-btn active" data-tab="portfolio">Portfolio</button>
+      <button class="tab-btn" data-tab="analysis">Analysis</button>
       <button class="tab-btn" data-tab="trades">Recent Trades</button>
       <button class="tab-btn" data-tab="alerts">Alerts</button>
       <button class="tab-btn" data-tab="market">Market</button>
@@ -81,6 +82,153 @@
       </table>
       {% else %}
       <p class="empty-state">No open positions</p>
+      {% endif %}
+    </div>
+
+    <!-- Analysis Tab -->
+    <div class="tab-content" id="tab-analysis">
+      {% set pa = portfolio_analysis %}
+
+      <!-- Drawdown Indicator -->
+      <div class="analysis-section">
+        <h3>📉 Drawdown from Peak</h3>
+        {% set dd_pct = (pa.drawdown.current_pct * 100) %}
+        {% set dd_color = 'pnl-positive' if dd_pct < 5 else ('pnl-negative' if dd_pct >= 10 else '') %}
+        <div class="drawdown-bar-container">
+          <div class="drawdown-bar" style="width:{{ [dd_pct, 100] | min }}%;"
+               data-pct="{{ '%.2f' | format(dd_pct) }}"></div>
+        </div>
+        <div class="drawdown-stats">
+          <span class="{{ dd_color }}">{{ "%.2f" | format(dd_pct) }}% drawdown</span>
+          <span>Peak: ${{ "{:,.2f}".format(pa.drawdown.peak_equity) }}</span>
+          <span>Current: ${{ "{:,.2f}".format(pa.drawdown.current_equity) }}</span>
+        </div>
+      </div>
+
+      <!-- Concentration & Diversification -->
+      <div class="analysis-section">
+        <h3>🎯 Concentration &amp; Diversification</h3>
+        {% if pa.allocation %}
+        <div class="analysis-metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">HHI</span>
+            <strong class="{{ 'pnl-negative' if pa.concentration.is_concentrated else 'pnl-positive' }}">
+              {{ "%.3f" | format(pa.concentration.herfindahl_index) }}
+            </strong>
+            <span class="metric-hint">{% if pa.concentration.herfindahl_index < 0.15 %}Well diversified{% elif pa.concentration.herfindahl_index < 0.25 %}Moderate{% else %}Concentrated{% endif %}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Diversification</span>
+            <strong>{{ "%.0f" | format(pa.diversification.score) }}/100</strong>
+            <span class="metric-hint">{{ "%.1f" | format(pa.diversification.effective_positions) }} effective positions</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Top Position</span>
+            <strong>{{ "%.1f" | format(pa.concentration.top_position * 100) }}%</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Top 3</span>
+            <strong>{{ "%.1f" | format(pa.concentration.top_3 * 100) }}%</strong>
+          </div>
+        </div>
+
+        <!-- Allocation donut chart (canvas) -->
+        <div class="chart-row">
+          <div class="chart-container">
+            <h4>Portfolio Allocation</h4>
+            <canvas id="allocationChart" width="220" height="220"></canvas>
+          </div>
+
+          <!-- Sector Exposure -->
+          <div class="chart-container">
+            <h4>Sector Exposure</h4>
+            {% if pa.sector_exposure %}
+            <div class="sector-bars">
+              {% for sector, weight in pa.sector_exposure.items() %}
+              <div class="sector-bar-row">
+                <span class="sector-label">{{ sector }}</span>
+                <div class="sector-bar-track">
+                  <div class="sector-bar-fill" style="width:{{ (weight * 100) | round(1) }}%;"></div>
+                </div>
+                <span class="sector-pct">{{ "%.1f" | format(weight * 100) }}%</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty-state">No sector data</p>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <p class="empty-state">No positions to analyse</p>
+        {% endif %}
+      </div>
+
+      <!-- P&L Attribution -->
+      <div class="analysis-section">
+        <h3>💰 P&amp;L Attribution</h3>
+        {% if pa.attribution.by_symbol %}
+        <div class="analysis-metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Total P&amp;L</span>
+            <strong class="{{ 'pnl-positive' if pa.attribution.total_pnl >= 0 else 'pnl-negative' }}">
+              ${{ "{:,.2f}".format(pa.attribution.total_pnl) }}
+            </strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Win Rate</span>
+            <strong>{{ "%.1f" | format(pa.attribution.win_rate * 100) }}%</strong>
+          </div>
+        </div>
+        <div class="attribution-tables">
+          <div>
+            <h4>By Symbol</h4>
+            <table class="data-table compact">
+              <thead><tr><th>Symbol</th><th class="text-right">P&amp;L</th></tr></thead>
+              <tbody>
+                {% for item in pa.attribution.by_symbol[:10] %}
+                <tr>
+                  <td><strong>{{ item.name }}</strong></td>
+                  <td class="text-right {{ 'pnl-positive' if item.pnl >= 0 else 'pnl-negative' }}">
+                    ${{ "{:,.2f}".format(item.pnl) }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h4>By Strategy</h4>
+            <table class="data-table compact">
+              <thead><tr><th>Strategy</th><th class="text-right">P&amp;L</th></tr></thead>
+              <tbody>
+                {% for item in pa.attribution.by_strategy[:10] %}
+                <tr>
+                  <td><strong>{{ item.name }}</strong></td>
+                  <td class="text-right {{ 'pnl-positive' if item.pnl >= 0 else 'pnl-negative' }}">
+                    ${{ "{:,.2f}".format(item.pnl) }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% else %}
+        <p class="empty-state">No closed trades for attribution analysis</p>
+        {% endif %}
+      </div>
+
+      <!-- Suggestions -->
+      {% if pa.suggestions %}
+      <div class="analysis-section">
+        <h3>💡 Suggestions</h3>
+        <ul class="suggestion-list">
+          {% for s in pa.suggestions %}
+          <li>{{ s }}</li>
+          {% endfor %}
+        </ul>
+      </div>
       {% endif %}
     </div>
 
@@ -485,6 +633,65 @@
       if (bpEl) bpEl.textContent = '$' + (d.buying_power || 0).toFixed(2);
     } catch(e) {}
   }, 15000);
+
+  // ---------------------------------------------------------------
+  // Allocation donut chart (pure canvas, no external library)
+  // ---------------------------------------------------------------
+  (function drawAllocationDonut() {
+    const canvas = document.getElementById('allocationChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const allocation = {{ portfolio_analysis.allocation | tojson }};
+    if (!allocation || allocation.length === 0) {
+      ctx.fillStyle = '#888';
+      ctx.textAlign = 'center';
+      ctx.fillText('No data', canvas.width / 2, canvas.height / 2);
+      return;
+    }
+    const palette = [
+      '#4299e1','#48bb78','#ed8936','#9f7aea','#f56565',
+      '#38b2ac','#ecc94b','#667eea','#fc8181','#68d391',
+    ];
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const radius = Math.min(cx, cy) - 10;
+    const inner = radius * 0.55;
+    let startAngle = -Math.PI / 2;
+
+    allocation.forEach(function(item, i) {
+      const slice = item.weight * 2 * Math.PI;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, startAngle, startAngle + slice);
+      ctx.arc(cx, cy, inner, startAngle + slice, startAngle, true);
+      ctx.closePath();
+      ctx.fillStyle = palette[i % palette.length];
+      ctx.fill();
+      // Label
+      if (item.weight > 0.05) {
+        const mid = startAngle + slice / 2;
+        const lx = cx + Math.cos(mid) * (radius + inner) / 2;
+        const ly = cy + Math.sin(mid) * (radius + inner) / 2;
+        ctx.fillStyle = '#fff';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.symbol, lx, ly);
+      }
+      startAngle += slice;
+    });
+
+    // Legend below the chart
+    const legend = document.createElement('div');
+    legend.className = 'chart-legend';
+    allocation.forEach(function(item, i) {
+      const s = document.createElement('span');
+      s.innerHTML = '<span class="legend-dot" style="background:' +
+        palette[i % palette.length] + '"></span>' +
+        item.symbol + ' ' + (item.weight * 100).toFixed(1) + '%';
+      legend.appendChild(s);
+    });
+    canvas.parentNode.appendChild(legend);
+  })();
 })();
 </script>
 {% endblock %}

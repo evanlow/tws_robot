@@ -35,6 +35,9 @@ def index():
     except Exception:
         pass
 
+    # Portfolio analysis (concentration, allocation, drawdown, attribution)
+    portfolio_analysis = svc.get_portfolio_analysis()
+
     context = {
         "title": "Dashboard",
         "active_page": "dashboard",
@@ -50,5 +53,6 @@ def index():
         "daily_pnl_dollar": insights["daily_pnl_dollar"],
         "buying_power": insights["buying_power"],
         "market_overview": market_overview,
+        "portfolio_analysis": portfolio_analysis,
     }
     return render_template("dashboard/index.html", **context)
