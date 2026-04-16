@@ -46,3 +46,4 @@ test_logs.log
 *.tmp
 _tmp.py
 test_output.txt
+coverage_output.txt
