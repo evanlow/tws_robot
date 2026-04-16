@@ -302,7 +302,7 @@ class MarketSnapshot(Base):
     day_high = Column(Float, nullable=True)
     day_low = Column(Float, nullable=True)
     prev_close = Column(Float, nullable=True)
-    volume = Column(Float, nullable=True)
+    volume = Column(Integer, nullable=True)
 
     # Timestamps
     timestamp = Column(DateTime, nullable=False, default=datetime.now, index=True)
