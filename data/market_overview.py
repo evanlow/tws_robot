@@ -264,8 +264,14 @@ class MarketOverviewService:
             snapshots = _fetch_from_yfinance()
             sparklines = _fetch_sparkline_from_yfinance()
 
-            if snapshots:
-                self._persist_snapshots(snapshots)
+            if not snapshots:
+                # Fetch returned nothing (network/API issue).  Keep the
+                # existing cache / DB-backed overview instead of
+                # overwriting with empty data.
+                logger.warning("yfinance returned no snapshots — keeping existing cache")
+                return self._cache or self._load_from_db() or self._empty_overview()
+
+            self._persist_snapshots(snapshots)
 
             overview = self._build_overview(snapshots, sparklines)
 
@@ -282,7 +288,14 @@ class MarketOverviewService:
                 self._refreshing = False
 
     def refresh_async(self) -> None:
-        """Trigger a background refresh (non-blocking)."""
+        """Trigger a background refresh (non-blocking).
+
+        Guarded: if a refresh is already in progress the call is a no-op,
+        preventing thread churn under repeated requests.
+        """
+        with self._lock:
+            if self._refreshing:
+                return
         thread = threading.Thread(target=self.refresh, daemon=True)
         thread.start()
 
@@ -379,6 +392,8 @@ class MarketOverviewService:
             # For each symbol, get distinct (market_date, price) ordered by date
             symbols = list(INDEX_DEFINITIONS.keys())
             for sym in symbols:
+                # Order DESC to grab the most recent N trading days,
+                # then reverse in Python to get oldest→newest for the chart.
                 rows = (
                     session.query(
                         MarketSnapshot.market_date,
@@ -390,11 +405,11 @@ class MarketOverviewService:
                         MarketSnapshot.market_date.isnot(None),
                     )
                     .group_by(MarketSnapshot.market_date)
-                    .order_by(MarketSnapshot.market_date)
+                    .order_by(MarketSnapshot.market_date.desc())
                     .limit(days)
                     .all()
                 )
-                sparklines[sym] = [float(r.avg_price) for r in rows]
+                sparklines[sym] = [float(r.avg_price) for r in reversed(rows)]
         except Exception as exc:
             logger.warning("Sparkline DB load failed: %s", exc)
 
@@ -427,6 +442,17 @@ class MarketOverviewService:
 
         status = _market_status()
 
+        # Derive last_updated from the newest snapshot timestamp rather
+        # than datetime.now() so that DB-loaded data does not appear fresh.
+        last_updated = None
+        for s in snapshots:
+            ts = s.get("timestamp")
+            if ts is None:
+                continue
+            ts_str = ts.isoformat() if isinstance(ts, datetime) else str(ts)
+            if last_updated is None or ts_str > last_updated:
+                last_updated = ts_str
+
         return {
             "regions": [
                 {"name": "US", "flag": "🇺🇸", "label": "US Markets",
@@ -437,7 +463,7 @@ class MarketOverviewService:
                  "status": status.get("Asia", "closed"), "indices": by_region.get("Asia", [])},
             ],
             "market_status": status,
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": last_updated,
             "snapshots": snapshots,
         }
 
