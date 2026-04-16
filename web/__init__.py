@@ -26,6 +26,10 @@ def create_app(config_override: dict | None = None) -> "Flask":
 
     app = Flask(__name__, template_folder="templates", static_folder="static")
 
+    # Load .env so OPENAI_API_KEY and other secrets are available early
+    from dotenv import load_dotenv
+    load_dotenv()
+
     # Default configuration
     app.config.setdefault("SECRET_KEY", "dev-secret-change-in-production")
     app.config.setdefault("DEBUG", False)
