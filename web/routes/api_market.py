@@ -22,16 +22,11 @@ def _get_service():
 def overview():
     """Return the latest global market overview (from cache or DB).
 
-    If data is stale a background refresh is automatically triggered
-    so the *next* request will have fresh data.
+    The service automatically triggers a background refresh when data is
+    stale, so the *next* request will have fresh data.
     """
     svc = _get_service()
     data = svc.get_overview()
-
-    # Kick off a background refresh when stale
-    if svc.is_stale():
-        svc.refresh_async()
-
     return jsonify(data)
 
 

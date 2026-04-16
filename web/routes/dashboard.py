@@ -26,15 +26,12 @@ def index():
     except Exception:
         pass
 
-    # Market overview (cached / DB)
+    # Market overview (cached / DB — auto-refreshes in the background when stale)
     market_overview = {"regions": [], "market_status": {}, "last_updated": None, "snapshots": []}
     try:
         from data.market_overview import get_market_overview_service
         mkt_svc = get_market_overview_service()
         market_overview = mkt_svc.get_overview()
-        # Trigger async refresh if stale
-        if mkt_svc.is_stale():
-            mkt_svc.refresh_async()
     except Exception:
         pass
 

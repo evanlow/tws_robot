@@ -227,12 +227,17 @@ class MarketOverviewService:
     # Public API
     # ------------------------------------------------------------------ #
 
-    def get_overview(self) -> Dict[str, Any]:
+    def get_overview(self, auto_refresh: bool = True) -> Dict[str, Any]:
         """Return the latest market overview.
 
         1. Serve from in-memory cache if fresh (< 5 min).
         2. Otherwise fall back to the most recent DB snapshots.
         3. If DB is also empty, return a stub with empty lists.
+
+        When *auto_refresh* is True (the default) and the data is stale,
+        a single background refresh thread is kicked off automatically so
+        callers don't need to check staleness themselves.  The guard
+        inside ``refresh_async()`` prevents thread churn.
         """
         with self._lock:
             if self._cache and self._cache_time:
@@ -246,7 +251,17 @@ class MarketOverviewService:
             with self._lock:
                 self._cache = overview
                 self._cache_time = datetime.now()
+
+            # Data came from DB — may be stale; kick off a background
+            # refresh so the *next* request gets fresh data.
+            if auto_refresh:
+                self.refresh_async()
+
             return overview
+
+        # No data at all — trigger a fetch for next time
+        if auto_refresh:
+            self.refresh_async()
 
         return self._empty_overview()
 
