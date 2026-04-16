@@ -170,6 +170,7 @@ class RiskManager:
         # Strategy-aware equity tracking (stock-only, excludes short options)
         self.stock_equity = initial_capital       # cash + long stock value only
         self.peak_stock_equity = initial_capital   # peak of stock-only equity
+        self._stock_equity_from_positions = False  # True once recompute_strategy_metrics sets it
         
         # Short options premium tracking
         self.short_options_premium_collected = 0.0   # total premium received
@@ -213,6 +214,14 @@ class RiskManager:
         # Update peak equity
         if equity > self.peak_equity:
             self.peak_equity = equity
+        
+        # Fallback: if stock_equity has not been set via position-level
+        # breakdown (recompute_strategy_metrics), keep it in sync with
+        # total equity so drawdown checks work correctly.
+        if not self._stock_equity_from_positions:
+            self.stock_equity = equity
+            if equity > self.peak_stock_equity:
+                self.peak_stock_equity = equity
         
         # Reset daily tracking on new day
         if self.current_date is None or current_date.date() != self.current_date.date():
@@ -585,6 +594,7 @@ class RiskManager:
         # Reset strategy-aware tracking
         self.stock_equity = self.initial_capital
         self.peak_stock_equity = self.initial_capital
+        self._stock_equity_from_positions = False
         self.short_options_premium_collected = 0.0
         self.short_options_current_liability = 0.0
         logger.debug("RiskManager reset to initial state")

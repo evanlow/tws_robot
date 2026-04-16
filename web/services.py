@@ -252,6 +252,7 @@ class ServiceManager:
         rm = self.risk_manager
         with self._lock:
             rm.stock_equity = stock_equity
+            rm._stock_equity_from_positions = True
             if stock_equity > rm.peak_stock_equity:
                 rm.peak_stock_equity = stock_equity
             rm.short_options_premium_collected = total_premium_collected
