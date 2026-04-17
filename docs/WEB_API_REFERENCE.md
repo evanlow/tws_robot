@@ -209,6 +209,159 @@ Get all open positions.
 }
 ```
 
+### `GET /api/account/portfolio-analysis`
+
+Get comprehensive portfolio analysis including concentration metrics, sector exposure, drawdown tracking, and P&L attribution.
+
+**NEW in v1.6 (PR #14)** - Portfolio Analysis Dashboard
+
+**Response:**
+```json
+{
+  "allocation": [
+    {
+      "symbol": "AAPL",
+      "market_value": 15000.00,
+      "weight": 0.48,
+      "unrealized_pnl": 500.00
+    },
+    {
+      "symbol": "MSFT",
+      "market_value": 10000.00,
+      "weight": 0.32,
+      "unrealized_pnl": -200.00
+    }
+  ],
+  "total_value": 31000.00,
+  "concentration": {
+    "herfindahl_index": 0.31,
+    "top_position_pct": 0.48,
+    "top_3_positions_pct": 0.85,
+    "top_5_positions_pct": 0.95
+  },
+  "diversification": {
+    "score": 68.5,
+    "effective_positions": 3.2
+  },
+  "sector_exposure": {
+    "Technology": 0.65,
+    "Healthcare": 0.25,
+    "Finance": 0.10
+  },
+  "risk_flags": {
+    "is_concentrated": true,
+    "has_high_correlations": false,
+    "sector_risk": true
+  },
+  "drawdown": {
+    "current_pct": 0.045,
+    "peak_equity": 110000.00,
+    "current_equity": 105000.00
+  },
+  "attribution": {
+    "by_symbol": [
+      {"name": "AAPL", "pnl": 1250.00},
+      {"name": "MSFT", "pnl": 850.00},
+      {"name": "TSLA", "pnl": -300.00}
+    ],
+    "by_strategy": [
+      {"name": "momentum", "pnl": 2100.00},
+      {"name": "mean_reversion", "pnl": -200.00}
+    ],
+    "win_rate": 0.625,
+    "total_pnl": 1800.00
+  },
+  "suggestions": [
+    "Portfolio is concentrated (HHI=0.31). Consider adding 2-3 more positions.",
+    "Technology sector exposure (65%) exceeds diversification threshold. Reduce to <50%.",
+    "Top position (AAPL) represents 48% of portfolio. Reduce to <25% for better risk management."
+  ]
+}
+```
+
+**Field Descriptions:**
+
+**Allocation:**
+- `allocation` - Array of position breakdowns
+- `symbol` - Ticker symbol
+- `market_value` - Absolute market value (uses abs() for short positions)
+- `weight` - Position weight in portfolio (0.0 to 1.0, based on gross market values)
+- `unrealized_pnl` - Unrealized profit/loss for the position
+- `total_value` - Total gross market value of all positions
+
+**Concentration Metrics:**
+- `herfindahl_index` - HHI concentration measure (0=perfectly diversified, 1=fully concentrated)
+  - Values > 0.25 indicate concentration risk
+  - Formula: sum of squared weights
+- `top_position_pct` - Largest single position as % of portfolio
+- `top_3_positions_pct` - Top 3 positions combined weight
+- `top_5_positions_pct` - Top 5 positions combined weight
+
+**Diversification:**
+- `score` - Overall diversification score (0-100, where 100=well diversified)
+  - Considers number of positions, weight distribution, and correlations
+- `effective_positions` - Effective number of independent positions
+  - Accounts for correlation and concentration
+  - E.g., 10 positions with 0.8 correlation act like ~3 effective positions
+
+**Sector Exposure:**
+- Mapping of sector names to portfolio weights
+- Sum of all sector weights should equal ~1.0
+- Helps identify sector concentration risks
+
+**Risk Flags:**
+- `is_concentrated` - True if HHI > 0.25
+- `has_high_correlations` - True if any position pair has correlation > 0.8
+- `sector_risk` - True if any single sector exceeds 50% of portfolio
+
+**Drawdown:**
+- `current_pct` - Current drawdown from peak (0.0 to 1.0)
+  - Clamped to [0, 1] range to handle edge cases
+- `peak_equity` - Highest equity reached
+- `current_equity` - Current account equity
+
+**Attribution:**
+- `by_symbol` - P&L breakdown by ticker symbol (from closed trades)
+- `by_strategy` - P&L breakdown by strategy name (from closed trades)
+- `win_rate` - Percentage of profitable trades (0.0 to 1.0)
+- `total_pnl` - Total P&L from all closed trades analyzed
+
+**Suggestions:**
+- Array of actionable recommendations for improving portfolio diversification
+- Generated based on concentration, correlation, and sector exposure analysis
+
+**Use Cases:**
+
+1. **Portfolio Health Dashboard:**
+   ```javascript
+   fetch('/api/account/portfolio-analysis')
+     .then(res => res.json())
+     .then(data => {
+       if (data.risk_flags.is_concentrated) {
+         console.warn('Portfolio concentration detected!');
+         data.suggestions.forEach(s => console.log('💡', s));
+       }
+     });
+   ```
+
+2. **Risk Monitoring:**
+   - Check HHI regularly (target: < 0.25 for diversified portfolio)
+   - Monitor top position (target: < 25% of portfolio)
+   - Review sector exposure (target: no sector > 50%)
+
+3. **Performance Review:**
+   - Identify top/bottom performers by symbol
+   - Compare strategy effectiveness via attribution
+   - Track win rate trends
+
+**Notes:**
+
+- Uses absolute (gross) market values for weights, so short positions contribute positively to concentration
+- Drawdown is clamped to [0.0, 1.0] to handle edge cases (e.g., equity exceeding peak)
+- Attribution only includes closed trades with complete data (entry_time, exit_time, pnl, strategy)
+- Sector/industry data depends on position metadata; positions without sector info are excluded
+- For large portfolios (100+ positions), calculation may take 1-2 seconds
+
 ---
 
 ## Orders API

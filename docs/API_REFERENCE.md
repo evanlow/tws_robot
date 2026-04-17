@@ -989,6 +989,152 @@ services._positions = {
 services.recompute_strategy_metrics()  # Update derived metrics
 ```
 
+#### Portfolio Analysis
+
+```python
+# Get comprehensive portfolio analysis (concentration, attribution, drawdown)
+# (NEW in v1.6 - PR #14)
+analysis = services.get_portfolio_analysis()
+
+# Returns a dictionary with:
+{
+    "allocation": [
+        {
+            "symbol": "AAPL",
+            "market_value": 15000.00,
+            "weight": 0.48,               # 48% of portfolio
+            "unrealized_pnl": 500.00
+        },
+        {
+            "symbol": "MSFT",
+            "market_value": 10000.00,
+            "weight": 0.32,               # 32% of portfolio
+            "unrealized_pnl": -200.00
+        }
+        # ... more positions
+    ],
+    "total_value": 31000.00,              # Total gross market value
+    
+    "concentration": {
+        "herfindahl_index": 0.31,         # HHI: 0-1 (1=concentrated, 0=diversified)
+        "top_position_pct": 0.48,         # Largest position weight
+        "top_3_positions_pct": 0.85,      # Top 3 combined weight
+        "top_5_positions_pct": 0.95       # Top 5 combined weight
+    },
+    
+    "diversification": {
+        "score": 68.5,                    # 0-100 (100=well diversified)
+        "effective_positions": 3.2        # Effective number of independent positions
+    },
+    
+    "sector_exposure": {
+        "Technology": 0.65,               # 65% in tech sector
+        "Healthcare": 0.25,               # 25% in healthcare
+        "Finance": 0.10                   # 10% in finance
+    },
+    
+    "risk_flags": {
+        "is_concentrated": true,          # HHI > 0.25
+        "has_high_correlations": false,   # Any pair correlation > 0.8
+        "sector_risk": true               # Single sector > 50%
+    },
+    
+    "drawdown": {
+        "current_pct": 0.045,             # 4.5% drawdown from peak
+        "peak_equity": 110000.00,
+        "current_equity": 105000.00
+    },
+    
+    "attribution": {
+        "by_symbol": [
+            {"name": "AAPL", "pnl": 1250.00},
+            {"name": "MSFT", "pnl": 850.00},
+            {"name": "TSLA", "pnl": -300.00}
+        ],
+        "by_strategy": [
+            {"name": "momentum", "pnl": 2100.00},
+            {"name": "mean_reversion", "pnl": -200.00}
+        ],
+        "win_rate": 0.625,                # 62.5% of trades profitable
+        "total_pnl": 1800.00
+    },
+    
+    "suggestions": [
+        "Portfolio is concentrated (HHI=0.31). Consider adding 2-3 more positions.",
+        "Technology sector exposure (65%) exceeds diversification threshold. Reduce to <50%.",
+        "Top position (AAPL) represents 48% of portfolio. Reduce to <25% for better risk management."
+    ]
+}
+```
+
+**What It Provides:**
+
+- **Allocation**: Per-symbol breakdown with weights and P&L
+- **Concentration Metrics**: Herfindahl-Hirschman Index (HHI) and top-N concentration percentages
+- **Diversification Score**: 0-100 rating based on position count, weights, and correlations
+- **Sector Exposure**: Portfolio weight distribution across sectors
+- **Risk Flags**: Automated warnings for concentration, correlation, and sector risks
+- **Drawdown Tracking**: Current drawdown from peak equity
+- **P&L Attribution**: Performance breakdown by symbol and by strategy (from closed trades)
+- **Actionable Suggestions**: Specific recommendations for improving diversification
+
+**When to Use:**
+
+- Dashboard portfolio analysis tab (called automatically on page load)
+- API endpoint: `GET /api/account/portfolio-analysis`
+- Periodic risk reviews (check concentration and correlation risks)
+- Strategy performance analysis (attribution breakdown)
+
+**Dependencies:**
+
+This method combines data from:
+
+- **CorrelationAnalyzer** (`risk/correlation_analyzer.py`): Calculates concentration metrics (HHI), sector exposure, and diversification scores
+- **PerformanceAttribution** (`strategies/performance_attribution.py`): Analyzes P&L sources from closed trades, attributing performance by symbol, strategy, date, etc.
+- **RiskManager**: Provides peak equity and current equity for drawdown calculation
+
+**Example: Portfolio Health Check**
+
+```python
+from web.services import get_services
+
+services = get_services()
+analysis = services.get_portfolio_analysis()
+
+# Check concentration risk
+if analysis["risk_flags"]["is_concentrated"]:
+    hhi = analysis["concentration"]["herfindahl_index"]
+    print(f"⚠️ Portfolio concentrated (HHI={hhi:.2f})")
+    for suggestion in analysis["suggestions"]:
+        print(f"  💡 {suggestion}")
+
+# Check top position exposure
+top_pct = analysis["concentration"]["top_position_pct"]
+if top_pct > 0.25:
+    print(f"⚠️ Largest position is {top_pct:.1%} of portfolio (target: <25%)")
+
+# Check sector concentration
+for sector, weight in analysis["sector_exposure"].items():
+    if weight > 0.50:
+        print(f"⚠️ {sector} sector exposure ({weight:.1%}) exceeds 50% threshold")
+
+# Review performance attribution
+print("\n📊 Top Performers:")
+for item in analysis["attribution"]["by_symbol"][:3]:
+    print(f"  {item['name']}: ${item['pnl']:,.2f}")
+
+print(f"\n🎯 Win Rate: {analysis['attribution']['win_rate']:.1%}")
+print(f"💰 Total P&L: ${analysis['attribution']['total_pnl']:,.2f}")
+```
+
+**Thread Safety:**
+
+This method is read-only and safe to call from any thread. It internally creates temporary analyzer instances and doesn't modify shared state.
+
+**Performance Note:**
+
+Portfolio analysis involves calculating correlations and metrics across all positions. For portfolios with 100+ positions, this may take 1-2 seconds. The dashboard caches results and handles exceptions gracefully to avoid blocking page loads.
+
 #### Order Management
 
 ```python
