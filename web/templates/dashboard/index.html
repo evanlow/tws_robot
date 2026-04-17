@@ -686,9 +686,14 @@
     legend.className = 'chart-legend';
     allocation.forEach(function(item, i) {
       const s = document.createElement('span');
-      s.innerHTML = '<span class="legend-dot" style="background:' +
-        palette[i % palette.length] + '"></span>' +
-        item.symbol + ' ' + (item.weight * 100).toFixed(1) + '%';
+      const dot = document.createElement('span');
+      dot.className = 'legend-dot';
+      dot.style.background = palette[i % palette.length];
+      const text = document.createTextNode(
+        item.symbol + ' ' + (item.weight * 100).toFixed(1) + '%'
+      );
+      s.appendChild(dot);
+      s.appendChild(text);
       legend.appendChild(s);
     });
     canvas.parentNode.appendChild(legend);
