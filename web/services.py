@@ -319,13 +319,15 @@ class ServiceManager:
         rm = self.risk_manager
 
         # -- Allocation breakdown -----------------------------------------
+        # Use gross (absolute) market values so short positions produce
+        # valid non-negative weights that sum to ~1.
         total_value = sum(
-            pos.get("market_value", 0) for pos in positions.values()
+            abs(pos.get("market_value", 0)) for pos in positions.values()
         )
         allocation: List[Dict[str, Any]] = []
         corr_positions: List["PositionInfo"] = []
         for symbol, pos in positions.items():
-            mv = pos.get("market_value", 0)
+            mv = abs(pos.get("market_value", 0))
             weight = mv / total_value if total_value > 0 else 0
             allocation.append({
                 "symbol": symbol,
@@ -335,7 +337,7 @@ class ServiceManager:
             })
             corr_positions.append(PositionInfo(
                 symbol=symbol,
-                quantity=pos.get("quantity", 0),
+                quantity=int(pos.get("quantity", 0)),
                 market_value=mv,
                 weight=weight,
                 sector=pos.get("sector"),

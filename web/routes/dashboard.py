@@ -37,10 +37,15 @@ def index():
 
     # Portfolio analysis (concentration, allocation, drawdown, attribution)
     portfolio_analysis = {
-        "drawdown": {},
+        "drawdown": {"current_pct": 0, "peak_equity": 0, "current_equity": 0},
         "allocation": [],
         "concentration": {},
-        "attribution": [],
+        "diversification": {},
+        "sector_exposure": {},
+        "risk_flags": {},
+        "attribution": {"by_symbol": [], "by_strategy": [], "win_rate": 0, "total_pnl": 0},
+        "suggestions": [],
+        "total_value": 0,
     }
     try:
         portfolio_analysis = svc.get_portfolio_analysis()
