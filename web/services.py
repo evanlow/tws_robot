@@ -351,7 +351,8 @@ class ServiceManager:
         # -- Drawdown from RiskManager ------------------------------------
         peak = rm.peak_equity
         current = rm.current_equity
-        drawdown_pct = (peak - current) / peak if peak > 0 else 0.0
+        raw_drawdown_pct = (peak - current) / peak if peak > 0 else 0.0
+        drawdown_pct = max(0.0, min(1.0, raw_drawdown_pct))
 
         # -- P&L attribution from recent trades ---------------------------
         from strategies.performance_attribution import (
