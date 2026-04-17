@@ -3,9 +3,13 @@
 GET /  →  renders templates/dashboard/index.html
 """
 
+import logging
+
 from flask import Blueprint, render_template
 
 from web.services import get_services
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("dashboard", __name__, url_prefix="/")
 
@@ -35,6 +39,23 @@ def index():
     except Exception:
         pass
 
+    # Portfolio analysis (concentration, allocation, drawdown, attribution)
+    portfolio_analysis = {
+        "drawdown": {"current_pct": 0, "peak_equity": 0, "current_equity": 0},
+        "allocation": [],
+        "concentration": {},
+        "diversification": {},
+        "sector_exposure": {},
+        "risk_flags": {},
+        "attribution": {"by_symbol": [], "by_strategy": [], "win_rate": 0, "total_pnl": 0},
+        "suggestions": [],
+        "total_value": 0,
+    }
+    try:
+        portfolio_analysis = svc.get_portfolio_analysis()
+    except Exception:
+        logger.exception("Failed to compute portfolio analysis")
+
     context = {
         "title": "Dashboard",
         "active_page": "dashboard",
@@ -50,5 +71,6 @@ def index():
         "daily_pnl_dollar": insights["daily_pnl_dollar"],
         "buying_power": insights["buying_power"],
         "market_overview": market_overview,
+        "portfolio_analysis": portfolio_analysis,
     }
     return render_template("dashboard/index.html", **context)

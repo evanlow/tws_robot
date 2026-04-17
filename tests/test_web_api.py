@@ -239,6 +239,47 @@ class TestAccountAPI:
         assert data["count"] == 0
         assert data["positions"] == []
 
+    def test_portfolio_analysis_empty(self, client):
+        """Test /api/account/portfolio-analysis returns 200 with expected keys."""
+        resp = client.get("/api/account/portfolio-analysis")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        for key in ("allocation", "concentration", "drawdown", "attribution",
+                     "diversification", "sector_exposure", "suggestions",
+                     "risk_flags", "total_value"):
+            assert key in data, f"Missing key: {key}"
+        assert data["allocation"] == []
+        assert data["total_value"] == 0
+
+    def test_portfolio_analysis_with_positions(self, client, services):
+        """Test /api/account/portfolio-analysis with open positions."""
+        services.update_position("AAPL", {
+            "quantity": 100,
+            "entry_price": 150.0,
+            "current_price": 155.0,
+            "market_value": 15500.0,
+            "unrealized_pnl": 500.0,
+        })
+        services.update_position("MSFT", {
+            "quantity": 50,
+            "entry_price": 300.0,
+            "current_price": 310.0,
+            "market_value": 15500.0,
+            "unrealized_pnl": 500.0,
+        })
+
+        resp = client.get("/api/account/portfolio-analysis")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert len(data["allocation"]) == 2
+        assert data["total_value"] == 31000.0
+        # Each position has equal weight
+        for item in data["allocation"]:
+            assert item["symbol"] in ("AAPL", "MSFT")
+            assert 0.0 <= item["weight"] <= 1.0
+        # Drawdown should be clamped to [0, 1]
+        assert 0.0 <= data["drawdown"]["current_pct"] <= 1.0
+
 
 # ==============================================================================
 # Emergency API

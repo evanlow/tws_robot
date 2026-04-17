@@ -21,7 +21,7 @@ import logging
 import os
 import threading
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.event_bus import Event, EventBus, EventType, get_event_bus
 
@@ -292,6 +292,127 @@ class ServiceManager:
             "total_unrealized_pnl": total_unrealized_pnl,
             "daily_pnl_dollar": daily_pnl_dollar,
             "buying_power": account.get("buying_power", 0),
+        }
+
+    # ------------------------------------------------------------------
+    # Portfolio analysis (concentration, attribution, drawdown)
+    # ------------------------------------------------------------------
+
+    def get_portfolio_analysis(self) -> Dict[str, Any]:
+        """Return aggregate portfolio analysis for the dashboard.
+
+        Combines data from the CorrelationAnalyzer (concentration / HHI /
+        sector exposure) and the RiskManager (drawdown) into a single dict
+        that the dashboard template and API can consume directly.
+
+        Returns a dictionary with keys:
+            allocation   – per-symbol weight and market value
+            concentration – HHI, top-N %, diversification score
+            sector_exposure – sector → weight mapping
+            drawdown     – current drawdown from peak
+            attribution  – P&L by symbol and by strategy (from recent trades)
+            suggestions  – actionable diversification suggestions
+        """
+        from risk.correlation_analyzer import CorrelationAnalyzer, PositionInfo
+
+        positions = self.get_positions()
+        rm = self.risk_manager
+
+        # -- Allocation breakdown -----------------------------------------
+        # Use gross (absolute) market values so short positions produce
+        # valid non-negative weights that sum to ~1.
+        total_value = sum(
+            abs(pos.get("market_value", 0)) for pos in positions.values()
+        )
+        allocation: List[Dict[str, Any]] = []
+        corr_positions: List["PositionInfo"] = []
+        for symbol, pos in positions.items():
+            mv = abs(pos.get("market_value", 0))
+            weight = mv / total_value if total_value > 0 else 0
+            allocation.append({
+                "symbol": symbol,
+                "market_value": mv,
+                "weight": weight,
+                "unrealized_pnl": pos.get("unrealized_pnl", 0),
+            })
+            corr_positions.append(PositionInfo(
+                symbol=symbol,
+                quantity=int(pos.get("quantity", 0)),
+                market_value=mv,
+                weight=weight,
+                sector=pos.get("sector"),
+                industry=pos.get("industry"),
+            ))
+
+        # -- Concentration metrics via CorrelationAnalyzer ----------------
+        analyzer = CorrelationAnalyzer()
+        metrics = analyzer.analyze(corr_positions)
+        summary = analyzer.get_metrics_summary(metrics)
+        suggestions = analyzer.get_diversification_suggestions(metrics)
+
+        # -- Drawdown from RiskManager ------------------------------------
+        peak = rm.peak_equity
+        current = rm.current_equity
+        raw_drawdown_pct = (peak - current) / peak if peak > 0 else 0.0
+        if raw_drawdown_pct < 0.0 or raw_drawdown_pct > 1.0:
+            logger.warning(
+                "Drawdown out of expected range: %.4f (peak=%.2f, current=%.2f)",
+                raw_drawdown_pct, peak, current,
+            )
+        drawdown_pct = max(0.0, min(1.0, raw_drawdown_pct))
+
+        # -- P&L attribution from recent trades ---------------------------
+        from strategies.performance_attribution import (
+            AttributionMetric,
+            PerformanceAttribution,
+        )
+
+        pa = PerformanceAttribution()
+        trades = self.get_recent_trades()
+        for t in trades:
+            # Only include closed trades that have the required fields
+            if all(k in t for k in ("symbol", "entry_time", "exit_time",
+                                     "entry_price", "exit_price",
+                                     "quantity", "pnl", "strategy")):
+                pa.add_trade(t)
+
+        by_symbol: List[Tuple[str, float]] = []
+        by_strategy: List[Tuple[str, float]] = []
+        win_rate = 0.0
+        total_pnl = 0.0
+        if pa.trades:
+            by_symbol = pa.get_attribution_by(
+                AttributionMetric.SYMBOL,
+            ).get_sorted_by_contribution()
+            by_strategy = pa.get_attribution_by(
+                AttributionMetric.STRATEGY,
+            ).get_sorted_by_contribution()
+            win_rate = pa.get_win_rate()
+            total_pnl = pa.get_total_pnl()
+
+        return {
+            "allocation": allocation,
+            "total_value": total_value,
+            "concentration": summary.get("concentration", {}),
+            "diversification": summary.get("diversification", {}),
+            "sector_exposure": summary.get("sector_exposure", {}),
+            "risk_flags": summary.get("risk_flags", {}),
+            "drawdown": {
+                "current_pct": drawdown_pct,
+                "peak_equity": peak,
+                "current_equity": current,
+            },
+            "attribution": {
+                "by_symbol": [
+                    {"name": name, "pnl": pnl} for name, pnl in by_symbol
+                ],
+                "by_strategy": [
+                    {"name": name, "pnl": pnl} for name, pnl in by_strategy
+                ],
+                "win_rate": win_rate,
+                "total_pnl": total_pnl,
+            },
+            "suggestions": suggestions,
         }
 
     # ------------------------------------------------------------------

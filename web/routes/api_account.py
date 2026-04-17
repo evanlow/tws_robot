@@ -62,3 +62,11 @@ def positions():
         })
 
     return jsonify({"positions": positions_list, "count": len(positions_list)})
+
+
+@bp.route("/portfolio-analysis", methods=["GET"])
+def portfolio_analysis():
+    """Return aggregate portfolio analysis (concentration, attribution, drawdown)."""
+    svc = get_services()
+    analysis = svc.get_portfolio_analysis()
+    return jsonify(analysis)
