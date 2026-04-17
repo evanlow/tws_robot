@@ -354,6 +354,11 @@ class ServiceManager:
         peak = rm.peak_equity
         current = rm.current_equity
         raw_drawdown_pct = (peak - current) / peak if peak > 0 else 0.0
+        if raw_drawdown_pct < 0.0 or raw_drawdown_pct > 1.0:
+            logger.warning(
+                "Drawdown out of expected range: %.4f (peak=%.2f, current=%.2f)",
+                raw_drawdown_pct, peak, current,
+            )
         drawdown_pct = max(0.0, min(1.0, raw_drawdown_pct))
 
         # -- P&L attribution from recent trades ---------------------------

@@ -3,9 +3,13 @@
 GET /  →  renders templates/dashboard/index.html
 """
 
+import logging
+
 from flask import Blueprint, render_template
 
 from web.services import get_services
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("dashboard", __name__, url_prefix="/")
 
@@ -50,7 +54,7 @@ def index():
     try:
         portfolio_analysis = svc.get_portfolio_analysis()
     except Exception:
-        pass
+        logger.exception("Failed to compute portfolio analysis")
 
     context = {
         "title": "Dashboard",
