@@ -36,7 +36,16 @@ def index():
         pass
 
     # Portfolio analysis (concentration, allocation, drawdown, attribution)
-    portfolio_analysis = svc.get_portfolio_analysis()
+    portfolio_analysis = {
+        "drawdown": {},
+        "allocation": [],
+        "concentration": {},
+        "attribution": [],
+    }
+    try:
+        portfolio_analysis = svc.get_portfolio_analysis()
+    except Exception:
+        pass
 
     context = {
         "title": "Dashboard",
