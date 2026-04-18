@@ -598,7 +598,7 @@
       if (narrEl) {
         if (data.ai_narrative) {
           narrEl.innerHTML = '<p style="white-space:pre-wrap;line-height:1.6;color:#e2e8f0;">' +
-            _escHtml(data.ai_narrative) + '</p>';
+            escapeHtml(data.ai_narrative) + '</p>';
         } else {
           narrEl.innerHTML = '<p class="empty-state">AI analysis not available (enable AI features in settings)</p>';
         }
@@ -625,7 +625,7 @@
     }
   })();
 
-  function _escHtml(text) {
+  function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
