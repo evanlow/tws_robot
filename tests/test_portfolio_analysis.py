@@ -540,6 +540,66 @@ class TestFundamentals:
         assert result["pe_trailing"] == 25.0
         mock_fetch.assert_called_once_with("GOOG")
 
+    def test_sanitize_numeric_valid_values(self):
+        """_sanitize_numeric passes through valid finite numbers."""
+        from data.fundamentals import _sanitize_numeric
+
+        assert _sanitize_numeric(10.5) == 10.5
+        assert _sanitize_numeric(0) == 0.0
+        assert _sanitize_numeric(-5.2) == -5.2
+        assert _sanitize_numeric("42.5") == 42.5
+
+    def test_sanitize_numeric_rejects_non_numeric(self):
+        """_sanitize_numeric returns None for non-numeric placeholders."""
+        from data.fundamentals import _sanitize_numeric
+
+        assert _sanitize_numeric(None) is None
+        assert _sanitize_numeric("?") is None
+        assert _sanitize_numeric("N/A") is None
+        assert _sanitize_numeric("") is None
+
+    def test_sanitize_numeric_rejects_nan_and_infinity(self):
+        """_sanitize_numeric returns None for NaN and Infinity."""
+        from data.fundamentals import _sanitize_numeric
+
+        assert _sanitize_numeric(float("nan")) is None
+        assert _sanitize_numeric(float("inf")) is None
+        assert _sanitize_numeric(float("-inf")) is None
+
+    def test_fetch_fundamentals_sanitizes_placeholder_values(self):
+        """fetch_fundamentals converts '?', NaN, Infinity in yfinance data to None."""
+        from data.fundamentals import fetch_fundamentals
+
+        mock_info = {
+            "longName": "Alphabet Inc.",
+            "sector": "Technology",
+            "trailingPE": "?",
+            "forwardPE": float("nan"),
+            "marketCap": float("inf"),
+            "trailingEps": 6.50,
+            "profitMargins": "N/A",
+            "currentPrice": 165.0,
+            "recommendationKey": "buy",
+        }
+
+        mock_ticker = MagicMock()
+        mock_ticker.info = mock_info
+        with patch("yfinance.Ticker", return_value=mock_ticker):
+            result = fetch_fundamentals("GOOG")
+
+        # Valid numbers preserved
+        assert result["eps_trailing"] == 6.50
+        assert result["current_price"] == 165.0
+        # Invalid placeholders become None
+        assert result["pe_trailing"] is None
+        assert result["pe_forward"] is None
+        assert result["market_cap"] is None
+        assert result["profit_margin"] is None
+        # String fields remain untouched
+        assert result["name"] == "Alphabet Inc."
+        assert result["sector"] == "Technology"
+        assert result["recommendation_key"] == "buy"
+
 
 # ===========================================================================
 # Web API endpoint tests

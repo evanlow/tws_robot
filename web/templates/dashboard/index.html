@@ -817,7 +817,16 @@
 
     try {
       var res = await fetch('/api/account/portfolio-insights');
+      if (!res.ok) {
+        narrEl.innerHTML = '<p class="empty-state">Failed to load AI narrative (server error)</p>';
+        return;
+      }
       var data = await res.json();
+
+      if (data.error) {
+        narrEl.innerHTML = '<p class="empty-state">' + escapeHtml(data.error) + '</p>';
+        return;
+      }
 
       if (data.ai_narrative) {
         narrEl.innerHTML = '<p style="white-space:pre-wrap;line-height:1.6;margin:0;">' + escapeHtml(data.ai_narrative) + '</p>';

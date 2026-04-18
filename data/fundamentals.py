@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 # Cache TTL: how long (in seconds) before fundamentals are considered stale.
 _CACHE_TTL_SECONDS = 86400  # 24 hours
 
+# Keys in the fundamentals dict that hold non-numeric (string) values and
+# should be skipped by the numeric sanitizer.
+_STRING_KEYS = frozenset({
+    "symbol", "fetched_at", "name", "sector", "industry", "recommendation_key",
+})
+
 
 def _safe_get(info: Dict[str, Any], key: str, default: Any = None) -> Any:
     """Get a value from a dict, returning *default* if missing or None."""
@@ -143,7 +149,6 @@ def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
 
     # Sanitize all numeric fields — yfinance may return placeholder strings
     # (e.g. "?"), Infinity, or NaN for unavailable data.
-    _STRING_KEYS = {"symbol", "fetched_at", "name", "sector", "industry", "recommendation_key"}
     for key, value in result.items():
         if key not in _STRING_KEYS and value is not None:
             result[key] = _sanitize_numeric(value)
