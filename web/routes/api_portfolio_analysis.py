@@ -112,6 +112,9 @@ def stock_deep_dive(symbol: str):
     try:
         from data.fundamentals import get_fundamentals
         fundamentals = get_fundamentals(symbol, use_cache=use_cache)
+        # Strip internal error details before exposing to API
+        if "error" in fundamentals:
+            fundamentals = {"symbol": symbol, "fetch_error": True}
     except Exception:
         logger.warning("Fundamentals fetch failed for %s", symbol)
         fundamentals = {}
