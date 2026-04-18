@@ -400,20 +400,6 @@
         <span>Buying Power</span>
         <strong id="statBuyingPower">${{ "%.2f"|format(buying_power) }}</strong>
       </div>
-      <div class="stat-row">
-        <span>Positions</span>
-        <strong>{{ positions|length }}</strong>
-      </div>
-      <div class="stat-row">
-        <span>Strategies</span>
-        <strong>{{ strategies|length }}</strong>
-      </div>
-      <div class="stat-row">
-        <span>Emergency Stop</span>
-        <strong class="{{ 'pnl-negative' if risk_summary.emergency_stop_active else 'pnl-positive' }}">
-          {{ 'ACTIVE' if risk_summary.emergency_stop_active else 'OFF' }}
-        </strong>
-      </div>
       {% else %}
       <div class="stat-row">
         <span>Unrealized P&L</span>
@@ -427,6 +413,7 @@
         <span>Buying Power</span>
         <strong id="statBuyingPower" class="empty-state">--</strong>
       </div>
+      {% endif %}
       <div class="stat-row">
         <span>Positions</span>
         <strong>{{ positions|length }}</strong>
@@ -441,7 +428,6 @@
           {{ 'ACTIVE' if risk_summary.emergency_stop_active else 'OFF' }}
         </strong>
       </div>
-      {% endif %}
     </div>
 
     <!-- Connection Controls -->
