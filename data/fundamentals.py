@@ -29,6 +29,25 @@ def _safe_get(info: Dict[str, Any], key: str, default: Any = None) -> Any:
     return val if val is not None else default
 
 
+def _sanitize_numeric(value: Any) -> Optional[float]:
+    """Convert *value* to a float, returning ``None`` for non-numeric data.
+
+    yfinance occasionally returns placeholder strings (e.g. ``"?"``),
+    ``Infinity``, or ``NaN`` for unavailable metrics.  This helper
+    ensures we only pass proper finite numbers to the API / frontend.
+    """
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    # Reject NaN and Infinity
+    if f != f or f == float("inf") or f == float("-inf"):
+        return None
+    return f
+
+
 def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
     """Fetch fundamental data for *symbol* via yfinance.
 
@@ -120,6 +139,14 @@ def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
         "avg_volume": _safe_get(info, "averageVolume"),
         "avg_volume_10d": _safe_get(info, "averageDailyVolume10Day"),
     }
+
+    # Sanitize all numeric fields — yfinance may return placeholder strings
+    # (e.g. "?"), Infinity, or NaN for unavailable data.
+    _STRING_KEYS = {"symbol", "fetched_at", "name", "sector", "industry", "recommendation_key"}
+    for key, value in result.items():
+        if key not in _STRING_KEYS and value is not None:
+            result[key] = _sanitize_numeric(value)
+
     return result
 
 
