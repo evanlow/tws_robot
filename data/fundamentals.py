@@ -14,6 +14,7 @@ Usage::
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -24,9 +25,15 @@ _CACHE_TTL_SECONDS = 86400  # 24 hours
 
 
 def _safe_get(info: Dict[str, Any], key: str, default: Any = None) -> Any:
-    """Get a value from a dict, returning *default* if missing or None."""
+    """Get a value from a dict, returning *default* if missing, None, or NaN."""
     val = info.get(key)
-    return val if val is not None else default
+    if val is None:
+        return default
+    # yfinance can return float('nan') or float('inf') for some fields;
+    # these break JSON serialization and frontend rendering.
+    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+        return default
+    return val
 
 
 def fetch_fundamentals(symbol: str) -> Dict[str, Any]:

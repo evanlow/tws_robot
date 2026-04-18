@@ -20,6 +20,7 @@ GET  /api/account/stock-analysis-history/<symbol>
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
@@ -29,6 +30,19 @@ from web.services import get_services
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("api_portfolio_analysis", __name__, url_prefix="/api/account")
+
+
+def _sanitize_for_json(obj):
+    """Recursively replace NaN/Inf floats with None so jsonify succeeds."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
 
 
 @bp.route("/portfolio-insights", methods=["GET"])
@@ -114,7 +128,7 @@ def stock_deep_dive(symbol: str):
                 enriched_position["portfolio_weight"] = (
                     mv / total_value if total_value > 0 else 0
                 )
-                return jsonify({
+                return jsonify(_sanitize_for_json({
                     "symbol": cached.get("symbol", symbol),
                     "position": enriched_position,
                     "fundamentals": cached.get("fundamentals"),
@@ -122,7 +136,7 @@ def stock_deep_dive(symbol: str):
                     "ai_analysis": cached.get("ai_analysis"),
                     "timestamp": cached.get("analysis_date"),
                     "from_cache": True,
-                })
+                }))
         except Exception:
             logger.debug("Cache lookup failed for %s", symbol)
 
@@ -196,9 +210,7 @@ def stock_deep_dive(symbol: str):
     except Exception:
         logger.debug("Failed to persist analysis for %s", symbol)
 
-    result["from_cache"] = False
-    # Sanitize: remove any internal keys that shouldn't be exposed
-    safe_result = {
+    safe_result = _sanitize_for_json({
         "symbol": result.get("symbol"),
         "position": result.get("position"),
         "fundamentals": result.get("fundamentals"),
@@ -206,7 +218,7 @@ def stock_deep_dive(symbol: str):
         "ai_analysis": result.get("ai_analysis"),
         "timestamp": result.get("timestamp"),
         "from_cache": False,
-    }
+    })
     return jsonify(safe_result)
 
 
