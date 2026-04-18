@@ -53,9 +53,9 @@ def _gather_live_context() -> str:
     subsystem is unavailable the corresponding field falls back to
     ``None`` / empty list so the prompt is always well-formed.
 
-    Positions are capped at the top ``_MAX_CONTEXT_POSITIONS`` by market
-    value (with a ``total_count`` annotation) and strategies at the top
-    ``_MAX_CONTEXT_STRATEGIES`` to keep the prompt within token limits.
+    Positions are capped at the top ``_MAX_CONTEXT_POSITIONS`` by absolute
+    market value and strategies at the top ``_MAX_CONTEXT_STRATEGIES`` to
+    keep the prompt within token limits.
     """
     try:
         svc = get_services()
