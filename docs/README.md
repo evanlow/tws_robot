@@ -63,6 +63,7 @@ Practical guides for common tasks:
 ### Developer Guides
 
 - **[API Reference](API_REFERENCE.md)** - Developer API documentation
+- **[Web API Reference](WEB_API_REFERENCE.md)** - REST API for the web dashboard
 - **[Contributing](CONTRIBUTING.md)** - How to contribute
 - **[Technical Specs](TECHNICAL_SPECS.md)** - Architecture details
 - **[Testing Guide](TESTING.md)** - Testing documentation, Prime Directive, coverage goals
@@ -92,17 +93,21 @@ Practical guides for common tasks:
 
 | Strategy | Description | Status |
 |----------|-------------|--------|
-| **Bollinger Bands** | Mean reversion strategy | ✅ Production |
-| **Moving Average** | Trend following | ✅ Production |
-| **Momentum** | Momentum-based trading | 🧪 Testing |
+| **Bollinger Bands** | Mean reversion strategy | ✅ Production (live/paper ready) |
+| **Moving Average** | Trend following | ✅ Backtest ready |
+| **Mean Reversion** | Buy oversold, sell overbought | ✅ Backtest ready |
+| **Momentum** | Momentum-based trading | ✅ Backtest ready |
 
 ### Risk Management
 
-- **Position Sizing:** Kelly Criterion (half-Kelly for safety)
-- **Daily Loss Limit:** 2% of account value
-- **Max Position Size:** 5% of account value
-- **Max Drawdown:** 15% circuit breaker
-- **Emergency Controls:** Automatic shutdown on violations
+- **Position Sizing:** 4 algorithms (Fixed Percent, Kelly Criterion, Risk-Based, Risk Parity)
+- **Recommended Daily Loss Limit:** 2% of account value
+- **Recommended Max Position Size:** 5% of account value
+- **Recommended Max Drawdown:** 15% circuit breaker
+- **Live Defaults / Overrides:** Actual live-trading limits are configured in `scripts/run_live.py` and may be overridden via CLI flags/config (current launcher defaults include 5% daily loss, 10% max drawdown, and `--position-size` defaulting to 10%)
+- **Emergency Controls:** Web/API controls for **halt** (`/halt`), **close all positions** (`/close-all`), and **resume** (`/resume`)
+- **Correlation Analysis:** Multi-asset portfolio diversification tracking
+- **Real-Time Monitoring:** Continuous risk assessment with alerts
 
 ---
 
@@ -192,7 +197,7 @@ Critical Modules: 84-99%
 
 ### Recent Changes
 
-See [SPRINT4_COMPLETE.md](../SPRINT4_COMPLETE.md) for latest updates.
+See [SPRINT4_COMPLETE.md](sprints/SPRINT4_COMPLETE.md) for latest updates.
 
 ---
 
@@ -281,27 +286,52 @@ tws_robot/
 │   ├── architecture/          # System design docs
 │   ├── decisions/             # ADRs
 │   └── runbooks/              # Operational guides
-├── scripts/                   # CLI utilities (run_web.py, etc.)
-├── strategies/                # Trading strategies
-│   ├── base_strategy.py       # Base class
-│   ├── bollinger_bands.py     # BB strategy
-│   └── strategy_registry.py   # Strategy management
+├── scripts/                   # CLI utilities (run_web.py, run_live.py, etc.)
+├── strategies/                # Live trading strategies
+│   ├── base_strategy.py       # Base class for live strategies
+│   ├── bollinger_bands.py     # BB strategy (live-ready)
+│   ├── strategy_registry.py   # Strategy registration and management
+│   └── strategy_orchestrator.py # Multi-strategy coordination
 ├── risk/                      # Risk management
-│   ├── risk_monitor.py        # Real-time monitoring
-│   ├── position_sizer.py      # Position sizing
-│   └── drawdown_control.py    # Drawdown management
+│   ├── risk_manager.py        # Core risk engine
+│   ├── position_sizer.py      # 4 position sizing algorithms
+│   ├── drawdown_control.py    # Drawdown monitoring and protection
+│   ├── correlation_analyzer.py # Portfolio diversification analysis
+│   └── emergency_controls.py  # Circuit breakers and kill switch
 ├── execution/                 # Order execution
-│   ├── order_manager.py       # Order management
-│   └── paper_adapter.py       # Paper trading
+│   ├── order_executor.py      # Signal-to-order with 5-layer safety
+│   ├── market_data_feed.py    # Real-time market data pipeline
+│   ├── paper_adapter.py       # Paper trading simulation
+│   └── risk_monitor.py        # Real-time risk monitoring
 ├── backtest/                  # Backtesting engine
 │   ├── engine.py              # Backtest runner
-│   ├── data_manager.py        # Data handling
-│   └── performance.py         # Performance analytics
+│   ├── data_manager.py        # Data handling (CSV, yfinance, DB)
+│   ├── performance.py         # 15+ performance metrics
+│   ├── strategy_templates.py  # Pre-built strategies (MA, MeanRev, Momentum)
+│   ├── profiles.py            # Risk profiles (Conservative, Moderate, Aggressive)
+│   └── visualization.py       # Chart generation
+├── core/                      # Infrastructure
+│   ├── event_bus.py           # Event-driven architecture
+│   ├── connection.py          # TWS connection management
+│   ├── order_manager.py       # Order lifecycle tracking
+│   └── contract_builder.py    # Multi-asset contract creation
+├── strategy/                  # Strategy lifecycle (promotion pipeline)
+│   ├── lifecycle.py           # State machine (Backtest → Paper → Live)
+│   ├── validation.py          # Promotion criteria enforcement
+│   └── promotion.py           # Multi-gate approval workflow
+├── ai/                        # AI integration (OpenAI GPT-4o)
+│   ├── client.py              # AI client for strategy analysis
+│   ├── prompts.py             # Predefined analysis prompts
+│   └── ...                    # Additional AI modules (partial view)
+├── data/                      # Database and data management
+│   ├── database.py            # SQLAlchemy ORM (SQLite/PostgreSQL/MySQL)
+│   ├── models.py              # Trade, Position, Order, Strategy models
+│   └── ...                    # Additional data modules (partial view)
 ├── monitoring/                # Monitoring and metrics
-│   ├── metrics_tracker.py     # Metrics collection
-│   └── event_bus.py           # Event system
+│   └── ...                    # Additional monitoring modules (partial view)
 ├── examples/                  # Example scripts
 ├── tests/                     # Test suite
+├── config/                    # Environment configuration
 ├── requirements.txt           # Dependencies
 └── pytest.ini                 # Test configuration
 ```

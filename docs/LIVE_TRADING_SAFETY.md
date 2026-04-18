@@ -371,14 +371,18 @@ emergency_stop_enabled = True
 - **Order audit trail** (every order logged with timestamp, status, reason)
 - **Portfolio reconciliation** (catches state desynchronization)
 - **Live mode confirmation** (explicit user approval per order in live mode)
+- **Web dashboard** for monitoring positions, P&L, risk, and strategies (launch with `python scripts/run_web.py`)
+- **One-click emergency stop** from the dashboard top status bar
+- **Multi-strategy coordination** via StrategyOrchestrator with signal aggregation and conflict resolution
+- **Real-time risk monitoring** with RealTimeRiskMonitor tracking exposure, drawdown, daily loss, and position/exposure limits; correlation monitoring, if used, is implemented by the CorrelationAnalyzer/RiskMonitor components
+- **Historical performance tracking** in database via SQLAlchemy ORM (SQLite, PostgreSQL, MySQL)
+- **4 position sizing algorithms** (Fixed Percent, Kelly Criterion, Risk-Based, Risk Parity)
+- **AI-powered strategy assistant** for analysis and recommendations (requires OpenAI API key)
 
 ### What We Don't Have (Yet) ⚠️
-- Real-time position tracking from TWS (we query on-demand)
 - Automatic stop-loss orders (must be added to strategy)
 - Email/SMS alerts for important events
-- Web dashboard for monitoring
-- Historical performance tracking in database
-- Multi-strategy coordination
+- Distributed backtesting across multiple machines
 
 ---
 
@@ -444,7 +448,8 @@ python run_live.py --strategy bollinger --initial-capital 10000 --confirm-live
 **For Strategy Issues:**
 - Review backtest results: `reports/backtest_STRATEGY_YYYYMMDD_HHMMSS.html`
 - Check risk manager stats in logs
-- Review WEEK4_DOCUMENTATION.md for strategy details
+- Review [USER_GUIDE.md](USER_GUIDE.md) for strategy details
+- Check the **Strategies** page on the web dashboard for real-time status
 
 **Remember:**
 - Paper trading is free, use it liberally
@@ -470,6 +475,6 @@ This software is provided as-is without warranty. Use at your own risk.
 
 ---
 
-*Last Updated: January 24, 2026*
-*Document Version: 1.0*
+*Last Updated: April 2026*
+*Document Version: 1.1*
 *Part of: TWS Robot Live Trading Phase 1*

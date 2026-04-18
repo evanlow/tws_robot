@@ -653,4 +653,4 @@ MetricsTracker().print_summary(last_hours=1)
 
 - [Debugging Strategies](debugging-strategies.md)
 - [Risk Controls](../architecture/risk-controls.md)
-- [Monitoring Guide](../architecture/monitoring.md)
+- [Architecture Overview](../architecture/overview.md)

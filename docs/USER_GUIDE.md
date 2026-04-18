@@ -69,6 +69,8 @@ The dashboard has several pages accessible from the navigation bar:
 | **Risk** | Monitor risk levels, drawdown, and circuit breaker status |
 | **Logs** | Browse application logs in real time |
 | **Settings** | Configure TWS connection details and trading parameters |
+| **AI Chat** | Ask the AI assistant questions about your strategies, market conditions, and trading decisions |
+| **AI Strategy** | Get AI-powered help creating, refining, and analyzing trading strategies |
 
 ### Key Features
 

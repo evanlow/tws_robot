@@ -38,6 +38,7 @@ From the dashboard you can:
 - Run backtests and review results
 - Monitor risk levels and emergency stop with one click
 - Browse logs and configure settings
+- Use the AI assistant for strategy analysis and recommendations (requires OpenAI API key)
 
 ---
 
@@ -328,7 +329,8 @@ cp strategy_lifecycle.db strategy_lifecycle.db.backup
 ### Web Dashboard Monitoring (Recommended)
 
 Open http://127.0.0.1:5000 and use:
-- **Dashboard** — Real-time equity, P&L, strategy status
+- **Dashboard** — Real-time equity, P&L, strategy status, and the embedded **AI Chat** assistant in the right panel for strategy and trading questions
+- **Strategies** — Strategy management and performance
 - **Positions** — Open positions and trade history
 - **Risk** — Risk levels, drawdown, circuit breaker status
 - **Logs** — Browse application logs
