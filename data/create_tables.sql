@@ -176,3 +176,39 @@ DESCRIBE positions;
 DESCRIBE orders;
 DESCRIBE market_data;
 DESCRIBE performance_metrics;
+
+-- ============================================================================
+-- Portfolio Analytics Tables (for SQLite — auto-created by portfolio_persistence.py)
+-- ============================================================================
+-- These tables are managed by data/portfolio_persistence.py using raw SQL
+-- for SQLite compatibility. The DDL below is the reference schema:
+--
+-- CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+--     id INTEGER PRIMARY KEY AUTOINCREMENT,
+--     timestamp TEXT NOT NULL,
+--     total_equity REAL DEFAULT 0.0,
+--     cash REAL DEFAULT 0.0,
+--     positions_json TEXT,
+--     strategy_mix_json TEXT,
+--     analysis_json TEXT,
+--     created_at TEXT DEFAULT (datetime('now'))
+-- );
+--
+-- CREATE TABLE IF NOT EXISTS stock_analyses (
+--     id INTEGER PRIMARY KEY AUTOINCREMENT,
+--     symbol TEXT NOT NULL,
+--     analysis_date TEXT NOT NULL,
+--     fundamentals_json TEXT,
+--     technical_json TEXT,
+--     ai_analysis_json TEXT,
+--     verdict TEXT,
+--     created_at TEXT DEFAULT (datetime('now'))
+-- );
+--
+-- CREATE TABLE IF NOT EXISTS fundamentals_cache (
+--     id INTEGER PRIMARY KEY AUTOINCREMENT,
+--     symbol TEXT NOT NULL,
+--     data_json TEXT NOT NULL,
+--     fetched_at TEXT NOT NULL,
+--     created_at TEXT DEFAULT (datetime('now'))
+-- );

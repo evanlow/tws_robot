@@ -126,3 +126,74 @@ class Prompts:
         "  \"rationale\": one sentence explaining the score\n\n"
         "Do not include any other text outside the JSON."
     )
+
+    # ------------------------------------------------------------------
+    # Enhancement 6 — Portfolio Strategy Analysis
+    # ------------------------------------------------------------------
+    PORTFOLIO_STRATEGY_ANALYSIS = (
+        "You are a senior portfolio strategist reviewing a trader's current "
+        "portfolio. Analyse the positions below and provide insightful "
+        "observations about the overall strategy and allocation.\n\n"
+        "Portfolio context:\n{portfolio_json}\n\n"
+        "For each position, classify the likely strategy (e.g. momentum, "
+        "mean reversion, buy-and-hold, value, income/dividend, speculative, "
+        "hedging). Consider the holding period, entry timing, position size, "
+        "and P&L trajectory.\n\n"
+        "Then provide:\n"
+        "1. A portfolio-level strategy mix summary (e.g. '60% momentum, "
+        "30% value, 10% speculative')\n"
+        "2. Timing observations (when positions were opened relative to "
+        "likely market conditions)\n"
+        "3. Risk-adjusted positioning assessment (are positions sized "
+        "appropriately for their strategies?)\n"
+        "4. Actionable recommendations for improving the portfolio\n\n"
+        "Return ONLY a valid JSON object with the following structure:\n"
+        "{{\n"
+        '  "positions": [\n'
+        '    {{"symbol": "...", "strategy": "...", "confidence": 0.8, '
+        '"reasoning": "..."}}\n'
+        "  ],\n"
+        '  "strategy_mix": {{"momentum": 0.6, "value": 0.3}},\n'
+        '  "narrative": "A 2-3 paragraph analysis of the portfolio...",\n'
+        '  "risk_assessment": "...",\n'
+        '  "recommendations": ["...", "..."]\n'
+        "}}\n"
+        "Do not include any text outside the JSON."
+    )
+
+    # ------------------------------------------------------------------
+    # Enhancement 7 — Stock Deep-Dive Analysis
+    # ------------------------------------------------------------------
+    STOCK_DEEP_DIVE = (
+        "You are a senior equity research analyst providing a comprehensive "
+        "deep-dive analysis of a single stock held in a portfolio.\n\n"
+        "Stock: {symbol}\n"
+        "Position context:\n{position_json}\n"
+        "Fundamental data:\n{fundamentals_json}\n"
+        "Technical data:\n{technical_json}\n\n"
+        "Provide a thorough analysis covering:\n"
+        "1. **Fundamental Assessment**: Valuation (P/E, P/B), profitability "
+        "(margins, ROE), growth (revenue, EPS trends), balance sheet health\n"
+        "2. **Technical Assessment**: Price action, trend, key levels, "
+        "momentum indicators\n"
+        "3. **Position Assessment**: Is the current position (entry price, "
+        "size, holding period) well-positioned? Should it be added to, "
+        "reduced, or held?\n"
+        "4. **Bull Case**: Key reasons the stock could outperform\n"
+        "5. **Bear Case**: Key risks and reasons for concern\n"
+        "6. **Verdict**: Overall assessment — STRONG BUY, BUY, HOLD, "
+        "REDUCE, or SELL with confidence level\n\n"
+        "Return ONLY a valid JSON object with this structure:\n"
+        "{{\n"
+        '  "fundamental_assessment": "...",\n'
+        '  "technical_assessment": "...",\n'
+        '  "position_assessment": "...",\n'
+        '  "bull_case": ["...", "..."],\n'
+        '  "bear_case": ["...", "..."],\n'
+        '  "verdict": "HOLD",\n'
+        '  "confidence": 0.7,\n'
+        '  "summary": "A concise 2-3 sentence summary...",\n'
+        '  "target_action": "Hold current position, consider adding on dips below $X"\n'
+        "}}\n"
+        "Do not include any text outside the JSON."
+    )

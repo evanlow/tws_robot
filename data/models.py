@@ -8,6 +8,9 @@ Models:
 - Strategy: Strategy configuration and state
 - MarketData: Historical price and volume data
 - PerformanceMetric: Daily/cumulative performance metrics
+- PortfolioSnapshot: Point-in-time portfolio state
+- StockAnalysis: Stock deep-dive analysis results
+- FundamentalsCache: Cached fundamental data with TTL
 """
 
 from sqlalchemy import (
@@ -331,3 +334,55 @@ class MarketSnapshot(Base):
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "market_date": self.market_date.isoformat() if self.market_date else None,
         }
+
+
+# ---------------------------------------------------------------------------
+# Portfolio Analysis Models
+# ---------------------------------------------------------------------------
+
+
+class PortfolioSnapshot(Base):
+    """Point-in-time portfolio snapshot for historical tracking."""
+    __tablename__ = 'portfolio_snapshots'
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(String(50), nullable=False, index=True)
+    total_equity = Column(Float, default=0.0)
+    cash = Column(Float, default=0.0)
+    positions_json = Column(Text, nullable=True)
+    strategy_mix_json = Column(Text, nullable=True)
+    analysis_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return (f"<PortfolioSnapshot(id={self.id}, "
+                f"equity={self.total_equity}, ts={self.timestamp})>")
+
+
+class StockAnalysis(Base):
+    """Persisted stock deep-dive analysis."""
+    __tablename__ = 'stock_analyses'
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    analysis_date = Column(String(50), nullable=False, index=True)
+    fundamentals_json = Column(Text, nullable=True)
+    technical_json = Column(Text, nullable=True)
+    ai_analysis_json = Column(Text, nullable=True)
+    verdict = Column(String(20), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return (f"<StockAnalysis(id={self.id}, symbol={self.symbol}, "
+                f"verdict={self.verdict})>")
+
+
+class FundamentalsCache(Base):
+    """Cached fundamental data with TTL-based expiry."""
+    __tablename__ = 'fundamentals_cache'
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    data_json = Column(Text, nullable=False)
+    fetched_at = Column(String(50), nullable=False)
+    created_at = Column(DateTime, default=datetime.now)

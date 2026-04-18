@@ -85,6 +85,8 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_backtest import bp as api_backtest_bp
     from web.routes.api_data import bp as api_data_bp
     from web.routes.api_market import bp as api_market_bp
+    from web.routes.api_portfolio_analysis import bp as api_portfolio_analysis_bp
+    from web.routes.portfolio_analysis import bp as portfolio_analysis_bp
 
     app.register_blueprint(api_connection_bp)
     app.register_blueprint(api_account_bp)
@@ -96,5 +98,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(api_backtest_bp)
     app.register_blueprint(api_data_bp)
     app.register_blueprint(api_market_bp)
+    app.register_blueprint(api_portfolio_analysis_bp)
+    app.register_blueprint(portfolio_analysis_bp)
 
     return app

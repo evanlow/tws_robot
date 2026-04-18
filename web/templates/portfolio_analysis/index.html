@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>📊 {{ title }}</h1>
+
+<!-- Loading indicator -->
+<div id="loadingIndicator" style="display:none;text-align:center;padding:2rem;">
+  <p style="color:#63b3ed;font-size:1.1rem;">⏳ Analyzing portfolio…</p>
+</div>
+
+<!-- Portfolio Overview Section -->
+<section id="portfolioOverview">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Portfolio Overview</h2>
+
+  {% if position_count > 0 %}
+  <div class="stats-grid" id="overviewStats">
+    <div class="stat-card">
+      <span class="stat-label">Positions</span>
+      <span class="stat-value" id="positionCount">{{ position_count }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Total Value</span>
+      <span class="stat-value" id="totalValue">--</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Risk Status</span>
+      <span class="risk-badge risk-{{ risk_summary.risk_status|default('NORMAL')|lower }}" id="riskStatus">
+        {{ risk_summary.risk_status|default('NORMAL') }}
+      </span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Drawdown</span>
+      <span class="stat-value" id="drawdownPct">
+        {{ "%.2f"|format((risk_summary.stock_drawdown_pct|default(0)) * 100) }}%
+      </span>
+    </div>
+  </div>
+
+  <!-- Strategy Mix -->
+  <div style="margin-top:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Strategy Mix</h2>
+    <div id="strategyMix" class="stats-grid">
+      <p class="empty-state">Loading strategy analysis…</p>
+    </div>
+  </div>
+
+  <!-- Positions with Strategy Deductions -->
+  <div style="margin-top:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">
+      Positions &amp; Strategy Classification
+    </h2>
+    <table class="data-table" id="positionsTable">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Side</th>
+          <th>Qty</th>
+          <th>Entry</th>
+          <th>Current</th>
+          <th>P&amp;L</th>
+          <th>Weight</th>
+          <th>Strategy</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="positionsBody">
+        {% for symbol, pos in positions.items() %}
+        <tr>
+          <td><strong>{{ symbol }}</strong></td>
+          <td>{{ pos.side|default('LONG') }}</td>
+          <td>{{ pos.quantity|default(0) }}</td>
+          <td>${{ "%.2f"|format(pos.entry_price|default(0)) }}</td>
+          <td>${{ "%.2f"|format(pos.current_price|default(0)) }}</td>
+          <td class="{{ 'pnl-positive' if (pos.unrealized_pnl|default(0)) >= 0 else 'pnl-negative' }}">
+            ${{ "%.2f"|format(pos.unrealized_pnl|default(0)) }}
+          </td>
+          <td id="weight-{{ symbol }}">--</td>
+          <td id="strategy-{{ symbol }}"><em>analyzing…</em></td>
+          <td>
+            <button class="btn-sm btn-secondary" onclick="deepDive('{{ symbol }}')">
+              🔍 Deep Dive
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- AI Narrative -->
+  <div style="margin-top:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">
+      🤖 AI Portfolio Narrative
+    </h2>
+    <div id="aiNarrative" class="stat-card" style="padding:1rem;min-height:60px;">
+      <p class="empty-state">Loading AI analysis… (requires AI to be enabled)</p>
+    </div>
+  </div>
+
+  <!-- AI Recommendations -->
+  <div id="recommendationsSection" style="margin-top:1.5rem;display:none;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">
+      💡 Recommendations
+    </h2>
+    <ul id="recommendationsList" style="list-style:none;padding:0;"></ul>
+  </div>
+
+  <!-- Save Snapshot Button -->
+  <div style="margin-top:1.5rem;">
+    <button class="btn-secondary" onclick="saveSnapshot()">📸 Save Portfolio Snapshot</button>
+    <span id="snapshotStatus" style="margin-left:1rem;color:#68d391;display:none;">✓ Saved</span>
+  </div>
+
+  {% else %}
+  <p class="empty-state">No open positions — connect to TWS and load your portfolio to begin analysis.</p>
+  {% endif %}
+</section>
+
+<!-- Deep Dive Modal -->
+<div id="deepDiveModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;">
+  <div style="max-width:800px;margin:2rem auto;background:#1a202c;border-radius:8px;padding:2rem;border:1px solid #4a5568;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+      <h2 id="deepDiveTitle" style="color:#63b3ed;margin:0;">Stock Deep Dive</h2>
+      <button onclick="closeDeepDive()" style="background:none;border:none;color:#e2e8f0;font-size:1.5rem;cursor:pointer;">✕</button>
+    </div>
+    <div id="deepDiveContent">
+      <p style="text-align:center;color:#a0aec0;">Loading analysis…</p>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Load portfolio insights on page load
+(async function() {
+  if ({{ position_count }} === 0) return;
+
+  try {
+    const res = await fetch('/api/account/portfolio-insights');
+    const data = await res.json();
+
+    // Update total value
+    const tvEl = document.getElementById('totalValue');
+    if (tvEl && data.total_value) {
+      tvEl.textContent = '$' + data.total_value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    // Update strategy mix
+    const mixEl = document.getElementById('strategyMix');
+    if (mixEl && data.strategy_mix && Object.keys(data.strategy_mix).length > 0) {
+      mixEl.innerHTML = '';
+      for (const [strategy, weight] of Object.entries(data.strategy_mix)) {
+        const card = document.createElement('div');
+        card.className = 'stat-card';
+        card.innerHTML = `<span class="stat-label">${strategy.replace(/_/g, ' ')}</span>
+          <span class="stat-value">${(weight * 100).toFixed(1)}%</span>`;
+        mixEl.appendChild(card);
+      }
+    }
+
+    // Update per-position strategy labels and weights
+    if (data.positions_enriched) {
+      for (const pos of data.positions_enriched) {
+        const stratEl = document.getElementById('strategy-' + pos.symbol);
+        if (stratEl) {
+          const label = (pos.ai_strategy || pos.deduced_strategy || 'unknown').replace(/_/g, ' ');
+          const conf = pos.ai_confidence || pos.strategy_confidence || 0;
+          stratEl.innerHTML = `<span title="${pos.strategy_reasoning || ''}">${label} <small style="color:#a0aec0">(${(conf * 100).toFixed(0)}%)</small></span>`;
+        }
+        const weightEl = document.getElementById('weight-' + pos.symbol);
+        if (weightEl && pos.portfolio_weight !== undefined) {
+          weightEl.textContent = (pos.portfolio_weight * 100).toFixed(1) + '%';
+        }
+      }
+    }
+
+    // Update AI narrative
+    const narrEl = document.getElementById('aiNarrative');
+    if (narrEl) {
+      if (data.ai_narrative) {
+        narrEl.innerHTML = '<p style="white-space:pre-wrap;line-height:1.6;">' + escapeHtml(data.ai_narrative) + '</p>';
+      } else {
+        narrEl.innerHTML = '<p class="empty-state">AI analysis not available (enable AI features in settings)</p>';
+      }
+    }
+
+    // Update recommendations
+    const recSection = document.getElementById('recommendationsSection');
+    const recList = document.getElementById('recommendationsList');
+    if (recList && data.ai_recommendations && data.ai_recommendations.length > 0) {
+      recSection.style.display = '';
+      recList.innerHTML = '';
+      for (const rec of data.ai_recommendations) {
+        const li = document.createElement('li');
+        li.style.cssText = 'padding:0.5rem;margin-bottom:0.5rem;background:#2d3748;border-radius:4px;border-left:3px solid #63b3ed;padding-left:1rem;';
+        li.textContent = rec;
+        recList.appendChild(li);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load portfolio insights:', err);
+  }
+})();
+
+// Deep dive function
+window.deepDive = async function(symbol) {
+  const modal = document.getElementById('deepDiveModal');
+  const title = document.getElementById('deepDiveTitle');
+  const content = document.getElementById('deepDiveContent');
+
+  title.textContent = '🔍 Deep Dive: ' + symbol;
+  content.innerHTML = '<p style="text-align:center;color:#a0aec0;">⏳ Fetching analysis for ' + symbol + '… This may take a moment.</p>';
+  modal.style.display = 'block';
+
+  try {
+    const res = await fetch('/api/account/stock-deep-dive/' + symbol);
+    const data = await res.json();
+
+    if (data.error) {
+      content.innerHTML = '<p style="color:#fc8181;">' + escapeHtml(data.error) + '</p>';
+      return;
+    }
+
+    let html = '';
+
+    // Position summary
+    if (data.position) {
+      html += '<h3 style="color:#68d391;margin-top:1rem;">📋 Position Summary</h3>';
+      html += '<div class="stats-grid">';
+      html += statCard('Entry Price', '$' + (data.position.entry_price || 0).toFixed(2));
+      html += statCard('Current Price', '$' + (data.position.current_price || 0).toFixed(2));
+      html += statCard('Unrealized P&L', '$' + (data.position.unrealized_pnl || 0).toFixed(2));
+      html += statCard('Portfolio Weight', ((data.position.portfolio_weight || 0) * 100).toFixed(1) + '%');
+      html += '</div>';
+    }
+
+    // Fundamentals
+    if (data.fundamentals && !data.fundamentals.error) {
+      const f = data.fundamentals;
+      html += '<h3 style="color:#68d391;margin-top:1.5rem;">📈 Fundamentals</h3>';
+      html += '<div class="stats-grid">';
+      html += statCard('P/E (TTM)', fmtVal(f.pe_trailing));
+      html += statCard('P/E (Fwd)', fmtVal(f.pe_forward));
+      html += statCard('EPS', fmtVal(f.eps_trailing));
+      html += statCard('Market Cap', fmtBigNum(f.market_cap));
+      html += statCard('Profit Margin', fmtPct(f.profit_margin));
+      html += statCard('ROE', fmtPct(f.roe));
+      html += statCard('Debt/Equity', fmtVal(f.debt_to_equity));
+      html += statCard('Dividend Yield', fmtPct(f.dividend_yield));
+      html += statCard('Analyst Target', fmtVal(f.target_mean_price, '$'));
+      html += statCard('Recommendation', f.recommendation_key || '--');
+      html += '</div>';
+    }
+
+    // Technicals
+    if (data.technicals && Object.keys(data.technicals).length > 1) {
+      const t = data.technicals;
+      html += '<h3 style="color:#68d391;margin-top:1.5rem;">📉 Technical Context</h3>';
+      html += '<div class="stats-grid">';
+      if (t.sma_50) html += statCard('50-day SMA', '$' + t.sma_50.toFixed(2));
+      if (t.sma_200) html += statCard('200-day SMA', '$' + t.sma_200.toFixed(2));
+      if (t.rsi_14) html += statCard('RSI (14)', t.rsi_14.toFixed(1));
+      if (t.high_52w) html += statCard('52w High', '$' + t.high_52w.toFixed(2));
+      if (t.low_52w) html += statCard('52w Low', '$' + t.low_52w.toFixed(2));
+      html += '</div>';
+      if (t.trend_signals && t.trend_signals.length > 0) {
+        html += '<ul style="margin-top:0.5rem;">';
+        for (const sig of t.trend_signals) {
+          html += '<li style="color:#e2e8f0;">' + escapeHtml(sig) + '</li>';
+        }
+        html += '</ul>';
+      }
+    }
+
+    // AI Analysis
+    if (data.ai_analysis) {
+      const ai = data.ai_analysis;
+      html += '<h3 style="color:#68d391;margin-top:1.5rem;">🤖 AI Analysis</h3>';
+
+      if (ai.verdict) {
+        const verdictColors = {
+          'STRONG BUY': '#48bb78', 'BUY': '#68d391', 'HOLD': '#ecc94b',
+          'REDUCE': '#f6ad55', 'SELL': '#fc8181'
+        };
+        const color = verdictColors[ai.verdict] || '#e2e8f0';
+        html += '<div style="text-align:center;margin:1rem 0;padding:0.75rem;background:#2d3748;border-radius:8px;">';
+        html += '<span style="font-size:1.3rem;font-weight:bold;color:' + color + ';">' + escapeHtml(ai.verdict) + '</span>';
+        if (ai.confidence) {
+          html += ' <small style="color:#a0aec0;">(' + (ai.confidence * 100).toFixed(0) + '% confidence)</small>';
+        }
+        html += '</div>';
+      }
+
+      if (ai.summary) {
+        html += '<p style="margin:1rem 0;line-height:1.6;color:#e2e8f0;">' + escapeHtml(ai.summary) + '</p>';
+      }
+
+      if (ai.fundamental_assessment) {
+        html += '<h4 style="color:#a0aec0;margin-top:1rem;">Fundamental Assessment</h4>';
+        html += '<p style="line-height:1.6;">' + escapeHtml(ai.fundamental_assessment) + '</p>';
+      }
+
+      if (ai.technical_assessment) {
+        html += '<h4 style="color:#a0aec0;margin-top:1rem;">Technical Assessment</h4>';
+        html += '<p style="line-height:1.6;">' + escapeHtml(ai.technical_assessment) + '</p>';
+      }
+
+      if (ai.position_assessment) {
+        html += '<h4 style="color:#a0aec0;margin-top:1rem;">Position Assessment</h4>';
+        html += '<p style="line-height:1.6;">' + escapeHtml(ai.position_assessment) + '</p>';
+      }
+
+      if (ai.bull_case && ai.bull_case.length > 0) {
+        html += '<h4 style="color:#48bb78;margin-top:1rem;">🐂 Bull Case</h4><ul>';
+        for (const item of ai.bull_case) {
+          html += '<li style="color:#e2e8f0;margin-bottom:0.3rem;">' + escapeHtml(item) + '</li>';
+        }
+        html += '</ul>';
+      }
+
+      if (ai.bear_case && ai.bear_case.length > 0) {
+        html += '<h4 style="color:#fc8181;margin-top:1rem;">🐻 Bear Case</h4><ul>';
+        for (const item of ai.bear_case) {
+          html += '<li style="color:#e2e8f0;margin-bottom:0.3rem;">' + escapeHtml(item) + '</li>';
+        }
+        html += '</ul>';
+      }
+
+      if (ai.target_action) {
+        html += '<h4 style="color:#63b3ed;margin-top:1rem;">🎯 Recommended Action</h4>';
+        html += '<p style="font-weight:bold;color:#e2e8f0;">' + escapeHtml(ai.target_action) + '</p>';
+      }
+    } else {
+      html += '<h3 style="color:#68d391;margin-top:1.5rem;">🤖 AI Analysis</h3>';
+      html += '<p class="empty-state">AI analysis not available (enable AI features in settings)</p>';
+    }
+
+    if (data.from_cache) {
+      html += '<p style="color:#a0aec0;font-size:0.85rem;margin-top:1rem;text-align:right;">ℹ️ From cache</p>';
+    }
+
+    content.innerHTML = html;
+  } catch (err) {
+    content.innerHTML = '<p style="color:#fc8181;">Error loading analysis: ' + err + '</p>';
+  }
+};
+
+window.closeDeepDive = function() {
+  document.getElementById('deepDiveModal').style.display = 'none';
+};
+
+// Close modal on Escape key
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeDeepDive();
+});
+
+window.saveSnapshot = async function() {
+  const statusEl = document.getElementById('snapshotStatus');
+  try {
+    const res = await fetch('/api/account/portfolio-snapshot', { method: 'POST' });
+    const data = await res.json();
+    if (data.status === 'saved') {
+      statusEl.style.display = 'inline';
+      setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+    }
+  } catch (err) {
+    alert('Failed to save snapshot: ' + err);
+  }
+};
+
+// Helpers
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function statCard(label, value) {
+  return '<div class="stat-card"><span class="stat-label">' + label + '</span><span class="stat-value">' + (value || '--') + '</span></div>';
+}
+
+function fmtVal(v, prefix) {
+  if (v == null) return '--';
+  prefix = prefix || '';
+  return prefix + Number(v).toFixed(2);
+}
+
+function fmtPct(v) {
+  if (v == null) return '--';
+  return (v * 100).toFixed(1) + '%';
+}
+
+function fmtBigNum(v) {
+  if (v == null) return '--';
+  if (v >= 1e12) return '$' + (v / 1e12).toFixed(1) + 'T';
+  if (v >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+  return '$' + v.toLocaleString();
+}
+</script>
+{% endblock %}
