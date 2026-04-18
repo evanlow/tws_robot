@@ -113,6 +113,283 @@ def db_for_persistence(tmp_path):
 # ===========================================================================
 
 
+class TestExtractOptionUnderlying:
+    """Tests for option symbol parsing."""
+
+    def test_standard_call_symbol(self):
+        from ai.portfolio_analyzer import extract_option_underlying
+        result = extract_option_underlying("GOOG 260515C00200000")
+        assert result is not None
+        assert result["underlying"] == "GOOG"
+        assert result["expiry"] == "260515"
+        assert result["right"] == "C"
+        assert result["strike"] == 200.0
+
+    def test_standard_put_symbol(self):
+        from ai.portfolio_analyzer import extract_option_underlying
+        result = extract_option_underlying("SLV 260515P00054000")
+        assert result is not None
+        assert result["underlying"] == "SLV"
+        assert result["right"] == "P"
+        assert result["strike"] == 54.0
+
+    def test_put_symbol_with_decimals(self):
+        from ai.portfolio_analyzer import extract_option_underlying
+        result = extract_option_underlying("GOOG 260515P00240000")
+        assert result is not None
+        assert result["underlying"] == "GOOG"
+        assert result["right"] == "P"
+        assert result["strike"] == 240.0
+
+    def test_stock_symbol_returns_none(self):
+        from ai.portfolio_analyzer import extract_option_underlying
+        assert extract_option_underlying("GOOG") is None
+
+    def test_empty_string_returns_none(self):
+        from ai.portfolio_analyzer import extract_option_underlying
+        assert extract_option_underlying("") is None
+
+    def test_none_returns_none(self):
+        from ai.portfolio_analyzer import extract_option_underlying
+        assert extract_option_underlying(None) is None
+
+    def test_extra_whitespace(self):
+        from ai.portfolio_analyzer import extract_option_underlying
+        result = extract_option_underlying("GOOG  260515C00200000")
+        assert result is not None
+        assert result["underlying"] == "GOOG"
+
+
+class TestDetectMultiLegStrategies:
+    """Tests for cross-position multi-leg strategy detection."""
+
+    def test_covered_call_detected(self):
+        from ai.portfolio_analyzer import detect_multi_leg_strategies, STRATEGY_COVERED_CALL
+        positions = [
+            {"symbol": "GOOG", "side": "LONG", "sec_type": "STK",
+             "market_value": 16500.0},
+            {"symbol": "GOOG 260515C00200000", "side": "SHORT", "sec_type": "OPT",
+             "market_value": -500.0},
+        ]
+        result = detect_multi_leg_strategies(positions)
+        assert len(result) == 1
+        assert result[0]["strategy"] == STRATEGY_COVERED_CALL
+        assert result[0]["underlying"] == "GOOG"
+        assert "GOOG" in result[0]["legs"]
+        assert "GOOG 260515C00200000" in result[0]["legs"]
+        assert "covered call" in result[0]["description"].lower()
+
+    def test_protective_put_detected(self):
+        from ai.portfolio_analyzer import detect_multi_leg_strategies, STRATEGY_PROTECTIVE_PUT
+        positions = [
+            {"symbol": "GOOG", "side": "LONG", "sec_type": "STK",
+             "market_value": 16500.0},
+            {"symbol": "GOOG 260515P00150000", "side": "LONG", "sec_type": "OPT",
+             "market_value": 200.0},
+        ]
+        result = detect_multi_leg_strategies(positions)
+        assert len(result) == 1
+        assert result[0]["strategy"] == STRATEGY_PROTECTIVE_PUT
+
+    def test_collar_detected(self):
+        from ai.portfolio_analyzer import detect_multi_leg_strategies, STRATEGY_COLLAR
+        positions = [
+            {"symbol": "GOOG", "side": "LONG", "sec_type": "STK",
+             "market_value": 16500.0},
+            {"symbol": "GOOG 260515C00200000", "side": "SHORT", "sec_type": "OPT",
+             "market_value": -500.0},
+            {"symbol": "GOOG 260515P00150000", "side": "LONG", "sec_type": "OPT",
+             "market_value": 200.0},
+        ]
+        result = detect_multi_leg_strategies(positions)
+        assert len(result) == 1
+        assert result[0]["strategy"] == STRATEGY_COLLAR
+
+    def test_no_multi_leg_for_standalone_short_put(self):
+        """A short put without long stock is NOT a multi-leg strategy."""
+        from ai.portfolio_analyzer import detect_multi_leg_strategies
+        positions = [
+            {"symbol": "SLV 260515P00054000", "side": "SHORT", "sec_type": "OPT",
+             "market_value": -71.0},
+        ]
+        result = detect_multi_leg_strategies(positions)
+        assert len(result) == 0
+
+    def test_no_multi_leg_for_stock_only(self):
+        from ai.portfolio_analyzer import detect_multi_leg_strategies
+        positions = [
+            {"symbol": "GOOG", "side": "LONG", "sec_type": "STK",
+             "market_value": 16500.0},
+        ]
+        result = detect_multi_leg_strategies(positions)
+        assert len(result) == 0
+
+    def test_multiple_covered_calls_on_same_underlying(self):
+        from ai.portfolio_analyzer import detect_multi_leg_strategies, STRATEGY_COVERED_CALL
+        positions = [
+            {"symbol": "GOOG", "side": "LONG", "sec_type": "STK",
+             "market_value": 16500.0},
+            {"symbol": "GOOG 260515C00200000", "side": "SHORT", "sec_type": "OPT",
+             "market_value": -500.0},
+            {"symbol": "GOOG 260618C00210000", "side": "SHORT", "sec_type": "OPT",
+             "market_value": -400.0},
+        ]
+        result = detect_multi_leg_strategies(positions)
+        assert len(result) == 1
+        assert result[0]["strategy"] == STRATEGY_COVERED_CALL
+        assert len(result[0]["legs"]) == 3  # stock + 2 calls
+
+    def test_mixed_underlyings(self):
+        """Covered call on GOOG, standalone short put on SLV."""
+        from ai.portfolio_analyzer import detect_multi_leg_strategies, STRATEGY_COVERED_CALL
+        positions = [
+            {"symbol": "GOOG", "side": "LONG", "sec_type": "STK",
+             "market_value": 16500.0},
+            {"symbol": "GOOG 260515C00200000", "side": "SHORT", "sec_type": "OPT",
+             "market_value": -500.0},
+            {"symbol": "SLV 260515P00054000", "side": "SHORT", "sec_type": "OPT",
+             "market_value": -71.0},
+        ]
+        result = detect_multi_leg_strategies(positions)
+        assert len(result) == 1
+        assert result[0]["strategy"] == STRATEGY_COVERED_CALL
+        assert result[0]["underlying"] == "GOOG"
+
+    def test_empty_positions(self):
+        from ai.portfolio_analyzer import detect_multi_leg_strategies
+        assert detect_multi_leg_strategies([]) == []
+
+
+class TestDeductionWithMultiLeg:
+    """Tests that deduce_position_strategy respects multi-leg context."""
+
+    def test_covered_call_leg_classified_correctly(self):
+        from ai.portfolio_analyzer import deduce_position_strategy, STRATEGY_COVERED_CALL
+        pos = {
+            "symbol": "GOOG 260515C00200000",
+            "side": "SHORT",
+            "sec_type": "OPT",
+            "entry_price": 5.0,
+            "current_price": 3.0,
+        }
+        multi_leg_map = {
+            "GOOG 260515C00200000": {
+                "strategy": STRATEGY_COVERED_CALL,
+                "description": "Covered call on GOOG",
+            },
+            "GOOG": {
+                "strategy": STRATEGY_COVERED_CALL,
+                "description": "Covered call on GOOG",
+            },
+        }
+        result = deduce_position_strategy(pos, multi_leg_map=multi_leg_map)
+        assert result["strategy"] == STRATEGY_COVERED_CALL
+        assert result["confidence"] == 0.90
+
+    def test_without_multi_leg_falls_back_to_income(self):
+        from ai.portfolio_analyzer import deduce_position_strategy, STRATEGY_INCOME
+        pos = {
+            "symbol": "GOOG 260515C00200000",
+            "side": "SHORT",
+            "sec_type": "OPT",
+            "entry_price": 5.0,
+            "current_price": 3.0,
+        }
+        result = deduce_position_strategy(pos)
+        assert result["strategy"] == STRATEGY_INCOME
+
+    def test_stock_leg_of_covered_call(self):
+        from ai.portfolio_analyzer import deduce_position_strategy, STRATEGY_COVERED_CALL
+        pos = {
+            "symbol": "GOOG",
+            "side": "LONG",
+            "sec_type": "STK",
+            "entry_price": 140.0,
+            "current_price": 165.0,
+            "entry_time": (datetime.now(timezone.utc) - timedelta(days=120)).isoformat(),
+        }
+        multi_leg_map = {
+            "GOOG": {
+                "strategy": STRATEGY_COVERED_CALL,
+                "description": "Covered call on GOOG",
+            },
+        }
+        result = deduce_position_strategy(pos, multi_leg_map=multi_leg_map)
+        assert result["strategy"] == STRATEGY_COVERED_CALL
+
+
+class TestPortfolioAnalyzerMultiLeg:
+    """Tests that full portfolio analysis detects multi-leg strategies."""
+
+    def test_covered_call_portfolio(self):
+        from ai.portfolio_analyzer import PortfolioAnalyzer, STRATEGY_COVERED_CALL
+        positions = {
+            "GOOG": {
+                "quantity": 100,
+                "entry_price": 140.0,
+                "current_price": 165.0,
+                "market_value": 16500.0,
+                "unrealized_pnl": 2500.0,
+                "side": "LONG",
+                "sec_type": "STK",
+                "entry_time": (datetime.now(timezone.utc) - timedelta(days=120)).isoformat(),
+            },
+            "GOOG 260515C00200000": {
+                "quantity": -1,
+                "entry_price": 5.0,
+                "current_price": 3.0,
+                "market_value": -300.0,
+                "unrealized_pnl": 200.0,
+                "side": "SHORT",
+                "sec_type": "OPT",
+            },
+            "SLV 260515P00054000": {
+                "quantity": -1,
+                "entry_price": 0.92,
+                "current_price": 0.21,
+                "market_value": -71.0,
+                "unrealized_pnl": 71.0,
+                "side": "SHORT",
+                "sec_type": "OPT",
+            },
+        }
+        analyzer = PortfolioAnalyzer()
+        result = analyzer.analyze_portfolio(positions, use_ai=False)
+
+        # Multi-leg strategies should be detected
+        assert "multi_leg_strategies" in result
+        assert len(result["multi_leg_strategies"]) == 1
+        ml = result["multi_leg_strategies"][0]
+        assert ml["strategy"] == STRATEGY_COVERED_CALL
+        assert ml["underlying"] == "GOOG"
+
+        # GOOG and its call should both be classified as covered_call
+        enriched = {p["symbol"]: p for p in result["positions_enriched"]}
+        assert enriched["GOOG"]["deduced_strategy"] == STRATEGY_COVERED_CALL
+        assert enriched["GOOG 260515C00200000"]["deduced_strategy"] == STRATEGY_COVERED_CALL
+
+        # SLV put (standalone) should remain as income
+        assert enriched["SLV 260515P00054000"]["deduced_strategy"] == "income"
+
+    def test_no_multi_leg_in_stock_only_portfolio(self):
+        from ai.portfolio_analyzer import PortfolioAnalyzer
+        positions = {
+            "GOOG": {
+                "quantity": 50,
+                "entry_price": 140.0,
+                "current_price": 165.0,
+                "market_value": 8250.0,
+                "unrealized_pnl": 1250.0,
+                "side": "LONG",
+                "sec_type": "STK",
+                "entry_time": (datetime.now(timezone.utc) - timedelta(days=120)).isoformat(),
+            },
+        }
+        analyzer = PortfolioAnalyzer()
+        result = analyzer.analyze_portfolio(positions, use_ai=False)
+        assert result["multi_leg_strategies"] == []
+
+
 class TestStrategyDeduction:
     """Tests for rule-based strategy classification."""
 
