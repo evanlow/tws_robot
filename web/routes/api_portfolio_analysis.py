@@ -41,6 +41,7 @@ def portfolio_insights():
         return jsonify({
             "positions_enriched": [],
             "strategy_mix": {},
+            "multi_leg_strategies": [],
             "ai_narrative": None,
             "ai_recommendations": [],
             "ai_risk_assessment": None,

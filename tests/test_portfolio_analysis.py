@@ -135,11 +135,11 @@ class TestExtractOptionUnderlying:
 
     def test_put_symbol_with_decimals(self):
         from ai.portfolio_analyzer import extract_option_underlying
-        result = extract_option_underlying("GOOG 260515P00240000")
+        result = extract_option_underlying("GOOG 260515P00240500")
         assert result is not None
         assert result["underlying"] == "GOOG"
         assert result["right"] == "P"
-        assert result["strike"] == 240.0
+        assert result["strike"] == 240.5
 
     def test_stock_symbol_returns_none(self):
         from ai.portfolio_analyzer import extract_option_underlying

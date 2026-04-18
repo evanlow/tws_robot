@@ -90,13 +90,14 @@ _OPT_SYMBOL_RE = re.compile(
 )
 
 
-def extract_option_underlying(symbol: str) -> Optional[Dict[str, Any]]:
+def extract_option_underlying(symbol: Optional[str]) -> Optional[Dict[str, Any]]:
     """Parse a TWS option local-symbol into its components.
 
     Parameters
     ----------
-    symbol : str
+    symbol : str or None
         A TWS-style option symbol like ``"GOOG 260515C00200000"``.
+        ``None`` and empty strings return ``None``.
 
     Returns
     -------
