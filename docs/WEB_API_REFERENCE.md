@@ -406,6 +406,14 @@ Get enhanced portfolio analysis with AI-powered strategy deduction, allocation i
     "income": 0.15,
     "value": 0.05
   },
+  "multi_leg_strategies": [
+    {
+      "strategy": "covered_call",
+      "underlying": "GOOG",
+      "legs": ["GOOG", "GOOG 260515C00200000"],
+      "description": "Covered call on GOOG: the short call(s) (strike=200.0, expiry=260515) are backed by the long stock position. The short call risk is capped because the trader owns the underlying shares and can deliver them if assigned. This is an intentional income / exit strategy, not a naked risk."
+    }
+  ],
   "ai_narrative": "Your portfolio demonstrates a balanced core-satellite approach with 50% in long-term buy-and-hold positions and 30% in momentum plays. The allocation is well-diversified across strategies, though tech sector concentration at 45% warrants attention.",
   "ai_recommendations": [
     "Consider reducing momentum allocation from 30% to 20% to decrease portfolio volatility",
@@ -434,6 +442,16 @@ Each position includes original fields plus:
 - Breakdown of portfolio by deduced strategy as % weights
 - Helps understand overall portfolio approach (value vs. growth vs. momentum)
 
+**Multi-Leg Strategies:**
+- Array of detected multi-leg option strategies (covered calls, protective puts, collars)
+- Each entry includes:
+  - `strategy` - Type of multi-leg strategy detected
+  - `underlying` - The underlying stock symbol
+  - `legs` - Array of all position symbols that form this strategy
+  - `description` - Detailed explanation of the strategy structure
+- Important: Positions identified as part of multi-leg strategies are classified by their combined strategy (e.g., `covered_call`) rather than being evaluated in isolation
+- Empty array `[]` when no multi-leg strategies are detected
+
 **AI Fields (when `ai=true`):**
 - `ai_narrative` - Natural language summary of portfolio composition and approach
 - `ai_recommendations` - Array of actionable suggestions for improving portfolio
@@ -456,6 +474,9 @@ Each position includes original fields plus:
 | `income` | Dividend-paying stocks, income focus |
 | `speculative` | High volatility, rapid position changes |
 | `hedging` | Protective positions (puts, inverse ETFs) |
+| `covered_call` | **NEW** Long stock + short call(s) on same underlying (income/exit strategy) |
+| `protective_put` | **NEW** Long stock + long put(s) on same underlying (downside protection) |
+| `collar` | **NEW** Long stock + short call + long put (capped upside and downside) |
 | `unknown` | Insufficient data to classify |
 
 **Use Cases:**

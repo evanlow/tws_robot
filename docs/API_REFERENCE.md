@@ -1523,6 +1523,9 @@ The analyzer uses rule-based heuristics to classify each position:
 | **Income** | Dividend-paying stocks, income-focused |
 | **Speculative** | High volatility, rapid position changes |
 | **Hedging** | Protective positions (puts, inverse ETFs) |
+| **Covered Call** | **NEW** Long stock + short call(s) on same underlying (income/exit strategy) |
+| **Protective Put** | **NEW** Long stock + long put(s) on same underlying (downside protection) |
+| **Collar** | **NEW** Long stock + short call + long put (capped upside/downside) |
 
 **Return Value:**
 
@@ -1546,6 +1549,14 @@ The analyzer uses rule-based heuristics to classify each position:
         "momentum": 0.30,
         "income": 0.20
     },
+    "multi_leg_strategies": [
+        {
+            "strategy": "covered_call",
+            "underlying": "GOOG",
+            "legs": ["GOOG", "GOOG 260515C00200000"],
+            "description": "Covered call on GOOG: the short call(s) are backed by the long stock position..."
+        }
+    ],
     "ai_narrative": "Your portfolio demonstrates a balanced approach...",
     "ai_recommendations": [
         "Consider reducing momentum allocation from 30% to 20%",

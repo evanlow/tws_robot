@@ -20,6 +20,7 @@ Transform your trading ideas into automated strategies. Test them on historical 
 - 📊 **Multiple strategies** - Run Moving Average, Mean Reversion, Momentum simultaneously
 - ⚡ **Paper trading** - Validate strategies with real-time data before going live
 - 📈 **Performance tracking** - See what's working with Sharpe ratio, win rate, drawdown
+- 🎯 **AI Portfolio Intelligence** - Automatic strategy detection with multi-leg option support (covered calls, protective puts, collars)
 
 ### For Quantitative Developers
 - 🏗️ **Professional architecture** - Event-driven design, modular components
