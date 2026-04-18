@@ -4,6 +4,11 @@ Combines rule-based heuristics (holding period, position size, P&L trajectory)
 with optional LLM narration to classify each position's likely strategy and
 produce a portfolio-level narrative.
 
+Multi-leg option strategies (covered calls, protective puts, collars, etc.)
+are detected by scanning cross-position relationships so the analyser can
+reason about the portfolio *as a whole* rather than treating each position
+in isolation.
+
 Usage::
 
     from ai.portfolio_analyzer import PortfolioAnalyzer
@@ -14,6 +19,7 @@ Usage::
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +36,9 @@ STRATEGY_VALUE = "value"
 STRATEGY_INCOME = "income"
 STRATEGY_SPECULATIVE = "speculative"
 STRATEGY_HEDGING = "hedging"
+STRATEGY_COVERED_CALL = "covered_call"
+STRATEGY_PROTECTIVE_PUT = "protective_put"
+STRATEGY_COLLAR = "collar"
 STRATEGY_UNKNOWN = "unknown"
 
 # Holding period thresholds (in days)
@@ -68,10 +77,171 @@ def _holding_days(entry_time: Any) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
+# Option symbol parsing & multi-leg strategy detection
+# ---------------------------------------------------------------------------
+
+# Matches TWS-style option local symbols, e.g.:
+#   "GOOG 260515C00200000"  or  "GOOG  260515P00240000"
+# Group 1: underlying ticker, Group 2: expiry (YYMMDD),
+# Group 3: right (C or P), Group 4: raw strike digits.
+# Uses \s+ to handle variable whitespace between ticker and date.
+_OPT_SYMBOL_RE = re.compile(
+    r"^([A-Z]+)\s+(\d{6})([CP])(\d+)$"
+)
+
+
+def extract_option_underlying(symbol: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Parse a TWS option local-symbol into its components.
+
+    Parameters
+    ----------
+    symbol : str or None
+        A TWS-style option symbol like ``"GOOG 260515C00200000"``.
+        ``None`` and empty strings return ``None``.
+
+    Returns
+    -------
+    dict or None
+        ``{"underlying": "GOOG", "expiry": "260515",
+           "right": "C", "strike": 200.0}``
+        Returns ``None`` when the symbol doesn't match the expected format.
+    """
+    if not symbol:
+        return None
+    m = _OPT_SYMBOL_RE.match(symbol.strip())
+    if not m:
+        return None
+    raw_strike = m.group(4)
+    # TWS encodes strike as integer in units of 1/1000 of a dollar
+    strike = int(raw_strike) / 1000.0
+    return {
+        "underlying": m.group(1),
+        "expiry": m.group(2),
+        "right": m.group(3),  # "C" (call) or "P" (put)
+        "strike": strike,
+    }
+
+
+def detect_multi_leg_strategies(
+    positions: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Scan the portfolio for multi-leg option strategies.
+
+    Identifies combinations such as:
+    * **Covered call** — long stock + short call on same underlying
+    * **Protective put** — long stock + long put on same underlying
+    * **Collar** — long stock + short call + long put on same underlying
+
+    Parameters
+    ----------
+    positions : list[dict]
+        Position dicts containing at least ``symbol``, ``side``, ``sec_type``.
+
+    Returns
+    -------
+    list[dict]
+        Each entry describes a detected multi-leg strategy with keys
+        ``strategy``, ``underlying``, ``legs`` (list of symbols), and
+        ``description``.
+    """
+    # Index positions by underlying
+    long_stocks: Dict[str, Dict[str, Any]] = {}   # underlying → position
+    short_calls: Dict[str, List[Dict[str, Any]]] = {}  # underlying → [positions]
+    long_puts: Dict[str, List[Dict[str, Any]]] = {}
+    short_puts: Dict[str, List[Dict[str, Any]]] = {}
+
+    for pos in positions:
+        symbol = pos.get("symbol", "")
+        side = pos.get("side", "LONG")
+        sec_type = pos.get("sec_type", "STK")
+
+        if sec_type in ("STK", "") and side == "LONG":
+            long_stocks[symbol] = pos
+            continue
+
+        if sec_type == "OPT":
+            parsed = extract_option_underlying(symbol)
+            if parsed is None:
+                continue
+            underlying = parsed["underlying"]
+            right = parsed["right"]
+            pos_with_parsed = {**pos, "_parsed_option": parsed}
+
+            if right == "C" and side == "SHORT":
+                short_calls.setdefault(underlying, []).append(pos_with_parsed)
+            elif right == "P" and side == "LONG":
+                long_puts.setdefault(underlying, []).append(pos_with_parsed)
+            elif right == "P" and side == "SHORT":
+                # Tracked for potential future use (e.g. cash-secured puts)
+                short_puts.setdefault(underlying, []).append(pos_with_parsed)
+
+    detected: List[Dict[str, Any]] = []
+
+    for underlying, stock_pos in long_stocks.items():
+        has_short_calls = underlying in short_calls
+        has_long_puts = underlying in long_puts
+
+        if has_short_calls and has_long_puts:
+            # Collar: long stock + short call + long put
+            call_legs = [p.get("symbol") for p in short_calls[underlying]]
+            put_legs = [p.get("symbol") for p in long_puts[underlying]]
+            detected.append({
+                "strategy": STRATEGY_COLLAR,
+                "underlying": underlying,
+                "legs": [underlying] + call_legs + put_legs,
+                "description": (
+                    f"Collar on {underlying}: long stock hedged with "
+                    f"short call(s) and protective put(s). "
+                    f"Limits both upside and downside risk."
+                ),
+            })
+        elif has_short_calls:
+            # Covered call: long stock + short call
+            call_legs = [p.get("symbol") for p in short_calls[underlying]]
+            call_details = []
+            for p in short_calls[underlying]:
+                parsed = p.get("_parsed_option", {})
+                strike = parsed.get("strike", "N/A")
+                expiry = parsed.get("expiry", "N/A")
+                call_details.append(f"strike={strike}, expiry={expiry}")
+            detected.append({
+                "strategy": STRATEGY_COVERED_CALL,
+                "underlying": underlying,
+                "legs": [underlying] + call_legs,
+                "description": (
+                    f"Covered call on {underlying}: the short call(s) "
+                    f"({'; '.join(call_details)}) are backed by the long "
+                    f"stock position. The short call risk is capped because "
+                    f"the trader owns the underlying shares and can deliver "
+                    f"them if assigned. This is an intentional income / exit "
+                    f"strategy, not a naked risk."
+                ),
+            })
+        elif has_long_puts:
+            # Protective put: long stock + long put
+            put_legs = [p.get("symbol") for p in long_puts[underlying]]
+            detected.append({
+                "strategy": STRATEGY_PROTECTIVE_PUT,
+                "underlying": underlying,
+                "legs": [underlying] + put_legs,
+                "description": (
+                    f"Protective put on {underlying}: long stock position "
+                    f"is hedged with put option(s) providing downside "
+                    f"protection."
+                ),
+            })
+
+    return detected
+
+
+# ---------------------------------------------------------------------------
 # Rule-based strategy deduction
 # ---------------------------------------------------------------------------
 
-def deduce_position_strategy(position: Dict[str, Any]) -> Dict[str, Any]:
+def deduce_position_strategy(
+    position: Dict[str, Any],
+    multi_leg_map: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """Classify a single position using rule-based heuristics.
 
     Parameters
@@ -81,6 +251,11 @@ def deduce_position_strategy(position: Dict[str, Any]) -> Dict[str, Any]:
         classification: ``entry_price``, ``current_price``, ``quantity``,
         ``market_value``, ``unrealized_pnl``, ``side``, ``sec_type``,
         ``entry_time``, ``portfolio_weight``.
+    multi_leg_map : dict, optional
+        Mapping of ``symbol → multi_leg_strategy_dict`` produced by
+        :func:`detect_multi_leg_strategies`.  When provided, positions
+        that belong to a detected multi-leg strategy are classified
+        accordingly instead of being evaluated in isolation.
 
     Returns
     -------
@@ -97,6 +272,15 @@ def deduce_position_strategy(position: Dict[str, Any]) -> Dict[str, Any]:
     days_held = _holding_days(position.get("entry_time"))
 
     reasons: List[str] = []
+
+    # --- Check if this position is part of a detected multi-leg strategy --
+    if multi_leg_map and symbol in multi_leg_map:
+        ml = multi_leg_map[symbol]
+        return {
+            "strategy": ml["strategy"],
+            "confidence": 0.90,
+            "reasoning": f"{symbol}: Part of {ml['strategy']} — {ml['description']}",
+        }
 
     # --- Short option positions → hedging / income -----------------------
     if side == "SHORT" and sec_type == "OPT":
@@ -208,6 +392,7 @@ def _build_portfolio_context(
     deductions: List[Dict[str, Any]],
     strategy_mix: Dict[str, float],
     account_summary: Dict[str, Any],
+    multi_leg_strategies: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Serialise portfolio data into a JSON string for LLM injection."""
     ctx = {
@@ -219,6 +404,7 @@ def _build_portfolio_context(
         },
         "positions": [],
         "heuristic_strategy_mix": strategy_mix,
+        "multi_leg_strategies": multi_leg_strategies or [],
     }
     for pos, ded in zip(positions, deductions):
         ctx["positions"].append({
@@ -263,7 +449,8 @@ class PortfolioAnalyzer:
         -------
         dict
             Keys: ``deductions``, ``strategy_mix``, ``ai_narrative``,
-            ``ai_recommendations``, ``positions_enriched``.
+            ``ai_recommendations``, ``positions_enriched``,
+            ``multi_leg_strategies``.
         """
         account_summary = account_summary or {}
 
@@ -279,24 +466,43 @@ class PortfolioAnalyzer:
             enriched["portfolio_weight"] = mv / total_value if total_value > 0 else 0
             pos_list.append(enriched)
 
-        # Rule-based strategy deductions
-        deductions = [deduce_position_strategy(p) for p in pos_list]
+        # Detect multi-leg option strategies across the portfolio
+        multi_leg_strategies = detect_multi_leg_strategies(pos_list)
+
+        # Build a map from symbol → multi-leg strategy for quick lookup
+        multi_leg_map: Dict[str, Dict[str, Any]] = {}
+        for ml in multi_leg_strategies:
+            for leg_symbol in ml.get("legs", []):
+                multi_leg_map[leg_symbol] = ml
+
+        # Rule-based strategy deductions (now portfolio-aware)
+        deductions = [
+            deduce_position_strategy(p, multi_leg_map=multi_leg_map)
+            for p in pos_list
+        ]
         strategy_mix = compute_strategy_mix(deductions, pos_list)
 
         # Build enriched positions list
         positions_enriched = []
         for pos, ded in zip(pos_list, deductions):
-            positions_enriched.append({
+            entry = {
                 **pos,
                 "deduced_strategy": ded["strategy"],
                 "strategy_confidence": ded["confidence"],
                 "strategy_reasoning": ded["reasoning"],
-            })
+            }
+            # Tag positions that belong to a multi-leg strategy
+            sym = pos.get("symbol", "")
+            if sym in multi_leg_map:
+                entry["multi_leg_strategy"] = multi_leg_map[sym]["strategy"]
+                entry["multi_leg_description"] = multi_leg_map[sym]["description"]
+            positions_enriched.append(entry)
 
         result: Dict[str, Any] = {
             "deductions": deductions,
             "strategy_mix": strategy_mix,
             "positions_enriched": positions_enriched,
+            "multi_leg_strategies": multi_leg_strategies,
             "ai_narrative": None,
             "ai_recommendations": [],
             "ai_risk_assessment": None,
@@ -313,6 +519,7 @@ class PortfolioAnalyzer:
                 if client is not None:
                     ctx_json = _build_portfolio_context(
                         pos_list, deductions, strategy_mix, account_summary,
+                        multi_leg_strategies=multi_leg_strategies,
                     )
                     system_prompt = Prompts.PORTFOLIO_STRATEGY_ANALYSIS.format(
                         portfolio_json=ctx_json,
