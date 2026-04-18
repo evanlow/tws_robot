@@ -132,6 +132,20 @@
       {% else %}
       <p class="empty-state">No open positions</p>
       {% endif %}
+
+      <!-- AI Portfolio Narrative (loaded async) -->
+      {% if positions %}
+      <div style="margin-top:1.25rem;">
+        <h3>🤖 AI Portfolio Narrative</h3>
+        <div id="dashboardNarrative" class="stat-card" style="padding:1rem;min-height:50px;">
+          <p class="empty-state">Loading AI narrative…</p>
+        </div>
+        <div id="dashboardRecommendations" style="margin-top:0.75rem;display:none;">
+          <h4 style="color:#63b3ed;margin-bottom:0.5rem;">💡 Recommendations</h4>
+          <ul id="dashboardRecList" style="list-style:none;padding:0;margin:0;"></ul>
+        </div>
+      </div>
+      {% endif %}
     </div>
 
     <!-- Analysis Tab -->
@@ -786,6 +800,57 @@
       legend.appendChild(s);
     });
     canvas.parentNode.appendChild(legend);
+  })();
+
+  // ---------------------------------------------------------------
+  // AI Portfolio Narrative (fetched from portfolio-insights API)
+  // ---------------------------------------------------------------
+  (async function loadAINarrative() {
+    var narrEl = document.getElementById('dashboardNarrative');
+    if (!narrEl) return;  // no positions → element not rendered
+
+    function escapeHtml(text) {
+      var d = document.createElement('div');
+      d.textContent = text;
+      return d.innerHTML;
+    }
+
+    try {
+      var res = await fetch('/api/account/portfolio-insights');
+      if (!res.ok) {
+        narrEl.innerHTML = '<p class="empty-state">Failed to load AI narrative (server error)</p>';
+        return;
+      }
+      var data = await res.json();
+
+      if (data.error) {
+        narrEl.innerHTML = '<p class="empty-state">' + escapeHtml(data.error) + '</p>';
+        return;
+      }
+
+      if (data.ai_narrative) {
+        narrEl.innerHTML = '<p style="white-space:pre-wrap;line-height:1.6;margin:0;">' + escapeHtml(data.ai_narrative) + '</p>';
+      } else {
+        narrEl.innerHTML = '<p class="empty-state">AI narrative not available — enable AI features in <a href="/settings">Settings</a></p>';
+      }
+
+      // Recommendations
+      var recSection = document.getElementById('dashboardRecommendations');
+      var recList = document.getElementById('dashboardRecList');
+      if (recList && data.ai_recommendations && data.ai_recommendations.length > 0) {
+        recSection.style.display = '';
+        recList.innerHTML = '';
+        for (var i = 0; i < data.ai_recommendations.length; i++) {
+          var li = document.createElement('li');
+          li.style.cssText = 'padding:0.5rem;margin-bottom:0.4rem;background:#2d3748;border-radius:4px;border-left:3px solid #63b3ed;padding-left:1rem;';
+          li.textContent = data.ai_recommendations[i];
+          recList.appendChild(li);
+        }
+      }
+    } catch (err) {
+      narrEl.innerHTML = '<p class="empty-state">Failed to load AI narrative</p>';
+      console.error('AI narrative fetch error:', err);
+    }
   })();
 })();
 </script>

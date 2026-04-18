@@ -14,6 +14,7 @@ Usage::
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -22,11 +23,36 @@ logger = logging.getLogger(__name__)
 # Cache TTL: how long (in seconds) before fundamentals are considered stale.
 _CACHE_TTL_SECONDS = 86400  # 24 hours
 
+# Keys in the fundamentals dict that hold non-numeric (string) values and
+# should be skipped by the numeric sanitizer.
+_STRING_KEYS = frozenset({
+    "symbol", "fetched_at", "name", "sector", "industry", "recommendation_key",
+})
+
 
 def _safe_get(info: Dict[str, Any], key: str, default: Any = None) -> Any:
     """Get a value from a dict, returning *default* if missing or None."""
     val = info.get(key)
     return val if val is not None else default
+
+
+def _sanitize_numeric(value: Any) -> Optional[float]:
+    """Convert *value* to a float, returning ``None`` for non-numeric data.
+
+    yfinance occasionally returns placeholder strings (e.g. ``"?"``),
+    ``Infinity``, or ``NaN`` for unavailable metrics.  This helper
+    ensures we only pass proper finite numbers to the API / frontend.
+    """
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    # Reject NaN and Infinity
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return f
 
 
 def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
@@ -120,6 +146,13 @@ def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
         "avg_volume": _safe_get(info, "averageVolume"),
         "avg_volume_10d": _safe_get(info, "averageDailyVolume10Day"),
     }
+
+    # Sanitize all numeric fields — yfinance may return placeholder strings
+    # (e.g. "?"), Infinity, or NaN for unavailable data.
+    for key, value in result.items():
+        if key not in _STRING_KEYS and value is not None:
+            result[key] = _sanitize_numeric(value)
+
     return result
 
 
