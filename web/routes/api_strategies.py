@@ -154,3 +154,30 @@ def update_config(name: str):
     except Exception as exc:
         logger.error("Failed to update strategy config: %s", exc)
         return jsonify({"error": "Failed to update strategy configuration."}), 400
+
+
+# ------------------------------------------------------------------
+# Inferred strategies (auto-detected from positions)
+# ------------------------------------------------------------------
+
+@bp.route("/inferred", methods=["GET"])
+def list_inferred():
+    """Return auto-detected strategies from current positions."""
+    svc = get_services()
+    return jsonify({"inferred": svc.get_inferred_strategies()})
+
+
+@bp.route("/inferred/<inferred_id>/dismiss", methods=["POST"])
+def dismiss_inferred(inferred_id: str):
+    """Dismiss an inferred strategy so it's no longer shown."""
+    svc = get_services()
+    svc.dismiss_inferred_strategy(inferred_id)
+    return jsonify({"status": "dismissed", "id": inferred_id})
+
+
+@bp.route("/inferred/reset", methods=["POST"])
+def reset_dismissed():
+    """Reset all dismissed inferred strategies."""
+    svc = get_services()
+    svc.reset_dismissed_inferred()
+    return jsonify({"status": "reset"})
