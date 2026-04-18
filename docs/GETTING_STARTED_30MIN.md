@@ -59,7 +59,7 @@ Open your browser to **http://127.0.0.1:5000**. You'll see the TWS Robot dashboa
 
 The web dashboard gives you a bird's-eye view of everything:
 - **Top Status Bar** — Connection status, equity, daily P&L, risk level, and an **Emergency Stop** button
-- **Navigation Menu** — Dashboard, Strategies, Backtest, Positions, Risk, Logs, Settings, AI Chat, AI Strategy
+- **Navigation Menu** — Dashboard, Strategies, Backtest, Positions, Risk, Logs, Settings
 - **Dashboard Page** — Active strategies, portfolio overview, recent trades, and alerts
 
 > 💡 **Don't worry** if it shows "Disconnected" — you don't need TWS connected for backtesting!

@@ -101,9 +101,10 @@ Practical guides for common tasks:
 ### Risk Management
 
 - **Position Sizing:** 4 algorithms (Fixed Percent, Kelly Criterion, Risk-Based, Risk Parity)
-- **Daily Loss Limit:** 2% of account value
-- **Max Position Size:** 5% of account value
-- **Max Drawdown:** 15% circuit breaker
+- **Recommended Daily Loss Limit:** 2% of account value
+- **Recommended Max Position Size:** 5% of account value
+- **Recommended Max Drawdown:** 15% circuit breaker
+- **Live Defaults / Overrides:** Actual live-trading limits are configured in `scripts/run_live.py` and may be overridden via CLI flags/config (current launcher defaults: 5% daily loss, 10% max drawdown, `--position-size` defaulting to 10%)
 - **Emergency Controls:** Web/API controls for **halt** (`/halt`), **close all positions** (`/close-all`), and **resume** (`/resume`)
 - **Correlation Analysis:** Multi-asset portfolio diversification tracking
 - **Real-Time Monitoring:** Continuous risk assessment with alerts
@@ -320,11 +321,14 @@ tws_robot/
 │   └── promotion.py           # Multi-gate approval workflow
 ├── ai/                        # AI integration (OpenAI GPT-4o)
 │   ├── client.py              # AI client for strategy analysis
-│   └── prompts.py             # Predefined analysis prompts
+│   ├── prompts.py             # Predefined analysis prompts
+│   └── ...                    # Additional AI modules (context_builder, etc.)
 ├── data/                      # Database and data management
 │   ├── database.py            # SQLAlchemy ORM (SQLite/PostgreSQL/MySQL)
-│   └── models.py              # Trade, Position, Order, Strategy models
+│   ├── models.py              # Trade, Position, Order, Strategy models
+│   └── ...                    # Additional data modules (market_overview, realtime_pipeline, etc.)
 ├── monitoring/                # Monitoring and metrics
+│   └── ...                    # paper_monitor, validation_monitor, etc.
 ├── examples/                  # Example scripts
 ├── tests/                     # Test suite
 ├── config/                    # Environment configuration

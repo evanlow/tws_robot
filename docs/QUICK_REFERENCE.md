@@ -17,15 +17,13 @@ python scripts/run_web.py --host 0.0.0.0 --port 8080 --debug
 **Dashboard Pages:**
 | Page | What You Can Do |
 |------|----------------|
-| **Dashboard** | View connection status, equity, P&L, active strategies, alerts |
+| **Dashboard** | View connection status, equity, P&L, active strategies, alerts, and the embedded AI Chat assistant |
 | **Strategies** | Create, start, stop, and monitor strategies |
 | **Backtest** | Run backtests and review results |
 | **Positions** | View open positions and trade history |
 | **Risk** | Monitor risk levels and circuit breaker status |
 | **Logs** | Browse application logs in real time |
 | **Settings** | Configure TWS connection and parameters |
-| **AI Chat** | API-backed AI assistant capability for strategy, market, and trading questions (not a dedicated navbar page) |
-| **AI Strategy** | API-backed AI strategy analysis/help used by the app (not a dedicated navbar page) |
 
 > 🚨 **Emergency Stop** is always visible in the top status bar — one click halts all trading.
 
