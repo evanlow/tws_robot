@@ -101,9 +101,10 @@ Practical guides for common tasks:
 ### Risk Management
 
 - **Position Sizing:** 4 algorithms (Fixed Percent, Kelly Criterion, Risk-Based, Risk Parity)
-- **Daily Loss Limit:** 2% of account value
-- **Max Position Size:** 5% of account value
-- **Max Drawdown:** 15% circuit breaker
+- **Recommended Daily Loss Limit:** 2% of account value
+- **Recommended Max Position Size:** 5% of account value
+- **Recommended Max Drawdown:** 15% circuit breaker
+- **Live Defaults / Overrides:** Actual live-trading limits are configured in `scripts/run_live.py` and may be overridden via CLI flags/config (current launcher defaults include 5% daily loss, 10% max drawdown, and `--position-size` defaulting to 10%)
 - **Emergency Controls:** Web/API controls for **halt** (`/halt`), **close all positions** (`/close-all`), and **resume** (`/resume`)
 - **Correlation Analysis:** Multi-asset portfolio diversification tracking
 - **Real-Time Monitoring:** Continuous risk assessment with alerts
