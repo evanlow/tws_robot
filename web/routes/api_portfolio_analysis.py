@@ -103,8 +103,26 @@ def stock_deep_dive(symbol: str):
             from data.portfolio_persistence import get_latest_stock_analysis
             cached = get_latest_stock_analysis(symbol)
             if cached is not None:
-                cached["from_cache"] = True
-                return jsonify(cached)
+                # Normalize cached row to the same response schema as
+                # a fresh analysis so the frontend renders correctly.
+                enriched_position = dict(position)
+                enriched_position["symbol"] = symbol
+                total_value = sum(
+                    abs(p.get("market_value", 0)) for p in positions.values()
+                )
+                mv = abs(position.get("market_value", 0))
+                enriched_position["portfolio_weight"] = (
+                    mv / total_value if total_value > 0 else 0
+                )
+                return jsonify({
+                    "symbol": cached.get("symbol", symbol),
+                    "position": enriched_position,
+                    "fundamentals": cached.get("fundamentals"),
+                    "technicals": cached.get("technical"),
+                    "ai_analysis": cached.get("ai_analysis"),
+                    "timestamp": cached.get("analysis_date"),
+                    "from_cache": True,
+                })
         except Exception:
             logger.debug("Cache lookup failed for %s", symbol)
 

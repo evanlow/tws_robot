@@ -652,6 +652,55 @@ class TestStockDeepDiveAPI:
         assert resp.status_code == 200
         assert data["symbol"] == "AAPL"
 
+    def test_cached_response_matches_fresh_schema(self, client, services):
+        """Cached deep-dive response must have the same keys as a fresh one."""
+        services.update_position("GOOG", {
+            "quantity": 50,
+            "entry_price": 140.0,
+            "current_price": 165.0,
+            "market_value": 8250.0,
+            "unrealized_pnl": 1250.0,
+            "side": "LONG",
+        })
+
+        cached_row = {
+            "id": 1,
+            "symbol": "GOOG",
+            "analysis_date": "2026-04-17T12:00:00+00:00",
+            "fundamentals": {"pe_trailing": 25.0},
+            "technical": {"sma_50": 160.0, "rsi_14": 55.0},
+            "ai_analysis": {"verdict": "HOLD", "summary": "looks ok"},
+            "verdict": "HOLD",
+        }
+
+        with patch(
+            "data.portfolio_persistence.get_latest_stock_analysis",
+            return_value=cached_row,
+        ):
+            resp = client.get("/api/account/stock-deep-dive/GOOG")
+            data = resp.get_json()
+
+        assert resp.status_code == 200
+        # Must match the fresh-response schema
+        assert data["symbol"] == "GOOG"
+        assert data["from_cache"] is True
+        assert "position" in data
+        assert data["position"]["entry_price"] == 140.0
+        assert data["position"]["portfolio_weight"] == 1.0
+        # Field renamed: "technical" → "technicals"
+        assert "technicals" in data
+        assert data["technicals"]["sma_50"] == 160.0
+        # Field renamed: "analysis_date" → "timestamp"
+        assert "timestamp" in data
+        assert data["timestamp"] == "2026-04-17T12:00:00+00:00"
+        assert data["fundamentals"]["pe_trailing"] == 25.0
+        assert data["ai_analysis"]["verdict"] == "HOLD"
+        # Internal DB fields should NOT leak
+        assert "id" not in data
+        assert "verdict" not in data
+        assert "analysis_date" not in data
+        assert "technical" not in data
+
 
 class TestPortfolioSnapshotAPI:
     """Tests for /api/account/portfolio-snapshot and /api/account/portfolio-snapshots."""
