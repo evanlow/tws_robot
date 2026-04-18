@@ -809,7 +809,7 @@
     var narrEl = document.getElementById('dashboardNarrative');
     if (!narrEl) return;  // no positions → element not rendered
 
-    function escNarr(text) {
+    function escapeHtml(text) {
       var d = document.createElement('div');
       d.textContent = text;
       return d.innerHTML;
@@ -820,7 +820,7 @@
       var data = await res.json();
 
       if (data.ai_narrative) {
-        narrEl.innerHTML = '<p style="white-space:pre-wrap;line-height:1.6;margin:0;">' + escNarr(data.ai_narrative) + '</p>';
+        narrEl.innerHTML = '<p style="white-space:pre-wrap;line-height:1.6;margin:0;">' + escapeHtml(data.ai_narrative) + '</p>';
       } else {
         narrEl.innerHTML = '<p class="empty-state">AI narrative not available — enable AI features in <a href="/settings">Settings</a></p>';
       }

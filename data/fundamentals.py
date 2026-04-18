@@ -14,6 +14,7 @@ Usage::
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -43,7 +44,7 @@ def _sanitize_numeric(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     # Reject NaN and Infinity
-    if f != f or f == float("inf") or f == float("-inf"):
+    if math.isnan(f) or math.isinf(f):
         return None
     return f
 
