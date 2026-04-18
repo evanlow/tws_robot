@@ -107,19 +107,38 @@
         {% set entry_price = inf.positions[0].entry_price|default(0) %}
         {% set current_price = inf.positions[0].current_price|default(entry_price) %}
         {% if entry_price > 0 %}
-        {% set range_total = inf.targets.profit_target_price - inf.targets.stop_loss_price %}
+        {% set is_short = inf.strategy_type in ['ShortEquity'] %}
+        {# For shorts: stop is above entry, target is below — flip so bar renders left-to-right #}
+        {% if is_short %}
+        {% set bar_low = inf.targets.profit_target_price %}
+        {% set bar_high = inf.targets.stop_loss_price %}
+        {% else %}
+        {% set bar_low = inf.targets.stop_loss_price %}
+        {% set bar_high = inf.targets.profit_target_price %}
+        {% endif %}
+        {% set range_total = bar_high - bar_low %}
         {% if range_total > 0 %}
-        {% set progress = ((current_price - inf.targets.stop_loss_price) / range_total * 100)|round(1) %}
+        {% set progress = ((current_price - bar_low) / range_total * 100)|round(1) %}
         {% set progress = [0, [progress, 100]|min]|max %}
         <div style="margin-top:0.5rem;">
           <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#a0aec0;">
+            {% if is_short %}
+            <span>🎯 ${{ "%.2f"|format(inf.targets.profit_target_price) }}</span>
+            <span>Entry ${{ "%.2f"|format(entry_price) }}</span>
+            <span>🛑 ${{ "%.2f"|format(inf.targets.stop_loss_price) }}</span>
+            {% else %}
             <span>🛑 ${{ "%.2f"|format(inf.targets.stop_loss_price) }}</span>
             <span>Entry ${{ "%.2f"|format(entry_price) }}</span>
             <span>🎯 ${{ "%.2f"|format(inf.targets.profit_target_price) }}</span>
+            {% endif %}
           </div>
           <div style="background:#1e1e2e;border-radius:4px;height:8px;position:relative;margin-top:3px;">
+            {% if is_short %}
+            <div style="background:{{ '#48bb78' if current_price <= entry_price else '#fc8181' }};height:100%;border-radius:4px;width:{{ progress }}%;transition:width 0.3s;"></div>
+            {% else %}
             <div style="background:{{ '#48bb78' if current_price >= entry_price else '#fc8181' }};height:100%;border-radius:4px;width:{{ progress }}%;transition:width 0.3s;"></div>
-            <div style="position:absolute;top:-1px;left:{{ ((entry_price - inf.targets.stop_loss_price) / range_total * 100)|round(1) }}%;width:2px;height:10px;background:#e2e8f0;" title="Entry"></div>
+            {% endif %}
+            <div style="position:absolute;top:-1px;left:{{ ((entry_price - bar_low) / range_total * 100)|round(1) }}%;width:2px;height:10px;background:#e2e8f0;" title="Entry"></div>
           </div>
         </div>
         {% endif %}
@@ -266,14 +285,18 @@ window.adoptInferred = async function(id, strategyType, symbolsCsv) {
   if (!name) return;
   const symbols = symbolsCsv.split(',').map(s => s.trim()).filter(Boolean);
   try {
-    // Use the detected strategy type if registered, otherwise fall back to BollingerBands
     const classesRes = await fetch('/api/strategies/classes');
     const classesData = await classesRes.json();
     const availableClasses = classesData.classes || [];
-    const useType = availableClasses.includes(strategyType) ? strategyType : (availableClasses[0] || 'BollingerBands');
+
+    if (!availableClasses.includes(strategyType)) {
+      alert('Cannot adopt: the detected strategy type "' + strategyType + '" is not registered. Available types: ' + (availableClasses.join(', ') || 'none'));
+      return;
+    }
+
     const res = await fetch('/api/strategies/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ strategy_type: useType, name: name, symbols: symbols })
+      body: JSON.stringify({ strategy_type: strategyType, name: name, symbols: symbols })
     });
     const data = await res.json();
     if (data.error) alert(data.error);

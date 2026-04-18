@@ -196,7 +196,7 @@ class ServiceManager:
     def position_analyzer(self):
         """Return the shared PositionAnalyzer (created on first access)."""
         if self._position_analyzer is None:
-            from web.services.position_analyzer import PositionAnalyzer
+            from web.position_analyzer import PositionAnalyzer
             self._position_analyzer = PositionAnalyzer()
         return self._position_analyzer
 
@@ -208,20 +208,30 @@ class ServiceManager:
         """
         positions = self.get_positions()
         inferred = self.position_analyzer.analyze(positions)
-        self._inferred_strategies = [
-            s.to_dict() for s in inferred
-            if s.id not in self._dismissed_inferred
-        ]
-        return list(self._inferred_strategies)
+        with self._lock:
+            self._inferred_strategies = [
+                s.to_dict() for s in inferred
+                if s.id not in self._dismissed_inferred
+            ]
+            return list(self._inferred_strategies)
 
     def dismiss_inferred_strategy(self, inferred_id: str) -> bool:
-        """Mark an inferred strategy as dismissed so it's hidden."""
-        self._dismissed_inferred.add(inferred_id)
+        """Mark an inferred strategy as dismissed so it's hidden.
+
+        Returns False if the inferred_id is not in the current set of
+        inferred strategies (prevents unbounded growth of the dismissed set).
+        """
+        with self._lock:
+            valid_ids = {s["id"] for s in self._inferred_strategies}
+            if inferred_id not in valid_ids:
+                return False
+            self._dismissed_inferred.add(inferred_id)
         return True
 
     def reset_dismissed_inferred(self) -> None:
         """Clear all dismissed inferred strategy IDs."""
-        self._dismissed_inferred.clear()
+        with self._lock:
+            self._dismissed_inferred.clear()
 
     # ------------------------------------------------------------------
     # Account / positions state (written by event handlers)

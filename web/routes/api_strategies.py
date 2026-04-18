@@ -171,7 +171,8 @@ def list_inferred():
 def dismiss_inferred(inferred_id: str):
     """Dismiss an inferred strategy so it's no longer shown."""
     svc = get_services()
-    svc.dismiss_inferred_strategy(inferred_id)
+    if not svc.dismiss_inferred_strategy(inferred_id):
+        return jsonify({"error": f"Inferred strategy '{inferred_id}' not found"}), 404
     return jsonify({"status": "dismissed", "id": inferred_id})
 
 

@@ -8,7 +8,7 @@ optionally promote to a managed strategy.
 
 Usage::
 
-    from web.services.position_analyzer import PositionAnalyzer
+    from web.position_analyzer import PositionAnalyzer
 
     analyzer = PositionAnalyzer()
     detected = analyzer.analyze(positions_dict)
@@ -17,8 +17,7 @@ Usage::
 
 import logging
 import re
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -279,13 +278,20 @@ class PositionAnalyzer:
                 counter += 1
                 side = pos.get("side", "LONG")
                 right = parsed.get("right", "?")
-                right_name = "Call" if right == "C" else "Put"
-                stype = f"{'Long' if side == 'LONG' else 'Short'}{right_name}"
+                if right == "C":
+                    right_name = "Call"
+                elif right == "P":
+                    right_name = "Put"
+                else:
+                    right_name = "Option"
+                side_prefix = "Long" if side == "LONG" else "Short"
+                stype = f"{side_prefix}{right_name}"
+                confidence = 0.85 if right in ("C", "P") else 0.50
                 results.append(InferredStrategy(
                     id=f"inferred_{counter}",
                     strategy_type=stype,
                     description=f"{side.title()} {right_name} on {underlying}",
-                    confidence=0.85,
+                    confidence=confidence,
                     symbols=[underlying],
                     positions=[{**pos, "symbol": sym}],
                     targets={},
@@ -319,12 +325,21 @@ class PositionAnalyzer:
                       if x.get("right") == "P" and p.get("side") == "SHORT"]
 
         # --- Iron Condor: short call + long call (higher) + short put + long put (lower) ---
+        # All four legs must share the same expiry and have matching quantities
         if short_calls and long_calls and short_puts and long_puts:
             sc = short_calls[0]
             lc = long_calls[0]
             sp = short_puts[0]
             lp = long_puts[0]
-            if (lc[2]["strike"] > sc[2]["strike"] and
+            expiries = {sc[2].get("expiry"), lc[2].get("expiry"),
+                        sp[2].get("expiry"), lp[2].get("expiry")}
+            quantities_match = (
+                abs(sc[1].get("quantity", 0)) == abs(lc[1].get("quantity", 0)) ==
+                abs(sp[1].get("quantity", 0)) == abs(lp[1].get("quantity", 0))
+            )
+            if (len(expiries) == 1 and "" not in expiries and
+                    quantities_match and
+                    lc[2]["strike"] > sc[2]["strike"] and
                     lp[2]["strike"] < sp[2]["strike"]):
                 pos_list = [
                     {**sc[1], "symbol": sc[0]},

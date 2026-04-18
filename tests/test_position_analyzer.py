@@ -13,7 +13,7 @@ Covers strategy deduction from TWS positions including:
 
 import pytest
 
-from web.services.position_analyzer import (
+from web.position_analyzer import (
     InferredStrategy,
     PositionAnalyzer,
     _parse_option_symbol,
@@ -271,6 +271,41 @@ class TestPositionAnalyzer:
         results = self.analyzer.analyze(positions)
         assert len(results) == 1
         assert results[0].strategy_type == "LongPut"
+
+    # ---- unparseable option symbol → LongOption/ShortOption ---------------
+
+    def test_unparseable_option_long(self):
+        """Unparseable option symbol should be classified as LongOption, not LongPut."""
+        positions = {
+            "WEIRD_SYMBOL": _option_pos(1, 5.0, 7.0, "LONG", "OPT"),
+        }
+        results = self.analyzer.analyze(positions)
+        assert len(results) == 1
+        assert results[0].strategy_type == "LongOption"
+        assert results[0].confidence < 0.85  # lower confidence for unknown
+
+    def test_unparseable_option_short(self):
+        """Unparseable option symbol should be classified as ShortOption, not ShortPut."""
+        positions = {
+            "WEIRD_SYMBOL": _option_pos(1, 5.0, 3.0, "SHORT", "OPT"),
+        }
+        results = self.analyzer.analyze(positions)
+        assert len(results) == 1
+        assert results[0].strategy_type == "ShortOption"
+
+    # ---- iron condor rejects cross-expiry legs ----------------------------
+
+    def test_iron_condor_rejects_cross_expiry(self):
+        """Iron condor should not match when legs have different expiries."""
+        positions = {
+            "SPY250620C450": _option_pos(1, 3.0, 2.0, "SHORT"),   # Jun expiry
+            "SPY250718C460": _option_pos(1, 1.0, 0.5, "LONG"),    # Jul expiry (different!)
+            "SPY250620P400": _option_pos(1, 3.0, 2.0, "SHORT"),   # Jun expiry
+            "SPY250620P390": _option_pos(1, 1.0, 0.5, "LONG"),    # Jun expiry
+        }
+        results = self.analyzer.analyze(positions)
+        types = [r.strategy_type for r in results]
+        assert "IronCondor" not in types
 
     # ---- multiple underlyings ---------------------------------------------
 
