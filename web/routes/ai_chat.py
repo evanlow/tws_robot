@@ -42,12 +42,20 @@ def _ai_unavailable_response():
     }), 503
 
 
+_MAX_CONTEXT_POSITIONS = 20
+_MAX_CONTEXT_STRATEGIES = 10
+
+
 def _gather_live_context() -> str:
     """Collect live trading state from the ServiceManager and serialise it.
 
     Returns a JSON string suitable for the LLM system prompt.  If any
     subsystem is unavailable the corresponding field falls back to
     ``None`` / empty list so the prompt is always well-formed.
+
+    Positions are capped at the top ``_MAX_CONTEXT_POSITIONS`` by market
+    value (with a ``total_count`` annotation) and strategies at the top
+    ``_MAX_CONTEXT_STRATEGIES`` to keep the prompt within token limits.
     """
     try:
         svc = get_services()
@@ -64,19 +72,19 @@ def _gather_live_context() -> str:
         equity = risk_summary.get("current_equity")
         risk_status = risk_summary
     except Exception:
-        logger.debug("Could not fetch risk summary for AI context")
+        logger.debug("Could not fetch risk summary for AI context", exc_info=True)
 
     try:
         insights = svc.get_account_insights()
         daily_pnl = insights.get("daily_pnl_dollar")
     except Exception:
-        logger.debug("Could not fetch account insights for AI context")
+        logger.debug("Could not fetch account insights for AI context", exc_info=True)
 
-    # -- Open positions ------------------------------------------------
+    # -- Open positions (capped to top N by market value) ---------------
     open_positions = None
     try:
         raw_positions = svc.get_positions()
-        open_positions = [
+        all_positions = [
             {
                 "symbol": symbol,
                 "quantity": pos.get("quantity", 0),
@@ -89,25 +97,30 @@ def _gather_live_context() -> str:
             }
             for symbol, pos in raw_positions.items()
         ]
+        # Sort by absolute market value descending, keep top N
+        all_positions.sort(
+            key=lambda p: abs(p.get("market_value", 0)), reverse=True,
+        )
+        open_positions = all_positions[:_MAX_CONTEXT_POSITIONS]
     except Exception:
-        logger.debug("Could not fetch positions for AI context")
+        logger.debug("Could not fetch positions for AI context", exc_info=True)
 
-    # -- Active strategies ---------------------------------------------
+    # -- Active strategies (capped) ------------------------------------
     active_strategies = None
     try:
         reg = svc.strategy_registry
         active_strategies = [
             s.get_performance_summary() for s in reg.get_all_strategies()
-        ]
+        ][:_MAX_CONTEXT_STRATEGIES]
     except Exception:
-        logger.debug("Could not fetch strategies for AI context")
+        logger.debug("Could not fetch strategies for AI context", exc_info=True)
 
     # -- Recent alerts -------------------------------------------------
     recent_alerts = None
     try:
         recent_alerts = svc.get_alerts()[-10:]
     except Exception:
-        logger.debug("Could not fetch alerts for AI context")
+        logger.debug("Could not fetch alerts for AI context", exc_info=True)
 
     return build_trading_context(
         equity=equity,

@@ -120,6 +120,27 @@ def test_gather_live_context_empty_when_no_data(app):
     assert "timestamp" in ctx
 
 
+def test_gather_live_context_caps_positions(app):
+    """Only the top _MAX_CONTEXT_POSITIONS by market value should be included."""
+    from web.routes.ai_chat import _MAX_CONTEXT_POSITIONS
+
+    svc = app.config["services"]
+    for i in range(_MAX_CONTEXT_POSITIONS + 5):
+        svc.update_position(f"SYM{i}", {
+            "quantity": 10,
+            "market_value": float(i * 1000),
+            "unrealized_pnl": 0,
+        })
+
+    with app.app_context():
+        from web.routes.ai_chat import _gather_live_context
+        ctx = json.loads(_gather_live_context())
+
+    assert len(ctx["open_positions"]) == _MAX_CONTEXT_POSITIONS
+    # Highest market-value position should come first
+    assert ctx["open_positions"][0]["symbol"] == f"SYM{_MAX_CONTEXT_POSITIONS + 4}"
+
+
 def test_gather_live_context_survives_risk_manager_error(app):
     """Context should be returned even if the risk manager raises."""
     svc = app.config["services"]
