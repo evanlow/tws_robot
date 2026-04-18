@@ -167,7 +167,17 @@ def stock_deep_dive(symbol: str):
         logger.debug("Failed to persist analysis for %s", symbol)
 
     result["from_cache"] = False
-    return jsonify(result)
+    # Sanitize: remove any internal keys that shouldn't be exposed
+    safe_result = {
+        "symbol": result.get("symbol"),
+        "position": result.get("position"),
+        "fundamentals": result.get("fundamentals"),
+        "technicals": result.get("technicals"),
+        "ai_analysis": result.get("ai_analysis"),
+        "timestamp": result.get("timestamp"),
+        "from_cache": False,
+    }
+    return jsonify(safe_result)
 
 
 @bp.route("/portfolio-snapshot", methods=["POST"])

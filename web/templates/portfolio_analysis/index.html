@@ -5,7 +5,7 @@
 
 <!-- Loading indicator -->
 <div id="loadingIndicator" style="display:none;text-align:center;padding:2rem;">
-  <p style="color:#63b3ed;font-size:1.1rem;">⏳ Analysing portfolio…</p>
+  <p style="color:#63b3ed;font-size:1.1rem;">⏳ Analyzing portfolio…</p>
 </div>
 
 <!-- Portfolio Overview Section -->
@@ -75,7 +75,7 @@
             ${{ "%.2f"|format(pos.unrealized_pnl|default(0)) }}
           </td>
           <td id="weight-{{ symbol }}">--</td>
-          <td id="strategy-{{ symbol }}"><em>analysing…</em></td>
+          <td id="strategy-{{ symbol }}"><em>analyzing…</em></td>
           <td>
             <button class="btn-sm btn-secondary" onclick="deepDive('{{ symbol }}')">
               🔍 Deep Dive
@@ -98,7 +98,7 @@
   </div>
 
   <!-- AI Recommendations -->
-  <div style="margin-top:1.5rem;" id="recommendationsSection" style="display:none;">
+  <div id="recommendationsSection" style="margin-top:1.5rem;display:none;">
     <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">
       💡 Recommendations
     </h2>
