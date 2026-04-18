@@ -17,6 +17,43 @@
       <button class="btn-secondary btn-sm" onclick="connectTWS('live')">Connect Live</button>
     </div>
   </div>
+  <script>
+    async function connectTWS(environment) {
+      if (environment !== 'paper' && environment !== 'live') {
+        alert('Invalid TWS environment selected.');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/connection/connect', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ environment: environment })
+        });
+
+        if (!response.ok) {
+          let message = 'Failed to connect to TWS.';
+
+          try {
+            const data = await response.json();
+            if (data && data.error) {
+              message = data.error;
+            }
+          } catch (error) {
+            // Ignore JSON parsing issues and use the default message.
+          }
+
+          throw new Error(message);
+        }
+
+        window.location.reload();
+      } catch (error) {
+        alert(error.message || 'Failed to connect to TWS.');
+      }
+    }
+  </script>
   {% endif %}
 
   <!-- ---- Left Panel: Strategies ---- -->
