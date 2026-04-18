@@ -104,7 +104,7 @@ Practical guides for common tasks:
 - **Daily Loss Limit:** 2% of account value
 - **Max Position Size:** 5% of account value
 - **Max Drawdown:** 15% circuit breaker
-- **Emergency Controls:** 3-level system (pause → reduce → liquidate)
+- **Emergency Controls:** Web/API controls for **halt** (`/halt`), **close all positions** (`/close-all`), and **resume** (`/resume`)
 - **Correlation Analysis:** Multi-asset portfolio diversification tracking
 - **Real-Time Monitoring:** Continuous risk assessment with alerts
 
