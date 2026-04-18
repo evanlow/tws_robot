@@ -1716,6 +1716,51 @@ data = get_fundamentals("GOOG", use_cache=False)
 - Reduces API calls to yfinance
 - Configurable TTL via `_CACHE_TTL_SECONDS` constant
 
+**Data Sanitization:**
+
+**NEW in v1.7.1 (PR #18)** - Automatic sanitization of invalid numeric values.
+
+yfinance occasionally returns placeholder strings (`"?"`), `NaN`, or `Infinity` for unavailable metrics. The fundamentals fetcher automatically sanitizes all numeric fields:
+
+```python
+from data.fundamentals import get_fundamentals
+
+data = get_fundamentals("SOME_SYMBOL")
+
+# Invalid values are converted to None:
+# - Placeholder strings: "?", "N/A", ""
+# - NaN values: float('nan')
+# - Infinity values: float('inf'), float('-inf')
+
+# Example:
+if data["pe_trailing"] is None:
+    print("P/E ratio not available")
+else:
+    print(f"P/E: {data['pe_trailing']:.2f}")
+
+# String fields (symbol, name, sector, industry) are never sanitized
+print(data["name"])  # Always a string, never None
+```
+
+**Sanitization Behavior:**
+
+| Input Value | Output | Reason |
+|------------|--------|--------|
+| `25.3` | `25.3` | Valid number preserved |
+| `"42.5"` | `42.5` | String numbers converted |
+| `"?"` | `None` | Placeholder string rejected |
+| `"N/A"` | `None` | Placeholder string rejected |
+| `float('nan')` | `None` | NaN rejected |
+| `float('inf')` | `None` | Infinity rejected |
+| `None` | `None` | Already None |
+
+**Why Sanitization Matters:**
+
+- Prevents frontend display errors (e.g., showing "?" instead of "--")
+- Ensures numeric calculations don't fail on invalid data
+- Provides consistent `None` values for missing data
+- Safe for JSON serialization (NaN/Infinity are not valid JSON)
+
 **Error Handling:**
 
 ```python

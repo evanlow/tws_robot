@@ -488,6 +488,16 @@ fetch('/api/account/portfolio-insights?ai=false')
   });
 ```
 
+**Dashboard Integration:**
+
+**NEW in v1.7.1 (PR #18)** - AI narrative automatically displayed on main dashboard.
+
+When you have open positions, the main dashboard automatically fetches and displays:
+- **AI Portfolio Narrative**: Overview of your portfolio approach and composition
+- **AI Recommendations**: Actionable suggestions for improvement
+
+The narrative is loaded asynchronously from this endpoint and appears in a dedicated section below your positions list. If AI is disabled or unavailable, a message directs you to enable AI features in Settings.
+
 ### `GET /api/account/stock-deep-dive/<symbol>`
 
 **NEW in v1.7 (PR #17)** - On-Demand Stock Analysis
