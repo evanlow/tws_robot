@@ -41,6 +41,12 @@ body {
   50% { opacity: 0.6; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .status-bar-disconnected {
+    animation: none;
+    opacity: 1;
+  }
+}
 .disconnected-banner {
   background: #2d1b1b;
   border: 1px solid #fc8181;
