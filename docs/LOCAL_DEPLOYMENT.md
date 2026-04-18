@@ -329,12 +329,11 @@ cp strategy_lifecycle.db strategy_lifecycle.db.backup
 ### Web Dashboard Monitoring (Recommended)
 
 Open http://127.0.0.1:5000 and use:
-- **Dashboard** — Real-time equity, P&L, strategy status
+- **Dashboard** — Real-time equity, P&L, strategy status, and the embedded **AI Chat** assistant in the right panel for strategy and trading questions
 - **Strategies** — Strategy management and performance
 - **Positions** — Open positions and trade history
 - **Risk** — Risk levels, drawdown, circuit breaker status
 - **Logs** — Browse application logs
-- **AI Chat** — Ask the AI assistant about strategies and trading decisions
 
 ### Terminal Monitoring
 
