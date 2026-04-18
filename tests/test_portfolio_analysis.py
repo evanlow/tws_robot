@@ -94,10 +94,8 @@ def sample_positions():
 def db_for_persistence(tmp_path):
     """Set up a temporary SQLite database for persistence tests."""
     from data.database import Database, reset_database
-    from data.portfolio_persistence import reset_tables_flag
 
     reset_database()
-    reset_tables_flag()
     db_path = tmp_path / "test_portfolio.db"
     db = Database(f"sqlite:///{db_path}")
     db.create_tables()
@@ -108,7 +106,6 @@ def db_for_persistence(tmp_path):
 
     db.close()
     reset_database()
-    reset_tables_flag()
 
 
 # ===========================================================================
@@ -713,15 +710,7 @@ class TestPortfolioSnapshotAPI:
             "market_value": 8250.0,
         })
 
-        with patch("data.portfolio_persistence._get_db") as mock_db:
-            mock_conn = MagicMock()
-            mock_result = MagicMock()
-            mock_result.lastrowid = 1
-            mock_conn.execute.return_value = mock_result
-            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-            mock_conn.__exit__ = MagicMock(return_value=False)
-            mock_db.return_value.engine.connect.return_value = mock_conn
-
+        with patch("data.portfolio_persistence.save_portfolio_snapshot", return_value=1) as mock_save:
             resp = client.post("/api/account/portfolio-snapshot")
             data = resp.get_json()
 
@@ -729,13 +718,7 @@ class TestPortfolioSnapshotAPI:
         assert data["status"] == "saved"
 
     def test_list_snapshots_empty(self, client):
-        with patch("data.portfolio_persistence._get_db") as mock_db:
-            mock_conn = MagicMock()
-            mock_conn.execute.return_value.mappings.return_value.all.return_value = []
-            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-            mock_conn.__exit__ = MagicMock(return_value=False)
-            mock_db.return_value.engine.connect.return_value = mock_conn
-
+        with patch("data.portfolio_persistence.get_snapshot_history", return_value=[]):
             resp = client.get("/api/account/portfolio-snapshots")
             data = resp.get_json()
 
@@ -747,13 +730,7 @@ class TestStockAnalysisHistoryAPI:
     """Tests for /api/account/stock-analysis-history/<symbol>."""
 
     def test_empty_history(self, client):
-        with patch("data.portfolio_persistence._get_db") as mock_db:
-            mock_conn = MagicMock()
-            mock_conn.execute.return_value.mappings.return_value.all.return_value = []
-            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-            mock_conn.__exit__ = MagicMock(return_value=False)
-            mock_db.return_value.engine.connect.return_value = mock_conn
-
+        with patch("data.portfolio_persistence.get_stock_analysis_history", return_value=[]):
             resp = client.get("/api/account/stock-analysis-history/GOOG")
             data = resp.get_json()
 
