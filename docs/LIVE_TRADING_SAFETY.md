@@ -374,7 +374,7 @@ emergency_stop_enabled = True
 - **Web dashboard** for monitoring positions, P&L, risk, and strategies (launch with `python scripts/run_web.py`)
 - **One-click emergency stop** from the dashboard top status bar
 - **Multi-strategy coordination** via StrategyOrchestrator with signal aggregation and conflict resolution
-- **Real-time risk monitoring** with RealTimeRiskMonitor tracking concentration, leverage, drawdown, and correlation
+- **Real-time risk monitoring** with RealTimeRiskMonitor tracking exposure, drawdown, daily loss, and position/exposure limits; correlation monitoring, if used, is implemented by the CorrelationAnalyzer/RiskMonitor components
 - **Historical performance tracking** in database via SQLAlchemy ORM (SQLite, PostgreSQL, MySQL)
 - **4 position sizing algorithms** (Fixed Percent, Kelly Criterion, Risk-Based, Risk Parity)
 - **AI-powered strategy assistant** for analysis and recommendations (requires OpenAI API key)
