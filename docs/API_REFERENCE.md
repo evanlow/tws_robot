@@ -661,6 +661,301 @@ except Exception as exc:
     # Service returns cached/empty data on errors
 ```
 
+### PositionAnalyzer - Auto-Detect Trading Strategies
+
+The `PositionAnalyzer` analyzes your current positions and automatically identifies trading strategies like covered calls, iron condors, spreads, and more.
+
+#### Overview
+
+Examines position data to detect common trading patterns:
+- Equity positions (long/short)
+- Covered calls and protective puts
+- Bull/bear spreads (call and put)
+- Iron condors, straddles, strangles
+- Multi-leg option strategies
+
+Returns inferred strategies with confidence scores, profit targets, and stop losses.
+
+#### Basic Usage
+
+```python
+from web.position_analyzer import PositionAnalyzer
+
+# Create analyzer instance
+analyzer = PositionAnalyzer()
+
+# Analyze positions (dict keyed by symbol)
+positions = {
+    "AAPL": {
+        "quantity": 100,
+        "entry_price": 150.0,
+        "current_price": 155.0,
+        "market_value": 15500.0,
+        "unrealized_pnl": 500.0,
+        "side": "LONG",
+        "sec_type": "STK",
+    },
+    "AAPL250620C200": {
+        "quantity": -1,
+        "entry_price": 5.0,
+        "current_price": 3.0,
+        "market_value": -300.0,
+        "unrealized_pnl": 200.0,
+        "side": "SHORT",
+        "sec_type": "OPT",
+    }
+}
+
+# Run analysis
+inferred_strategies = analyzer.analyze(positions)
+
+# Examine results
+for strategy in inferred_strategies:
+    print(f"Found: {strategy.strategy_type}")
+    print(f"  Symbols: {', '.join(strategy.symbols)}")
+    print(f"  Confidence: {strategy.confidence:.0%}")
+    print(f"  Description: {strategy.description}")
+    if strategy.targets:
+        print(f"  Profit Target: ${strategy.targets.get('profit_target_price', 'N/A')}")
+        print(f"  Stop Loss: ${strategy.targets.get('stop_loss_price', 'N/A')}")
+```
+
+#### InferredStrategy Data Model
+
+Each detected strategy is returned as an `InferredStrategy` object:
+
+```python
+from web.position_analyzer import InferredStrategy
+
+strategy = InferredStrategy(
+    id="inferred_AAPL_covered_call_1",           # Unique identifier
+    strategy_type="CoveredCall",                  # Strategy type
+    description="Covered call on AAPL",          # Human-readable description
+    confidence=0.95,                              # 0.0 to 1.0 (1.0 = certain)
+    symbols=["AAPL"],                             # Underlying symbols
+    positions=[...],                              # Positions in this strategy
+    targets={                                     # Profit/loss targets
+        "profit_target_price": 200.0,
+        "stop_loss_price": 142.5,
+        "trailing_stop_pct": 0.05,
+        "max_profit": 5000.0,
+        "max_loss": None  # None = unlimited risk
+    }
+)
+
+# Convert to dict for JSON serialization
+strategy_dict = strategy.to_dict()
+```
+
+#### Detected Strategy Types
+
+**Equity Strategies:**
+- `LongEquity` - Long stock position
+- `ShortEquity` - Short stock position
+
+**Covered Strategies:**
+- `CoveredCall` - Long stock + short call (defined upside, unlimited downside)
+- `ProtectivePut` - Long stock + long put (defined downside, unlimited upside)
+
+**Call Spreads:**
+- `BullCallSpread` - Long lower-strike call + short higher-strike call
+- `BearCallSpread` - Short lower-strike call + long higher-strike call
+
+**Put Spreads:**
+- `BullPutSpread` - Short higher-strike put + long lower-strike put
+- `BearPutSpread` - Long higher-strike put + short lower-strike put
+
+**Complex Strategies:**
+- `IronCondor` - Bull put spread + bear call spread (same expiry)
+- `Straddle` - Long call + long put (same strike and expiry)
+- `Strangle` - Long call + long put (different strikes, same expiry)
+
+**Naked Options:**
+- `LongCall`, `ShortCall`, `LongPut`, `ShortPut` - Single option positions
+- `LongOption`, `ShortOption` - Unparseable option symbols (lower confidence)
+
+#### Option Symbol Parsing
+
+The analyzer can parse TWS option symbols in multiple formats:
+
+```python
+from web.position_analyzer import _parse_option_symbol
+
+# Compact format: AAPL250620C200
+parsed = _parse_option_symbol("AAPL250620C200")
+# Returns: {"underlying": "AAPL", "expiry": "250620", "right": "C", "strike": 200.0}
+
+# OCC format: AAPL  250620C00200000
+parsed = _parse_option_symbol("AAPL  250620C00200000")
+# Returns: {"underlying": "AAPL", "expiry": "250620", "right": "C", "strike": 200.0}
+
+# Decimal strikes: MSFT250718P300.5
+parsed = _parse_option_symbol("MSFT250718P300.5")
+# Returns: {"underlying": "MSFT", "expiry": "250718", "right": "P", "strike": 300.5}
+
+# Non-option symbols return None
+parsed = _parse_option_symbol("AAPL")
+# Returns: None
+```
+
+#### Strategy Targets
+
+Detected strategies include profit/loss targets:
+
+```python
+# Long equity position
+{
+    "profit_target_price": 165.0,    # +10% from entry
+    "stop_loss_price": 142.5,        # -5% from entry
+    "trailing_stop_pct": 0.05        # 5% trailing stop
+}
+
+# Covered call
+{
+    "profit_target_price": 200.0,    # Strike price of short call
+    "stop_loss_price": 142.5,        # -5% on underlying
+    "max_profit": 5000.0,            # Limited upside
+    "trailing_stop_pct": 0.05
+}
+
+# Bull call spread
+{
+    "spread_width": 20.0,            # Difference between strikes
+    "max_profit": 1400.0,            # (Width - Net Debit) * 100
+    "max_loss": 600.0                # Net Debit * 100
+}
+
+# Iron condor
+{
+    "max_profit": 600.0,             # Net Credit * 100
+    "max_loss": 400.0                # (Spread Width - Net Credit) * 100
+}
+```
+
+#### Integration with Web Service
+
+The analyzer is integrated into `ServiceManager` for use in the web dashboard:
+
+```python
+from web.services import get_services
+
+# Get the shared service manager
+svc = get_services()
+
+# Get inferred strategies (automatically calls analyzer)
+inferred = svc.get_inferred_strategies()
+
+# Dismiss a strategy
+svc.dismiss_inferred_strategy("inferred_AAPL_covered_call_1")
+
+# Reset dismissed strategies
+svc.reset_dismissed_inferred()
+```
+
+#### Confidence Scores
+
+Confidence indicates how certain the detection is:
+
+- **0.95 - 1.0**: High confidence - All legs match expected pattern exactly
+- **0.85 - 0.94**: Medium confidence - Pattern matches but with some ambiguity
+- **< 0.85**: Low confidence - Unparseable symbols or unusual position sizes
+
+```python
+# Filter by confidence threshold
+high_confidence = [s for s in inferred_strategies if s.confidence >= 0.90]
+```
+
+#### Advanced Usage
+
+```python
+# Analyze with custom position data
+positions = {
+    "SPY250620C450": {"quantity": -1, "side": "SHORT", "sec_type": "OPT"},
+    "SPY250620C460": {"quantity": 1, "side": "LONG", "sec_type": "OPT"},
+    "SPY250620P400": {"quantity": -1, "side": "SHORT", "sec_type": "OPT"},
+    "SPY250620P390": {"quantity": 1, "side": "LONG", "sec_type": "OPT"},
+}
+
+inferred = analyzer.analyze(positions)
+
+# Should detect an iron condor
+iron_condor = next(s for s in inferred if s.strategy_type == "IronCondor")
+print(f"Max profit: ${iron_condor.targets['max_profit']:.2f}")
+print(f"Max loss: ${iron_condor.targets['max_loss']:.2f}")
+
+# Get positions that are part of this strategy
+strategy_positions = iron_condor.positions
+for pos in strategy_positions:
+    print(f"  {pos['symbol']}: {pos['quantity']} contracts")
+```
+
+### StrategyTarget Data Model
+
+Database model for storing profit/loss targets associated with strategies.
+
+```python
+from data.models import StrategyTarget, Strategy
+
+# Create a strategy target
+target = StrategyTarget(
+    strategy_id=strategy.id,
+    
+    # Price-based targets
+    profit_target_price=200.0,       # Take profit at this price
+    profit_target_pct=0.10,          # Or 10% gain
+    stop_loss_price=142.5,           # Stop loss at this price
+    stop_loss_pct=0.05,              # Or 5% loss
+    trailing_stop_pct=0.05,          # 5% trailing stop
+    
+    # Max profit/loss for options
+    max_profit=5000.0,               # Maximum profit (covered calls)
+    max_loss=None,                   # Maximum loss (None = unlimited)
+    
+    # Time-based targets
+    time_target=datetime(2026, 6, 20),  # Exit by this date
+    max_holding_days=45,             # Or max holding period
+    
+    # Notes
+    notes="Auto-detected covered call strategy"
+)
+
+# Save to database
+db_session.add(target)
+db_session.commit()
+
+# Access via relationship
+strategy = db_session.query(Strategy).first()
+for target in strategy.targets:
+    print(f"Profit target: ${target.profit_target_price}")
+    print(f"Stop loss: ${target.stop_loss_price}")
+
+# Serialize to dict
+target_dict = target.to_dict()
+```
+
+**StrategyTarget Fields:**
+
+- **Price Targets:**
+  - `profit_target_price` - Exit price for profit taking
+  - `profit_target_pct` - Profit percentage target (0.10 = 10%)
+  - `stop_loss_price` - Exit price for loss prevention
+  - `stop_loss_pct` - Loss percentage threshold (0.05 = 5%)
+  - `trailing_stop_pct` - Trailing stop percentage
+
+- **Risk Metrics (Options):**
+  - `max_profit` - Maximum theoretical profit
+  - `max_loss` - Maximum theoretical loss (None = unlimited)
+
+- **Time Targets:**
+  - `time_target` - Exit by specific datetime
+  - `max_holding_days` - Maximum days to hold position
+
+- **Metadata:**
+  - `strategy_id` - Foreign key to Strategy table
+  - `created_at` - When target was created
+  - `updated_at` - Last modification time
+  - `notes` - Free-form notes
+
 ---
 
 ## Event System API

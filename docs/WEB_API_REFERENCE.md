@@ -1108,6 +1108,173 @@ Get strategy performance metrics.
 }
 ```
 
+### `GET /api/strategies/inferred`
+
+**Auto-detect trading strategies from current positions.**
+
+Analyzes your active positions and identifies potential trading strategies:
+- Long/short equity positions
+- Covered calls and protective puts
+- Bull/bear call/put spreads
+- Iron condors, straddles, strangles
+- Multi-leg option strategies
+
+Each inferred strategy includes profit targets, stop losses, and confidence scores.
+
+**Response:**
+```json
+{
+  "inferred": [
+    {
+      "id": "inferred_AAPL_covered_call_1",
+      "strategy_type": "CoveredCall",
+      "description": "Covered call on AAPL: Long 100 shares, Short 1x 200C",
+      "confidence": 0.95,
+      "symbols": ["AAPL"],
+      "positions": [
+        {
+          "symbol": "AAPL",
+          "quantity": 100,
+          "side": "LONG",
+          "sec_type": "STK"
+        },
+        {
+          "symbol": "AAPL250620C200",
+          "quantity": -1,
+          "side": "SHORT",
+          "sec_type": "OPT"
+        }
+      ],
+      "targets": {
+        "profit_target_price": 200.0,
+        "max_profit": 5000.0,
+        "trailing_stop_pct": 0.05
+      }
+    },
+    {
+      "id": "inferred_SPY_iron_condor_1",
+      "strategy_type": "IronCondor",
+      "description": "Iron condor on SPY",
+      "confidence": 0.90,
+      "symbols": ["SPY"],
+      "positions": [
+        {"symbol": "SPY250620C450", "quantity": -1, "side": "SHORT"},
+        {"symbol": "SPY250620C460", "quantity": 1, "side": "LONG"},
+        {"symbol": "SPY250620P400", "quantity": -1, "side": "SHORT"},
+        {"symbol": "SPY250620P390", "quantity": 1, "side": "LONG"}
+      ],
+      "targets": {
+        "max_profit": 600.0,
+        "max_loss": 400.0
+      }
+    }
+  ]
+}
+```
+
+**Field Descriptions:**
+
+- `id` - Unique identifier for this inferred strategy (used for dismissing)
+- `strategy_type` - Detected strategy pattern:
+  - Equity: `LongEquity`, `ShortEquity`
+  - Covered strategies: `CoveredCall`, `ProtectivePut`
+  - Spreads: `BullCallSpread`, `BearPutSpread`, `BullPutSpread`, `BearCallSpread`
+  - Complex: `IronCondor`, `Straddle`, `Strangle`
+  - Options: `LongCall`, `ShortCall`, `LongPut`, `ShortPut`, `LongOption`, `ShortOption`
+- `description` - Human-readable description of the strategy
+- `confidence` - Detection confidence (0.0 to 1.0, where 1.0 = certain match)
+- `symbols` - List of underlying symbols involved
+- `positions` - Array of positions that make up this strategy
+- `targets` - Profit targets, stop losses, and risk metrics:
+  - `profit_target_price` - Target exit price (for equity/covered calls)
+  - `stop_loss_price` - Stop loss price (for equity/protective puts)
+  - `trailing_stop_pct` - Trailing stop percentage (e.g., 0.05 = 5%)
+  - `max_profit` - Maximum theoretical profit (for defined-risk strategies)
+  - `max_loss` - Maximum theoretical loss (for defined-risk strategies)
+  - `spread_width` - Width between strikes (for spreads)
+
+**Use Cases:**
+
+1. **Portfolio Visualization:**
+   ```javascript
+   // Display detected strategies in dashboard
+   fetch('/api/strategies/inferred')
+     .then(res => res.json())
+     .then(data => {
+       data.inferred.forEach(strategy => {
+         console.log(`Found: ${strategy.strategy_type} on ${strategy.symbols.join(', ')}`);
+         console.log(`Confidence: ${(strategy.confidence * 100).toFixed(0)}%`);
+       });
+     });
+   ```
+
+2. **Risk Management:**
+   ```javascript
+   // Check for undefined-risk positions
+   const riskyStrategies = data.inferred.filter(s => 
+     s.strategy_type === 'ShortCall' && !s.targets.max_loss
+   );
+   if (riskyStrategies.length > 0) {
+     alert('⚠️ You have naked short calls with unlimited risk!');
+   }
+   ```
+
+### `POST /api/strategies/inferred/{inferred_id}/dismiss`
+
+Dismiss an auto-detected strategy so it no longer appears in the list.
+
+Useful for hiding strategies you've reviewed and don't want to see again.
+
+**Path Parameters:**
+- `inferred_id` - The ID from the inferred strategy (e.g., `"inferred_AAPL_covered_call_1"`)
+
+**Response:**
+```json
+{
+  "status": "dismissed",
+  "id": "inferred_AAPL_covered_call_1"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Inferred strategy ID not found in current positions
+
+**Example:**
+```javascript
+// Dismiss a strategy the user has already reviewed
+fetch('/api/strategies/inferred/inferred_AAPL_covered_call_1/dismiss', {
+  method: 'POST'
+})
+.then(res => res.json())
+.then(data => console.log(`Dismissed: ${data.id}`));
+```
+
+### `POST /api/strategies/inferred/reset`
+
+Reset all dismissed inferred strategies.
+
+Clears the dismissed list so all detected strategies will appear again.
+
+**Response:**
+```json
+{
+  "status": "reset"
+}
+```
+
+**Example:**
+```javascript
+// Clear all dismissed strategies
+fetch('/api/strategies/inferred/reset', {
+  method: 'POST'
+})
+.then(res => res.json())
+.then(() => {
+  // Refresh the inferred strategies list
+  window.location.reload();
+});
+```
+
 ---
 
 ## Backtest API

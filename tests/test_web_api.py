@@ -148,6 +148,96 @@ class TestServiceManager:
         assert insights["daily_pnl_dollar"] == 0.0
         assert insights["buying_power"] == 150000.0
 
+    def test_position_analyzer_lazy_init(self, services):
+        """Test position_analyzer is created on first access."""
+        analyzer = services.position_analyzer
+        assert analyzer is not None
+        # Should return same instance on second access
+        assert services.position_analyzer is analyzer
+
+    def test_get_inferred_strategies_empty_positions(self, services):
+        """Test get_inferred_strategies() with no positions."""
+        inferred = services.get_inferred_strategies()
+        assert inferred == []
+
+    def test_get_inferred_strategies_with_positions(self, services):
+        """Test get_inferred_strategies() detects strategies from positions."""
+        # Add a long equity position
+        services.update_position("AAPL", {
+            "quantity": 100,
+            "entry_price": 150.0,
+            "current_price": 155.0,
+            "unrealized_pnl": 500.0,
+            "market_value": 15500.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+        
+        inferred = services.get_inferred_strategies()
+        
+        # Should detect at least one strategy
+        assert len(inferred) > 0
+        # First strategy should be LongEquity for AAPL
+        assert inferred[0]["strategy_type"] == "LongEquity"
+        assert "AAPL" in inferred[0]["symbols"]
+        assert "id" in inferred[0]
+        assert "confidence" in inferred[0]
+
+    def test_dismiss_inferred_strategy(self, services):
+        """Test dismissing an inferred strategy."""
+        # Add position and get inferred strategies
+        services.update_position("AAPL", {
+            "quantity": 100,
+            "entry_price": 150.0,
+            "current_price": 155.0,
+            "unrealized_pnl": 500.0,
+            "market_value": 15500.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+        
+        inferred = services.get_inferred_strategies()
+        assert len(inferred) == 1
+        strategy_id = inferred[0]["id"]
+        
+        # Dismiss the strategy
+        assert services.dismiss_inferred_strategy(strategy_id) is True
+        
+        # Should no longer appear in the list
+        inferred_after = services.get_inferred_strategies()
+        assert len(inferred_after) == 0
+
+    def test_dismiss_invalid_strategy_id(self, services):
+        """Test dismissing a non-existent strategy ID returns False."""
+        assert services.dismiss_inferred_strategy("invalid_id") is False
+
+    def test_reset_dismissed_inferred(self, services):
+        """Test resetting dismissed strategies."""
+        # Add position and dismiss it
+        services.update_position("AAPL", {
+            "quantity": 100,
+            "entry_price": 150.0,
+            "current_price": 155.0,
+            "unrealized_pnl": 500.0,
+            "market_value": 15500.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+        
+        inferred = services.get_inferred_strategies()
+        strategy_id = inferred[0]["id"]
+        services.dismiss_inferred_strategy(strategy_id)
+        
+        # Verify it's dismissed
+        assert len(services.get_inferred_strategies()) == 0
+        
+        # Reset dismissed
+        services.reset_dismissed_inferred()
+        
+        # Should reappear in the list
+        inferred_after = services.get_inferred_strategies()
+        assert len(inferred_after) == 1
+
 
 # ==============================================================================
 # Connection API
@@ -503,6 +593,105 @@ class TestStrategyAPI:
     def test_metrics_nonexistent(self, client):
         resp = client.get("/api/strategies/nonexistent/metrics")
         assert resp.status_code == 404
+
+    def test_list_inferred_empty(self, client):
+        """Test /api/strategies/inferred with no positions."""
+        resp = client.get("/api/strategies/inferred")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert "inferred" in data
+        assert data["inferred"] == []
+
+    def test_list_inferred_with_positions(self, client, services):
+        """Test /api/strategies/inferred detects strategies from positions."""
+        # Add a long equity position
+        services.update_position("AAPL", {
+            "quantity": 100,
+            "entry_price": 150.0,
+            "current_price": 155.0,
+            "unrealized_pnl": 500.0,
+            "market_value": 15500.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+        
+        resp = client.get("/api/strategies/inferred")
+        data = resp.get_json()
+        
+        assert resp.status_code == 200
+        assert len(data["inferred"]) > 0
+        assert data["inferred"][0]["strategy_type"] == "LongEquity"
+
+    def test_dismiss_inferred_strategy(self, client, services):
+        """Test POST /api/strategies/inferred/<id>/dismiss."""
+        # Add position to create an inferred strategy
+        services.update_position("MSFT", {
+            "quantity": 50,
+            "entry_price": 300.0,
+            "current_price": 310.0,
+            "unrealized_pnl": 500.0,
+            "market_value": 15500.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+        
+        # Get the strategy ID
+        resp = client.get("/api/strategies/inferred")
+        inferred = resp.get_json()["inferred"]
+        assert len(inferred) == 1
+        strategy_id = inferred[0]["id"]
+        
+        # Dismiss it
+        resp = client.post(f"/api/strategies/inferred/{strategy_id}/dismiss")
+        data = resp.get_json()
+        
+        assert resp.status_code == 200
+        assert data["status"] == "dismissed"
+        assert data["id"] == strategy_id
+        
+        # Verify it's no longer in the list
+        resp = client.get("/api/strategies/inferred")
+        inferred_after = resp.get_json()["inferred"]
+        assert len(inferred_after) == 0
+
+    def test_dismiss_invalid_inferred_strategy(self, client):
+        """Test dismissing a non-existent inferred strategy."""
+        resp = client.post("/api/strategies/inferred/invalid_id/dismiss")
+        assert resp.status_code == 404
+
+    def test_reset_dismissed_inferred(self, client, services):
+        """Test POST /api/strategies/inferred/reset."""
+        # Add position and dismiss it
+        services.update_position("TSLA", {
+            "quantity": 25,
+            "entry_price": 200.0,
+            "current_price": 220.0,
+            "unrealized_pnl": 500.0,
+            "market_value": 5500.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+        
+        # Get and dismiss the strategy
+        resp = client.get("/api/strategies/inferred")
+        strategy_id = resp.get_json()["inferred"][0]["id"]
+        client.post(f"/api/strategies/inferred/{strategy_id}/dismiss")
+        
+        # Verify it's dismissed
+        resp = client.get("/api/strategies/inferred")
+        assert len(resp.get_json()["inferred"]) == 0
+        
+        # Reset dismissed strategies
+        resp = client.post("/api/strategies/inferred/reset")
+        data = resp.get_json()
+        
+        assert resp.status_code == 200
+        assert data["status"] == "reset"
+        
+        # Strategy should reappear
+        resp = client.get("/api/strategies/inferred")
+        inferred_after = resp.get_json()["inferred"]
+        assert len(inferred_after) == 1
 
 
 # ==============================================================================
