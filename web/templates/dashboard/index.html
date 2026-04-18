@@ -7,6 +7,18 @@
      ============================================================ -->
 <div class="dashboard-grid">
 
+  {% if not connected %}
+  <!-- Prominent disconnected banner -->
+  <div class="disconnected-banner">
+    <h2>⚠ TWS Not Connected</h2>
+    <p>Connect to TWS to view live account data, positions, and trading controls.</p>
+    <div class="btn-connect-group">
+      <button class="btn-primary btn-sm" onclick="connectTWS('paper')">Connect Paper</button>
+      <button class="btn-secondary btn-sm" onclick="connectTWS('live')">Connect Live</button>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- ---- Left Panel: Strategies ---- -->
   <section class="panel panel-strategies">
     <h2 class="panel-title">📊 Active Strategies</h2>
@@ -371,6 +383,7 @@
     <!-- Quick Stats -->
     <div class="quick-stats">
       <h2 class="panel-title">📈 Quick Stats</h2>
+      {% if connected %}
       <div class="stat-row">
         <span>Unrealized P&L</span>
         <strong id="statUnrealizedPnl" class="{{ 'pnl-positive' if total_unrealized_pnl >= 0 else 'pnl-negative' }}">
@@ -401,6 +414,34 @@
           {{ 'ACTIVE' if risk_summary.emergency_stop_active else 'OFF' }}
         </strong>
       </div>
+      {% else %}
+      <div class="stat-row">
+        <span>Unrealized P&L</span>
+        <strong id="statUnrealizedPnl" class="empty-state">--</strong>
+      </div>
+      <div class="stat-row">
+        <span>Daily P&L</span>
+        <strong id="statDailyPnl" class="empty-state">--</strong>
+      </div>
+      <div class="stat-row">
+        <span>Buying Power</span>
+        <strong id="statBuyingPower" class="empty-state">--</strong>
+      </div>
+      <div class="stat-row">
+        <span>Positions</span>
+        <strong>{{ positions|length }}</strong>
+      </div>
+      <div class="stat-row">
+        <span>Strategies</span>
+        <strong>{{ strategies|length }}</strong>
+      </div>
+      <div class="stat-row">
+        <span>Emergency Stop</span>
+        <strong class="{{ 'pnl-negative' if risk_summary.emergency_stop_active else 'pnl-positive' }}">
+          {{ 'ACTIVE' if risk_summary.emergency_stop_active else 'OFF' }}
+        </strong>
+      </div>
+      {% endif %}
     </div>
 
     <!-- Connection Controls -->
@@ -608,6 +649,24 @@
     try {
       const res = await fetch('/api/account/summary');
       const d = await res.json();
+
+      // If not connected, show placeholder values instead of zeros
+      if (!d.connected) {
+        const equityEl = document.getElementById('equityVal');
+        if (equityEl) equityEl.textContent = '--';
+        const pnlEl = document.getElementById('pnlVal');
+        if (pnlEl) { pnlEl.textContent = '--'; pnlEl.className = ''; }
+        const riskEl = document.getElementById('riskBadge');
+        if (riskEl) { riskEl.textContent = '--'; riskEl.className = 'risk-badge'; }
+        const upnlEl = document.getElementById('statUnrealizedPnl');
+        if (upnlEl) { upnlEl.textContent = '--'; upnlEl.className = 'empty-state'; }
+        const dpnlEl = document.getElementById('statDailyPnl');
+        if (dpnlEl) { dpnlEl.textContent = '--'; dpnlEl.className = 'empty-state'; }
+        const bpEl = document.getElementById('statBuyingPower');
+        if (bpEl) { bpEl.textContent = '--'; bpEl.className = 'empty-state'; }
+        return;
+      }
+
       document.getElementById('equityVal').textContent = '$' + (d.equity || 0).toFixed(2);
       const pnl = ((d.daily_pnl_pct || 0) * 100).toFixed(2);
       const pnlEl = document.getElementById('pnlVal');

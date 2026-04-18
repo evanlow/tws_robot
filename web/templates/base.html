@@ -18,6 +18,7 @@
         <span class="status-dot {{ 'dot-green' if connected else 'dot-red' }}"></span>
         <span id="connLabel">{{ environment | upper }}</span>
       </span>
+      {% if connected %}
       <span class="status-divider">|</span>
       <span class="status-item" id="equityDisplay">
         Equity: <strong id="equityVal">${{ "%.2f"|format(risk_summary.current_equity) }}</strong>
@@ -36,6 +37,10 @@
           {{ risk_summary.risk_status }}
         </span>
       </span>
+      {% else %}
+      <span class="status-divider">|</span>
+      <span class="status-bar-disconnected">⚠ TWS NOT CONNECTED — connect to Paper or Live to begin</span>
+      {% endif %}
     </div>
     <div class="status-bar-right">
       <button class="btn-emergency" id="emergencyBtn" title="Emergency Stop — halt all trading">

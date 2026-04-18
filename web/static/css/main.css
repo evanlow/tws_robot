@@ -29,6 +29,43 @@ body {
 .dot-red { background: #fc8181; box-shadow: 0 0 4px #fc8181; }
 .dot-yellow { background: #ecc94b; box-shadow: 0 0 4px #ecc94b; }
 
+/* ---- Disconnected state ----------------------------------------------- */
+.status-bar-disconnected {
+  color: #fc8181;
+  font-weight: 600;
+  font-size: 0.85rem;
+  animation: pulse-disconnected 2s ease-in-out infinite;
+}
+@keyframes pulse-disconnected {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.disconnected-banner {
+  background: #2d1b1b;
+  border: 1px solid #fc8181;
+  border-radius: 8px;
+  padding: 1.5rem 2rem;
+  text-align: center;
+  grid-column: 1 / -1;
+  margin-bottom: 0.5rem;
+}
+.disconnected-banner h2 {
+  color: #fc8181;
+  font-size: 1.3rem;
+  margin-bottom: 0.5rem;
+}
+.disconnected-banner p {
+  color: #a0aec0;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+.disconnected-banner .btn-connect-group {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
 /* ---- Navbar ----------------------------------------------------------- */
 .navbar {
   display: flex;
