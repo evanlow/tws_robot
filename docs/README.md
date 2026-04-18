@@ -321,11 +321,14 @@ tws_robot/
 │   └── promotion.py           # Multi-gate approval workflow
 ├── ai/                        # AI integration (OpenAI GPT-4o)
 │   ├── client.py              # AI client for strategy analysis
-│   └── prompts.py             # Predefined analysis prompts
+│   ├── prompts.py             # Predefined analysis prompts
+│   └── ...                    # Additional AI modules (partial view)
 ├── data/                      # Database and data management
 │   ├── database.py            # SQLAlchemy ORM (SQLite/PostgreSQL/MySQL)
-│   └── models.py              # Trade, Position, Order, Strategy models
+│   ├── models.py              # Trade, Position, Order, Strategy models
+│   └── ...                    # Additional data modules (partial view)
 ├── monitoring/                # Monitoring and metrics
+│   └── ...                    # Additional monitoring modules (partial view)
 ├── examples/                  # Example scripts
 ├── tests/                     # Test suite
 ├── config/                    # Environment configuration
