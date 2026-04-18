@@ -221,10 +221,11 @@ class PositionAnalyzer:
                 if parsed:
                     options.setdefault(underlying, []).append((symbol, pos, parsed))
                 else:
-                    # Can't parse option symbol — treat as generic option position
+                    # Can't parse option symbol — use conservative defaults
+                    logger.warning("Could not parse option symbol: %s", symbol)
                     options.setdefault(underlying, []).append((symbol, pos, {
                         "underlying": underlying,
-                        "right": "C" if pos.get("side") == "SHORT" else "P",
+                        "right": "?",
                         "strike": abs(pos.get("entry_price", 0)),
                         "expiry": "",
                     }))
@@ -356,7 +357,9 @@ class PositionAnalyzer:
                     continue
                 stock_qty = abs(stock_pos.get("quantity", 0))
                 opt_qty = abs(sc[1].get("quantity", 0)) * 100
-                if stock_qty >= opt_qty or opt_qty <= stock_qty * 1.5:
+                # Allow covered call when stock covers options
+                # (stock_qty >= opt_qty) or roughly 1:1 ratio
+                if opt_qty > 0 and stock_qty >= opt_qty * 0.67:
                     pos_list = [
                         {**stock_pos, "symbol": stock_sym},
                         {**sc[1], "symbol": sc[0]},

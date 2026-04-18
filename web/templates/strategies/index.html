@@ -81,9 +81,13 @@
             📉 Trail: {{ "%.1f"|format(inf.targets.trailing_stop_pct * 100) }}%
           </span>
           {% endif %}
-          {% if inf.targets.max_profit is not none and inf.targets.max_profit != "net credit received" %}
+          {% if inf.targets.max_profit is not none and inf.targets.max_profit is number %}
           <span class="target-badge target-profit">
             💰 Max Profit: ${{ "%.2f"|format(inf.targets.max_profit) }}
+          </span>
+          {% elif inf.targets.max_profit is not none %}
+          <span class="target-badge target-profit">
+            💰 Max Profit: {{ inf.targets.max_profit }}
           </span>
           {% endif %}
           {% if inf.targets.max_loss %}
@@ -262,9 +266,14 @@ window.adoptInferred = async function(id, strategyType, symbolsCsv) {
   if (!name) return;
   const symbols = symbolsCsv.split(',').map(s => s.trim()).filter(Boolean);
   try {
+    // Use the detected strategy type if registered, otherwise fall back to BollingerBands
+    const classesRes = await fetch('/api/strategies/classes');
+    const classesData = await classesRes.json();
+    const availableClasses = classesData.classes || [];
+    const useType = availableClasses.includes(strategyType) ? strategyType : (availableClasses[0] || 'BollingerBands');
     const res = await fetch('/api/strategies/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ strategy_type: 'BollingerBands', name: name, symbols: symbols })
+      body: JSON.stringify({ strategy_type: useType, name: name, symbols: symbols })
     });
     const data = await res.json();
     if (data.error) alert(data.error);
