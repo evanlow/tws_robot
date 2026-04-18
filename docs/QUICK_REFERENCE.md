@@ -24,6 +24,8 @@ python scripts/run_web.py --host 0.0.0.0 --port 8080 --debug
 | **Risk** | Monitor risk levels and circuit breaker status |
 | **Logs** | Browse application logs in real time |
 | **Settings** | Configure TWS connection and parameters |
+| **AI Chat** | Ask the AI assistant about strategies, markets, and trading decisions |
+| **AI Strategy** | Get AI-powered help creating and analyzing strategies |
 
 > 🚨 **Emergency Stop** is always visible in the top status bar — one click halts all trading.
 

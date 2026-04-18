@@ -362,9 +362,13 @@ tws_robot/
 ├── backtest/     # Historical testing engine
 ├── strategies/   # Live trading strategies
 ├── risk/         # Risk management
-├── core/         # Infrastructure (EventBus, etc.)
-├── execution/    # Order execution
+├── core/         # Infrastructure (EventBus, connection, etc.)
+├── execution/    # Order execution and market data feed
+├── strategy/     # Strategy lifecycle and promotion pipeline
+├── ai/           # AI integration (OpenAI GPT-4o)
+├── data/         # Database ORM and data management
 ├── monitoring/   # Performance tracking
+├── config/       # Environment configuration
 ├── scripts/      # CLI utilities
 └── examples/     # Example scripts
 ```
@@ -374,6 +378,8 @@ tws_robot/
 - Risk control? → `risk/`
 - Core infrastructure? → `core/`
 - New web page? → `web/routes/` (Blueprint) + `web/templates/` (HTML)
+- AI features? → `ai/` + `web/routes/ai_*.py`
+- Data models? → `data/models.py`
 
 ### Web UI Development
 
@@ -391,6 +397,8 @@ web/
 │   ├── risk.py          # Risk monitoring page
 │   ├── logs.py          # Logs viewer
 │   ├── settings.py      # Settings page
+│   ├── ai_chat.py       # AI chat assistant
+│   ├── ai_strategy.py   # AI strategy analysis
 │   ├── api_*.py         # JSON API endpoints
 │   └── ...
 ├── templates/           # Jinja2 HTML templates

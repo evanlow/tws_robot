@@ -407,7 +407,6 @@ Interpretation:
 1. **Moving Average Crossover**: Trend-following strategy
 2. **Mean Reversion**: Buy oversold, sell overbought
 3. **Momentum**: Ride strong trends
-4. **Breakout**: Enter on price breakouts
 
 **Use this when:**
 - Choosing which strategy to implement
