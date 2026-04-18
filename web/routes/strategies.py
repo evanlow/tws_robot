@@ -26,12 +26,20 @@ def index():
     except Exception:
         pass
 
+    # Auto-detected strategies from current positions
+    inferred = []
+    try:
+        inferred = svc.get_inferred_strategies()
+    except Exception:
+        pass
+
     context = {
         "title": "Strategies",
         "active_page": "strategies",
         "strategies": strategies,
         "strategy_classes": classes,
         "summary": svc.strategy_registry.get_overall_summary() if strategies else {},
+        "inferred_strategies": inferred,
     }
     return render_template("strategies/index.html", **context)
 

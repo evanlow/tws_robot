@@ -14,6 +14,144 @@
 </div>
 {% endif %}
 
+<!-- Auto-Detected Strategies -->
+{% if inferred_strategies %}
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#f6ad55;margin-bottom:0.75rem;">
+    🔍 Auto-Detected Strategies
+    <span style="font-size:0.75rem;color:#a0aec0;font-weight:normal;margin-left:0.5rem;">
+      from current positions
+    </span>
+  </h2>
+  <div style="display:grid;gap:1rem;">
+    {% for inf in inferred_strategies %}
+    <div class="inferred-card" id="inferred-{{ inf.id }}" style="background:#1a1a2e;border:1px solid #2d2d44;border-radius:8px;padding:1rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.75rem;">
+        <div>
+          <span style="display:inline-block;background:#4a3728;color:#f6ad55;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:10px;margin-bottom:0.35rem;">
+            🔍 INFERRED
+          </span>
+          <span style="display:inline-block;background:#1c3d5a;color:#63b3ed;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:10px;margin-left:0.25rem;">
+            {{ inf.strategy_type }}
+          </span>
+          <span style="display:inline-block;font-size:0.7rem;color:#a0aec0;margin-left:0.5rem;">
+            {{ "%.0f"|format(inf.confidence * 100) }}% confidence
+          </span>
+        </div>
+        <div style="display:flex;gap:0.5rem;">
+          <button class="btn-sm btn-success" onclick="adoptInferred('{{ inf.id }}', '{{ inf.strategy_type }}', '{{ inf.symbols|join(",") }}')">
+            ✓ Adopt
+          </button>
+          <button class="btn-sm btn-secondary" onclick="dismissInferred('{{ inf.id }}')">
+            ✕ Dismiss
+          </button>
+        </div>
+      </div>
+      <p style="font-size:0.85rem;color:#e2e8f0;margin-bottom:0.5rem;">{{ inf.description }}</p>
+
+      <!-- Positions in this strategy -->
+      <div style="font-size:0.8rem;color:#a0aec0;margin-bottom:0.5rem;">
+        <strong>Positions:</strong>
+        {% for pos in inf.positions %}
+        <span style="display:inline-block;background:#0f0f13;padding:2px 6px;border-radius:4px;margin:2px;">
+          {{ pos.symbol }} ({{ pos.side|default('?') }} {{ pos.quantity|default(0)|abs }})
+        </span>
+        {% endfor %}
+      </div>
+
+      <!-- Targets -->
+      {% if inf.targets %}
+      <div style="margin-top:0.5rem;">
+        <div style="font-size:0.75rem;color:#a0aec0;margin-bottom:0.35rem;"><strong>Targets:</strong></div>
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+          {% if inf.targets.stop_loss_price %}
+          <span class="target-badge target-stop">
+            🛑 Stop: ${{ "%.2f"|format(inf.targets.stop_loss_price) }}
+            {% if inf.targets.stop_loss_pct %} ({{ "%.1f"|format(inf.targets.stop_loss_pct * 100) }}%){% endif %}
+          </span>
+          {% endif %}
+          {% if inf.targets.profit_target_price %}
+          <span class="target-badge target-profit">
+            🎯 Target: ${{ "%.2f"|format(inf.targets.profit_target_price) }}
+            {% if inf.targets.profit_target_pct %} ({{ "%.1f"|format(inf.targets.profit_target_pct * 100) }}%){% endif %}
+          </span>
+          {% endif %}
+          {% if inf.targets.trailing_stop_pct %}
+          <span class="target-badge target-trailing">
+            📉 Trail: {{ "%.1f"|format(inf.targets.trailing_stop_pct * 100) }}%
+          </span>
+          {% endif %}
+          {% if inf.targets.max_profit is not none and inf.targets.max_profit is number %}
+          <span class="target-badge target-profit">
+            💰 Max Profit: ${{ "%.2f"|format(inf.targets.max_profit) }}
+          </span>
+          {% elif inf.targets.max_profit is not none %}
+          <span class="target-badge target-profit">
+            💰 Max Profit: {{ inf.targets.max_profit }}
+          </span>
+          {% endif %}
+          {% if inf.targets.max_loss %}
+          <span class="target-badge target-stop">
+            ⚠️ Max Loss: ${{ "%.2f"|format(inf.targets.max_loss) }}
+          </span>
+          {% endif %}
+          {% if inf.targets.profit_target_pct and not inf.targets.profit_target_price %}
+          <span class="target-badge target-profit">
+            🎯 Close at {{ "%.0f"|format(inf.targets.profit_target_pct * 100) }}% profit
+          </span>
+          {% endif %}
+        </div>
+
+        <!-- Visual target bar -->
+        {% if inf.targets.stop_loss_price and inf.targets.profit_target_price and inf.positions %}
+        {% set entry_price = inf.positions[0].entry_price|default(0) %}
+        {% set current_price = inf.positions[0].current_price|default(entry_price) %}
+        {% if entry_price > 0 %}
+        {% set is_short = inf.strategy_type in ['ShortEquity'] %}
+        {# For shorts: stop is above entry, target is below — flip so bar renders left-to-right #}
+        {% if is_short %}
+        {% set bar_low = inf.targets.profit_target_price %}
+        {% set bar_high = inf.targets.stop_loss_price %}
+        {% else %}
+        {% set bar_low = inf.targets.stop_loss_price %}
+        {% set bar_high = inf.targets.profit_target_price %}
+        {% endif %}
+        {% set range_total = bar_high - bar_low %}
+        {% if range_total > 0 %}
+        {% set progress = ((current_price - bar_low) / range_total * 100)|round(1) %}
+        {% set progress = [0, [progress, 100]|min]|max %}
+        <div style="margin-top:0.5rem;">
+          <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#a0aec0;">
+            {% if is_short %}
+            <span>🎯 ${{ "%.2f"|format(inf.targets.profit_target_price) }}</span>
+            <span>Entry ${{ "%.2f"|format(entry_price) }}</span>
+            <span>🛑 ${{ "%.2f"|format(inf.targets.stop_loss_price) }}</span>
+            {% else %}
+            <span>🛑 ${{ "%.2f"|format(inf.targets.stop_loss_price) }}</span>
+            <span>Entry ${{ "%.2f"|format(entry_price) }}</span>
+            <span>🎯 ${{ "%.2f"|format(inf.targets.profit_target_price) }}</span>
+            {% endif %}
+          </div>
+          <div style="background:#1e1e2e;border-radius:4px;height:8px;position:relative;margin-top:3px;">
+            {% if is_short %}
+            <div style="background:{{ '#48bb78' if current_price <= entry_price else '#fc8181' }};height:100%;border-radius:4px;width:{{ progress }}%;transition:width 0.3s;"></div>
+            {% else %}
+            <div style="background:{{ '#48bb78' if current_price >= entry_price else '#fc8181' }};height:100%;border-radius:4px;width:{{ progress }}%;transition:width 0.3s;"></div>
+            {% endif %}
+            <div style="position:absolute;top:-1px;left:{{ ((entry_price - bar_low) / range_total * 100)|round(1) }}%;width:2px;height:10px;background:#e2e8f0;" title="Entry"></div>
+          </div>
+        </div>
+        {% endif %}
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <!-- Strategy List -->
 <section>
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Strategy Instances</h2>
@@ -92,6 +230,30 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<style>
+.target-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.target-stop {
+  background: #2d1b1b;
+  color: #fc8181;
+}
+.target-profit {
+  background: #1b2d1b;
+  color: #68d391;
+}
+.target-trailing {
+  background: #2d2b1b;
+  color: #ecc94b;
+}
+.inferred-card:hover {
+  border-color: #4a5568 !important;
+}
+</style>
 <script>
 window.controlStrategy = async function(name, action) {
   try {
@@ -115,6 +277,42 @@ window.createStrategy = async function() {
     const data = await res.json();
     if (data.error) alert(data.error);
     else location.reload();
+  } catch(e) { alert('Error: ' + e); }
+};
+
+window.adoptInferred = async function(id, strategyType, symbolsCsv) {
+  const name = prompt('Enter a name for this strategy:', strategyType + '_' + symbolsCsv.split(',')[0]);
+  if (!name) return;
+  const symbols = symbolsCsv.split(',').map(s => s.trim()).filter(Boolean);
+  try {
+    const classesRes = await fetch('/api/strategies/classes');
+    const classesData = await classesRes.json();
+    const availableClasses = classesData.classes || [];
+
+    if (!availableClasses.includes(strategyType)) {
+      alert('Cannot adopt: the detected strategy type "' + strategyType + '" is not registered. Available types: ' + (availableClasses.join(', ') || 'none'));
+      return;
+    }
+
+    const res = await fetch('/api/strategies/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strategy_type: strategyType, name: name, symbols: symbols })
+    });
+    const data = await res.json();
+    if (data.error) alert(data.error);
+    else {
+      // Also dismiss the inferred card
+      await fetch(`/api/strategies/inferred/${id}/dismiss`, { method: 'POST' });
+      location.reload();
+    }
+  } catch(e) { alert('Error: ' + e); }
+};
+
+window.dismissInferred = async function(id) {
+  try {
+    await fetch(`/api/strategies/inferred/${id}/dismiss`, { method: 'POST' });
+    const card = document.getElementById('inferred-' + id);
+    if (card) card.style.display = 'none';
   } catch(e) { alert('Error: ' + e); }
 };
 

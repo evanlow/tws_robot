@@ -60,6 +60,11 @@ class ServiceManager:
         self._strategy_registry: Any = None
         self._order_executor: Any = None
         self._market_data_feed: Any = None
+        self._position_analyzer: Any = None
+
+        # Auto-detected strategies cache
+        self._inferred_strategies: List[Dict[str, Any]] = []
+        self._dismissed_inferred: set = set()  # IDs dismissed by user
 
         # SSE subscribers — list of queues that receive serialised events
         self._sse_queues: List[Any] = []
@@ -186,6 +191,47 @@ class ServiceManager:
             )
         except Exception:  # pragma: no cover
             logger.debug("BollingerBandsStrategy not available for registration")
+
+    @property
+    def position_analyzer(self):
+        """Return the shared PositionAnalyzer (created on first access)."""
+        if self._position_analyzer is None:
+            from web.position_analyzer import PositionAnalyzer
+            self._position_analyzer = PositionAnalyzer()
+        return self._position_analyzer
+
+    def get_inferred_strategies(self) -> List[Dict[str, Any]]:
+        """Run position analysis and return inferred strategies.
+
+        Results are cached and refreshed each time this method is called.
+        Dismissed inferred IDs are filtered out.
+        """
+        positions = self.get_positions()
+        inferred = self.position_analyzer.analyze(positions)
+        with self._lock:
+            self._inferred_strategies = [
+                s.to_dict() for s in inferred
+                if s.id not in self._dismissed_inferred
+            ]
+            return list(self._inferred_strategies)
+
+    def dismiss_inferred_strategy(self, inferred_id: str) -> bool:
+        """Mark an inferred strategy as dismissed so it's hidden.
+
+        Returns False if the inferred_id is not in the current set of
+        inferred strategies (prevents unbounded growth of the dismissed set).
+        """
+        with self._lock:
+            valid_ids = {s["id"] for s in self._inferred_strategies}
+            if inferred_id not in valid_ids:
+                return False
+            self._dismissed_inferred.add(inferred_id)
+        return True
+
+    def reset_dismissed_inferred(self) -> None:
+        """Clear all dismissed inferred strategy IDs."""
+        with self._lock:
+            self._dismissed_inferred.clear()
 
     # ------------------------------------------------------------------
     # Account / positions state (written by event handlers)

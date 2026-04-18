@@ -211,6 +211,7 @@ class Strategy(Base):
     trades = relationship("Trade", back_populates="strategy")
     positions = relationship("Position", back_populates="strategy")
     orders = relationship("Order", back_populates="strategy")
+    targets = relationship("StrategyTarget", back_populates="strategy")
     
     def __repr__(self):
         status = "ACTIVE" if self.is_active else "INACTIVE"
@@ -375,6 +376,61 @@ class StockAnalysis(Base):
     def __repr__(self):
         return (f"<StockAnalysis(id={self.id}, symbol={self.symbol}, "
                 f"verdict={self.verdict})>")
+
+
+class StrategyTarget(Base):
+    """Targets associated with a strategy — profit, stop-loss, trailing, time.
+
+    Each row describes one target set for a strategy instance.  The web UI
+    shows a visual progress bar from stop → entry → target.
+    """
+    __tablename__ = 'strategy_targets'
+
+    id = Column(Integer, primary_key=True)
+    strategy_id = Column(Integer, ForeignKey('strategies.id'), nullable=False)
+
+    # Price-based targets
+    profit_target_price = Column(Float, nullable=True)
+    profit_target_pct = Column(Float, nullable=True)
+    stop_loss_price = Column(Float, nullable=True)
+    stop_loss_pct = Column(Float, nullable=True)
+    trailing_stop_pct = Column(Float, nullable=True)
+
+    # Max profit / loss for options strategies
+    max_profit = Column(Float, nullable=True)
+    max_loss = Column(Float, nullable=True)
+
+    # Time-based targets
+    time_target = Column(DateTime, nullable=True)
+    max_holding_days = Column(Integer, nullable=True)
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    notes = Column(Text, nullable=True)
+
+    # Relationship
+    strategy = relationship("Strategy", back_populates="targets")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "strategy_id": self.strategy_id,
+            "profit_target_price": self.profit_target_price,
+            "profit_target_pct": self.profit_target_pct,
+            "stop_loss_price": self.stop_loss_price,
+            "stop_loss_pct": self.stop_loss_pct,
+            "trailing_stop_pct": self.trailing_stop_pct,
+            "max_profit": self.max_profit,
+            "max_loss": self.max_loss,
+            "time_target": self.time_target.isoformat() if self.time_target else None,
+            "max_holding_days": self.max_holding_days,
+            "notes": self.notes,
+        }
+
+    def __repr__(self):
+        return (f"<StrategyTarget(id={self.id}, strategy_id={self.strategy_id}, "
+                f"tp={self.profit_target_price}, sl={self.stop_loss_price})>")
 
 
 class FundamentalsCache(Base):
