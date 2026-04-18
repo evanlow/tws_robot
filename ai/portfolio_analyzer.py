@@ -81,9 +81,10 @@ def _holding_days(entry_time: Any) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 # Matches TWS-style option local symbols, e.g.:
-#   "GOOG  260515C00200000"  or  "GOOG 260515P00240000"
+#   "GOOG 260515C00200000"  or  "GOOG  260515P00240000"
 # Group 1: underlying ticker, Group 2: expiry (YYMMDD),
 # Group 3: right (C or P), Group 4: raw strike digits.
+# Uses \s+ to handle variable whitespace between ticker and date.
 _OPT_SYMBOL_RE = re.compile(
     r"^([A-Z]+)\s+(\d{6})([CP])(\d+)$"
 )
@@ -170,6 +171,7 @@ def detect_multi_leg_strategies(
             elif right == "P" and side == "LONG":
                 long_puts.setdefault(underlying, []).append(pos_with_parsed)
             elif right == "P" and side == "SHORT":
+                # Tracked for potential future use (e.g. cash-secured puts)
                 short_puts.setdefault(underlying, []).append(pos_with_parsed)
 
     detected: List[Dict[str, Any]] = []
@@ -198,8 +200,8 @@ def detect_multi_leg_strategies(
             call_details = []
             for p in short_calls[underlying]:
                 parsed = p.get("_parsed_option", {})
-                strike = parsed.get("strike", "?")
-                expiry = parsed.get("expiry", "?")
+                strike = parsed.get("strike", "N/A")
+                expiry = parsed.get("expiry", "N/A")
                 call_details.append(f"strike={strike}, expiry={expiry}")
             detected.append({
                 "strategy": STRATEGY_COVERED_CALL,
