@@ -74,20 +74,12 @@ def _parse_option_symbol(symbol: str) -> Optional[Dict[str, Any]]:
 
     Returns ``None`` if the symbol doesn't match option patterns.
     """
-    # Strip all whitespace and try the compact format
+    # Strip all whitespace
     clean = symbol.replace(" ", "")
-    m = _OPTION_RE.match(clean)
-    if m:
-        return {
-            "underlying": m.group("underlying"),
-            "expiry": m.group("date"),
-            "right": m.group("right"),
-            "strike": float(m.group("strike")),
-        }
 
-    # Longer OCC format: AAPL  250620C00200000  (8-char strike ×1000)
+    # Try OCC format first: AAPL250620C00200000  (8-digit strike ×1000)
     occ_re = re.compile(
-        r"^(?P<underlying>[A-Z]+)\s*"
+        r"^(?P<underlying>[A-Z]+)"
         r"(?P<date>\d{6})"
         r"(?P<right>[CP])"
         r"(?P<strike>\d{8})$"
@@ -99,6 +91,16 @@ def _parse_option_symbol(symbol: str) -> Optional[Dict[str, Any]]:
             "expiry": m2.group("date"),
             "right": m2.group("right"),
             "strike": float(m2.group("strike")) / 1000.0,
+        }
+
+    # Compact format: AAPL250620C200 or AAPL250620C200.5
+    m = _OPTION_RE.match(clean)
+    if m:
+        return {
+            "underlying": m.group("underlying"),
+            "expiry": m.group("date"),
+            "right": m.group("right"),
+            "strike": float(m.group("strike")),
         }
 
     return None
