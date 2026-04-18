@@ -1457,6 +1457,374 @@ analysis = analyze_strategy(strategy_code)
 print(analysis)
 ```
 
+### Portfolio Intelligence - AI-Powered Portfolio Analysis
+
+**NEW in v1.7 (PR #17)** - AI-powered portfolio strategy deduction and stock deep-dive analysis.
+
+The portfolio intelligence system combines rule-based heuristics with optional LLM narration to:
+- Deduce trading strategies from position characteristics
+- Generate portfolio-level insights and recommendations
+- Provide on-demand deep-dive analysis for individual stocks
+- Track portfolio evolution via snapshots
+
+#### PortfolioAnalyzer - Strategy Deduction
+
+Analyzes your entire portfolio to deduce what strategies are being employed and provides AI-powered insights.
+
+```python
+from ai.portfolio_analyzer import PortfolioAnalyzer
+
+analyzer = PortfolioAnalyzer()
+
+# Get positions from ServiceManager
+from web.services import get_services
+svc = get_services()
+positions = svc.get_positions()
+account_summary = svc.get_account_summary()
+account_summary["equity"] = svc.risk_manager.current_equity
+
+# Analyze with AI narration (default)
+result = analyzer.analyze_portfolio(
+    positions,
+    account_summary=account_summary,
+    use_ai=True  # Enable AI narrative and recommendations
+)
+
+# Access results
+for pos in result["positions_enriched"]:
+    print(f"{pos['symbol']}: {pos['deduced_strategy']} "
+          f"({pos['strategy_confidence']:.1%} confidence)")
+
+# Strategy mix breakdown
+print(f"\nStrategy Mix: {result['strategy_mix']}")
+# {'momentum': 0.35, 'buy_and_hold': 0.45, 'income': 0.20}
+
+# AI-powered narrative
+print(f"\n{result['ai_narrative']}")
+
+# AI recommendations
+for rec in result['ai_recommendations']:
+    print(f"💡 {rec}")
+
+# AI risk assessment
+print(f"\n⚠️ {result['ai_risk_assessment']}")
+```
+
+**Strategy Classification:**
+
+The analyzer uses rule-based heuristics to classify each position:
+
+| Strategy | Detection Rules |
+|----------|----------------|
+| **Momentum** | Short-term holding (< 5 days), positive P&L momentum |
+| **Mean Reversion** | Short-term (< 5 days), negative entry momentum |
+| **Buy and Hold** | Long-term holding (> 90 days) |
+| **Value** | Medium/long-term, positive fundamentals (P/E, P/B) |
+| **Income** | Dividend-paying stocks, income-focused |
+| **Speculative** | High volatility, rapid position changes |
+| **Hedging** | Protective positions (puts, inverse ETFs) |
+
+**Return Value:**
+
+```python
+{
+    "positions_enriched": [
+        {
+            "symbol": "AAPL",
+            "deduced_strategy": "buy_and_hold",
+            "strategy_confidence": 0.85,
+            "holding_days": 120.5,
+            "unrealized_pnl_pct": 15.2,
+            "position_type": "core",  # 'core' or 'satellite'
+            "risk_level": "moderate",
+            # ... original position data
+        },
+        # ... more positions
+    ],
+    "strategy_mix": {
+        "buy_and_hold": 0.50,
+        "momentum": 0.30,
+        "income": 0.20
+    },
+    "ai_narrative": "Your portfolio demonstrates a balanced approach...",
+    "ai_recommendations": [
+        "Consider reducing momentum allocation from 30% to 20%",
+        "Tech sector concentration (45%) exceeds diversification threshold"
+    ],
+    "ai_risk_assessment": "Moderate risk profile with some concentration concerns",
+    "ai_strategy_mix": "Core-satellite structure with 50% long-term holds"
+}
+```
+
+**When AI is Disabled (`use_ai=False`):**
+
+- `ai_narrative`, `ai_recommendations`, `ai_risk_assessment`, `ai_strategy_mix` will be `None`
+- Strategy deduction still works using rule-based classification
+- Significantly faster (no LLM API calls)
+
+#### StockAnalyzer - Deep-Dive Analysis
+
+Performs comprehensive analysis of individual stocks combining fundamentals, technicals, and position data.
+
+```python
+from ai.stock_analyzer import StockAnalyzer
+
+analyzer = StockAnalyzer()
+
+# Get position data
+position = svc.get_positions()["AAPL"]
+
+# Fetch fundamentals
+from data.fundamentals import get_fundamentals
+fundamentals = get_fundamentals("AAPL")
+
+# Compute technical context (from price history)
+history = [...]  # List of OHLCV dicts
+from ai.stock_analyzer import compute_technical_context
+technicals = compute_technical_context(
+    current_price=position.get("current_price", 0),
+    history=history
+)
+
+# Analyze with AI deep-dive
+result = analyzer.analyze_stock(
+    symbol="AAPL",
+    position=position,
+    fundamentals=fundamentals,
+    technicals=technicals,
+    use_ai=True
+)
+
+print(result["ai_analysis"])
+```
+
+**Return Value:**
+
+```python
+{
+    "symbol": "AAPL",
+    "position_summary": {
+        "quantity": 100,
+        "market_value": 17500.0,
+        "unrealized_pnl": 2500.0,
+        "unrealized_pnl_pct": 16.7,
+        "holding_days": 45.2
+    },
+    "fundamental_summary": {
+        "pe_trailing": 28.5,
+        "pe_forward": 25.3,
+        "market_cap": 2800000000000,
+        "dividend_yield": 0.0045,
+        "analyst_target_mean": 185.0
+    },
+    "technical_summary": {
+        "current_price": 175.0,
+        "sma_50": 168.5,
+        "sma_200": 155.2,
+        "rsi_14": 62.3,
+        "weeks_52_high": 185.0,
+        "weeks_52_low": 140.0
+    },
+    "ai_analysis": "AAPL demonstrates strong momentum with price above both 50 and 200-day moving averages. RSI at 62.3 indicates healthy bullish momentum without overbought conditions. Valuation appears fair with forward P/E of 25.3 slightly below industry average. Consider taking partial profits if price approaches $185 resistance (52-week high and analyst target).",
+    "timestamp": "2026-04-18T12:30:00Z"
+}
+```
+
+**Technical Context Calculation:**
+
+```python
+from ai.stock_analyzer import compute_technical_context
+
+history = [
+    {"close": 170.0, "high": 171.0, "low": 169.0, "volume": 50000000},
+    {"close": 172.0, "high": 173.0, "low": 170.5, "volume": 55000000},
+    # ... more bars (needs 200+ for full analysis)
+]
+
+technicals = compute_technical_context(
+    current_price=175.0,
+    history=history
+)
+
+# Returns:
+# {
+#     "current_price": 175.0,
+#     "sma_50": 168.5,      # 50-day simple moving average
+#     "sma_200": 155.2,     # 200-day simple moving average
+#     "rsi_14": 62.3,       # 14-period RSI
+#     "weeks_52_high": 185.0,
+#     "weeks_52_low": 140.0,
+#     "distance_from_high_pct": -5.4,  # % below 52-week high
+#     "distance_from_low_pct": 25.0    # % above 52-week low
+# }
+```
+
+#### Fundamentals Fetcher
+
+Retrieves and caches stock fundamental data via yfinance.
+
+```python
+from data.fundamentals import get_fundamentals
+
+# Fetch with caching (24-hour TTL)
+data = get_fundamentals("GOOG", use_cache=True)
+
+# Force fresh fetch
+data = get_fundamentals("GOOG", use_cache=False)
+
+# Returns comprehensive fundamental data:
+{
+    "symbol": "GOOG",
+    "fetched_at": "2026-04-18T12:00:00Z",
+    "name": "Alphabet Inc.",
+    "sector": "Technology",
+    "industry": "Internet Content & Information",
+    "market_cap": 1800000000000,
+    
+    # Valuation ratios
+    "pe_trailing": 25.3,
+    "pe_forward": 22.1,
+    "peg_ratio": 1.45,
+    "price_to_book": 6.2,
+    "price_to_sales": 5.8,
+    
+    # Profitability
+    "profit_margin": 0.21,
+    "operating_margin": 0.26,
+    "gross_margin": 0.57,
+    "roe": 0.28,
+    
+    # Growth metrics
+    "revenue_growth": 0.14,
+    "earnings_growth": 0.18,
+    
+    # Dividend info (if applicable)
+    "dividend_yield": 0.0,
+    "payout_ratio": None,
+    
+    # Analyst consensus
+    "analyst_target_mean": 165.0,
+    "analyst_target_high": 200.0,
+    "analyst_target_low": 130.0,
+    "recommendation": "buy"  # buy, hold, sell
+}
+```
+
+**Caching:**
+
+- Fundamentals are cached in SQLite for 24 hours
+- Reduces API calls to yfinance
+- Configurable TTL via `_CACHE_TTL_SECONDS` constant
+
+**Error Handling:**
+
+```python
+data = get_fundamentals("INVALID_SYMBOL")
+
+if "error" in data:
+    print(f"Failed to fetch: {data['error']}")
+    # Returns: {"error": "...", "symbol": "INVALID_SYMBOL"}
+```
+
+#### Portfolio Persistence
+
+Save and retrieve portfolio snapshots for historical tracking.
+
+```python
+from data.portfolio_persistence import (
+    save_portfolio_snapshot,
+    get_recent_snapshots,
+    save_stock_analysis,
+    get_latest_stock_analysis,
+    get_stock_analysis_history
+)
+
+# Save current portfolio state
+snapshot_id = save_portfolio_snapshot(
+    positions=svc.get_positions(),
+    account_summary=svc.get_account_summary(),
+    strategy_analysis={
+        "strategy_mix": {"buy_and_hold": 0.5, "momentum": 0.3},
+        "ai_narrative": "Portfolio is well-diversified..."
+    }
+)
+
+# Retrieve recent snapshots
+snapshots = get_recent_snapshots(limit=10)
+for snap in snapshots:
+    print(f"{snap['snapshot_date']}: ${snap['total_value']:,.2f}")
+
+# Save stock deep-dive analysis
+save_stock_analysis(
+    symbol="AAPL",
+    position=position,
+    fundamentals=fundamentals,
+    technical=technicals,
+    ai_analysis="Strong buy signal based on momentum..."
+)
+
+# Get latest analysis for a symbol
+latest = get_latest_stock_analysis("AAPL")
+if latest:
+    print(f"Last analyzed: {latest['analysis_date']}")
+    print(latest['ai_analysis'])
+
+# Get analysis history
+history = get_stock_analysis_history("AAPL", limit=5)
+for analysis in history:
+    print(f"{analysis['analysis_date']}: {analysis['ai_analysis'][:100]}...")
+```
+
+#### Usage Example: Complete Portfolio Intelligence Workflow
+
+```python
+from web.services import get_services
+from ai.portfolio_analyzer import PortfolioAnalyzer
+from ai.stock_analyzer import StockAnalyzer
+from data.fundamentals import get_fundamentals
+from data.portfolio_persistence import save_portfolio_snapshot
+
+# 1. Analyze entire portfolio
+svc = get_services()
+positions = svc.get_positions()
+account = svc.get_account_summary()
+account["equity"] = svc.risk_manager.current_equity
+
+portfolio_analyzer = PortfolioAnalyzer()
+portfolio_result = portfolio_analyzer.analyze_portfolio(
+    positions, account, use_ai=True
+)
+
+# 2. Save portfolio snapshot
+snapshot_id = save_portfolio_snapshot(
+    positions=positions,
+    account_summary=account,
+    strategy_analysis={
+        "strategy_mix": portfolio_result["strategy_mix"],
+        "ai_narrative": portfolio_result["ai_narrative"]
+    }
+)
+
+# 3. Deep-dive on top position
+top_symbol = max(positions.keys(), 
+    key=lambda s: abs(positions[s].get("market_value", 0)))
+
+stock_analyzer = StockAnalyzer()
+fundamentals = get_fundamentals(top_symbol)
+# ... compute technicals from price history
+
+stock_result = stock_analyzer.analyze_stock(
+    symbol=top_symbol,
+    position=positions[top_symbol],
+    fundamentals=fundamentals,
+    technicals=technicals,
+    use_ai=True
+)
+
+print(f"\n📊 Portfolio Analysis:\n{portfolio_result['ai_narrative']}")
+print(f"\n🔍 Deep-Dive on {top_symbol}:\n{stock_result['ai_analysis']}")
+```
+
 ---
 
 ## Common Patterns

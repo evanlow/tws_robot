@@ -362,6 +362,438 @@ Get comprehensive portfolio analysis including concentration metrics, sector exp
 - Sector/industry data depends on position metadata; positions without sector info are excluded
 - For large portfolios (100+ positions), calculation may take 1-2 seconds
 
+### `GET /api/account/portfolio-insights`
+
+**NEW in v1.7 (PR #17)** - AI-Powered Portfolio Intelligence
+
+Get enhanced portfolio analysis with AI-powered strategy deduction, allocation intelligence, and actionable recommendations.
+
+**Query Parameters:**
+- `ai` (optional, default: `true`) - Enable/disable AI narrative and recommendations
+
+**Response:**
+```json
+{
+  "positions_enriched": [
+    {
+      "symbol": "AAPL",
+      "quantity": 100,
+      "market_value": 17500.00,
+      "unrealized_pnl": 2500.00,
+      "unrealized_pnl_pct": 16.7,
+      "deduced_strategy": "buy_and_hold",
+      "strategy_confidence": 0.85,
+      "holding_days": 120.5,
+      "position_type": "core",
+      "risk_level": "moderate"
+    },
+    {
+      "symbol": "TSLA",
+      "quantity": 50,
+      "market_value": 12500.00,
+      "unrealized_pnl": 1200.00,
+      "unrealized_pnl_pct": 10.6,
+      "deduced_strategy": "momentum",
+      "strategy_confidence": 0.72,
+      "holding_days": 12.3,
+      "position_type": "satellite",
+      "risk_level": "high"
+    }
+  ],
+  "strategy_mix": {
+    "buy_and_hold": 0.50,
+    "momentum": 0.30,
+    "income": 0.15,
+    "value": 0.05
+  },
+  "ai_narrative": "Your portfolio demonstrates a balanced core-satellite approach with 50% in long-term buy-and-hold positions and 30% in momentum plays. The allocation is well-diversified across strategies, though tech sector concentration at 45% warrants attention.",
+  "ai_recommendations": [
+    "Consider reducing momentum allocation from 30% to 20% to decrease portfolio volatility",
+    "Tech sector exposure (45%) exceeds recommended 30% threshold - consider adding positions in other sectors",
+    "TSLA position (momentum, 12.5% of portfolio) could benefit from a trailing stop at -8% to protect gains"
+  ],
+  "ai_risk_assessment": "Moderate risk profile with slight aggressive tilt due to momentum allocation. Well-positioned for continued bull market but vulnerable to sharp corrections.",
+  "ai_strategy_mix": "Core-satellite structure: 50% defensive buy-and-hold core with 50% tactical satellite positions for alpha generation",
+  "total_value": 35000.00,
+  "position_count": 8,
+  "timestamp": "2026-04-18T12:30:00Z"
+}
+```
+
+**Field Descriptions:**
+
+**Positions Enriched:**
+Each position includes original fields plus:
+- `deduced_strategy` - Inferred strategy type (`"momentum"`, `"buy_and_hold"`, `"mean_reversion"`, `"value"`, `"income"`, `"speculative"`, `"hedging"`, `"unknown"`)
+- `strategy_confidence` - Confidence score for strategy classification (0.0-1.0)
+- `holding_days` - Number of days position has been held
+- `position_type` - `"core"` (long-term, large allocation) or `"satellite"` (tactical, smaller)
+- `risk_level` - `"low"`, `"moderate"`, or `"high"` based on volatility and position size
+
+**Strategy Mix:**
+- Breakdown of portfolio by deduced strategy as % weights
+- Helps understand overall portfolio approach (value vs. growth vs. momentum)
+
+**AI Fields (when `ai=true`):**
+- `ai_narrative` - Natural language summary of portfolio composition and approach
+- `ai_recommendations` - Array of actionable suggestions for improving portfolio
+- `ai_risk_assessment` - Overall risk evaluation with context
+- `ai_strategy_mix` - High-level description of portfolio strategy structure
+
+**When AI Disabled (`ai=false`):**
+- AI fields return `null`
+- Strategy deduction still works (rule-based classification)
+- Significantly faster response time
+
+**Strategy Classification Logic:**
+
+| Strategy | Detection Heuristics |
+|----------|---------------------|
+| `momentum` | Short-term holding (< 5 days) + positive P&L momentum |
+| `mean_reversion` | Short-term (< 5 days) + negative entry momentum |
+| `buy_and_hold` | Long-term holding (> 90 days) |
+| `value` | Medium/long-term + favorable valuation (low P/E, P/B) |
+| `income` | Dividend-paying stocks, income focus |
+| `speculative` | High volatility, rapid position changes |
+| `hedging` | Protective positions (puts, inverse ETFs) |
+| `unknown` | Insufficient data to classify |
+
+**Use Cases:**
+
+```javascript
+// Get portfolio insights with AI
+fetch('/api/account/portfolio-insights')
+  .then(res => res.json())
+  .then(data => {
+    // Display strategy mix
+    console.log('Strategy Mix:', data.strategy_mix);
+    
+    // Show AI recommendations
+    data.ai_recommendations.forEach(rec => {
+      console.log('💡', rec);
+    });
+    
+    // Alert on high-risk positions
+    data.positions_enriched
+      .filter(p => p.risk_level === 'high')
+      .forEach(p => console.warn(`⚠️ High risk: ${p.symbol}`));
+  });
+
+// Fast check without AI (for polling/monitoring)
+fetch('/api/account/portfolio-insights?ai=false')
+  .then(res => res.json())
+  .then(data => {
+    // Still get strategy deduction, just no AI narrative
+    console.log(data.strategy_mix);
+  });
+```
+
+### `GET /api/account/stock-deep-dive/<symbol>`
+
+**NEW in v1.7 (PR #17)** - On-Demand Stock Analysis
+
+Get comprehensive deep-dive analysis for a specific portfolio holding, combining fundamentals, technicals, and AI-powered insights.
+
+**Path Parameters:**
+- `symbol` - Stock ticker symbol (must be in current portfolio)
+
+**Query Parameters:**
+- `ai` (optional, default: `true`) - Enable/disable AI analysis
+- `cache` (optional, default: `true`) - Use cached analysis if available (24-hour TTL)
+
+**Response:**
+```json
+{
+  "symbol": "AAPL",
+  "position": {
+    "symbol": "AAPL",
+    "quantity": 100,
+    "entry_price": 150.00,
+    "current_price": 175.00,
+    "market_value": 17500.00,
+    "unrealized_pnl": 2500.00,
+    "unrealized_pnl_pct": 16.7,
+    "holding_days": 45.2,
+    "portfolio_weight": 0.35
+  },
+  "fundamentals": {
+    "symbol": "AAPL",
+    "name": "Apple Inc.",
+    "sector": "Technology",
+    "industry": "Consumer Electronics",
+    "market_cap": 2800000000000,
+    "pe_trailing": 28.5,
+    "pe_forward": 25.3,
+    "peg_ratio": 2.1,
+    "price_to_book": 45.2,
+    "dividend_yield": 0.0045,
+    "profit_margin": 0.26,
+    "roe": 1.47,
+    "revenue_growth": 0.11,
+    "analyst_target_mean": 185.00,
+    "recommendation": "buy"
+  },
+  "technicals": {
+    "current_price": 175.00,
+    "sma_50": 168.50,
+    "sma_200": 155.20,
+    "rsi_14": 62.3,
+    "weeks_52_high": 185.00,
+    "weeks_52_low": 140.00,
+    "distance_from_high_pct": -5.4,
+    "distance_from_low_pct": 25.0
+  },
+  "ai_analysis": "AAPL demonstrates strong momentum with price trading above both 50-day (168.50) and 200-day (155.20) moving averages, indicating bullish trend structure. RSI at 62.3 shows healthy momentum without overbought conditions.\n\nValuation appears fair with forward P/E of 25.3 slightly below sector average. The stock has appreciated 16.7% since entry 45 days ago, approaching analyst consensus target of $185 (52-week high).\n\nRecommendation: Hold current position. Consider taking partial profits (25-30% of position) if price reaches $182-185 resistance zone. Set trailing stop at $165 (-5.7%) to protect gains. Strong fundamentals support continued holding for long-term investors.",
+  "timestamp": "2026-04-18T12:45:00Z",
+  "from_cache": false
+}
+```
+
+**Error Response (symbol not in portfolio):**
+```json
+{
+  "error": "MSFT is not in the current portfolio",
+  "available_symbols": ["AAPL", "GOOG", "TSLA", "NVDA"]
+}
+```
+
+**Field Descriptions:**
+
+**Position:**
+- Complete position data with portfolio context
+- `portfolio_weight` - Position size as % of total portfolio value
+
+**Fundamentals:**
+- Company info (name, sector, industry)
+- Valuation ratios (P/E, PEG, P/B, P/S)
+- Profitability metrics (margins, ROE)
+- Growth rates
+- Analyst consensus and recommendations
+- Fetched from yfinance, cached for 24 hours
+
+**Technicals:**
+- Moving averages (50-day, 200-day SMA)
+- Momentum indicators (14-period RSI)
+- 52-week range and distance from extremes
+- Calculated from historical price data
+
+**AI Analysis (when `ai=true`):**
+- Comprehensive narrative combining all data points
+- Trend analysis and momentum assessment
+- Valuation commentary
+- Specific entry/exit recommendations
+- Risk management suggestions (stop loss, profit targets)
+
+**Caching:**
+- Analysis results cached for 24 hours
+- `from_cache: true` indicates cached response
+- Use `cache=false` to force fresh analysis
+- Cache speeds up repeated requests (< 50ms vs. 2-3 seconds)
+
+**Use Cases:**
+
+```javascript
+// Get fresh deep-dive analysis
+fetch('/api/account/stock-deep-dive/AAPL')
+  .then(res => res.json())
+  .then(data => {
+    console.log(`${data.symbol} Analysis:`);
+    console.log(data.ai_analysis);
+    
+    // Check if overvalued
+    if (data.fundamentals.pe_trailing > 30) {
+      console.warn('High P/E - may be overvalued');
+    }
+    
+    // Check technical strength
+    const { current_price, sma_200 } = data.technicals;
+    if (current_price > sma_200) {
+      console.log('✅ Above 200-day MA - bullish trend');
+    }
+  });
+
+// Fast cached lookup (for display refresh)
+fetch('/api/account/stock-deep-dive/AAPL?cache=true')
+  .then(res => res.json())
+  .then(data => {
+    if (data.from_cache) {
+      console.log('Using cached analysis');
+    }
+  });
+
+// Without AI for faster response
+fetch('/api/account/stock-deep-dive/AAPL?ai=false')
+  .then(res => res.json())
+  .then(data => {
+    // Still get fundamentals and technicals
+    console.log(data.fundamentals);
+    console.log(data.technicals);
+  });
+```
+
+### `POST /api/account/portfolio-snapshot`
+
+**NEW in v1.7 (PR #17)** - Save Portfolio Snapshot
+
+Save the current portfolio state as a snapshot for historical tracking and analysis.
+
+**Request Body:** None (uses current portfolio state)
+
+**Response:**
+```json
+{
+  "snapshot_id": 42,
+  "snapshot_date": "2026-04-18T12:50:00Z",
+  "position_count": 8,
+  "total_value": 35000.00,
+  "message": "Portfolio snapshot saved successfully"
+}
+```
+
+**Use Case:**
+```javascript
+// Save daily snapshot
+fetch('/api/account/portfolio-snapshot', { method: 'POST' })
+  .then(res => res.json())
+  .then(data => {
+    console.log(`Snapshot #${data.snapshot_id} saved`);
+    console.log(`Portfolio value: $${data.total_value.toFixed(2)}`);
+  });
+
+// Automated daily snapshot
+setInterval(() => {
+  fetch('/api/account/portfolio-snapshot', { method: 'POST' });
+}, 24 * 60 * 60 * 1000);  // Once per day
+```
+
+**Stored Data:**
+- All current positions with quantities, prices, P&L
+- Account summary (equity, cash, buying power)
+- Strategy analysis (if available)
+- Timestamp for historical tracking
+
+### `GET /api/account/portfolio-snapshots`
+
+**NEW in v1.7 (PR #17)** - Retrieve Portfolio History
+
+Get recent portfolio snapshots for historical analysis and tracking.
+
+**Query Parameters:**
+- `limit` (optional, default: `10`) - Maximum number of snapshots to return
+
+**Response:**
+```json
+{
+  "snapshots": [
+    {
+      "snapshot_id": 42,
+      "snapshot_date": "2026-04-18T12:00:00Z",
+      "position_count": 8,
+      "total_value": 35000.00,
+      "total_equity": 52000.00,
+      "cash_balance": 17000.00
+    },
+    {
+      "snapshot_id": 41,
+      "snapshot_date": "2026-04-17T12:00:00Z",
+      "position_count": 7,
+      "total_value": 33500.00,
+      "total_equity": 50500.00,
+      "cash_balance": 17000.00
+    }
+  ],
+  "count": 2
+}
+```
+
+**Use Case:**
+```javascript
+// Get last 30 days of snapshots
+fetch('/api/account/portfolio-snapshots?limit=30')
+  .then(res => res.json())
+  .then(data => {
+    // Track portfolio value over time
+    const values = data.snapshots.map(s => ({
+      date: s.snapshot_date,
+      value: s.total_value
+    }));
+    
+    // Calculate growth
+    const oldest = values[values.length - 1];
+    const newest = values[0];
+    const growth = ((newest.value - oldest.value) / oldest.value) * 100;
+    console.log(`30-day growth: ${growth.toFixed(2)}%`);
+  });
+```
+
+### `GET /api/account/stock-analysis-history/<symbol>`
+
+**NEW in v1.7 (PR #17)** - Stock Analysis History
+
+Get historical deep-dive analyses for a specific symbol to track how analysis/sentiment has evolved.
+
+**Path Parameters:**
+- `symbol` - Stock ticker symbol
+
+**Query Parameters:**
+- `limit` (optional, default: `5`) - Maximum number of historical analyses to return
+
+**Response:**
+```json
+{
+  "symbol": "AAPL",
+  "history": [
+    {
+      "analysis_id": 15,
+      "analysis_date": "2026-04-18T12:45:00Z",
+      "ai_analysis": "AAPL demonstrates strong momentum...",
+      "fundamentals_snapshot": {
+        "pe_trailing": 28.5,
+        "analyst_target_mean": 185.00
+      },
+      "technical_snapshot": {
+        "current_price": 175.00,
+        "rsi_14": 62.3
+      }
+    },
+    {
+      "analysis_id": 12,
+      "analysis_date": "2026-04-10T14:30:00Z",
+      "ai_analysis": "AAPL consolidating near $170...",
+      "fundamentals_snapshot": {
+        "pe_trailing": 29.1,
+        "analyst_target_mean": 180.00
+      },
+      "technical_snapshot": {
+        "current_price": 170.00,
+        "rsi_14": 55.8
+      }
+    }
+  ],
+  "count": 2
+}
+```
+
+**Use Case:**
+```javascript
+// Track how analysis has changed over time
+fetch('/api/account/stock-analysis-history/AAPL?limit=10')
+  .then(res => res.json())
+  .then(data => {
+    console.log(`${data.symbol} Analysis History:`);
+    data.history.forEach(h => {
+      console.log(`\n${h.analysis_date}:`);
+      console.log(h.ai_analysis.substring(0, 200) + '...');
+    });
+    
+    // Track price evolution
+    const prices = data.history.map(h => 
+      h.technical_snapshot.current_price
+    );
+    console.log('Price trend:', prices);
+  });
+```
+
 ---
 
 ## Orders API
