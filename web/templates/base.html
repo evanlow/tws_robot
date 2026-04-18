@@ -18,29 +18,28 @@
         <span class="status-dot {{ 'dot-green' if connected else 'dot-red' }}"></span>
         <span id="connLabel">{{ environment | upper }}</span>
       </span>
-      {% if connected %}
       <span class="status-divider">|</span>
+      {% if not connected %}
+      <span class="status-bar-disconnected">⚠ TWS NOT CONNECTED</span>
+      <span class="status-divider">|</span>
+      {% endif %}
       <span class="status-item" id="equityDisplay">
-        Equity: <strong id="equityVal">${{ "%.2f"|format(risk_summary.current_equity) }}</strong>
+        Equity: <strong id="equityVal">{% if connected %}${{ "%.2f"|format(risk_summary.current_equity) }}{% else %}--{% endif %}</strong>
       </span>
       <span class="status-divider">|</span>
       <span class="status-item" id="pnlDisplay">
         Daily P&L:
-        <strong id="pnlVal" class="{{ 'pnl-positive' if risk_summary.daily_pnl_pct >= 0 else 'pnl-negative' }}">
-          {{ "%.2f"|format(risk_summary.daily_pnl_pct * 100) }}%
+        <strong id="pnlVal" class="{{ 'pnl-positive' if connected and risk_summary.daily_pnl_pct >= 0 else ('pnl-negative' if connected else '') }}">
+          {% if connected %}{{ "%.2f"|format(risk_summary.daily_pnl_pct * 100) }}%{% else %}--{% endif %}
         </strong>
       </span>
       <span class="status-divider">|</span>
       <span class="status-item">
         Risk:
-        <span class="risk-badge risk-{{ risk_summary.risk_status|lower }}" id="riskBadge">
-          {{ risk_summary.risk_status }}
+        <span class="risk-badge {{ 'risk-' ~ risk_summary.risk_status|lower if connected else '' }}" id="riskBadge">
+          {% if connected %}{{ risk_summary.risk_status }}{% else %}--{% endif %}
         </span>
       </span>
-      {% else %}
-      <span class="status-divider">|</span>
-      <span class="status-bar-disconnected">⚠ TWS NOT CONNECTED — connect to Paper or Live to begin</span>
-      {% endif %}
     </div>
     <div class="status-bar-right">
       <button class="btn-emergency" id="emergencyBtn" title="Emergency Stop — halt all trading">

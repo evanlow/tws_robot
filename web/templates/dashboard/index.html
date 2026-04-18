@@ -690,13 +690,20 @@
         return;
       }
 
-      document.getElementById('equityVal').textContent = '$' + (d.equity || 0).toFixed(2);
+      // Update status bar — also handles transition from disconnected to connected
+      const eqEl = document.getElementById('equityVal');
+      if (eqEl) eqEl.textContent = '$' + (d.equity || 0).toFixed(2);
       const pnl = ((d.daily_pnl_pct || 0) * 100).toFixed(2);
       const pnlEl = document.getElementById('pnlVal');
-      pnlEl.textContent = pnl + '%';
-      pnlEl.className = parseFloat(pnl) >= 0 ? 'pnl-positive' : 'pnl-negative';
-      document.getElementById('riskBadge').textContent = d.risk_status || 'NORMAL';
-      document.getElementById('riskBadge').className = 'risk-badge risk-' + (d.risk_status || 'NORMAL').toLowerCase();
+      if (pnlEl) {
+        pnlEl.textContent = pnl + '%';
+        pnlEl.className = parseFloat(pnl) >= 0 ? 'pnl-positive' : 'pnl-negative';
+      }
+      const riskEl = document.getElementById('riskBadge');
+      if (riskEl) {
+        riskEl.textContent = d.risk_status || 'NORMAL';
+        riskEl.className = 'risk-badge risk-' + (d.risk_status || 'NORMAL').toLowerCase();
+      }
 
       // Update quick stats
       const upnl = d.unrealized_pnl || 0;
