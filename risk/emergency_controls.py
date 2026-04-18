@@ -10,7 +10,7 @@ Week 3 Day 6: Emergency Controls
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Callable
 from enum import Enum
 import logging
@@ -125,7 +125,7 @@ class CircuitBreaker:
         self.is_tripped = False
         self.trip_time: Optional[datetime] = None
         self.trip_count_today = 0
-        self.last_reset_date: Optional[datetime] = None
+        self.last_reset_date: Optional[date] = None
         self.trip_history: List[datetime] = []
     
     def check(self, current_value: float, timestamp: datetime) -> bool:
