@@ -6,12 +6,19 @@ GET /api/account/symbol-names — resolve ticker symbols to company names
 """
 
 import logging
+import re
 
 from flask import Blueprint, jsonify, request
 
 from web.services import get_services
 
 logger = logging.getLogger(__name__)
+
+# Simple ticker regex: 1-10 uppercase letters, optionally with dots (BRK.B)
+_TICKER_RE = re.compile(r"^[A-Z]{1,10}(\.[A-Z]{1,5})?$")
+
+# Maximum number of symbols accepted per request
+_MAX_SYMBOLS = 50
 
 bp = Blueprint("api_account", __name__, url_prefix="/api/account")
 
@@ -83,14 +90,7 @@ def symbol_names():
     -------
     JSON ``{"names": {"AAPL": "Apple Inc.", ...}}``
     """
-    import re
-
     svc = get_services()
-
-    # Simple ticker regex: 1-10 uppercase letters, optionally with dots (BRK.B)
-    _TICKER_RE = re.compile(r"^[A-Z]{1,10}(\.[A-Z]{1,5})?$")
-
-    _MAX_SYMBOLS = 50
 
     raw_symbols = request.args.get("symbols", "")
     if raw_symbols:

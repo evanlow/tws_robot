@@ -199,7 +199,15 @@ window.viewDataStatus = async function() {
     if (data.files && data.files.length) {
       const table = document.createElement('table');
       table.className = 'data-table';
-      table.innerHTML = '<thead><tr><th>Symbol</th><th>Last Modified</th><th>Age</th><th>Fresh</th></tr></thead>';
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      ['Symbol', 'Last Modified', 'Age', 'Fresh'].forEach(function(text) {
+        const th = document.createElement('th');
+        th.textContent = text;
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
       const tbody = document.createElement('tbody');
       for (const f of data.files) {
         const tr = document.createElement('tr');
