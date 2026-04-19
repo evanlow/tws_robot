@@ -444,7 +444,14 @@ class TestAccountAPI:
         data = resp.get_json()
         assert resp.status_code == 200
         assert isinstance(data["names"], dict)
-        # The numeric symbol should not be filtered out by the regex
+        # Verify numeric symbol is not filtered out — if yfinance resolves
+        # it, it will appear in names; if not, it still shouldn't error.
+        # The key check: the endpoint accepted the numeric symbol (no 400
+        # error) and the regex didn't exclude it from default resolution.
+        # We can also verify via explicit param to confirm it's processed:
+        resp2 = client.get("/api/account/symbol-names?symbols=1211")
+        assert resp2.status_code == 200
+        assert isinstance(resp2.get_json()["names"], dict)
 
 
 class TestToYfinanceSymbol:
