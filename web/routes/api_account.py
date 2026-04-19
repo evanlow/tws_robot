@@ -83,16 +83,32 @@ def symbol_names():
     -------
     JSON ``{"names": {"AAPL": "Apple Inc.", ...}}``
     """
+    import re
+
     svc = get_services()
+
+    # Simple ticker regex: 1-10 uppercase letters, optionally with dots (BRK.B)
+    _TICKER_RE = re.compile(r"^[A-Z]{1,10}(\.[A-Z]{1,5})?$")
+
+    _MAX_SYMBOLS = 50
 
     raw_symbols = request.args.get("symbols", "")
     if raw_symbols:
         symbols = [s.strip().upper() for s in raw_symbols.split(",") if s.strip()]
     else:
-        symbols = list(svc.get_positions().keys())
+        # Default to portfolio — filter to stock tickers only
+        positions = svc.get_positions()
+        symbols = [
+            sym for sym, pos in positions.items()
+            if pos.get("sec_type", "STK") in ("STK", "")
+            and _TICKER_RE.match(sym)
+        ]
 
     if not symbols:
         return jsonify({"names": {}})
+
+    if len(symbols) > _MAX_SYMBOLS:
+        return jsonify({"error": f"Too many symbols (max {_MAX_SYMBOLS})"}), 400
 
     names: dict[str, str] = {}
     from data.fundamentals import get_fundamentals

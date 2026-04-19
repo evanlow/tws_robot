@@ -197,12 +197,30 @@ window.viewDataStatus = async function() {
     const res = await fetch('/api/data/status');
     const data = await res.json();
     if (data.files && data.files.length) {
-      let html = '<table class="data-table"><thead><tr><th>Symbol</th><th>Last Modified</th><th>Age</th><th>Fresh</th></tr></thead><tbody>';
+      const table = document.createElement('table');
+      table.className = 'data-table';
+      table.innerHTML = '<thead><tr><th>Symbol</th><th>Last Modified</th><th>Age</th><th>Fresh</th></tr></thead>';
+      const tbody = document.createElement('tbody');
       for (const f of data.files) {
-        html += `<tr><td data-symbol="${f.symbol}">${f.symbol}</td><td>${f.last_modified}</td><td>${f.age_days} days</td>
-          <td>${f.fresh ? '✅' : '⚠️'}</td></tr>`;
+        const tr = document.createElement('tr');
+        const tdSym = document.createElement('td');
+        tdSym.setAttribute('data-symbol', f.symbol);
+        tdSym.textContent = f.symbol;
+        const tdMod = document.createElement('td');
+        tdMod.textContent = f.last_modified;
+        const tdAge = document.createElement('td');
+        tdAge.textContent = f.age_days + ' days';
+        const tdFresh = document.createElement('td');
+        tdFresh.textContent = f.fresh ? '✅' : '⚠️';
+        tr.appendChild(tdSym);
+        tr.appendChild(tdMod);
+        tr.appendChild(tdAge);
+        tr.appendChild(tdFresh);
+        tbody.appendChild(tr);
       }
-      container.innerHTML = html + '</tbody></table>';
+      table.appendChild(tbody);
+      container.innerHTML = '';
+      container.appendChild(table);
       if (typeof enrichSymbolNames === 'function') enrichSymbolNames();
     } else {
       container.innerHTML = '<p class="empty-state">No historical data files found</p>';

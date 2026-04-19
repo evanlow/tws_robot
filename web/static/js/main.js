@@ -42,12 +42,12 @@ function _enrichSymbolNames() {
   if (!elements.length) return;
 
   // Collect unique symbols
-  var symbolSet = {};
+  var symbolSet = new Set();
   elements.forEach(function(el) {
     var sym = el.getAttribute('data-symbol');
-    if (sym) symbolSet[sym] = true;
+    if (sym) symbolSet.add(sym);
   });
-  var symbols = Object.keys(symbolSet);
+  var symbols = Array.from(symbolSet);
   if (!symbols.length) return;
 
   fetch('/api/account/symbol-names?symbols=' + encodeURIComponent(symbols.join(',')))
