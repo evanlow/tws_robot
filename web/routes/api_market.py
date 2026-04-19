@@ -47,10 +47,17 @@ def outlook():
     from ai.market_outlook import get_market_outlook_generator
 
     force = request.args.get("refresh", "false").lower() == "true"
+    generator = get_market_outlook_generator()
+
+    # Avoid expensive portfolio analysis when the cache is still fresh
+    if not force and not generator.is_stale():
+        data = generator.get_outlook()
+        return jsonify(data)
+
     mkt_svc = _get_service()
     market_overview = mkt_svc.get_overview()
 
-    # Gather portfolio context
+    # Gather portfolio context (only when we expect to regenerate)
     svc = get_services()
     positions = svc.get_positions()
     strategy_mix = {}
@@ -69,7 +76,6 @@ def outlook():
     except Exception:
         logger.debug("Failed to get account summary for outlook", exc_info=True)
 
-    generator = get_market_outlook_generator()
     data = generator.get_outlook(
         market_overview=market_overview,
         positions=positions,

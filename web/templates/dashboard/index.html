@@ -928,6 +928,10 @@
             li.textContent = data.ai_recommendations[i];
             recList.appendChild(li);
           }
+        } else {
+          // No recommendations — clear any stale items and hide section
+          if (recList) recList.innerHTML = '';
+          if (recSection) recSection.style.display = 'none';
         }
       } else {
         // No AI content — show fallback

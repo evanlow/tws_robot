@@ -234,15 +234,25 @@ def _parse_outlook_json(raw: str) -> Optional[Dict[str, Any]]:
 class MarketOutlookGenerator:
     """Generates and caches AI-powered market outlook for the dashboard.
 
-    Thread-safe: all public methods acquire ``_lock``.
+    Thread-safe: all public methods acquire ``_lock``.  When the cache is
+    stale, only one thread performs the (potentially slow) LLM generation;
+    other concurrent callers wait and receive the freshly cached result.
     """
+
+    # Short TTL used when no snapshots are available so the dashboard
+    # picks up real data as soon as the background refresh completes.
+    _EMPTY_DATA_TTL = 30  # seconds
 
     def __init__(self, cache_ttl: int = _OUTLOOK_CACHE_TTL) -> None:
         self._lock = threading.Lock()
+        self._generation_done = threading.Event()
         self._cache: Optional[Dict[str, Any]] = None
         self._cache_time: Optional[float] = None
         self._cache_ttl = cache_ttl
         self._generating = False
+
+        # Allow the event to be set initially so the first waiter proceeds
+        self._generation_done.set()
 
     def get_outlook(
         self,
@@ -275,16 +285,71 @@ class MarketOutlookGenerator:
             ``ai_portfolio_outlook``, ``ai_recommendations``,
             ``generated_at``, ``from_cache``.
         """
-        # Serve from cache if fresh
-        if not force_refresh:
-            with self._lock:
-                if self._cache and self._cache_time:
-                    age = time.time() - self._cache_time
-                    if age < self._cache_ttl:
-                        cached = dict(self._cache)
-                        cached["from_cache"] = True
-                        return cached
+        should_generate = False
 
+        with self._lock:
+            # Serve from cache if fresh
+            if not force_refresh and self._cache and self._cache_time:
+                ttl = getattr(self, "_cache_ttl_active", self._cache_ttl)
+                age = time.time() - self._cache_time
+                if age < ttl:
+                    cached = dict(self._cache)
+                    cached["from_cache"] = True
+                    return cached
+
+            # Cache is stale — decide whether *we* generate or wait
+            if self._generating:
+                # Another thread is already generating — wait for it
+                pass
+            else:
+                self._generating = True
+                self._generation_done.clear()
+                should_generate = True
+
+        if not should_generate:
+            # Wait for the in-flight generation to finish, then return cache
+            self._generation_done.wait(timeout=60)
+            with self._lock:
+                if self._cache:
+                    cached = dict(self._cache)
+                    cached["from_cache"] = True
+                    return cached
+            # Fallback: generation failed or timed out — compute pulse only
+            snapshots = []
+            if market_overview:
+                snapshots = market_overview.get("snapshots", [])
+            return {
+                "market_pulse": compute_market_pulse(snapshots),
+                "ai_session_recap": None,
+                "ai_portfolio_outlook": None,
+                "ai_recommendations": [],
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "from_cache": False,
+            }
+
+        # --- This thread is the generator ---
+        try:
+            result = self._generate(
+                market_overview=market_overview,
+                positions=positions,
+                strategy_mix=strategy_mix,
+                account_summary=account_summary,
+            )
+            return result
+        finally:
+            with self._lock:
+                self._generating = False
+            self._generation_done.set()
+
+    def _generate(
+        self,
+        *,
+        market_overview: Optional[Dict[str, Any]],
+        positions: Optional[Dict[str, Dict[str, Any]]],
+        strategy_mix: Optional[Dict[str, float]],
+        account_summary: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Perform the actual generation (pulse + optional AI enrichment)."""
         # Compute data-only market pulse (always available, no AI needed)
         snapshots = []
         if market_overview:
@@ -333,10 +398,13 @@ class MarketOutlookGenerator:
         except Exception:
             logger.exception("AI market outlook generation failed")
 
-        # Cache the result
+        # Cache the result — use a short TTL when no snapshots were available
+        # so the dashboard picks up real data once the background refresh fills it.
+        effective_ttl = self._cache_ttl if snapshots else self._EMPTY_DATA_TTL
         with self._lock:
             self._cache = result
             self._cache_time = time.time()
+            self._cache_ttl_active = effective_ttl
 
         return result
 
@@ -351,7 +419,8 @@ class MarketOutlookGenerator:
         with self._lock:
             if not self._cache or not self._cache_time:
                 return True
-            return (time.time() - self._cache_time) >= self._cache_ttl
+            ttl = getattr(self, "_cache_ttl_active", self._cache_ttl)
+            return (time.time() - self._cache_time) >= ttl
 
 
 # ──────────────────────────────────────────────────────────────────────

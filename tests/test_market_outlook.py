@@ -345,12 +345,14 @@ class TestMarketOutlookGenerator:
 
     def test_cache_expires(self, sample_market_overview):
         """After TTL expires, is_stale returns True."""
-        generator = MarketOutlookGenerator(cache_ttl=1)
+        generator = MarketOutlookGenerator(cache_ttl=60)
         with patch("ai.client.get_client", return_value=None):
             generator.get_outlook(market_overview=sample_market_overview)
             assert generator.is_stale() is False
-            time.sleep(1.1)
-            assert generator.is_stale() is True
+
+            # Simulate time advancing past the TTL
+            with patch("time.time", return_value=time.time() + 61):
+                assert generator.is_stale() is True
 
     def test_invalidate(self, sample_market_overview):
         """invalidate() clears cache."""
@@ -380,6 +382,49 @@ class TestMarketOutlookGenerator:
         with patch("ai.client.get_client", return_value=None):
             outlook = generator.get_outlook(market_overview=None)
         assert outlook["market_pulse"]["sentiment_label"] == "neutral"
+
+    def test_empty_snapshots_short_ttl(self):
+        """When snapshots are empty, cache uses shorter TTL so data refreshes sooner."""
+        generator = MarketOutlookGenerator(cache_ttl=900)
+        empty_overview = {"snapshots": [], "regions": [], "market_status": {}}
+        with patch("ai.client.get_client", return_value=None):
+            generator.get_outlook(market_overview=empty_overview)
+            assert generator.is_stale() is False
+            # After short TTL (30s) the empty-data cache should be stale,
+            # even though the normal TTL is 900s
+            with patch("time.time", return_value=time.time() + 31):
+                assert generator.is_stale() is True
+
+    def test_concurrent_generation_guard(self, sample_market_overview):
+        """Only one thread generates at a time; others wait for the result."""
+        import threading
+        generator = MarketOutlookGenerator(cache_ttl=300)
+        results = []
+        call_count = {"n": 0}
+
+        original_generate = generator._generate
+
+        def slow_generate(**kwargs):
+            call_count["n"] += 1
+            time.sleep(0.1)
+            return original_generate(**kwargs)
+
+        generator._generate = slow_generate
+
+        def worker():
+            with patch("ai.client.get_client", return_value=None):
+                r = generator.get_outlook(market_overview=sample_market_overview)
+                results.append(r)
+
+        threads = [threading.Thread(target=worker) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert len(results) == 3
+        # Only one thread should have actually called _generate
+        assert call_count["n"] == 1
 
     def test_singleton(self):
         """Module-level singleton works correctly."""
