@@ -11,6 +11,7 @@ import re
 from flask import Blueprint, jsonify, request
 
 from web.services import get_services
+from data.fundamentals import get_fundamentals
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,8 @@ def _to_yfinance_symbol(ib_symbol: str, pos_data: dict) -> str:
     exchange = pos_data.get("exchange", "")
     currency = pos_data.get("currency", "")
 
-    # If the symbol already contains a yfinance-style suffix, return as-is
+    # If the symbol contains any dot, don't append an exchange/currency
+    # suffix; keep the .OLD special-case so it can still be normalized.
     if "." in ib_symbol and not ib_symbol.endswith(".OLD"):
         return ib_symbol
 
@@ -183,6 +185,9 @@ def symbol_names():
     raw_symbols = request.args.get("symbols", "")
     if raw_symbols:
         symbols = [s.strip().upper() for s in raw_symbols.split(",") if s.strip()]
+        invalid = [s for s in symbols if not _TICKER_RE.match(s)]
+        if invalid:
+            return jsonify({"error": "Invalid symbols", "invalid_symbols": invalid}), 400
     else:
         # Default to portfolio — filter to stock tickers only
         symbols = [
@@ -198,7 +203,6 @@ def symbol_names():
         return jsonify({"error": f"Too many symbols (max {_MAX_SYMBOLS})"}), 400
 
     names: dict[str, str] = {}
-    from data.fundamentals import get_fundamentals
     for sym in symbols:
         try:
             yf_sym = _to_yfinance_symbol(sym, positions.get(sym, {}))

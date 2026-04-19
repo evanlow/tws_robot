@@ -4,6 +4,8 @@ Tests the new Super Dashboard API endpoints using the Flask test client.
 """
 
 import json
+from unittest.mock import patch
+
 import pytest
 
 from web import create_app
@@ -427,8 +429,17 @@ class TestAccountAPI:
         data = resp.get_json()
         assert "error" in data
 
+    def test_symbol_names_rejects_invalid_explicit_symbols(self, client):
+        """Test /api/account/symbol-names rejects invalid explicit symbols."""
+        resp = client.get("/api/account/symbol-names?symbols=AAPL,bad symbol!,MSFT")
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "error" in data
+        assert "invalid_symbols" in data
+
     def test_symbol_names_numeric_hk_stock_included(self, client, services):
-        """Test that numeric HK stock symbols are included in default resolution."""
+        """Test that numeric HK stock symbols pass through default portfolio
+        filtering and are resolved via yfinance with the .HK suffix."""
         services.update_position("1211", {
             "quantity": 1500,
             "entry_price": 128.84,
@@ -440,18 +451,15 @@ class TestAccountAPI:
             "exchange": "SEHK",
             "currency": "HKD",
         })
-        resp = client.get("/api/account/symbol-names")
-        data = resp.get_json()
-        assert resp.status_code == 200
-        assert isinstance(data["names"], dict)
-        # Verify numeric symbol is not filtered out — if yfinance resolves
-        # it, it will appear in names; if not, it still shouldn't error.
-        # The key check: the endpoint accepted the numeric symbol (no 400
-        # error) and the regex didn't exclude it from default resolution.
-        # We can also verify via explicit param to confirm it's processed:
-        resp2 = client.get("/api/account/symbol-names?symbols=1211")
-        assert resp2.status_code == 200
-        assert isinstance(resp2.get_json()["names"], dict)
+        fake_data = {"name": "BYD Electronic International Co., Ltd.", "symbol": "1211.HK"}
+        with patch("web.routes.api_account.get_fundamentals", return_value=fake_data) as mock_gf:
+            resp = client.get("/api/account/symbol-names")
+            data = resp.get_json()
+            assert resp.status_code == 200
+            # Verify get_fundamentals was called with the mapped yfinance symbol
+            mock_gf.assert_called_once_with("1211.HK", use_cache=True)
+            # Verify the original IB symbol is used as the key in the response
+            assert data["names"]["1211"] == "BYD Electronic International Co., Ltd."
 
 
 class TestToYfinanceSymbol:
