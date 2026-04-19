@@ -54,14 +54,14 @@ def outlook():
     svc = get_services()
     positions = svc.get_positions()
 
-    # Avoid expensive portfolio analysis when the cache is still fresh
-    # AND was already generated with positions.
-    if not force and not generator.is_stale():
-        # Pass positions so the generator can detect when an outlook that
-        # was generated without portfolio data should be invalidated.
-        data = generator.get_outlook(positions=positions)
-        if data.get("from_cache"):
-            return jsonify(data)
+    # Fast path: serve from cache without expensive context gathering.
+    # try_get_cached never triggers generation — it only returns a fresh
+    # cached result or None (after auto-invalidating a portfolio-less cache
+    # when positions have since become available).
+    if not force:
+        cached = generator.try_get_cached(positions=positions)
+        if cached is not None:
+            return jsonify(cached)
 
     mkt_svc = _get_service()
     market_overview = mkt_svc.get_overview()

@@ -250,6 +250,31 @@ class TestBuildOutlookContext:
         assert "AAPL" in ctx["portfolio"]["symbols"]
         assert ctx["portfolio"]["strategy_mix"]["momentum"] == 0.6
 
+    def test_account_level_fallback_when_positions_empty(self, sample_snapshots):
+        """When positions are empty but account_summary exists, the portfolio
+        summary should contain account-level data instead of being None."""
+        pulse = compute_market_pulse(sample_snapshots)
+        account_summary = {
+            "position_count": 7,
+            "equity": 60234.38,
+            "unrealized_pnl": 15697.39,
+            "daily_pnl": 0.0,
+        }
+        ctx_str = build_outlook_context(
+            market_pulse=pulse,
+            snapshots=sample_snapshots,
+            positions=None,
+            account_summary=account_summary,
+        )
+        ctx = json.loads(ctx_str)
+        portfolio = ctx["portfolio"]
+        assert portfolio is not None
+        assert portfolio["position_count"] == 7
+        assert portfolio["equity"] == 60234.38
+        assert portfolio["unrealized_pnl"] == 15697.39
+        assert portfolio["daily_pnl"] == 0.0
+        assert "note" in portfolio
+
 
 # ==============================================================================
 # _parse_outlook_json
@@ -361,6 +386,57 @@ class TestMarketOutlookGenerator:
             generator.get_outlook(market_overview=sample_market_overview)
             assert generator.is_stale() is False
             generator.invalidate()
+            assert generator.is_stale() is True
+
+    def test_cache_invalidated_when_positions_arrive(
+        self, sample_market_overview, sample_positions,
+    ):
+        """Cached outlook generated without positions is not served once
+        positions become available."""
+        generator = MarketOutlookGenerator(cache_ttl=300)
+        with patch("ai.client.get_client", return_value=None):
+            # First call — no positions
+            first = generator.get_outlook(
+                market_overview=sample_market_overview,
+                positions=None,
+            )
+            assert first["from_cache"] is False
+
+            # Second call — same params → still cached
+            second = generator.get_outlook(
+                market_overview=sample_market_overview,
+                positions=None,
+            )
+            assert second["from_cache"] is True
+
+            # Third call — positions now available → cache should be
+            # invalidated, resulting in a freshly generated result.
+            third = generator.get_outlook(
+                market_overview=sample_market_overview,
+                positions=sample_positions,
+            )
+            assert third["from_cache"] is False
+
+    def test_try_get_cached_returns_none_when_positions_arrive(
+        self, sample_market_overview, sample_positions,
+    ):
+        """try_get_cached returns None (does not serve stale cache) once
+        positions are available but cached outlook was generated without."""
+        generator = MarketOutlookGenerator(cache_ttl=300)
+        with patch("ai.client.get_client", return_value=None):
+            generator.get_outlook(
+                market_overview=sample_market_overview,
+                positions=None,
+            )
+
+            # Cache is fresh — returns cached result when no positions passed
+            assert generator.try_get_cached() is not None
+
+            # Positions now available — try_get_cached should invalidate and
+            # return None so the caller gathers full context and regenerates.
+            assert generator.try_get_cached(positions=sample_positions) is None
+
+            # Cache was cleared, so is_stale should be True
             assert generator.is_stale() is True
 
     def test_ai_failure_graceful(self, sample_market_overview):

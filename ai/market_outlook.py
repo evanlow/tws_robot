@@ -276,6 +276,30 @@ class MarketOutlookGenerator:
         # "portfolio data unavailable" message for the entire TTL.
         self._cache_had_positions = False
 
+    def try_get_cached(
+        self,
+        *,
+        positions: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return a fresh cached outlook, or ``None``.
+
+        This is a **cache-only** check — it never triggers generation.
+        It performs the same auto-invalidation as :meth:`get_outlook`:
+        if the cached outlook was generated without positions but
+        *positions* are now available the cache is cleared and ``None``
+        is returned so the caller can gather full context and regenerate.
+        """
+        with self._lock:
+            self._maybe_invalidate_for_positions(positions)
+
+            if self._cache and self._cache_time:
+                age = time.time() - self._cache_time
+                if age < self._cache_ttl_active:
+                    cached = dict(self._cache)
+                    cached["from_cache"] = True
+                    return cached
+        return None
+
     def get_outlook(
         self,
         *,
@@ -314,14 +338,7 @@ class MarketOutlookGenerator:
             # portfolio data but positions are now available.  This ensures
             # the user quickly gets a portfolio-aware outlook once TWS
             # callbacks populate positions.
-            positions_now_available = bool(positions) and not self._cache_had_positions
-            if positions_now_available and self._cache and self._cache_time:
-                logger.info(
-                    "Positions now available — invalidating portfolio-less "
-                    "outlook cache"
-                )
-                self._cache = None
-                self._cache_time = None
+            self._maybe_invalidate_for_positions(positions)
 
             # Serve from cache if fresh
             if not force_refresh and self._cache and self._cache_time:
@@ -345,9 +362,20 @@ class MarketOutlookGenerator:
             self._generation_done.wait(timeout=60)
             with self._lock:
                 if self._cache:
-                    cached = dict(self._cache)
-                    cached["from_cache"] = True
-                    return cached
+                    # Re-check: the generation that just finished may not
+                    # have had positions while this caller does.  Invalidate
+                    # so the *next* request regenerates with positions.
+                    if bool(positions) and not self._cache_had_positions:
+                        logger.info(
+                            "Post-wait: cached outlook lacks positions "
+                            "— invalidating for next request"
+                        )
+                        self._cache = None
+                        self._cache_time = None
+                    else:
+                        cached = dict(self._cache)
+                        cached["from_cache"] = True
+                        return cached
             # Fallback: generation failed or timed out — compute pulse only
             snapshots = []
             if market_overview:
@@ -374,6 +402,24 @@ class MarketOutlookGenerator:
             with self._lock:
                 self._generating = False
             self._generation_done.set()
+
+    # -- internal helpers --------------------------------------------------
+
+    def _maybe_invalidate_for_positions(
+        self,
+        positions: Optional[Dict[str, Dict[str, Any]]],
+    ) -> None:
+        """Clear cache when it was generated without positions but positions
+        are now available.  **Must be called while holding ``_lock``.**
+        """
+        if bool(positions) and not self._cache_had_positions \
+                and self._cache and self._cache_time:
+            logger.info(
+                "Positions now available — invalidating portfolio-less "
+                "outlook cache"
+            )
+            self._cache = None
+            self._cache_time = None
 
     def _generate(
         self,
