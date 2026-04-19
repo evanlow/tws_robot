@@ -33,12 +33,19 @@ def index():
     except Exception:
         pass
 
+    summary = {}
+    if strategies:
+        try:
+            summary = svc.strategy_registry.get_overall_summary()
+        except Exception:
+            pass
+
     context = {
         "title": "Strategies",
         "active_page": "strategies",
         "strategies": strategies,
         "strategy_classes": classes,
-        "summary": svc.strategy_registry.get_overall_summary() if strategies else {},
+        "summary": summary,
         "inferred_strategies": inferred,
     }
     return render_template("strategies/index.html", **context)

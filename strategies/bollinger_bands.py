@@ -66,9 +66,14 @@ class BollingerBandsStrategy(BaseStrategy):
         """
         Initialize Bollinger Bands strategy.
         
+        Can be called in two ways:
+        1. Registry path: BollingerBandsStrategy(config, event_bus)
+           where config is a StrategyConfig instance
+        2. Convenience path: BollingerBandsStrategy(name="BB", symbols=["AAPL"], ...)
+        
         Args:
-            name: Strategy name
-            symbols: List of symbols to trade
+            name: Strategy name (or StrategyConfig when called from registry)
+            symbols: List of symbols to trade (or event_bus when called from registry)
             period: Moving average period
             std_dev: Standard deviation multiplier for bands
             min_volume: Minimum volume threshold
@@ -76,22 +81,38 @@ class BollingerBandsStrategy(BaseStrategy):
             stop_loss_pct: Stop loss percentage from entry
             **kwargs: Additional parameters for base strategy
         """
-        # Create strategy config
         from strategies.base_strategy import StrategyConfig
-        config = StrategyConfig(
-            name=name,
-            symbols=symbols or [],
-            enabled=True,
-            parameters={
-                'period': period,
-                'std_dev': std_dev,
-                'min_volume': min_volume,
-                'position_size': position_size,
-                'stop_loss_pct': stop_loss_pct
-            }
-        )
+
+        # Support registry calling convention: strategy_class(config, event_bus)
+        if isinstance(name, StrategyConfig):
+            config = name
+            event_bus = symbols  # second positional arg is event_bus
+            period = config.parameters.get('period', period)
+            std_dev = config.parameters.get('std_dev', std_dev)
+            min_volume = config.parameters.get('min_volume', min_volume)
+            position_size = config.parameters.get('position_size', position_size)
+            stop_loss_pct = config.parameters.get('stop_loss_pct', stop_loss_pct)
+        else:
+            # Convenience path: create config from individual args
+            event_bus = None
+            config = StrategyConfig(
+                name=name,
+                symbols=symbols or [],
+                enabled=True,
+                parameters={
+                    'period': period,
+                    'std_dev': std_dev,
+                    'min_volume': min_volume,
+                    'position_size': position_size,
+                    'stop_loss_pct': stop_loss_pct
+                }
+            )
         
         super().__init__(config=config)
+        # Store event_bus reference for potential future use; skip
+        # BaseStrategy._subscribe_to_events() because this strategy
+        # uses its own signals_to_emit list instead of the event bus.
+        self.event_bus = event_bus
         
         self.period = period
         self.std_dev = std_dev
