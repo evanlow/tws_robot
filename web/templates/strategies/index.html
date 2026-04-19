@@ -312,7 +312,7 @@ window.loadInsight = async function(id) {
     section.style.display = 'block';
     btn.style.display = 'none';
   } catch(e) {
-    section.querySelector('.insight-text').textContent = 'Failed to load insight: ' + e;
+    section.querySelector('.insight-text').textContent = 'Failed to load insight: ' + (e.message || e);
     section.style.display = 'block';
     btn.disabled = false;
     btn.textContent = '💡 Get Insight';
