@@ -209,6 +209,67 @@ Get all open positions.
 }
 ```
 
+### `GET /api/account/symbol-names`
+
+Resolve ticker symbols to human-readable company names.
+
+**NEW in v1.7 (PR #24)** - Company Name Display
+
+**Query Parameters:**
+- `symbols` (optional): Comma-separated list of ticker symbols to resolve (e.g., `AAPL,MSFT,GOOGL`)
+  - When omitted, defaults to all stock symbols currently in the portfolio
+  - Maximum 50 symbols per request (rate limited)
+
+**Response:**
+```json
+{
+  "names": {
+    "AAPL": "Apple Inc.",
+    "MSFT": "Microsoft Corporation",
+    "GOOGL": "Alphabet Inc."
+  }
+}
+```
+
+**Error Response (400 - Too Many Symbols):**
+```json
+{
+  "error": "Too many symbols (max 50)"
+}
+```
+
+**Behavior:**
+- Filters out option symbols automatically when using portfolio default
+- Only returns names that are successfully resolved (silently skips failures)
+- Uses cached fundamental data when available for faster response
+- Returns empty object if no symbols provided or all resolutions fail
+
+**Example Usage:**
+```javascript
+// Get names for specific symbols
+fetch('/api/account/symbol-names?symbols=AAPL,TSLA')
+  .then(r => r.json())
+  .then(data => {
+    console.log(data.names);  // {"AAPL": "Apple Inc.", "TSLA": "Tesla, Inc."}
+  });
+
+// Get names for all portfolio stocks
+fetch('/api/account/symbol-names')
+  .then(r => r.json())
+  .then(data => {
+    // Automatically resolves all stock positions in portfolio
+    Object.entries(data.names).forEach(([symbol, name]) => {
+      console.log(`${symbol}: ${name}`);
+    });
+  });
+```
+
+**Use Cases:**
+- Display company names alongside ticker symbols in UI tables
+- Add tooltips/hovers showing full company names
+- Improve readability of position lists and reports
+- Help users quickly identify holdings without memorizing tickers
+
 ### `GET /api/account/portfolio-analysis`
 
 Get comprehensive portfolio analysis including concentration metrics, sector exposure, drawdown tracking, and P&L attribution.
