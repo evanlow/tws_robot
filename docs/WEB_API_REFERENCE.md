@@ -1116,6 +1116,132 @@ Returns real-time data for major market indices (S&P 500, Dow, Nasdaq, VIX, FTSE
 **Caching:**
 Data is cached for 5 minutes. When stale, a background refresh is triggered automatically so subsequent requests receive fresh data.
 
+### `GET /api/market/outlook`
+
+**Get AI-powered market outlook with portfolio-aware insights.**
+
+**NEW in v1.9 (PR #28)** - Daily Market Briefing
+
+Generates a comprehensive market briefing that combines global index data with your portfolio composition to provide personalized insights. Results are cached for 15 minutes to optimize performance.
+
+**Query Parameters:**
+- `refresh=true` (optional) - Bypass cache and force fresh generation
+
+**Response:**
+```json
+{
+  "market_pulse": {
+    "overall_sentiment": 0.42,
+    "sentiment_label": "positive",
+    "regions": {
+      "US": {"avg_change_pct": 0.46, "sentiment": "positive"},
+      "Europe": {"avg_change_pct": -0.12, "sentiment": "slightly_negative"},
+      "Asia": {"avg_change_pct": 0.28, "sentiment": "slightly_positive"}
+    },
+    "vix": {
+      "price": 15.2,
+      "change_pct": -3.18,
+      "level": "low"
+    },
+    "summary_text": "Markets mixed: US indices up 0.5%, Europe down 0.1%, Asia up 0.3%. VIX at 15.2 (low volatility)."
+  },
+  "ai_session_recap": "US markets rose modestly with the S&P 500 up 0.40% to 5,842 and Nasdaq gaining 0.65%. Technology led gains while European markets showed weakness with the FTSE down 0.31%. VIX declined 3.18% to 15.2, indicating low market anxiety.",
+  "ai_portfolio_outlook": "Your portfolio's 45% technology exposure benefits from today's tech-led rally. The covered call positions on AAPL and MSFT are well-positioned with current prices below strike prices. Iron condor on SPY remains within profitable range with VIX at comfortable levels.",
+  "ai_recommendations": [
+    "Consider taking partial profits on technology positions after strong gains",
+    "Monitor VIX levels - current low volatility may not persist",
+    "European weakness presents potential hedging opportunity",
+    "Iron condor positions look safe - hold until expiration"
+  ],
+  "generated_at": "2026-04-19T14:30:00+00:00",
+  "cached": false
+}
+```
+
+**Response Fields:**
+
+- `market_pulse` - Quantitative market sentiment analysis (computed, not AI):
+  - `overall_sentiment` - Aggregate sentiment score (-1.0 to 1.0)
+  - `sentiment_label` - Text label: "very_negative", "negative", "slightly_negative", "neutral", "slightly_positive", "positive", "very_positive"
+  - `regions` - Per-region sentiment breakdown:
+    - `avg_change_pct` - Average percentage change for indices in that region
+    - `sentiment` - Region-specific sentiment label
+  - `vix` - VIX data (when available):
+    - `price` - Current VIX level
+    - `change_pct` - Percentage change
+    - `level` - Classification: "low" (<20), "elevated" (20-30), "high" (30+)
+  - `summary_text` - One-line market pulse summary
+
+- `ai_session_recap` - AI-generated 2-3 sentence summary of the most recent trading session (null if AI disabled or error)
+  - References specific index moves and regional performance
+  - Mentions VIX behavior and volatility levels
+  - Uses actual numbers from market data
+
+- `ai_portfolio_outlook` - AI-generated portfolio-specific analysis (null if AI disabled, error, or no positions)
+  - Connects market conditions to your actual holdings
+  - Highlights exposed positions or sectors
+  - Assesses strategy positions (covered calls, spreads, etc.)
+  - Provides general market outlook if portfolio is empty
+
+- `ai_recommendations` - Array of 2-4 actionable items (null if AI disabled or error)
+  - Strategy suggestions aligned with current market direction
+  - Hedging recommendations if risk is elevated
+  - Position management guidance
+  - Opportunities based on market conditions
+
+- `generated_at` - ISO timestamp when the outlook was generated
+- `cached` - Whether this response came from cache (true) or was freshly generated (false)
+
+**AI Requirements:**
+- Requires `OPENAI_API_KEY` environment variable to be set
+- If AI is disabled, returns `market_pulse` data only (AI fields will be null)
+- Uses temperature 0.4 for consistent, focused responses
+
+**Caching:**
+- Results cached for 15 minutes (900 seconds)
+- Use `?refresh=true` to bypass cache and force regeneration
+- Cache automatically invalidated when market data is refreshed
+
+**Example Usage:**
+```javascript
+// Get cached outlook (if available)
+fetch('/api/market/outlook')
+  .then(r => r.json())
+  .then(data => {
+    // Display market pulse bar
+    document.querySelector('.market-pulse').textContent = data.market_pulse.summary_text;
+    document.querySelector('.sentiment').className = `sentiment ${data.market_pulse.sentiment_label}`;
+    
+    // Show AI insights (if available)
+    if (data.ai_session_recap) {
+      document.querySelector('.session-recap').textContent = data.ai_session_recap;
+      document.querySelector('.portfolio-outlook').textContent = data.ai_portfolio_outlook;
+      
+      // Render recommendations list
+      const list = document.querySelector('.recommendations');
+      data.ai_recommendations.forEach(rec => {
+        const li = document.createElement('li');
+        li.textContent = rec;
+        list.appendChild(li);
+      });
+    }
+  });
+
+// Force fresh generation
+fetch('/api/market/outlook?refresh=true')
+  .then(r => r.json())
+  .then(data => {
+    console.log('Fresh outlook generated:', data.generated_at);
+  });
+```
+
+**Use Cases:**
+- Dashboard "morning briefing" to start the trading day
+- Quick market sentiment check before making trades
+- Portfolio-specific risk assessment
+- Strategy adjustment recommendations
+- Market condition monitoring throughout the day
+
 ### `POST /api/market/refresh`
 
 Manually trigger market data refresh from Yahoo Finance.

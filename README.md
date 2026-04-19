@@ -20,8 +20,7 @@ Transform your trading ideas into automated strategies. Test them on historical 
 - 📊 **Multiple strategies** - Run Moving Average, Mean Reversion, Momentum simultaneously
 - ⚡ **Paper trading** - Validate strategies with real-time data before going live
 - 📈 **Performance tracking** - See what's working with Sharpe ratio, win rate, drawdown
-- 🏢 **Company name display** - See "Apple Inc." not just "AAPL" across all pages (supports international stocks: HK, JP, UK, AU, etc.)
-- �🎯 **AI Portfolio Intelligence** - Auto-detect your trading strategies from positions:
+- 🏢 **Company name display** - See "Apple Inc." not just "AAPL" across all pages (supports international stocks: HK, JP, UK, AU, etc.)- 📰 **AI Market Outlook** - Daily market briefing with session recap, portfolio-relevant insights, and actionable recommendations- �🎯 **AI Portfolio Intelligence** - Auto-detect your trading strategies from positions:
   - 📍 Covered calls, protective puts, and collars
   - 📐 Bull/bear spreads, iron condors, straddles, strangles
   - 🎚️ Automatic profit targets, stop losses, and risk metrics
