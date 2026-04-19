@@ -20,7 +20,7 @@
       <tr>
         <td><code>{{ o.id|default('') }}</code></td>
         <td>{{ o.submitted_at|default('') }}</td>
-        <td><strong>{{ o.symbol }}</strong></td>
+        <td data-symbol="{{ o.symbol }}"><strong>{{ o.symbol }}</strong></td>
         <td class="{{ 'text-buy' if o.action == 'BUY' else 'text-sell' }}">{{ o.action }}</td>
         <td>{{ o.quantity }}</td>
         <td>{{ o.order_type|default('MARKET') }}</td>
@@ -49,7 +49,7 @@
       {% for t in trades %}
       <tr>
         <td>{{ t.timestamp|default(t.submitted_at|default('')) }}</td>
-        <td><strong>{{ t.symbol }}</strong></td>
+        <td data-symbol="{{ t.symbol }}"><strong>{{ t.symbol }}</strong></td>
         <td class="{{ 'text-buy' if t.action == 'BUY' else 'text-sell' }}">{{ t.action }}</td>
         <td>{{ t.quantity }}</td>
         <td>${{ "%.2f"|format(t.price|default(0)) }}</td>

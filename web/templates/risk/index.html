@@ -85,7 +85,7 @@
     <tbody>
       {% for symbol, pos in positions.items() %}
       <tr>
-        <td><strong>{{ symbol }}</strong></td>
+        <td data-symbol="{{ symbol }}"><strong>{{ symbol }}</strong></td>
         <td>${{ "%.2f"|format(pos.market_value|default(0)) }}</td>
         <td class="{{ 'pnl-positive' if (pos.unrealized_pnl|default(0)) >= 0 else 'pnl-negative' }}">
           ${{ "%.2f"|format(pos.unrealized_pnl|default(0)) }}

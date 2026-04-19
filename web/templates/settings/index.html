@@ -199,10 +199,11 @@ window.viewDataStatus = async function() {
     if (data.files && data.files.length) {
       let html = '<table class="data-table"><thead><tr><th>Symbol</th><th>Last Modified</th><th>Age</th><th>Fresh</th></tr></thead><tbody>';
       for (const f of data.files) {
-        html += `<tr><td>${f.symbol}</td><td>${f.last_modified}</td><td>${f.age_days} days</td>
+        html += `<tr><td data-symbol="${f.symbol}">${f.symbol}</td><td>${f.last_modified}</td><td>${f.age_days} days</td>
           <td>${f.fresh ? '✅' : '⚠️'}</td></tr>`;
       }
       container.innerHTML = html + '</tbody></table>';
+      if (typeof enrichSymbolNames === 'function') enrichSymbolNames();
     } else {
       container.innerHTML = '<p class="empty-state">No historical data files found</p>';
     }

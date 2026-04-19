@@ -2,6 +2,9 @@
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[TWS Robot] UI ready');
+
+  // Auto-enrich symbol cells with company names
+  _enrichSymbolNames();
 });
 
 /**
@@ -25,3 +28,54 @@ window.renderMarkdown = function renderMarkdown(text) {
     .replace(/`(.+?)`/g,      '<code>$1</code>')
     .replace(/\n/g,           '<br>');
 };
+
+/**
+ * Fetch company names for all ``[data-symbol]`` elements on the page
+ * and enrich them with a tooltip (title) and a small subtitle showing
+ * the company name.
+ *
+ * Elements should set ``data-symbol="AAPL"`` to opt in.
+ * @private
+ */
+function _enrichSymbolNames() {
+  var elements = document.querySelectorAll('[data-symbol]');
+  if (!elements.length) return;
+
+  // Collect unique symbols
+  var symbolSet = {};
+  elements.forEach(function(el) {
+    var sym = el.getAttribute('data-symbol');
+    if (sym) symbolSet[sym] = true;
+  });
+  var symbols = Object.keys(symbolSet);
+  if (!symbols.length) return;
+
+  fetch('/api/account/symbol-names?symbols=' + encodeURIComponent(symbols.join(',')))
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      var names = data.names || {};
+      elements.forEach(function(el) {
+        var sym = el.getAttribute('data-symbol');
+        var name = names[sym];
+        if (!name) return;
+        // Add tooltip
+        el.setAttribute('title', name);
+        // Append subtitle if not already added
+        if (!el.querySelector('.symbol-name')) {
+          var sub = document.createElement('span');
+          sub.className = 'symbol-name';
+          sub.textContent = name;
+          el.appendChild(sub);
+        }
+      });
+    })
+    .catch(function(err) {
+      console.debug('[TWS Robot] Symbol name enrichment failed:', err);
+    });
+}
+
+/**
+ * Re-run symbol enrichment on demand (e.g. after dynamic content loads).
+ * Call this after inserting new ``[data-symbol]`` elements into the DOM.
+ */
+window.enrichSymbolNames = _enrichSymbolNames;

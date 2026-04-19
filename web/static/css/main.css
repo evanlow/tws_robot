@@ -756,3 +756,16 @@ h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
   margin-bottom: 0.35rem;
 }
 
+/* Symbol name subtitle — appended by auto-enrichment in main.js */
+.symbol-name {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: #a0aec0;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 18ch;
+}
+

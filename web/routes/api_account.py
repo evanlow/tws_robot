@@ -1,12 +1,17 @@
 """Account data API.
 
-GET /api/account/summary    — equity, buying power, cash balance, P&L
-GET /api/account/positions  — all open positions with real-time P&L
+GET /api/account/summary      — equity, buying power, cash balance, P&L
+GET /api/account/positions    — all open positions with real-time P&L
+GET /api/account/symbol-names — resolve ticker symbols to company names
 """
 
-from flask import Blueprint, jsonify
+import logging
+
+from flask import Blueprint, jsonify, request
 
 from web.services import get_services
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("api_account", __name__, url_prefix="/api/account")
 
@@ -62,6 +67,45 @@ def positions():
         })
 
     return jsonify({"positions": positions_list, "count": len(positions_list)})
+
+
+@bp.route("/symbol-names", methods=["GET"])
+def symbol_names():
+    """Resolve ticker symbols to human-readable company names.
+
+    Query parameters
+    ----------------
+    symbols : str, optional
+        Comma-separated list of symbols to resolve.  When omitted the
+        endpoint resolves all symbols currently in the portfolio.
+
+    Returns
+    -------
+    JSON ``{"names": {"AAPL": "Apple Inc.", ...}}``
+    """
+    svc = get_services()
+
+    raw_symbols = request.args.get("symbols", "")
+    if raw_symbols:
+        symbols = [s.strip().upper() for s in raw_symbols.split(",") if s.strip()]
+    else:
+        symbols = list(svc.get_positions().keys())
+
+    if not symbols:
+        return jsonify({"names": {}})
+
+    names: dict[str, str] = {}
+    for sym in symbols:
+        try:
+            from data.fundamentals import get_fundamentals
+            data = get_fundamentals(sym, use_cache=True)
+            name = data.get("name")
+            if name and name != sym:
+                names[sym] = name
+        except Exception:
+            logger.debug("Could not resolve name for %s", sym)
+
+    return jsonify({"names": names})
 
 
 @bp.route("/portfolio-analysis", methods=["GET"])

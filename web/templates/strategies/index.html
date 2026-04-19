@@ -53,7 +53,7 @@
       <div style="font-size:0.8rem;color:#a0aec0;margin-bottom:0.5rem;">
         <strong>Positions:</strong>
         {% for pos in inf.positions %}
-        <span style="display:inline-block;background:#0f0f13;padding:2px 6px;border-radius:4px;margin:2px;">
+        <span style="display:inline-block;background:#0f0f13;padding:2px 6px;border-radius:4px;margin:2px;" data-symbol="{{ pos.symbol }}">
           {{ pos.symbol }} ({{ pos.side|default('?') }} {{ pos.quantity|default(0)|abs }})
         </span>
         {% endfor %}
