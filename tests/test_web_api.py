@@ -429,13 +429,15 @@ class TestAccountAPI:
         data = resp.get_json()
         assert "error" in data
 
-    def test_symbol_names_rejects_invalid_explicit_symbols(self, client):
-        """Test /api/account/symbol-names rejects invalid explicit symbols."""
+    def test_symbol_names_skips_invalid_explicit_symbols(self, client):
+        """Test /api/account/symbol-names skips invalid symbols and resolves valid ones."""
         resp = client.get("/api/account/symbol-names?symbols=AAPL,bad symbol!,MSFT")
-        assert resp.status_code == 400
+        assert resp.status_code == 200
         data = resp.get_json()
-        assert "error" in data
-        assert "invalid_symbols" in data
+        assert "names" in data
+        # Invalid symbols are silently dropped; valid ones are resolved
+        assert isinstance(data["names"], dict)
+        assert "bad symbol!" not in data["names"]
 
     def test_symbol_names_numeric_hk_stock_included(self, client, services):
         """Test that numeric HK stock symbols pass through default portfolio
