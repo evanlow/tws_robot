@@ -1201,6 +1201,12 @@ Generates a comprehensive market briefing that combines global index data with y
 - Results cached for 15 minutes (900 seconds)
 - Use `?refresh=true` to bypass cache and force regeneration
 - Cache automatically invalidated when market data is refreshed
+- Cache auto-invalidated when portfolio positions load after initially being unavailable (prevents serving stale "data unavailable" messages while positions are loading from TWS)
+
+**Smart Portfolio Fallback:**
+- If positions haven't loaded from TWS yet, the outlook uses account-level data (equity, position count, P&L) to provide portfolio-aware insights
+- Once positions load, the cache automatically refreshes to include position-specific analysis
+- This ensures you get useful insights immediately on dashboard load, with enhanced details once TWS data arrives
 
 **Example Usage:**
 ```javascript
