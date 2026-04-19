@@ -245,14 +245,15 @@ class MarketOutlookGenerator:
 
     def __init__(self, cache_ttl: int = _OUTLOOK_CACHE_TTL) -> None:
         self._lock = threading.Lock()
+        # Event starts set so the very first concurrent waiter (if any)
+        # proceeds immediately rather than blocking forever.
         self._generation_done = threading.Event()
+        self._generation_done.set()
         self._cache: Optional[Dict[str, Any]] = None
         self._cache_time: Optional[float] = None
         self._cache_ttl = cache_ttl
+        self._cache_ttl_active = cache_ttl
         self._generating = False
-
-        # Allow the event to be set initially so the first waiter proceeds
-        self._generation_done.set()
 
     def get_outlook(
         self,
@@ -290,9 +291,8 @@ class MarketOutlookGenerator:
         with self._lock:
             # Serve from cache if fresh
             if not force_refresh and self._cache and self._cache_time:
-                ttl = getattr(self, "_cache_ttl_active", self._cache_ttl)
                 age = time.time() - self._cache_time
-                if age < ttl:
+                if age < self._cache_ttl_active:
                     cached = dict(self._cache)
                     cached["from_cache"] = True
                     return cached
@@ -419,8 +419,7 @@ class MarketOutlookGenerator:
         with self._lock:
             if not self._cache or not self._cache_time:
                 return True
-            ttl = getattr(self, "_cache_ttl_active", self._cache_ttl)
-            return (time.time() - self._cache_time) >= ttl
+            return (time.time() - self._cache_time) >= self._cache_ttl_active
 
 
 # ──────────────────────────────────────────────────────────────────────

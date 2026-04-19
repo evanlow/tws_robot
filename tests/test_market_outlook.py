@@ -406,7 +406,7 @@ class TestMarketOutlookGenerator:
 
         def slow_generate(**kwargs):
             call_count["n"] += 1
-            time.sleep(0.1)
+            time.sleep(0.01)
             return original_generate(**kwargs)
 
         generator._generate = slow_generate
