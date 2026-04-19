@@ -61,13 +61,13 @@ def outlook():
         analysis = analyzer.analyze_portfolio(positions, use_ai=False)
         strategy_mix = analysis.get("strategy_mix", {})
     except Exception:
-        logger.debug("Could not compute strategy mix for outlook")
+        logger.debug("Failed to compute strategy mix for outlook", exc_info=True)
 
     try:
         account_summary = svc.get_account_summary()
         account_summary["equity"] = svc.risk_manager.current_equity
     except Exception:
-        logger.debug("Could not get account summary for outlook")
+        logger.debug("Failed to get account summary for outlook", exc_info=True)
 
     generator = get_market_outlook_generator()
     data = generator.get_outlook(
