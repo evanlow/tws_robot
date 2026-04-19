@@ -199,7 +199,7 @@ def inferred_insight(inferred_id: str):
     if client is None:
         return jsonify({
             "error": "AI features are not enabled. "
-                     "Set AI_ENABLED=true and OPENAI_API_KEY to activate."
+                     "Set OPENAI_API_KEY to auto-enable, or set AI_ENABLED=true explicitly."
         }), 503
 
     svc = get_services()

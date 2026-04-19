@@ -843,11 +843,12 @@ class TestStrategyAPI:
         inferred_after = resp.get_json()["inferred"]
         assert len(inferred_after) == 1
 
-    def test_insight_inferred_not_found(self, client):
+    @patch("ai.client.get_client")
+    def test_insight_inferred_not_found(self, mock_get_client, client):
         """Test POST /api/strategies/inferred/<id>/insight for non-existent ID."""
+        mock_get_client.return_value = mock_get_client  # non-None → AI enabled
         resp = client.post("/api/strategies/inferred/missing_id/insight")
-        # If AI is disabled, we get 503; if AI is enabled but ID is bad, 404.
-        assert resp.status_code in (404, 503)
+        assert resp.status_code == 404
 
     @patch("ai.client.get_client")
     def test_insight_inferred_ai_disabled(self, mock_get_client, client, services):

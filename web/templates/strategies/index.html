@@ -60,9 +60,10 @@
           ${{ "%.2f"|format(cur_price) }}
         </span>
         {% if ent_price > 0 %}
-        {% set price_chg = cur_price - ent_price %}
+        {% set raw_chg = cur_price - ent_price %}
+        {% set price_chg = -raw_chg if first_pos.side|default('LONG') == 'SHORT' else raw_chg %}
         {% set price_chg_pct = (price_chg / ent_price * 100) %}
-        {% set is_profit = (price_chg >= 0 and first_pos.side|default('LONG') == 'LONG') or (price_chg <= 0 and first_pos.side|default('LONG') == 'SHORT') %}
+        {% set is_profit = price_chg >= 0 %}
         <span style="font-size:0.8rem;font-weight:600;color:{{ '#48bb78' if is_profit else '#fc8181' }};">
           {{ "+" if price_chg >= 0 else "" }}{{ "%.2f"|format(price_chg) }}
           ({{ "+" if price_chg >= 0 else "" }}{{ "%.1f"|format(price_chg_pct) }}%)
