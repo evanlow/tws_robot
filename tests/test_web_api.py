@@ -843,6 +843,63 @@ class TestStrategyAPI:
         inferred_after = resp.get_json()["inferred"]
         assert len(inferred_after) == 1
 
+    @patch("ai.client.get_client")
+    def test_insight_inferred_not_found(self, mock_get_client, client):
+        """Test POST /api/strategies/inferred/<id>/insight for non-existent ID."""
+        mock_get_client.return_value = mock_get_client  # non-None → AI enabled
+        resp = client.post("/api/strategies/inferred/missing_id/insight")
+        assert resp.status_code == 404
+
+    @patch("ai.client.get_client")
+    def test_insight_inferred_ai_disabled(self, mock_get_client, client, services):
+        """Test insight returns 503 when AI is not enabled."""
+        mock_get_client.return_value = None
+
+        services.update_position("GOOG", {
+            "quantity": 100,
+            "entry_price": 140.0,
+            "current_price": 145.0,
+            "unrealized_pnl": 500.0,
+            "market_value": 14500.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+
+        resp = client.get("/api/strategies/inferred")
+        inferred = resp.get_json()["inferred"]
+        assert len(inferred) >= 1
+        strategy_id = inferred[0]["id"]
+
+        resp = client.post(f"/api/strategies/inferred/{strategy_id}/insight")
+        assert resp.status_code == 503
+        assert "error" in resp.get_json()
+
+    @patch("ai.client.get_client")
+    def test_insight_inferred_success(self, mock_get_client, client, services):
+        """Test insight returns AI-generated text when AI is available."""
+        mock_client = mock_get_client.return_value
+        mock_client.chat.return_value = "The position is up 3.3% from entry with room to run toward the 10% target."
+
+        services.update_position("NVDA", {
+            "quantity": 50,
+            "entry_price": 120.0,
+            "current_price": 124.0,
+            "unrealized_pnl": 200.0,
+            "market_value": 6200.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+
+        resp = client.get("/api/strategies/inferred")
+        inferred = resp.get_json()["inferred"]
+        strategy_id = inferred[0]["id"]
+
+        resp = client.post(f"/api/strategies/inferred/{strategy_id}/insight")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert "insight" in data
+        assert "position is up" in data["insight"]
+
 
 # ==============================================================================
 # Event API
