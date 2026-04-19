@@ -41,11 +41,14 @@ function _enrichSymbolNames() {
   var elements = document.querySelectorAll('[data-symbol]');
   if (!elements.length) return;
 
-  // Collect unique symbols
+  // Collect unique symbols — only stock-like tickers (letters/digits, optional
+  // dot suffix).  Option symbols (e.g. "MRNA 261218P00025000") contain spaces
+  // and are skipped to avoid a wasted or failed API call.
+  var _tickerRe = /^[A-Z0-9]{1,10}(\.[A-Z]{1,5})?$/;
   var symbolSet = new Set();
   elements.forEach(function(el) {
-    var sym = el.getAttribute('data-symbol');
-    if (sym) symbolSet.add(sym);
+    var sym = (el.getAttribute('data-symbol') || '').trim().toUpperCase();
+    if (sym && _tickerRe.test(sym)) symbolSet.add(sym);
   });
   var symbols = Array.from(symbolSet);
   if (!symbols.length) return;

@@ -429,13 +429,29 @@ class TestAccountAPI:
         data = resp.get_json()
         assert "error" in data
 
-    def test_symbol_names_rejects_invalid_explicit_symbols(self, client):
-        """Test /api/account/symbol-names rejects invalid explicit symbols."""
-        resp = client.get("/api/account/symbol-names?symbols=AAPL,bad symbol!,MSFT")
-        assert resp.status_code == 400
-        data = resp.get_json()
-        assert "error" in data
-        assert "invalid_symbols" in data
+    def test_symbol_names_skips_invalid_explicit_symbols(self, client):
+        """Test /api/account/symbol-names skips invalid symbols and resolves valid ones."""
+        fake_aapl = {"name": "Apple Inc.", "symbol": "AAPL"}
+        fake_msft = {"name": "Microsoft Corporation", "symbol": "MSFT"}
+
+        def _fake_fundamentals(sym, use_cache=True):
+            return {"AAPL": fake_aapl, "MSFT": fake_msft}.get(sym, {"symbol": sym})
+
+        with patch("web.routes.api_account.get_fundamentals", side_effect=_fake_fundamentals) as mock_gf:
+            resp = client.get("/api/account/symbol-names?symbols=AAPL,bad symbol!,MSFT")
+            assert resp.status_code == 200
+            data = resp.get_json()
+            assert "names" in data
+            # Valid symbols are resolved
+            assert data["names"]["AAPL"] == "Apple Inc."
+            assert data["names"]["MSFT"] == "Microsoft Corporation"
+            # Invalid symbol is not present
+            assert "bad symbol!" not in data["names"]
+            # get_fundamentals was called only for valid symbols
+            called_syms = [c.args[0] for c in mock_gf.call_args_list]
+            assert "AAPL" in called_syms
+            assert "MSFT" in called_syms
+            assert len(called_syms) == 2
 
     def test_symbol_names_numeric_hk_stock_included(self, client, services):
         """Test that numeric HK stock symbols pass through default portfolio
