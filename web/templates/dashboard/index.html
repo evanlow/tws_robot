@@ -89,6 +89,45 @@
 
   <!-- ---- Center Panel: Tabs ---- -->
   <section class="panel panel-center">
+
+    <!-- ---- Market Outlook (loaded async) ---- -->
+    <div class="market-outlook-section" id="marketOutlookSection">
+      <div class="market-outlook-header">
+        <h2 class="panel-title">🌅 Market Outlook</h2>
+        <button class="btn-sm btn-secondary" id="outlookRefreshBtn" onclick="refreshOutlook()">↻ Refresh</button>
+      </div>
+
+      <!-- Market Pulse (data-only, always visible) -->
+      <div class="market-pulse-bar" id="marketPulseBar">
+        <span class="pulse-loading">Loading market data…</span>
+      </div>
+
+      <!-- AI-generated content (loaded async) -->
+      <div class="market-outlook-body" id="marketOutlookBody" style="display:none;">
+        <!-- Session Recap -->
+        <div class="outlook-card" id="outlookSessionRecap">
+          <h4>📋 Last Session Recap</h4>
+          <p class="empty-state">Loading…</p>
+        </div>
+        <!-- Portfolio-Relevant Outlook -->
+        <div class="outlook-card" id="outlookPortfolio">
+          <h4>🎯 Portfolio Outlook</h4>
+          <p class="empty-state">Loading…</p>
+        </div>
+        <!-- Recommendations -->
+        <div class="outlook-card" id="outlookRecommendations" style="display:none;">
+          <h4>💡 Recommendations &amp; Opportunities</h4>
+          <ul id="outlookRecList" style="list-style:none;padding:0;margin:0;"></ul>
+        </div>
+      </div>
+
+      <!-- Fallback when AI is unavailable -->
+      <div class="market-outlook-noai" id="marketOutlookNoAI" style="display:none;">
+        <p class="empty-state">AI outlook not available — showing data-only summary.
+          Enable AI in <a href="/settings">Settings</a> for full insights.</p>
+      </div>
+    </div>
+
     <div class="tab-bar">
       <button class="tab-btn active" data-tab="portfolio">Portfolio</button>
       <button class="tab-btn" data-tab="analysis">Analysis</button>
@@ -802,6 +841,107 @@
     });
     canvas.parentNode.appendChild(legend);
   })();
+
+  // ---------------------------------------------------------------
+  // Market Outlook (fetched from /api/market/outlook)
+  // ---------------------------------------------------------------
+  window.refreshOutlook = async function() {
+    var btn = document.getElementById('outlookRefreshBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '↻ Loading…'; }
+    try {
+      await loadMarketOutlook(true);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+    }
+  };
+
+  function escapeHtmlOutlook(text) {
+    var d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+  }
+
+  async function loadMarketOutlook(forceRefresh) {
+    var pulseBar = document.getElementById('marketPulseBar');
+    var body = document.getElementById('marketOutlookBody');
+    var noAI = document.getElementById('marketOutlookNoAI');
+    var recapEl = document.getElementById('outlookSessionRecap');
+    var portfolioEl = document.getElementById('outlookPortfolio');
+    var recSection = document.getElementById('outlookRecommendations');
+    var recList = document.getElementById('outlookRecList');
+
+    if (!pulseBar) return;
+
+    var url = '/api/market/outlook';
+    if (forceRefresh) url += '?refresh=true';
+
+    try {
+      var res = await fetch(url);
+      if (!res.ok) {
+        pulseBar.innerHTML = '<span class="pulse-loading">Failed to load market outlook</span>';
+        return;
+      }
+      var data = await res.json();
+
+      // Render Market Pulse bar (always available)
+      var pulse = data.market_pulse;
+      if (pulse) {
+        var sentClass = 'pulse-neutral';
+        if (pulse.sentiment_label === 'bullish' || pulse.sentiment_label === 'slightly bullish') sentClass = 'pulse-bullish';
+        else if (pulse.sentiment_label === 'bearish' || pulse.sentiment_label === 'slightly bearish') sentClass = 'pulse-bearish';
+
+        var pulseHtml = '<span class="pulse-sentiment ' + sentClass + '">' + escapeHtmlOutlook(pulse.sentiment_label.toUpperCase()) + '</span>';
+        pulseHtml += '<span class="pulse-summary">' + escapeHtmlOutlook(pulse.summary_text) + '</span>';
+
+        if (pulse.vix && pulse.vix.price) {
+          var vixClass = pulse.vix.level === 'elevated' ? 'pnl-negative' : (pulse.vix.level === 'low' ? 'pnl-positive' : '');
+          pulseHtml += '<span class="pulse-vix">VIX: <strong class="' + vixClass + '">' + pulse.vix.price.toFixed(1) + '</strong>';
+          if (pulse.vix.change_pct !== null && pulse.vix.change_pct !== undefined) {
+            var vixChgClass = pulse.vix.change_pct > 0 ? 'pnl-negative' : 'pnl-positive';
+            pulseHtml += ' <span class="' + vixChgClass + '">(' + (pulse.vix.change_pct >= 0 ? '+' : '') + pulse.vix.change_pct.toFixed(1) + '%)</span>';
+          }
+          pulseHtml += ' <span class="pulse-vix-label">' + escapeHtmlOutlook(pulse.vix.level) + '</span></span>';
+        }
+
+        pulseBar.innerHTML = pulseHtml;
+      }
+
+      // Render AI content
+      if (data.ai_session_recap || data.ai_portfolio_outlook) {
+        if (body) body.style.display = '';
+        if (noAI) noAI.style.display = 'none';
+
+        if (recapEl && data.ai_session_recap) {
+          recapEl.innerHTML = '<h4>📋 Last Session Recap</h4><p style="white-space:pre-wrap;line-height:1.6;margin:0;">' + escapeHtmlOutlook(data.ai_session_recap) + '</p>';
+        }
+
+        if (portfolioEl && data.ai_portfolio_outlook) {
+          portfolioEl.innerHTML = '<h4>🎯 Portfolio Outlook</h4><p style="white-space:pre-wrap;line-height:1.6;margin:0;">' + escapeHtmlOutlook(data.ai_portfolio_outlook) + '</p>';
+        }
+
+        if (recList && data.ai_recommendations && data.ai_recommendations.length > 0) {
+          if (recSection) recSection.style.display = '';
+          recList.innerHTML = '';
+          for (var i = 0; i < data.ai_recommendations.length; i++) {
+            var li = document.createElement('li');
+            li.style.cssText = 'padding:0.5rem;margin-bottom:0.4rem;background:#2d3748;border-radius:4px;border-left:3px solid #63b3ed;padding-left:1rem;';
+            li.textContent = data.ai_recommendations[i];
+            recList.appendChild(li);
+          }
+        }
+      } else {
+        // No AI content — show fallback
+        if (body) body.style.display = 'none';
+        if (noAI) noAI.style.display = '';
+      }
+    } catch (err) {
+      pulseBar.innerHTML = '<span class="pulse-loading">Failed to load market outlook</span>';
+      console.error('Market outlook fetch error:', err);
+    }
+  }
+
+  // Load on page init
+  loadMarketOutlook(false);
 
   // ---------------------------------------------------------------
   // AI Portfolio Narrative (fetched from portfolio-insights API)

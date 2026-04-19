@@ -220,6 +220,35 @@ class Prompts:
     )
 
     # ------------------------------------------------------------------
+    # Enhancement 9 — Market Outlook (dashboard morning briefing)
+    # ------------------------------------------------------------------
+    MARKET_OUTLOOK = (
+        "You are a senior market strategist providing a concise daily market "
+        "briefing for a trader. You have the latest global index data, VIX "
+        "levels, and the trader's current portfolio composition.\n\n"
+        "Market and portfolio context:\n{context_json}\n\n"
+        "Produce a structured outlook covering three areas:\n\n"
+        "1. **Session Recap** — Summarise the most recent trading session in "
+        "2-3 sentences: which regions led or lagged, notable index moves, "
+        "and VIX behaviour. Reference specific numbers from the data.\n\n"
+        "2. **Portfolio-Relevant Outlook** — Connect the market environment "
+        "to the trader's actual holdings and strategy mix. Highlight any "
+        "positions or sectors that are particularly exposed to current "
+        "conditions. If the portfolio data is empty or null, provide a "
+        "general market outlook instead.\n\n"
+        "3. **Recommendations** — Provide 2-4 actionable items: strategies "
+        "to consider given the outlook, hedging suggestions if risk is "
+        "elevated, or opportunities aligned with the market direction.\n\n"
+        "Return ONLY a valid JSON object with this structure:\n"
+        "{{\n"
+        '  "session_recap": "...",\n'
+        '  "portfolio_outlook": "...",\n'
+        '  "recommendations": ["...", "..."]\n'
+        "}}\n"
+        "Do not include any text outside the JSON."
+    )
+
+    # ------------------------------------------------------------------
     # Enhancement 8 — Inferred strategy narrative insight
     # ------------------------------------------------------------------
     STRATEGY_INSIGHT = (
