@@ -47,7 +47,7 @@ function _enrichSymbolNames() {
   var _tickerRe = /^[A-Z0-9]{1,10}(\.[A-Z]{1,5})?$/;
   var symbolSet = new Set();
   elements.forEach(function(el) {
-    var sym = el.getAttribute('data-symbol');
+    var sym = (el.getAttribute('data-symbol') || '').trim().toUpperCase();
     if (sym && _tickerRe.test(sym)) symbolSet.add(sym);
   });
   var symbols = Array.from(symbolSet);

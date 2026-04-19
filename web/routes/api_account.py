@@ -189,7 +189,11 @@ def symbol_names():
         # The frontend may send option symbols (e.g. "MRNA 261218P00025000")
         # alongside stock tickers; silently skipping invalid ones allows the
         # valid tickers to still be resolved.
-        symbols = [s for s in all_symbols if _TICKER_RE.match(s)]
+        # De-duplicate after filtering so repeated symbols do not trigger
+        # redundant lookups or count multiple times toward _MAX_SYMBOLS.
+        symbols = list(dict.fromkeys(
+            s for s in all_symbols if _TICKER_RE.match(s)
+        ))
     else:
         # Default to portfolio — filter to stock tickers only
         symbols = [
