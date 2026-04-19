@@ -190,7 +190,8 @@ def build_outlook_context(
             "prev_close": s.get("prev_close"),
         })
 
-    # Portfolio summary
+    # Portfolio summary — always include account-level data when available,
+    # even if individual position details have not yet been received from TWS.
     portfolio_summary: Optional[Dict[str, Any]] = None
     if positions:
         total_value = sum(
@@ -205,6 +206,21 @@ def build_outlook_context(
         }
         if account_summary:
             portfolio_summary["equity"] = account_summary.get("equity", 0)
+    elif account_summary:
+        # Detailed positions not yet loaded, but account-level data exists.
+        # Provide what we can so the LLM avoids the "portfolio data
+        # unavailable" phrasing.
+        portfolio_summary = {
+            "position_count": account_summary.get("position_count", 0),
+            "symbols": [],
+            "total_value": 0,
+            "strategy_mix": strategy_mix or {},
+            "equity": account_summary.get("equity", 0),
+            "unrealized_pnl": account_summary.get("unrealized_pnl", 0),
+            "daily_pnl": account_summary.get("daily_pnl", 0),
+            "note": "Individual position details are still loading; "
+                    "account-level figures are shown.",
+        }
 
     ctx = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -254,6 +270,35 @@ class MarketOutlookGenerator:
         self._cache_ttl = cache_ttl
         self._cache_ttl_active = cache_ttl
         self._generating = False
+        # Track whether the cached outlook was generated with full position
+        # data.  When it was not, the cache is auto-invalidated as soon as
+        # positions become available so the user doesn't see a stale
+        # "portfolio data unavailable" message for the entire TTL.
+        self._cache_had_positions = False
+
+    def try_get_cached(
+        self,
+        *,
+        positions: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return a fresh cached outlook, or ``None``.
+
+        This is a **cache-only** check — it never triggers generation.
+        It performs the same auto-invalidation as :meth:`get_outlook`:
+        if the cached outlook was generated without positions but
+        *positions* are now available the cache is cleared and ``None``
+        is returned so the caller can gather full context and regenerate.
+        """
+        with self._lock:
+            self._maybe_invalidate_for_positions(positions)
+
+            if self._cache and self._cache_time:
+                age = time.time() - self._cache_time
+                if age < self._cache_ttl_active:
+                    cached = dict(self._cache)
+                    cached["from_cache"] = True
+                    return cached
+        return None
 
     def get_outlook(
         self,
@@ -289,6 +334,12 @@ class MarketOutlookGenerator:
         should_generate = False
 
         with self._lock:
+            # Auto-invalidate the cache when it was generated without
+            # portfolio data but positions are now available.  This ensures
+            # the user quickly gets a portfolio-aware outlook once TWS
+            # callbacks populate positions.
+            self._maybe_invalidate_for_positions(positions)
+
             # Serve from cache if fresh
             if not force_refresh and self._cache and self._cache_time:
                 age = time.time() - self._cache_time
@@ -311,9 +362,20 @@ class MarketOutlookGenerator:
             self._generation_done.wait(timeout=60)
             with self._lock:
                 if self._cache:
-                    cached = dict(self._cache)
-                    cached["from_cache"] = True
-                    return cached
+                    # Re-check: the generation that just finished may not
+                    # have had positions while this caller does.  Invalidate
+                    # so the *next* request regenerates with positions.
+                    if bool(positions) and not self._cache_had_positions:
+                        logger.info(
+                            "Post-wait: cached outlook lacks positions "
+                            "— invalidating for next request"
+                        )
+                        self._cache = None
+                        self._cache_time = None
+                    else:
+                        cached = dict(self._cache)
+                        cached["from_cache"] = True
+                        return cached
             # Fallback: generation failed or timed out — compute pulse only
             snapshots = []
             if market_overview:
@@ -340,6 +402,24 @@ class MarketOutlookGenerator:
             with self._lock:
                 self._generating = False
             self._generation_done.set()
+
+    # -- internal helpers --------------------------------------------------
+
+    def _maybe_invalidate_for_positions(
+        self,
+        positions: Optional[Dict[str, Dict[str, Any]]],
+    ) -> None:
+        """Clear cache when it was generated without positions but positions
+        are now available.  **Must be called while holding ``_lock``.**
+        """
+        if (bool(positions) and not self._cache_had_positions
+                and self._cache and self._cache_time):
+            logger.info(
+                "Positions now available — invalidating portfolio-less "
+                "outlook cache"
+            )
+            self._cache = None
+            self._cache_time = None
 
     def _generate(
         self,
@@ -405,6 +485,7 @@ class MarketOutlookGenerator:
             self._cache = result
             self._cache_time = time.time()
             self._cache_ttl_active = effective_ttl
+            self._cache_had_positions = bool(positions)
 
         return result
 
