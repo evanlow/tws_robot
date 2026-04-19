@@ -110,7 +110,7 @@
         <tbody>
           {% for symbol, pos in positions.items() %}
           <tr>
-            <td><strong>{{ symbol }}</strong></td>
+            <td data-symbol="{{ symbol }}"><strong>{{ symbol }}</strong></td>
             <td>{{ pos.quantity|default(0) }}</td>
             <td>${{ "%.2f"|format(pos.entry_price|default(0)) }}</td>
             <td>${{ "%.2f"|format(pos.current_price|default(0)) }}</td>
@@ -251,7 +251,7 @@
               <tbody>
                 {% for item in pa.attribution.by_symbol[:10] %}
                 <tr>
-                  <td><strong>{{ item.name }}</strong></td>
+                  <td data-symbol="{{ item.name }}"><strong>{{ item.name }}</strong></td>
                   <td class="text-right {{ 'pnl-positive' if item.pnl >= 0 else 'pnl-negative' }}">
                     ${{ "{:,.2f}".format(item.pnl) }}
                   </td>
@@ -307,7 +307,7 @@
           {% for t in recent_trades %}
           <tr>
             <td>{{ t.submitted_at|default(t.timestamp|default('')) }}</td>
-            <td><strong>{{ t.symbol }}</strong></td>
+            <td data-symbol="{{ t.symbol }}"><strong>{{ t.symbol }}</strong></td>
             <td class="{{ 'text-buy' if t.action == 'BUY' else 'text-sell' }}">{{ t.action }}</td>
             <td>{{ t.quantity }}</td>
             <td>${{ "%.2f"|format(t.price|default(0)) }}</td>
@@ -795,6 +795,7 @@
       const text = document.createTextNode(
         item.symbol + ' ' + (item.weight * 100).toFixed(1) + '%'
       );
+      s.setAttribute('data-symbol', item.symbol);
       s.appendChild(dot);
       s.appendChild(text);
       legend.appendChild(s);

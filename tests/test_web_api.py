@@ -370,6 +370,63 @@ class TestAccountAPI:
         # Drawdown should be clamped to [0, 1]
         assert 0.0 <= data["drawdown"]["current_pct"] <= 1.0
 
+    def test_symbol_names_empty(self, client):
+        """Test /api/account/symbol-names with no positions returns empty."""
+        resp = client.get("/api/account/symbol-names")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert data["names"] == {}
+
+    def test_symbol_names_explicit_symbols(self, client):
+        """Test /api/account/symbol-names with explicit symbols param."""
+        resp = client.get("/api/account/symbol-names?symbols=AAPL,MSFT")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert "names" in data
+        # Result depends on yfinance availability, but structure is correct
+        assert isinstance(data["names"], dict)
+
+    def test_symbol_names_defaults_to_portfolio(self, client, services):
+        """Test /api/account/symbol-names defaults to portfolio stock symbols."""
+        services.update_position("GOOG", {
+            "quantity": 10,
+            "entry_price": 100.0,
+            "current_price": 110.0,
+            "market_value": 1100.0,
+            "unrealized_pnl": 100.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+        resp = client.get("/api/account/symbol-names")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert isinstance(data["names"], dict)
+
+    def test_symbol_names_filters_options(self, client, services):
+        """Test that option symbols are excluded from default resolution."""
+        services.update_position("AAPL 250418C200", {
+            "quantity": -1,
+            "entry_price": 5.0,
+            "current_price": 3.0,
+            "market_value": -300.0,
+            "unrealized_pnl": 200.0,
+            "side": "SHORT",
+            "sec_type": "OPT",
+        })
+        resp = client.get("/api/account/symbol-names")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        # Option symbol should not appear in results
+        assert "AAPL 250418C200" not in data["names"]
+
+    def test_symbol_names_too_many_symbols(self, client):
+        """Test /api/account/symbol-names rejects too many symbols."""
+        symbols = ",".join(f"SYM{i}" for i in range(60))
+        resp = client.get(f"/api/account/symbol-names?symbols={symbols}")
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "error" in data
+
 
 # ==============================================================================
 # Emergency API

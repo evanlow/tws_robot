@@ -66,7 +66,7 @@
       <tbody id="positionsBody">
         {% for symbol, pos in positions.items() %}
         <tr>
-          <td><strong>{{ symbol }}</strong></td>
+          <td data-symbol="{{ symbol }}"><strong>{{ symbol }}</strong></td>
           <td>{{ pos.side|default('LONG') }}</td>
           <td>{{ pos.quantity|default(0) }}</td>
           <td>${{ "%.2f"|format(pos.entry_price|default(0)) }}</td>

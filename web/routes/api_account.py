@@ -1,12 +1,24 @@
 """Account data API.
 
-GET /api/account/summary    — equity, buying power, cash balance, P&L
-GET /api/account/positions  — all open positions with real-time P&L
+GET /api/account/summary      — equity, buying power, cash balance, P&L
+GET /api/account/positions    — all open positions with real-time P&L
+GET /api/account/symbol-names — resolve ticker symbols to company names
 """
 
-from flask import Blueprint, jsonify
+import logging
+import re
+
+from flask import Blueprint, jsonify, request
 
 from web.services import get_services
+
+logger = logging.getLogger(__name__)
+
+# Simple ticker regex: 1-10 uppercase letters, optionally with dots (BRK.B)
+_TICKER_RE = re.compile(r"^[A-Z]{1,10}(\.[A-Z]{1,5})?$")
+
+# Maximum number of symbols accepted per request
+_MAX_SYMBOLS = 50
 
 bp = Blueprint("api_account", __name__, url_prefix="/api/account")
 
@@ -62,6 +74,54 @@ def positions():
         })
 
     return jsonify({"positions": positions_list, "count": len(positions_list)})
+
+
+@bp.route("/symbol-names", methods=["GET"])
+def symbol_names():
+    """Resolve ticker symbols to human-readable company names.
+
+    Query parameters
+    ----------------
+    symbols : str, optional
+        Comma-separated list of symbols to resolve.  When omitted the
+        endpoint resolves all symbols currently in the portfolio.
+
+    Returns
+    -------
+    JSON ``{"names": {"AAPL": "Apple Inc.", ...}}``
+    """
+    svc = get_services()
+
+    raw_symbols = request.args.get("symbols", "")
+    if raw_symbols:
+        symbols = [s.strip().upper() for s in raw_symbols.split(",") if s.strip()]
+    else:
+        # Default to portfolio — filter to stock tickers only
+        positions = svc.get_positions()
+        symbols = [
+            sym for sym, pos in positions.items()
+            if pos.get("sec_type", "STK") in ("STK", "")
+            and _TICKER_RE.match(sym)
+        ]
+
+    if not symbols:
+        return jsonify({"names": {}})
+
+    if len(symbols) > _MAX_SYMBOLS:
+        return jsonify({"error": f"Too many symbols (max {_MAX_SYMBOLS})"}), 400
+
+    names: dict[str, str] = {}
+    from data.fundamentals import get_fundamentals
+    for sym in symbols:
+        try:
+            data = get_fundamentals(sym, use_cache=True)
+            name = data.get("name")
+            if name and name != sym:
+                names[sym] = name
+        except Exception as exc:
+            logger.debug("Could not resolve name for %s: %s", sym, exc)
+
+    return jsonify({"names": names})
 
 
 @bp.route("/portfolio-analysis", methods=["GET"])
