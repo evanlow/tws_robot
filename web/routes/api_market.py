@@ -49,17 +49,24 @@ def outlook():
     force = request.args.get("refresh", "false").lower() == "true"
     generator = get_market_outlook_generator()
 
+    # Always gather current positions so the generator can auto-invalidate
+    # a cached outlook that was generated before positions loaded from TWS.
+    svc = get_services()
+    positions = svc.get_positions()
+
     # Avoid expensive portfolio analysis when the cache is still fresh
+    # AND was already generated with positions.
     if not force and not generator.is_stale():
-        data = generator.get_outlook()
-        return jsonify(data)
+        # Pass positions so the generator can detect when an outlook that
+        # was generated without portfolio data should be invalidated.
+        data = generator.get_outlook(positions=positions)
+        if data.get("from_cache"):
+            return jsonify(data)
 
     mkt_svc = _get_service()
     market_overview = mkt_svc.get_overview()
 
     # Gather portfolio context (only when we expect to regenerate)
-    svc = get_services()
-    positions = svc.get_positions()
     strategy_mix = {}
     account_summary = {}
     try:
@@ -75,6 +82,17 @@ def outlook():
         account_summary["equity"] = svc.risk_manager.current_equity
     except Exception:
         logger.debug("Failed to get account summary for outlook", exc_info=True)
+
+    # Enrich account_summary with position count and P&L so the context
+    # builder can use it even when individual positions are empty.
+    if "position_count" not in account_summary:
+        account_summary["position_count"] = len(positions)
+    try:
+        insights = svc.get_account_insights()
+        account_summary.setdefault("unrealized_pnl", insights.get("total_unrealized_pnl", 0))
+        account_summary.setdefault("daily_pnl", insights.get("daily_pnl_dollar", 0))
+    except Exception:
+        logger.debug("Failed to enrich account summary with insights", exc_info=True)
 
     data = generator.get_outlook(
         market_overview=market_overview,
