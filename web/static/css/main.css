@@ -769,3 +769,137 @@ h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
   max-width: 18ch;
 }
 
+/* =================================================================
+   Market Outlook Section
+   ================================================================= */
+
+.market-outlook-section {
+  background: #1e2a3a;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.market-outlook-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.market-outlook-header .panel-title {
+  margin: 0;
+}
+
+/* Market Pulse Bar */
+.market-pulse-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.75rem;
+  background: #2d3748;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.pulse-loading {
+  color: #a0aec0;
+  font-style: italic;
+}
+
+.pulse-sentiment {
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  letter-spacing: 0.5px;
+}
+
+.pulse-bullish {
+  background: rgba(72, 187, 120, 0.2);
+  color: #68d391;
+}
+
+.pulse-bearish {
+  background: rgba(252, 129, 129, 0.2);
+  color: #fc8181;
+}
+
+.pulse-neutral {
+  background: rgba(160, 174, 192, 0.2);
+  color: #a0aec0;
+}
+
+.pulse-summary {
+  color: #e2e8f0;
+}
+
+.pulse-vix {
+  margin-left: auto;
+  color: #e2e8f0;
+}
+
+.pulse-vix-label {
+  font-size: 0.75rem;
+  color: #a0aec0;
+  margin-left: 0.25rem;
+}
+
+/* Outlook Cards */
+.market-outlook-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.outlook-card {
+  background: #2d3748;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.outlook-card h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.85rem;
+  color: #63b3ed;
+}
+
+.outlook-card p {
+  font-size: 0.85rem;
+  color: #e2e8f0;
+  line-height: 1.5;
+}
+
+#outlookRecommendations {
+  grid-column: 1 / -1;
+}
+
+.market-outlook-noai {
+  padding: 0.5rem 0;
+}
+
+.outlook-recommendation-item {
+  padding: 0.5rem;
+  margin-bottom: 0.4rem;
+  background: #2d3748;
+  border-radius: 4px;
+  border-left: 3px solid #63b3ed;
+  padding-left: 1rem;
+}
+
+@media (max-width: 768px) {
+  .market-outlook-body {
+    grid-template-columns: 1fr;
+  }
+  .market-pulse-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .pulse-vix {
+    margin-left: 0;
+  }
+}
+
