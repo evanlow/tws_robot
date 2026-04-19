@@ -95,15 +95,15 @@ def symbol_names():
         return jsonify({"names": {}})
 
     names: dict[str, str] = {}
+    from data.fundamentals import get_fundamentals
     for sym in symbols:
         try:
-            from data.fundamentals import get_fundamentals
             data = get_fundamentals(sym, use_cache=True)
             name = data.get("name")
             if name and name != sym:
                 names[sym] = name
-        except Exception:
-            logger.debug("Could not resolve name for %s", sym)
+        except Exception as exc:
+            logger.debug("Could not resolve name for %s: %s", sym, exc)
 
     return jsonify({"names": names})
 
