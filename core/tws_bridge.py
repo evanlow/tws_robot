@@ -122,6 +122,8 @@ class _BridgeApp(EWrapper, EClient):
                 "realized_pnl": realizedPNL,
                 "side": "LONG" if pos_float > 0 else "SHORT",
                 "sec_type": sec_type,
+                "exchange": contract.primaryExchange or contract.exchange or "",
+                "currency": contract.currency or "",
             }
             # For short options, store premium collected (entry cost) for
             # retention tracking.  averageCost from TWS is the per-unit cost

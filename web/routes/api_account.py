@@ -14,13 +14,100 @@ from web.services import get_services
 
 logger = logging.getLogger(__name__)
 
-# Simple ticker regex: 1-10 uppercase letters, optionally with dots (BRK.B)
-_TICKER_RE = re.compile(r"^[A-Z]{1,10}(\.[A-Z]{1,5})?$")
+# Ticker regex: uppercase letters and/or digits, optionally with dots (BRK.B, 1211)
+_TICKER_RE = re.compile(r"^[A-Z0-9]{1,10}(\.[A-Z]{1,5})?$")
 
 # Maximum number of symbols accepted per request
 _MAX_SYMBOLS = 50
 
+# Mapping from IB exchange names to yfinance ticker suffixes.
+# Numeric-only symbols (e.g. HK stocks) and other international tickers
+# need a suffix for yfinance to resolve them correctly.
+_IB_EXCHANGE_TO_YF_SUFFIX: dict[str, str] = {
+    "SEHK": ".HK",
+    "HKFE": ".HK",
+    "TSE": ".T",
+    "JPX": ".T",
+    "LSE": ".L",
+    "ASX": ".AX",
+    "SGX": ".SI",
+    "KSE": ".KS",
+    "KOSDAQ": ".KQ",
+    "TWSE": ".TW",
+    "OTC": ".TWO",
+    "SFB": ".ST",
+    "IBIS": ".DE",
+    "FWB": ".F",
+    "AEB": ".AS",
+    "SBF": ".PA",
+    "BM": ".MC",
+    "BVME": ".MI",
+    "EBS": ".SW",
+    "VSE": ".VI",
+    "NSE": ".NS",
+    "BSE": ".BO",
+    "JSE": ".JO",
+    "BOVESPA": ".SA",
+    "MEXI": ".MX",
+    "MOEX": ".ME",
+    "ENEXT.BE": ".BR",
+    "BVL": ".LS",
+    "WSE": ".WA",
+    "HEX": ".HE",
+    "KFB": ".CO",
+    "OSE": ".OL",
+    "ICEEX": ".IC",
+    "NZE": ".NZ",
+}
+
 bp = Blueprint("api_account", __name__, url_prefix="/api/account")
+
+# Currency → yfinance suffix fallback (when exchange is not available).
+_CURRENCY_TO_YF_SUFFIX: dict[str, str] = {
+    "HKD": ".HK",
+    "JPY": ".T",
+    "GBP": ".L",
+    "AUD": ".AX",
+    "SGD": ".SI",
+    "KRW": ".KS",
+    "TWD": ".TW",
+    "SEK": ".ST",
+    "EUR": "",       # Multiple European exchanges — don't guess
+    "INR": ".NS",
+    "BRL": ".SA",
+    "MXN": ".MX",
+    "NZD": ".NZ",
+}
+
+
+def _to_yfinance_symbol(ib_symbol: str, pos_data: dict) -> str:
+    """Convert an IB symbol to its yfinance equivalent.
+
+    Uses exchange and currency information stored in position data to
+    determine the correct yfinance suffix for international tickers.
+    US tickers (no suffix needed) are returned unchanged.
+    """
+    exchange = pos_data.get("exchange", "")
+    currency = pos_data.get("currency", "")
+
+    # If the symbol already contains a yfinance-style suffix, return as-is
+    if "." in ib_symbol and not ib_symbol.endswith(".OLD"):
+        return ib_symbol
+
+    # Try exchange-based mapping first
+    if exchange:
+        suffix = _IB_EXCHANGE_TO_YF_SUFFIX.get(exchange, "")
+        if suffix:
+            return ib_symbol + suffix
+
+    # Fallback to currency-based mapping for numeric-only symbols
+    # (e.g. HK stocks: 1211, 2331) or when exchange info is missing
+    if currency and currency != "USD":
+        suffix = _CURRENCY_TO_YF_SUFFIX.get(currency, "")
+        if suffix:
+            return ib_symbol + suffix
+
+    return ib_symbol
 
 
 @bp.route("/summary", methods=["GET"])
@@ -91,13 +178,13 @@ def symbol_names():
     JSON ``{"names": {"AAPL": "Apple Inc.", ...}}``
     """
     svc = get_services()
+    positions = svc.get_positions()
 
     raw_symbols = request.args.get("symbols", "")
     if raw_symbols:
         symbols = [s.strip().upper() for s in raw_symbols.split(",") if s.strip()]
     else:
         # Default to portfolio — filter to stock tickers only
-        positions = svc.get_positions()
         symbols = [
             sym for sym, pos in positions.items()
             if pos.get("sec_type", "STK") in ("STK", "")
@@ -114,9 +201,10 @@ def symbol_names():
     from data.fundamentals import get_fundamentals
     for sym in symbols:
         try:
-            data = get_fundamentals(sym, use_cache=True)
+            yf_sym = _to_yfinance_symbol(sym, positions.get(sym, {}))
+            data = get_fundamentals(yf_sym, use_cache=True)
             name = data.get("name")
-            if name and name != sym:
+            if name and name != yf_sym and name != sym:
                 names[sym] = name
         except Exception as exc:
             logger.debug("Could not resolve name for %s: %s", sym, exc)

@@ -427,6 +427,68 @@ class TestAccountAPI:
         data = resp.get_json()
         assert "error" in data
 
+    def test_symbol_names_numeric_hk_stock_included(self, client, services):
+        """Test that numeric HK stock symbols are included in default resolution."""
+        services.update_position("1211", {
+            "quantity": 1500,
+            "entry_price": 128.84,
+            "current_price": 111.51,
+            "market_value": 167265.0,
+            "unrealized_pnl": -26002.45,
+            "side": "LONG",
+            "sec_type": "STK",
+            "exchange": "SEHK",
+            "currency": "HKD",
+        })
+        resp = client.get("/api/account/symbol-names")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert isinstance(data["names"], dict)
+        # The numeric symbol should not be filtered out by the regex
+
+
+class TestToYfinanceSymbol:
+    """Unit tests for _to_yfinance_symbol helper."""
+
+    def test_us_ticker_unchanged(self):
+        from web.routes.api_account import _to_yfinance_symbol
+        assert _to_yfinance_symbol("AAPL", {}) == "AAPL"
+
+    def test_hk_stock_by_exchange(self):
+        from web.routes.api_account import _to_yfinance_symbol
+        pos = {"exchange": "SEHK", "currency": "HKD"}
+        assert _to_yfinance_symbol("1211", pos) == "1211.HK"
+
+    def test_hk_stock_by_currency_fallback(self):
+        from web.routes.api_account import _to_yfinance_symbol
+        pos = {"currency": "HKD"}
+        assert _to_yfinance_symbol("9888", pos) == "9888.HK"
+
+    def test_japanese_stock_by_exchange(self):
+        from web.routes.api_account import _to_yfinance_symbol
+        pos = {"exchange": "TSE", "currency": "JPY"}
+        assert _to_yfinance_symbol("7203", pos) == "7203.T"
+
+    def test_symbol_with_existing_suffix_unchanged(self):
+        from web.routes.api_account import _to_yfinance_symbol
+        pos = {"exchange": "SEHK", "currency": "HKD"}
+        assert _to_yfinance_symbol("BRK.B", pos) == "BRK.B"
+
+    def test_old_suffix_gets_exchange_mapping(self):
+        """Symbols ending in .OLD should still get exchange suffix."""
+        from web.routes.api_account import _to_yfinance_symbol
+        pos = {"exchange": "SEHK", "currency": "HKD"}
+        assert _to_yfinance_symbol("CTKYY.OLD", pos) == "CTKYY.OLD.HK"
+
+    def test_usd_currency_no_suffix(self):
+        from web.routes.api_account import _to_yfinance_symbol
+        pos = {"currency": "USD"}
+        assert _to_yfinance_symbol("WKHS", pos) == "WKHS"
+
+    def test_empty_pos_data(self):
+        from web.routes.api_account import _to_yfinance_symbol
+        assert _to_yfinance_symbol("MSFT", {}) == "MSFT"
+
 
 # ==============================================================================
 # Emergency API
