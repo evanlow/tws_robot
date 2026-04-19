@@ -235,20 +235,12 @@ Resolve ticker symbols to human-readable company names.
 }
 ```
 
-**Error Responses:**
+**Error Response:**
 
 *400 - Too Many Symbols:*
 ```json
 {
   "error": "Too many symbols (max 50)"
-}
-```
-
-*400 - Invalid Symbols:*
-```json
-{
-  "error": "Invalid symbols",
-  "invalid_symbols": ["bad symbol!", "AAPL@123"]
 }
 ```
 
@@ -263,11 +255,13 @@ Resolve ticker symbols to human-readable company names.
   - Australia: `BHP` → `BHP.AX` (BHP Group)
 
 **Behavior:**
+- **Graceful error handling**: Invalid symbols are silently filtered out (e.g., option symbols with spaces)
+- Processes all valid symbols successfully even when mixed with invalid ones
 - Filters out option symbols automatically when using portfolio default
-- Only returns names that are successfully resolved (silently skips failures)
+- Only returns names that are successfully resolved (silently skips lookup failures)
 - Uses cached fundamental data when available for faster response
-- Returns empty object if no symbols provided or all resolutions fail
-- Validates explicit symbols and returns 400 error with details for invalid entries
+- Returns empty object if no symbols provided or all symbols are invalid
+- Deduplicates symbols to avoid redundant lookups
 
 **Example Usage:**
 ```javascript
@@ -297,14 +291,14 @@ fetch('/api/account/symbol-names')
     });
   });
 
-// Handle validation errors
-fetch('/api/account/symbol-names?symbols=AAPL,bad symbol!')
+// Mixed valid and invalid symbols - graceful handling
+fetch('/api/account/symbol-names?symbols=AAPL,bad symbol!,TSLA')
   .then(r => r.json())
   .then(data => {
-    if (data.error) {
-      console.error(data.error, data.invalid_symbols);
-      // "Invalid symbols" ["bad symbol!"]
-    }
+    // Invalid symbols are silently filtered out
+    // Only valid symbols are resolved and returned
+    console.log(data.names);
+    // {"AAPL": "Apple Inc.", "TSLA": "Tesla, Inc."}
   });
 ```
 
