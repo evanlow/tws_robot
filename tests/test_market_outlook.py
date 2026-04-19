@@ -389,7 +389,7 @@ class TestMarketOutlookGenerator:
             assert generator.is_stale() is True
 
     def test_cache_invalidated_when_positions_arrive(
-        self, sample_market_overview, sample_positions,
+        self, sample_market_overview, sample_positions
     ):
         """Cached outlook generated without positions is not served once
         positions become available."""
@@ -418,7 +418,7 @@ class TestMarketOutlookGenerator:
             assert third["from_cache"] is False
 
     def test_try_get_cached_returns_none_when_positions_arrive(
-        self, sample_market_overview, sample_positions,
+        self, sample_market_overview, sample_positions
     ):
         """try_get_cached returns None (does not serve stale cache) once
         positions are available but cached outlook was generated without."""

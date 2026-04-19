@@ -412,8 +412,8 @@ class MarketOutlookGenerator:
         """Clear cache when it was generated without positions but positions
         are now available.  **Must be called while holding ``_lock``.**
         """
-        if bool(positions) and not self._cache_had_positions \
-                and self._cache and self._cache_time:
+        if (bool(positions) and not self._cache_had_positions
+                and self._cache and self._cache_time):
             logger.info(
                 "Positions now available — invalidating portfolio-less "
                 "outlook cache"
