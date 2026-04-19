@@ -213,12 +213,14 @@ Get all open positions.
 
 Resolve ticker symbols to human-readable company names.
 
-**NEW in v1.7 (PR #24)** - Company Name Display
+**NEW in v1.7 (PR #24, #25)** - Company Name Display with International Stock Support
 
 **Query Parameters:**
-- `symbols` (optional): Comma-separated list of ticker symbols to resolve (e.g., `AAPL,MSFT,GOOGL`)
+- `symbols` (optional): Comma-separated list of ticker symbols to resolve (e.g., `AAPL,MSFT,GOOGL,1211,7203`)
   - When omitted, defaults to all stock symbols currently in the portfolio
   - Maximum 50 symbols per request (rate limited)
+  - Supports numeric symbols (Hong Kong stocks like 1211, 2331)
+  - Validates symbols: uppercase letters/digits with optional dot (BRK.B)
 
 **Response:**
 ```json
@@ -226,34 +228,66 @@ Resolve ticker symbols to human-readable company names.
   "names": {
     "AAPL": "Apple Inc.",
     "MSFT": "Microsoft Corporation",
-    "GOOGL": "Alphabet Inc."
+    "GOOGL": "Alphabet Inc.",
+    "1211": "BYD Electronic International Co., Ltd.",
+    "7203": "Toyota Motor Corporation"
   }
 }
 ```
 
-**Error Response (400 - Too Many Symbols):**
+**Error Responses:**
+
+*400 - Too Many Symbols:*
 ```json
 {
   "error": "Too many symbols (max 50)"
 }
 ```
 
+*400 - Invalid Symbols:*
+```json
+{
+  "error": "Invalid symbols",
+  "invalid_symbols": ["bad symbol!", "AAPL@123"]
+}
+```
+
+**International Stock Support:**
+- Automatically converts IB symbols to yfinance format using exchange/currency metadata
+- Supported exchanges: SEHK (.HK), TSE/JPX (.T), LSE (.L), ASX (.AX), SGX (.SI), KSE (.KS), TWSE (.TW), and 20+ more
+- Falls back to currency-based mapping when exchange info unavailable
+- Examples:
+  - Hong Kong: `1211` → `1211.HK` (BYD Electronic)
+  - Japan: `7203` → `7203.T` (Toyota Motor)
+  - UK: `HSBA` → `HSBA.L` (HSBC Holdings)
+  - Australia: `BHP` → `BHP.AX` (BHP Group)
+
 **Behavior:**
 - Filters out option symbols automatically when using portfolio default
 - Only returns names that are successfully resolved (silently skips failures)
 - Uses cached fundamental data when available for faster response
 - Returns empty object if no symbols provided or all resolutions fail
+- Validates explicit symbols and returns 400 error with details for invalid entries
 
 **Example Usage:**
 ```javascript
-// Get names for specific symbols
+// Get names for US stocks
 fetch('/api/account/symbol-names?symbols=AAPL,TSLA')
   .then(r => r.json())
   .then(data => {
-    console.log(data.names);  // {"AAPL": "Apple Inc.", "TSLA": "Tesla, Inc."}
+    console.log(data.names);  
+    // {"AAPL": "Apple Inc.", "TSLA": "Tesla, Inc."}
   });
 
-// Get names for all portfolio stocks
+// Get names for international stocks (HK, JP, UK)
+fetch('/api/account/symbol-names?symbols=1211,7203,HSBA')
+  .then(r => r.json())
+  .then(data => {
+    console.log(data.names);
+    // {"1211": "BYD Electronic...", "7203": "Toyota Motor...", "HSBA": "HSBC Holdings..."}
+  });
+
+// Get names for all portfolio stocks (auto-resolves international)
 fetch('/api/account/symbol-names')
   .then(r => r.json())
   .then(data => {
@@ -262,13 +296,24 @@ fetch('/api/account/symbol-names')
       console.log(`${symbol}: ${name}`);
     });
   });
+
+// Handle validation errors
+fetch('/api/account/symbol-names?symbols=AAPL,bad symbol!')
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      console.error(data.error, data.invalid_symbols);
+      // "Invalid symbols" ["bad symbol!"]
+    }
+  });
 ```
 
 **Use Cases:**
 - Display company names alongside ticker symbols in UI tables
 - Add tooltips/hovers showing full company names
-- Improve readability of position lists and reports
-- Help users quickly identify holdings without memorizing tickers
+- Improve readability of position lists and reports (US and international stocks)
+- Help users quickly identify holdings without memorizing tickers or numeric symbols
+- Support global portfolios with stocks from multiple exchanges
 
 ### `GET /api/account/portfolio-analysis`
 
