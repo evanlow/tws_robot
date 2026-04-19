@@ -5,9 +5,13 @@ GET  /strategies/<name>   →  detail / parameter editor
 POST /strategies/<name>   →  update parameters
 """
 
+import logging
+
 from flask import Blueprint, render_template
 
 from web.services import get_services
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("strategies", __name__, url_prefix="/strategies")
 
@@ -38,7 +42,7 @@ def index():
         try:
             summary = svc.strategy_registry.get_overall_summary()
         except Exception:
-            pass
+            logger.exception("Failed to get overall strategy summary")
 
     context = {
         "title": "Strategies",
