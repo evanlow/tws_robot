@@ -49,6 +49,30 @@
       </div>
       <p style="font-size:0.85rem;color:#e2e8f0;margin-bottom:0.5rem;">{{ inf.description }}</p>
 
+      <!-- Current Price -->
+      {% if inf.positions %}
+      {% set first_pos = inf.positions[0] %}
+      {% set cur_price = first_pos.current_price|default(0) %}
+      {% set ent_price = first_pos.entry_price|default(0) %}
+      {% if cur_price > 0 %}
+      <div style="display:flex;align-items:baseline;gap:0.75rem;margin-bottom:0.65rem;">
+        <span style="font-size:1.25rem;font-weight:700;color:#e2e8f0;">
+          ${{ "%.2f"|format(cur_price) }}
+        </span>
+        {% if ent_price > 0 %}
+        {% set price_chg = cur_price - ent_price %}
+        {% set price_chg_pct = (price_chg / ent_price * 100) %}
+        {% set is_profit = (price_chg >= 0 and first_pos.side|default('LONG') == 'LONG') or (price_chg <= 0 and first_pos.side|default('LONG') == 'SHORT') %}
+        <span style="font-size:0.8rem;font-weight:600;color:{{ '#48bb78' if is_profit else '#fc8181' }};">
+          {{ "+" if price_chg >= 0 else "" }}{{ "%.2f"|format(price_chg) }}
+          ({{ "+" if price_chg >= 0 else "" }}{{ "%.1f"|format(price_chg_pct) }}%)
+          from entry
+        </span>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% endif %}
+
       <!-- Positions in this strategy -->
       <div style="font-size:0.8rem;color:#a0aec0;margin-bottom:0.5rem;">
         <strong>Positions:</strong>
@@ -146,6 +170,18 @@
         {% endif %}
       </div>
       {% endif %}
+
+      <!-- AI Narrative Insight -->
+      <div class="insight-section" id="insight-{{ inf.id }}" style="margin-top:0.75rem;display:none;">
+        <div style="border-top:1px solid #2d2d44;padding-top:0.5rem;">
+          <span style="font-size:0.7rem;color:#a0aec0;font-weight:600;">💡 AI Insight</span>
+          <p class="insight-text" style="font-size:0.8rem;color:#cbd5e0;margin-top:0.25rem;line-height:1.45;"></p>
+        </div>
+      </div>
+      <button class="btn-sm btn-insight" onclick="loadInsight('{{ inf.id }}')" id="insight-btn-{{ inf.id }}"
+        style="margin-top:0.5rem;background:#2d2d44;color:#a0aec0;border:1px solid #4a5568;font-size:0.7rem;padding:3px 10px;border-radius:4px;cursor:pointer;">
+        💡 Get Insight
+      </button>
     </div>
     {% endfor %}
   </div>
@@ -253,8 +289,36 @@
 .inferred-card:hover {
   border-color: #4a5568 !important;
 }
+.btn-insight:hover {
+  background: #4a5568 !important;
+  color: #e2e8f0 !important;
+}
 </style>
 <script>
+window.loadInsight = async function(id) {
+  const btn = document.getElementById('insight-btn-' + id);
+  const section = document.getElementById('insight-' + id);
+  if (!btn || !section) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Loading…';
+  try {
+    const res = await fetch(`/api/strategies/inferred/${id}/insight`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      section.querySelector('.insight-text').textContent = data.error;
+    } else {
+      section.querySelector('.insight-text').textContent = data.insight;
+    }
+    section.style.display = 'block';
+    btn.style.display = 'none';
+  } catch(e) {
+    section.querySelector('.insight-text').textContent = 'Failed to load insight: ' + e;
+    section.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = '💡 Get Insight';
+  }
+};
+
 window.controlStrategy = async function(name, action) {
   try {
     const res = await fetch(`/api/strategies/${name}/${action}`, { method: 'POST' });

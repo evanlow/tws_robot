@@ -218,3 +218,17 @@ class Prompts:
         "}}\n"
         "Do not include any text outside the JSON."
     )
+
+    # ------------------------------------------------------------------
+    # Enhancement 8 — Inferred strategy narrative insight
+    # ------------------------------------------------------------------
+    STRATEGY_INSIGHT = (
+        "You are a concise trading analyst. Given the following inferred "
+        "strategy detected from live portfolio positions, write a short "
+        "narrative insight (2-3 sentences) that helps the trader understand "
+        "the position and what to watch for.\n\n"
+        "Strategy data:\n{strategy_json}\n\n"
+        "Cover: current P&L status, proximity to stop/target levels, and "
+        "one actionable observation. Be specific with numbers from the data. "
+        "Return ONLY the plain-text insight paragraph, no JSON, no markdown headers."
+    )

@@ -7,8 +7,10 @@ GET  /api/strategies/<name>/metrics     — live metrics
 PUT  /api/strategies/<name>/config      — update strategy parameters
 GET  /api/strategies/classes            — list registered strategy classes
 POST /api/strategies/create             — create a strategy instance
+POST /api/strategies/inferred/<id>/insight — AI narrative insight for an inferred strategy
 """
 
+import json
 import logging
 from datetime import datetime
 
@@ -182,3 +184,43 @@ def reset_dismissed():
     svc = get_services()
     svc.reset_dismissed_inferred()
     return jsonify({"status": "reset"})
+
+
+@bp.route("/inferred/<inferred_id>/insight", methods=["POST"])
+def inferred_insight(inferred_id: str):
+    """Generate an AI narrative insight for an inferred strategy.
+
+    Returns ``{"insight": "..."}`` or an error if AI is unavailable.
+    """
+    from ai.client import get_client
+    from ai.prompts import Prompts
+
+    client = get_client()
+    if client is None:
+        return jsonify({
+            "error": "AI features are not enabled. "
+                     "Set AI_ENABLED=true and OPENAI_API_KEY to activate."
+        }), 503
+
+    svc = get_services()
+    inferred = svc.get_inferred_strategies()
+    strategy_data = next((s for s in inferred if s["id"] == inferred_id), None)
+    if strategy_data is None:
+        return jsonify({"error": f"Inferred strategy '{inferred_id}' not found"}), 404
+
+    system_prompt = Prompts.STRATEGY_INSIGHT.format(
+        strategy_json=json.dumps(strategy_data, indent=2, default=str),
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "Please provide a brief insight for this strategy."},
+    ]
+
+    try:
+        insight = client.chat(messages, temperature=0.4)
+    except RuntimeError as exc:
+        logger.error("AI inferred-insight error: %s", exc)
+        return jsonify({"error": "AI request failed. Please try again."}), 502
+
+    return jsonify({"insight": insight})
