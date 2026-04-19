@@ -1375,6 +1375,83 @@ fetch('/api/strategies/inferred/reset', {
 });
 ```
 
+### `POST /api/strategies/inferred/{inferred_id}/insight`
+
+**Generate an AI narrative insight for an inferred strategy.**
+
+**NEW in v1.8 (PR #27)** - AI Strategy Insights
+
+Analyzes an auto-detected strategy and generates a concise 2-3 sentence narrative covering:
+- Current P&L status relative to entry price
+- Proximity to stop loss and profit target levels
+- One actionable observation or recommendation
+
+Requires AI features to be enabled (set `OPENAI_API_KEY` environment variable).
+
+**Path Parameters:**
+- `inferred_id` - The ID from the inferred strategy (e.g., `"inferred_NVDA_long_equity_1"`)
+
+**Response:**
+```json
+{
+  "insight": "The position is up 3.3% from entry with room to run toward the 10% target. Current price of $124 is well above the $114 stop loss, providing healthy cushion. Consider taking partial profits if momentum stalls near $130 resistance."
+}
+```
+
+**Error Responses:**
+
+*404 - Strategy Not Found:*
+```json
+{
+  "error": "Inferred strategy 'invalid_id' not found"
+}
+```
+
+*503 - AI Not Enabled:*
+```json
+{
+  "error": "AI features are not enabled. Set OPENAI_API_KEY to auto-enable, or set AI_ENABLED=true explicitly."
+}
+```
+
+*502 - AI Request Failed:*
+```json
+{
+  "error": "AI request failed. Please try again."
+}
+```
+
+**Example:**
+```javascript
+// Get AI insight for a specific inferred strategy
+fetch('/api/strategies/inferred/inferred_NVDA_long_equity_1/insight', {
+  method: 'POST'
+})
+.then(res => res.json())
+.then(data => {
+  if (data.insight) {
+    console.log('AI Insight:', data.insight);
+    // Display in strategy card
+    document.querySelector(`#strategy-${strategyId} .insight`).textContent = data.insight;
+  } else {
+    console.error('Error:', data.error);
+  }
+});
+```
+
+**Use Cases:**
+- Display context-aware trading insights on strategy cards
+- Help traders understand position status without manual analysis
+- Identify when to take action (e.g., take profits, adjust stops)
+- Learn from AI's interpretation of strategy metrics
+
+**Behavior:**
+- Insight is generated on-demand (not cached)
+- Uses current position data and strategy targets
+- Temperature set to 0.4 for consistent, focused responses
+- Includes specific numbers from position data
+- Safe to call repeatedly, but consider rate limiting in production
+
 ---
 
 ## Backtest API

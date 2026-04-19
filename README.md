@@ -25,8 +25,7 @@ Transform your trading ideas into automated strategies. Test them on historical 
   - 📍 Covered calls, protective puts, and collars
   - 📐 Bull/bear spreads, iron condors, straddles, strangles
   - 🎚️ Automatic profit targets, stop losses, and risk metrics
-  - 🧠 Confidence scores and actionable insights for each position
-
+  - 🧠 Confidence scores and actionable insights for each position  - 💬 AI-generated narrative insights explaining strategy status and next actions
 ### For Quantitative Developers
 - 🏗️ **Professional architecture** - Event-driven design, modular components
 - 🧬 **Extensible framework** - Build custom strategies on proven infrastructure
