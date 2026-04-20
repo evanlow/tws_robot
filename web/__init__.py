@@ -63,6 +63,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.settings import bp as settings_bp
     from web.routes.ai_chat import bp as ai_chat_bp
     from web.routes.ai_strategy import bp as ai_strategy_bp
+    from web.routes.account_intelligence import bp as account_intelligence_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(strategies_bp)
@@ -73,6 +74,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(settings_bp)
     app.register_blueprint(ai_chat_bp)
     app.register_blueprint(ai_strategy_bp)
+    app.register_blueprint(account_intelligence_bp)
 
     # ---- JSON API blueprints ----
     from web.routes.api_connection import bp as api_connection_bp
