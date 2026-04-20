@@ -70,6 +70,7 @@ The dashboard has several pages accessible from the navigation bar:
 | **Monitoring** ▾ | Dropdown menu grouping monitoring and risk pages |
 | **Risk** | Monitor risk levels, drawdown, and circuit breaker status |
 | **Events & Logs** | Browse application logs in real time |
+| **Account Intelligence** | Advanced analytics dashboard with health scores, cash flow, opportunities, risk intel, and execution insights |
 | **AI** ▾ | Dropdown menu grouping AI-powered features |
 | **AI Chat** | Dedicated page for asking the AI assistant about your strategies, market conditions, and trading decisions |
 | **Portfolio Insights** | AI-powered portfolio analysis with strategy deduction, allocation breakdown, and per-stock deep-dive capability |

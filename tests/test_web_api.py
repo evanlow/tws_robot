@@ -969,3 +969,8 @@ class TestPageRoutes:
         resp = client.get("/settings/", follow_redirects=True)
         assert resp.status_code == 200
         assert b"Settings" in resp.data
+
+    def test_account_intelligence(self, client):
+        resp = client.get("/account-intelligence/", follow_redirects=True)
+        assert resp.status_code == 200
+        assert b"Account Intelligence" in resp.data

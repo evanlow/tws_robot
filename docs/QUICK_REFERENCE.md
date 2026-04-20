@@ -22,9 +22,10 @@ python scripts/run_web.py --host 0.0.0.0 --port 8080 --debug
 | **Strategies** | Create, start, stop, and monitor strategies |
 | **Positions** | View open positions and trade history |
 | **Backtest** | Run backtests and review results |
-| **Monitoring** ▾ | Dropdown menu grouping: Risk, Events & Logs |
+| **Monitoring** ▾ | Dropdown menu grouping: Risk, Events & Logs, Account Intelligence |
 | **Risk** | Monitor risk levels and circuit breaker status |
 | **Events & Logs** | Browse application logs in real time |
+| **Account Intelligence** | Advanced analytics: health scores, cash flow, opportunities, risk intel, execution insights |
 | **AI** ▾ | Dropdown menu grouping: Chat, Portfolio Insights |
 | **AI Chat** | Dedicated page for asking the AI assistant about strategies, market, and trading |
 | **Portfolio Insights** | AI-powered portfolio analysis with strategy deduction and deep-dive capability |
