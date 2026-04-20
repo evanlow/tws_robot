@@ -64,32 +64,6 @@
   {% endif %}
 </section>
 
-<!-- Risk Summary -->
-<section style="margin-top:2rem;">
-  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Portfolio Risk</h2>
-  <div class="stats-grid">
-    <div class="stat-card">
-      <span class="stat-label">Risk Status</span>
-      <span class="risk-badge risk-{{ risk_summary.risk_status|default('NORMAL')|lower }}">{{ risk_summary.risk_status|default('NORMAL') }}</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">Stock Drawdown</span>
-      <span class="stat-value">{{ "%.2f"|format((risk_summary.stock_drawdown_pct|default(0)) * 100) }}%</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">Options Premium Retention</span>
-      <span class="stat-value {{ 'pnl-positive' if (risk_summary.premium_retention_pct|default(1)) >= 0.80 else 'pnl-negative' }}">
-        {{ "%.1f"|format((risk_summary.premium_retention_pct|default(1)) * 100) }}%
-      </span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">Daily P&L</span>
-      <span class="stat-value {{ 'pnl-positive' if (risk_summary.daily_pnl_pct|default(0)) >= 0 else 'pnl-negative' }}">
-        {{ "%.2f"|format((risk_summary.daily_pnl_pct|default(0)) * 100) }}%
-      </span>
-    </div>
-  </div>
-</section>
 {% endblock %}
 
 {% block extra_scripts %}

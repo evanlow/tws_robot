@@ -19,7 +19,7 @@ def index():
     risk_summary = svc.risk_manager.get_risk_summary()
 
     context = {
-        "title": "Portfolio Analysis",
+        "title": "Portfolio Insights",
         "active_page": "portfolio_analysis",
         "positions": positions,
         "risk_summary": risk_summary,

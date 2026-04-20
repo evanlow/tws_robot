@@ -132,6 +132,13 @@ def _gather_live_context() -> str:
     )
 
 
+@bp.route("/chat", methods=["GET"])
+def chat_page():
+    """Render the full-page AI Copilot chat interface."""
+    from flask import render_template
+    return render_template("ai_chat/index.html", title="AI Copilot", active_page="ai_chat")
+
+
 @bp.route("/chat", methods=["POST"])
 def chat():
     """Accept a user message, call OpenAI, return the assistant reply."""

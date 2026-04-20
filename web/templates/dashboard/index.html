@@ -56,34 +56,29 @@
   </script>
   {% endif %}
 
-  <!-- ---- Left Panel: Strategies ---- -->
+  <!-- ---- Left Panel: Strategy Summary ---- -->
   <section class="panel panel-strategies">
-    <h2 class="panel-title">📊 Active Strategies</h2>
+    <h2 class="panel-title">📊 Strategies</h2>
     {% if strategies %}
-    <div class="strategy-list">
-      {% for s in strategies %}
-      <div class="strategy-card">
-        <div class="strategy-header">
-          <a href="/strategies/{{ s.strategy_name }}"><strong>{{ s.strategy_name }}</strong></a>
-          <span class="state-badge state-{{ s.state|lower }}">{{ s.state }}</span>
-        </div>
-        <div class="strategy-stats">
-          <span>Signals: {{ s.signals_generated }}</span>
-          <span>Accepted: {{ s.signals_accepted }}</span>
-          <span>Rate: {{ "%.0f"|format(s.acceptance_rate * 100) }}%</span>
-        </div>
-        <div class="strategy-actions">
-          {% if s.state == 'RUNNING' %}
-          <button class="btn-sm btn-danger" onclick="controlStrategy('{{ s.strategy_name }}', 'stop')">Stop</button>
-          {% elif s.state in ['READY', 'PAUSED'] %}
-          <button class="btn-sm btn-success" onclick="controlStrategy('{{ s.strategy_name }}', 'start')">Start</button>
-          {% endif %}
-        </div>
+    {% set running_count = strategies|selectattr('state', 'equalto', 'RUNNING')|list|length %}
+    {% set stopped_count = strategies|rejectattr('state', 'equalto', 'RUNNING')|list|length %}
+    <div class="strategy-summary-widget">
+      <div class="stat-row">
+        <span>Total</span>
+        <strong>{{ strategies|length }}</strong>
       </div>
-      {% endfor %}
+      <div class="stat-row">
+        <span>Running</span>
+        <strong class="pnl-positive">{{ running_count }}</strong>
+      </div>
+      <div class="stat-row">
+        <span>Stopped / Other</span>
+        <strong>{{ stopped_count }}</strong>
+      </div>
     </div>
+    <a href="{{ url_for('strategies.index') }}" class="btn-secondary btn-sm" style="margin-top:0.75rem;display:inline-block;">Manage Strategies →</a>
     {% else %}
-    <p class="empty-state">No strategies registered. <a href="/strategies">Create one →</a></p>
+    <p class="empty-state">No strategies registered. <a href="{{ url_for('strategies.index') }}">Create one →</a></p>
     {% endif %}
   </section>
 
@@ -365,7 +360,7 @@
       <h3>Risk Alerts</h3>
       {% if alerts %}
       <div class="alert-list">
-        {% for alert in alerts %}
+        {% for alert in alerts[:3] %}
         <div class="alert-item alert-{{ alert.level|default('INFO')|lower }}">
           <span class="alert-time">{{ alert.timestamp|default('') }}</span>
           <span class="alert-level">{{ alert.level|default('INFO') }}</span>
@@ -373,6 +368,12 @@
         </div>
         {% endfor %}
       </div>
+      {% if alerts|length > 3 %}
+      <p style="margin-top:0.75rem;font-size:0.85rem;color:#a0aec0;">
+        Showing 3 of {{ alerts|length }} alerts.
+        <a href="{{ url_for('risk.index') }}" style="color:#63b3ed;">View all on Risk page →</a>
+      </p>
+      {% endif %}
       {% else %}
       <p class="empty-state">No alerts — system operating normally ✅</p>
       {% endif %}
@@ -571,16 +572,6 @@
       document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     });
   });
-
-  // Strategy control
-  window.controlStrategy = async function(name, action) {
-    try {
-      const res = await fetch(`/api/strategies/${name}/${action}`, { method: 'POST' });
-      const data = await res.json();
-      if (data.error) alert(data.error);
-      else location.reload();
-    } catch(e) { alert('Error: ' + e); }
-  };
 
   // Position close
   window.closePosition = async function(symbol) {

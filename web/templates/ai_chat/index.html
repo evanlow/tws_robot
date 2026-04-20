@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>🤖 {{ title }}</h1>
+
+<div class="ai-chat-fullpage">
+  <div class="ai-chat-messages" id="aiChatMessages">
+    <div class="ai-msg system-info">Ask anything about positions, strategies, risk, or the market.</div>
+  </div>
+  <div class="ai-chat-input-row" style="margin-top:0.75rem;">
+    <textarea id="aiChatInput" class="form-input" placeholder="Type a question…" rows="3" style="flex:1;resize:vertical;"></textarea>
+    <button class="btn-primary" id="aiSendBtn" style="align-self:flex-end;">Send</button>
+  </div>
+  <div style="display:flex;gap:0.75rem;margin-top:0.5rem;">
+    <button class="btn-secondary btn-sm" onclick="clearHistory()">Clear History</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  var messages = document.getElementById('aiChatMessages');
+  var input = document.getElementById('aiChatInput');
+  var sendBtn = document.getElementById('aiSendBtn');
+
+  function appendMsg(role, text) {
+    var div = document.createElement('div');
+    div.className = 'ai-msg ' + role;
+    div.textContent = text;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function sendChat() {
+    var text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    sendBtn.disabled = true;
+    appendMsg('user', text);
+    appendMsg('assistant', '…');
+    try {
+      var res = await fetch('/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
+      });
+      var data = await res.json();
+      messages.lastChild.textContent = data.reply || data.error || '(empty)';
+    } catch(e) {
+      messages.lastChild.textContent = 'Error: ' + e;
+    } finally {
+      sendBtn.disabled = false;
+      messages.scrollTop = messages.scrollHeight;
+    }
+  }
+
+  sendBtn.addEventListener('click', sendChat);
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  });
+
+  // Load existing history
+  (async function() {
+    try {
+      var res = await fetch('/ai/chat/history');
+      var data = await res.json();
+      if (data.history && data.history.length > 0) {
+        for (var i = 0; i < data.history.length; i++) {
+          appendMsg(data.history[i].role, data.history[i].content);
+        }
+      }
+    } catch(e) {}
+  })();
+})();
+
+window.clearHistory = async function() {
+  try {
+    await fetch('/ai/chat/history', { method: 'DELETE' });
+    var messages = document.getElementById('aiChatMessages');
+    messages.innerHTML = '<div class="ai-msg system-info">History cleared. Ask anything about positions, strategies, risk, or the market.</div>';
+  } catch(e) { alert('Error: ' + e); }
+};
+</script>
+{% endblock %}
