@@ -399,7 +399,7 @@ class ServiceManager:
         # -- Drawdown from RiskManager ------------------------------------
         peak = rm.peak_equity
         current = rm.current_equity
-        has_real_data = rm._equity_initialized
+        has_real_data = rm.equity_initialized
         raw_drawdown_pct = (peak - current) / peak if peak > 0 else 0.0
         if raw_drawdown_pct < 0.0 or raw_drawdown_pct > 1.0:
             logger.warning(

@@ -193,6 +193,11 @@ class RiskManager:
         logger.info(f"  Daily Loss Limit: {daily_loss_limit_pct:.1%}")
         logger.info(f"  Max Leverage: {max_leverage:.2f}x")
     
+    @property
+    def equity_initialized(self) -> bool:
+        """Whether real equity data has been received (not just the default)."""
+        return self._equity_initialized
+    
     def update(
         self,
         equity: float,
