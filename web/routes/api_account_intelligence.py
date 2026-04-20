@@ -31,8 +31,8 @@ bp = Blueprint("api_account_intelligence", __name__, url_prefix="/api/intelligen
 def _get_account_data():
     """Pull live account data from ServiceManager."""
     svc = get_services()
-    summary = svc.account_summary or {}
-    positions = list((svc.positions or {}).values())
+    summary = svc.get_account_summary() or {}
+    positions = list((svc.get_positions() or {}).values())
     return svc, summary, positions
 
 
