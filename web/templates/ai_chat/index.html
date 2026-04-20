@@ -24,12 +24,6 @@
   var input = document.getElementById('aiChatInput');
   var sendBtn = document.getElementById('aiSendBtn');
 
-  function escapeHtml(text) {
-    var d = document.createElement('div');
-    d.textContent = text;
-    return d.innerHTML;
-  }
-
   function appendMsg(role, text) {
     var div = document.createElement('div');
     div.className = 'ai-msg ' + role;
