@@ -929,8 +929,15 @@
         if (body) body.style.display = 'none';
         if (noAI) noAI.style.display = '';
         var noAIMsg = document.getElementById('marketOutlookNoAIMsg');
-        if (noAIMsg && data.ai_enabled) {
-          noAIMsg.textContent = 'AI outlook is loading \u2014 market data may still be refreshing. Click \u21bb Refresh in a moment.';
+        if (noAIMsg) {
+          if (!noAIMsg.dataset.defaultHtml) {
+            noAIMsg.dataset.defaultHtml = noAIMsg.innerHTML;
+          }
+          if (data.ai_enabled) {
+            noAIMsg.textContent = 'AI outlook is loading \u2014 market data may still be refreshing. Click \u21bb Refresh in a moment.';
+          } else {
+            noAIMsg.innerHTML = noAIMsg.dataset.defaultHtml;
+          }
         }
       }
     } catch (err) {
