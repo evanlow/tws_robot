@@ -136,12 +136,56 @@ def opportunities():
             "sector": p.get("sector", "Unknown"),
         })
 
+    # Build dividend candidates from position fundamentals when possible
+    dividend_candidates = _build_dividend_candidates(positions)
+
     detector = OpportunityDetector()
-    opps = detector.scan(positions=pos_dicts, equity=equity)
+    opps = detector.scan(
+        positions=pos_dicts,
+        equity=equity,
+        dividend_candidates=dividend_candidates,
+    )
+    plain_summary = detector.generate_plain_summary(pos_dicts, equity)
+
     return jsonify({
         "opportunities": [o.to_dict() for o in opps],
         "summary": detector.get_summary(),
+        "plain_summary": plain_summary,
     })
+
+
+def _build_dividend_candidates(positions):
+    """Build dividend candidate dicts from position data.
+
+    Tries to enrich each position with fundamental data (dividend_yield,
+    payout_ratio, sector) using the ``data.fundamentals`` module.  Falls
+    back gracefully if yfinance is unavailable or fetches fail.
+    """
+    candidates = []
+    for p in positions:
+        sym = p.get("symbol", "?")
+        sector = p.get("sector", "Unknown")
+
+        # Try to fetch fundamental data (cached, 24h TTL)
+        try:
+            from data.fundamentals import get_fundamentals
+            fund = get_fundamentals(sym, use_cache=True)
+            dy = fund.get("dividend_yield") or 0.0
+            pr = fund.get("payout_ratio") or 0.0
+            sector = fund.get("sector") or sector
+        except Exception:
+            dy = 0.0
+            pr = 0.0
+
+        if dy and dy > 0:
+            candidates.append({
+                "symbol": sym,
+                "dividend_yield": dy,
+                "payout_ratio": pr,
+                "sector": sector,
+            })
+
+    return candidates
 
 
 # ====================================================================

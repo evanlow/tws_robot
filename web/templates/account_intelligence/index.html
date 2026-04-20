@@ -224,23 +224,103 @@ async function fetchJSON(url) {
     var opps = opportunities.opportunities || [];
     var summary = opportunities.summary || {};
     var html = statCard('Opportunities Found', opps.length);
-    if (summary.high_priority != null) html += statCard('High Priority', summary.high_priority);
+    if (summary.high_urgency_count != null) html += statCard('High Priority', summary.high_urgency_count, summary.high_urgency_count > 0 ? 'pnl-negative' : '');
+    var byType = summary.by_type || {};
+    if (byType.SECTOR_GAP) html += statCard('Sector Gaps', byType.SECTOR_GAP);
+    if (byType.DIVIDEND) html += statCard('Dividend Opps', byType.DIVIDEND);
     grid.innerHTML = html;
 
     var list = document.getElementById('opportunitiesList');
+    var lhtml = '';
+
+    // Plain-English summary
+    if (opportunities.plain_summary) {
+      lhtml += '<div style="padding:0.75rem 1rem;margin-bottom:1rem;background:#1a365d;border-radius:8px;border-left:4px solid #63b3ed;color:#e2e8f0;font-size:0.95rem;line-height:1.5;">';
+      lhtml += '<strong style="color:#90cdf4;">💡 Portfolio Summary:</strong> ';
+      lhtml += escapeHtml(opportunities.plain_summary);
+      lhtml += '</div>';
+    }
+
     if (opps.length > 0) {
-      var lhtml = '<table class="data-table"><thead><tr><th>Type</th><th>Description</th><th>Priority</th></tr></thead><tbody>';
+      // Group opportunities by type
+      var groups = {};
+      var groupOrder = ['CONCENTRATION', 'OVERWEIGHT', 'REBALANCE', 'SECTOR_GAP', 'DIVIDEND'];
+      var groupLabels = {
+        'CONCENTRATION': '⚠️ Concentration Risk',
+        'OVERWEIGHT': '📊 Overweight Sectors',
+        'REBALANCE': '⚖️ Position Rebalancing',
+        'SECTOR_GAP': '🔍 Sector Gaps',
+        'DIVIDEND': '💰 Dividend Opportunities',
+      };
+
       for (var i = 0; i < opps.length; i++) {
         var o = opps[i];
-        var priorityClass = (o.priority === 'HIGH' || o.priority === 'high') ? 'pnl-negative' : '';
-        lhtml += '<tr><td>' + escapeHtml(o.type || o.opportunity_type || '--') + '</td><td>' +
-                 escapeHtml(o.description || o.message || '--') + '</td><td class="' + priorityClass + '">' +
-                 escapeHtml(o.priority || '--') + '</td></tr>';
+        var gtype = o.type || 'OTHER';
+        if (!groups[gtype]) groups[gtype] = [];
+        groups[gtype].push(o);
       }
-      lhtml += '</tbody></table>';
+
+      // Urgency badge helper
+      function urgencyBadge(u) {
+        var urg = (u || '').toUpperCase();
+        if (urg === 'HIGH') return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;background:#fc8181;color:#1a202c;">HIGH</span>';
+        if (urg === 'MEDIUM') return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;background:#ecc94b;color:#1a202c;">MEDIUM</span>';
+        return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;background:#68d391;color:#1a202c;">LOW</span>';
+      }
+
+      for (var gi = 0; gi < groupOrder.length; gi++) {
+        var gkey = groupOrder[gi];
+        var items = groups[gkey];
+        if (!items || items.length === 0) continue;
+
+        var label = groupLabels[gkey] || gkey;
+        lhtml += '<h3 style="font-size:0.95rem;color:#a0aec0;margin:1rem 0 0.5rem;">' + escapeHtml(label) + '</h3>';
+        lhtml += '<table class="data-table"><thead><tr>';
+        lhtml += '<th>Symbol</th><th>Description</th><th>Suggested Action</th><th style="text-align:right;">Est. Impact</th><th style="text-align:center;">Priority</th>';
+        lhtml += '</tr></thead><tbody>';
+
+        for (var j = 0; j < items.length; j++) {
+          var o = items[j];
+          var impact = o.potential_impact;
+          var impactStr = (impact != null && impact > 0) ? ('$' + Number(impact).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})) : '--';
+          lhtml += '<tr>';
+          lhtml += '<td>' + escapeHtml(o.symbol || '--') + '</td>';
+          lhtml += '<td>' + escapeHtml(o.description || '--') + '</td>';
+          lhtml += '<td>' + escapeHtml(o.suggested_action || '--') + '</td>';
+          lhtml += '<td style="text-align:right;">' + escapeHtml(impactStr) + '</td>';
+          lhtml += '<td style="text-align:center;">' + urgencyBadge(o.urgency) + '</td>';
+          lhtml += '</tr>';
+        }
+        lhtml += '</tbody></table>';
+      }
+
+      // Handle any ungrouped types
+      for (var gkey in groups) {
+        if (groupOrder.indexOf(gkey) === -1 && groups[gkey].length > 0) {
+          var items = groups[gkey];
+          lhtml += '<h3 style="font-size:0.95rem;color:#a0aec0;margin:1rem 0 0.5rem;">' + escapeHtml(gkey) + '</h3>';
+          lhtml += '<table class="data-table"><thead><tr>';
+          lhtml += '<th>Symbol</th><th>Description</th><th>Suggested Action</th><th style="text-align:right;">Est. Impact</th><th style="text-align:center;">Priority</th>';
+          lhtml += '</tr></thead><tbody>';
+          for (var j = 0; j < items.length; j++) {
+            var o = items[j];
+            var impact = o.potential_impact;
+            var impactStr = (impact != null && impact > 0) ? ('$' + Number(impact).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})) : '--';
+            lhtml += '<tr>';
+            lhtml += '<td>' + escapeHtml(o.symbol || '--') + '</td>';
+            lhtml += '<td>' + escapeHtml(o.description || '--') + '</td>';
+            lhtml += '<td>' + escapeHtml(o.suggested_action || '--') + '</td>';
+            lhtml += '<td style="text-align:right;">' + escapeHtml(impactStr) + '</td>';
+            lhtml += '<td style="text-align:center;">' + urgencyBadge(o.urgency) + '</td>';
+            lhtml += '</tr>';
+          }
+          lhtml += '</tbody></table>';
+        }
+      }
+
       list.innerHTML = lhtml;
     } else {
-      list.innerHTML = '<p class="empty-state">No opportunities detected at this time.</p>';
+      list.innerHTML = lhtml + '<p class="empty-state">No opportunities detected at this time.</p>';
     }
   }
 
