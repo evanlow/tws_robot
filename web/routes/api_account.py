@@ -121,14 +121,16 @@ def summary():
     account = svc.get_account_summary()
     insights = svc.get_account_insights()
 
+    equity_initialized = risk.get("equity_initialized", False)
+
     return jsonify({
         "connected": svc.connected,
         "environment": svc.connection_env,
-        "equity": risk.get("current_equity", 0),
-        "peak_equity": risk.get("peak_equity", 0),
+        "equity": risk.get("current_equity", 0) if equity_initialized else None,
+        "peak_equity": risk.get("peak_equity", 0) if equity_initialized else None,
         "daily_pnl_pct": risk.get("daily_pnl_pct", 0),
         "daily_pnl_dollar": insights["daily_pnl_dollar"],
-        "drawdown_pct": risk.get("drawdown_pct", 0),
+        "drawdown_pct": risk.get("drawdown_pct", 0) if equity_initialized else None,
         "stock_drawdown_pct": risk.get("stock_drawdown_pct", 0),
         "premium_retention_pct": risk.get("premium_retention_pct", 1.0),
         "short_options_premium_collected": risk.get("short_options_premium_collected", 0),

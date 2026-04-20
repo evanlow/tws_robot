@@ -80,7 +80,12 @@ class _BridgeApp(EWrapper, EClient):
             rm = self._svc.risk_manager
             with self._svc._lock:
                 rm.current_equity = equity
-                if equity > rm.peak_equity:
+                # On first real equity update, reset peak to actual value
+                # instead of the default initial_capital placeholder.
+                if not rm._equity_initialized:
+                    rm.peak_equity = equity
+                    rm._equity_initialized = True
+                elif equity > rm.peak_equity:
                     rm.peak_equity = equity
                 # First equity update also sets the daily start if still default
                 if rm.daily_start_equity == rm.initial_capital:

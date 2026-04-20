@@ -41,7 +41,7 @@ def index():
 
     # Portfolio analysis (concentration, allocation, drawdown, attribution)
     portfolio_analysis = {
-        "drawdown": {"current_pct": 0, "peak_equity": 0, "current_equity": 0},
+        "drawdown": {"current_pct": 0, "peak_equity": 0, "current_equity": 0, "has_real_data": False},
         "allocation": [],
         "concentration": {},
         "diversification": {},
