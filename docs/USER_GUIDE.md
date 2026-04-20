@@ -63,14 +63,17 @@ The dashboard has several pages accessible from the navigation bar:
 | Page | What It Does |
 |------|-------------|
 | **Dashboard** | Overview of your connection status, equity, P&L, active strategies, and recent alerts |
+| **Trading** ▾ | Dropdown menu grouping related trading pages |
 | **Strategies** | Create, start, stop, and monitor your trading strategies |
-| **Backtest** | Run backtests on historical data and review results |
 | **Positions** | View your current open positions and trade history |
+| **Backtest** | Run backtests on historical data and review results |
+| **Monitoring** ▾ | Dropdown menu grouping monitoring and risk pages |
 | **Risk** | Monitor risk levels, drawdown, and circuit breaker status |
-| **Logs** | Browse application logs in real time |
+| **Events & Logs** | Browse application logs in real time |
+| **AI** ▾ | Dropdown menu grouping AI-powered features |
+| **AI Chat** | Dedicated page for asking the AI assistant about your strategies, market conditions, and trading decisions |
+| **Portfolio Insights** | AI-powered portfolio analysis with strategy deduction, allocation breakdown, and per-stock deep-dive capability |
 | **Settings** | Configure TWS connection details and trading parameters |
-| **AI Chat** | Ask the AI assistant questions about your strategies, market conditions, and trading decisions |
-| **AI Strategy** | Get AI-powered help creating, refining, and analyzing trading strategies |
 
 ### Key Features
 

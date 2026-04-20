@@ -1082,7 +1082,7 @@ class TestPortfolioAnalysisPage:
     def test_page_loads(self, client):
         resp = client.get("/portfolio-analysis/")
         assert resp.status_code == 200
-        assert b"Portfolio Analysis" in resp.data
+        assert b"Portfolio Insights" in resp.data
 
     def test_page_shows_empty_state(self, client):
         resp = client.get("/portfolio-analysis/")
