@@ -278,6 +278,170 @@ class TestOpportunityDetector:
         d = sa.to_dict()
         assert d["status"] == "overweight"
 
+    # -- New tests for enhanced opportunity detection --
+
+    def test_sector_gap_includes_etf_symbol(self):
+        """Sector gap opportunities should include a concrete ETF symbol."""
+        from data.opportunity_detector import OpportunityType
+        detector = self._make_detector()
+        positions = [
+            {"symbol": "AAPL", "market_value": 100_000, "sector": "Technology"},
+        ]
+        opps = detector.scan(positions=positions, equity=100_000)
+        sector_gaps = [o for o in opps if o.opportunity_type == OpportunityType.SECTOR_GAP]
+        assert len(sector_gaps) > 0
+        # At least one gap should have an ETF symbol
+        with_etf = [o for o in sector_gaps if o.symbol]
+        assert len(with_etf) > 0
+        # Suggested action should mention a dollar amount or ETF
+        for o in with_etf:
+            assert "$" in o.suggested_action or o.symbol in o.suggested_action
+
+    def test_sector_gap_includes_dollar_impact(self):
+        """Sector gap opportunities should include potential_impact in dollars."""
+        from data.opportunity_detector import OpportunityType
+        detector = self._make_detector()
+        positions = [
+            {"symbol": "AAPL", "market_value": 100_000, "sector": "Technology"},
+        ]
+        opps = detector.scan(positions=positions, equity=100_000)
+        sector_gaps = [o for o in opps if o.opportunity_type == OpportunityType.SECTOR_GAP]
+        for o in sector_gaps:
+            assert o.potential_impact >= 0
+
+    def test_concentration_risk_detected(self):
+        """Concentration risk should be detected when top N positions dominate."""
+        from data.opportunity_detector import OpportunityType
+        detector = self._make_detector(concentration_top_n=2, concentration_warn_pct=0.70)
+        positions = [
+            {"symbol": "AAPL", "market_value": 50_000, "sector": "Technology"},
+            {"symbol": "GOOG", "market_value": 30_000, "sector": "Technology"},
+            {"symbol": "JPM", "market_value": 10_000, "sector": "Financials"},
+            {"symbol": "XOM", "market_value": 10_000, "sector": "Energy"},
+        ]
+        opps = detector.scan(positions=positions, equity=100_000)
+        conc = [o for o in opps if o.opportunity_type == OpportunityType.CONCENTRATION]
+        assert len(conc) == 1
+        assert "AAPL" in conc[0].symbol
+        assert "GOOG" in conc[0].symbol
+        assert conc[0].metadata["top_pct"] >= 0.70
+
+    def test_no_concentration_risk_when_well_diversified(self):
+        """No concentration warning when portfolio is well-diversified."""
+        from data.opportunity_detector import OpportunityType
+        detector = self._make_detector(concentration_top_n=3, concentration_warn_pct=0.80)
+        positions = [
+            {"symbol": "AAPL", "market_value": 20_000, "sector": "Technology"},
+            {"symbol": "GOOG", "market_value": 20_000, "sector": "Technology"},
+            {"symbol": "JPM", "market_value": 20_000, "sector": "Financials"},
+            {"symbol": "XOM", "market_value": 20_000, "sector": "Energy"},
+            {"symbol": "JNJ", "market_value": 20_000, "sector": "Healthcare"},
+        ]
+        opps = detector.scan(positions=positions, equity=100_000)
+        conc = [o for o in opps if o.opportunity_type == OpportunityType.CONCENTRATION]
+        assert len(conc) == 0
+
+    def test_concentration_risk_small_portfolio(self):
+        """Concentration risk should fire for small portfolios (≤ top_n positions)."""
+        from data.opportunity_detector import OpportunityType
+        detector = self._make_detector(concentration_top_n=3, concentration_warn_pct=0.80)
+        # Only 2 positions but they represent 95% of equity (well above 80% threshold)
+        positions = [
+            {"symbol": "AAPL", "market_value": 70_000, "sector": "Technology"},
+            {"symbol": "GOOG", "market_value": 25_000, "sector": "Technology"},
+        ]
+        opps = detector.scan(positions=positions, equity=100_000)
+        conc = [o for o in opps if o.opportunity_type == OpportunityType.CONCENTRATION]
+        assert len(conc) == 1
+        assert conc[0].metadata["top_pct"] >= 0.80
+
+    def test_rebalance_no_naive_equal_weight(self):
+        """Rebalance should NOT produce naive equal-weight BUY suggestions."""
+        detector = self._make_detector(max_single_position_pct=0.30)
+        positions = [
+            {"symbol": "AAPL", "market_value": 20_000, "sector": "Technology"},
+            {"symbol": "GOOG", "market_value": 15_000, "sector": "Technology"},
+            {"symbol": "JPM", "market_value": 10_000, "sector": "Financials"},
+        ]
+        suggestions = detector.generate_rebalance_suggestions(positions, equity=100_000)
+        # None of these exceed 30%, so no rebalance suggestions
+        assert len(suggestions) == 0
+
+    def test_plain_summary_empty_portfolio(self):
+        """Plain summary for empty portfolio should suggest starting with an ETF."""
+        detector = self._make_detector()
+        summary = detector.generate_plain_summary([], equity=0)
+        assert "SPY" in summary or "VTI" in summary
+
+    def test_plain_summary_concentrated_portfolio(self):
+        """Plain summary should flag concentration."""
+        detector = self._make_detector()
+        positions = [
+            {"symbol": "AAPL", "market_value": 90_000, "sector": "Technology"},
+            {"symbol": "JPM", "market_value": 10_000, "sector": "Financials"},
+        ]
+        summary = detector.generate_plain_summary(positions, equity=100_000)
+        assert "Technology" in summary
+        assert "2 position" in summary
+
+    def test_summary_includes_high_urgency_count(self):
+        """Summary dict should include high_urgency_count."""
+        from data.opportunity_detector import OpportunityType
+        detector = self._make_detector()
+        positions = [
+            {"symbol": "AAPL", "market_value": 100_000, "sector": "Unknown"},
+        ]
+        detector.scan(positions=positions, equity=100_000)
+        summary = detector.get_summary()
+        assert "high_urgency_count" in summary
+        assert isinstance(summary["high_urgency_count"], int)
+
+    def test_overweight_sector_high_urgency(self):
+        """Overweight sector >30pp should be HIGH urgency."""
+        from data.opportunity_detector import OpportunityType, Urgency
+        detector = self._make_detector()
+        positions = [
+            {"symbol": "AAPL", "market_value": 100_000, "sector": "Unknown"},
+        ]
+        opps = detector.scan(positions=positions, equity=100_000)
+        overweight = [o for o in opps if o.opportunity_type == OpportunityType.OVERWEIGHT]
+        # Unknown is 100% actual, 0% target → 100pp overweight
+        assert len(overweight) > 0
+        assert overweight[0].urgency == Urgency.HIGH
+
+    def test_opportunity_to_dict_has_urgency_key(self):
+        """Opportunity.to_dict() should have 'urgency' key, not 'priority'."""
+        from data.opportunity_detector import Opportunity, OpportunityType, Urgency
+        opp = Opportunity(
+            opportunity_type=OpportunityType.SECTOR_GAP,
+            symbol="XLK",
+            description="Test",
+            urgency=Urgency.HIGH,
+        )
+        d = opp.to_dict()
+        assert "urgency" in d
+        assert d["urgency"] == "HIGH"
+
+    def test_dividend_screening_handles_none_yield(self):
+        """Dividend screening should handle None dividend_yield gracefully."""
+        detector = self._make_detector(min_dividend_yield=0.02)
+        candidates = [
+            {"symbol": "SLV", "dividend_yield": None, "sector": "Materials"},
+            {"symbol": "T", "dividend_yield": 0.06, "payout_ratio": 0.70, "sector": "Communication"},
+        ]
+        opps = detector.screen_dividend_opportunities(candidates)
+        assert len(opps) == 1
+        assert opps[0].symbol == "T"
+
+    def test_etf_symbol_for_known_sectors(self):
+        """ETF mapping should return symbols for all default target sectors."""
+        from data.opportunity_detector import SECTOR_ETF_MAP
+        detector = self._make_detector()
+        for sector in detector.DEFAULT_SECTOR_TARGETS:
+            etf = detector._etf_symbol_for_sector(sector)
+            assert etf, f"No ETF mapped for sector {sector}"
+            assert etf in [e["symbol"] for e in SECTOR_ETF_MAP[sector]]
+
 
 # ====================================================================
 # 4. Performance Benchmarking
