@@ -19,11 +19,11 @@
 <div class="stats-grid" style="margin-bottom:1.5rem;">
   <div class="stat-card">
     <span class="stat-label">Account Equity</span>
-    <span class="stat-value">${{ "%.2f"|format(risk_summary.current_equity|default(100000)) }}</span>
+    <span class="stat-value">{% if risk_summary.equity_initialized|default(false) %}${{ "%.2f"|format(risk_summary.current_equity) }}{% else %}&mdash;{% endif %}</span>
   </div>
   <div class="stat-card">
     <span class="stat-label">Peak Equity</span>
-    <span class="stat-value">${{ "%.2f"|format(risk_summary.peak_equity|default(100000)) }}</span>
+    <span class="stat-value">{% if risk_summary.equity_initialized|default(false) %}${{ "%.2f"|format(risk_summary.peak_equity) }}{% else %}&mdash;{% endif %}</span>
   </div>
   <div class="stat-card">
     <span class="stat-label">Stock Drawdown</span>

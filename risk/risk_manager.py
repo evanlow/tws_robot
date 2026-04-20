@@ -163,6 +163,7 @@ class RiskManager:
         self.peak_equity = initial_capital
         self.current_equity = initial_capital
         self.daily_start_equity = initial_capital
+        self._equity_initialized = False  # True once real equity data is received
         self.current_date = None
         self.risk_status = RiskStatus.NORMAL
         self.emergency_stop_active = False
@@ -192,6 +193,11 @@ class RiskManager:
         logger.info(f"  Daily Loss Limit: {daily_loss_limit_pct:.1%}")
         logger.info(f"  Max Leverage: {max_leverage:.2f}x")
     
+    @property
+    def equity_initialized(self) -> bool:
+        """Whether real equity data has been received (not just the default)."""
+        return self._equity_initialized
+    
     def update(
         self,
         equity: float,
@@ -210,6 +216,7 @@ class RiskManager:
             Current risk metrics
         """
         self.current_equity = equity
+        self._equity_initialized = True
         
         # Update peak equity
         if equity > self.peak_equity:
@@ -559,6 +566,7 @@ class RiskManager:
             'current_equity': self.current_equity,
             'peak_equity': self.peak_equity,
             'daily_start_equity': self.daily_start_equity,
+            'equity_initialized': self._equity_initialized,
             'drawdown_pct': (self.peak_equity - self.current_equity) / self.peak_equity if self.peak_equity > 0 else 0.0,
             'daily_pnl_pct': (self.current_equity - self.daily_start_equity) / self.daily_start_equity if self.daily_start_equity > 0 else 0.0,
             'drawdown_breached': self.drawdown_breached,
@@ -584,6 +592,7 @@ class RiskManager:
         self.peak_equity = self.initial_capital
         self.current_equity = self.initial_capital
         self.daily_start_equity = self.initial_capital
+        self._equity_initialized = False
         self.current_date = None
         self.risk_status = RiskStatus.NORMAL
         self.emergency_stop_active = False

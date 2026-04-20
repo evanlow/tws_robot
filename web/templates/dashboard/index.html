@@ -189,6 +189,7 @@
       <!-- Drawdown Indicator -->
       <div class="analysis-section">
         <h3>📉 Drawdown from Peak</h3>
+        {% if pa.drawdown.has_real_data %}
         {% set dd_pct = (pa.drawdown.current_pct * 100) %}
         {% set dd_color = 'pnl-positive' if dd_pct < 5 else ('pnl-negative' if dd_pct >= 10 else '') %}
         <div class="drawdown-bar-container">
@@ -200,6 +201,9 @@
           <span>Peak: ${{ "{:,.2f}".format(pa.drawdown.peak_equity) }}</span>
           <span>Current: ${{ "{:,.2f}".format(pa.drawdown.current_equity) }}</span>
         </div>
+        {% else %}
+        <p class="stat-sublabel" style="margin-top:0.5rem;">Connect to TWS to view drawdown data.</p>
+        {% endif %}
       </div>
 
       <!-- Concentration & Diversification -->
