@@ -250,7 +250,7 @@ class OpportunityDetector:
         Returns:
             List of concentration-risk opportunities (may be empty).
         """
-        if equity <= 0 or len(positions) <= self.concentration_top_n:
+        if equity <= 0 or len(positions) == 0:
             return []
 
         sorted_pos = sorted(
@@ -258,7 +258,8 @@ class OpportunityDetector:
             key=lambda p: abs(p.get("market_value", 0.0)),
             reverse=True,
         )
-        top = sorted_pos[: self.concentration_top_n]
+        top_n = min(self.concentration_top_n, len(positions))
+        top = sorted_pos[:top_n]
         top_value = sum(abs(p.get("market_value", 0.0)) for p in top)
         top_pct = top_value / equity
 
@@ -273,8 +274,8 @@ class OpportunityDetector:
             opportunity_type=OpportunityType.CONCENTRATION,
             symbol=symbols_str,
             description=(
-                f"Your top {self.concentration_top_n} positions "
-                f"({symbols_str}) represent {top_pct*100:.0f}% of your portfolio"
+                f"Your top {top_n} position{'s' if top_n > 1 else ''} "
+                f"({symbols_str}) represent{'' if top_n > 1 else 's'} {top_pct*100:.0f}% of your portfolio"
             ),
             urgency=urgency,
             suggested_action=(
@@ -378,20 +379,11 @@ class OpportunityDetector:
                     },
                 )
                 opps.append(opp)
-                self._detected.append(opp)
         return opps
 
     # ------------------------------------------------------------------
     # Helpers — ETF suggestions for sectors
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _etf_for_sector(sector: str) -> Optional[Dict[str, str]]:
-        """Return the primary ETF dict for a sector, or None."""
-        etfs = SECTOR_ETF_MAP.get(sector)
-        if etfs:
-            return etfs[0]
-        return None
 
     @staticmethod
     def _etf_symbol_for_sector(sector: str) -> str:

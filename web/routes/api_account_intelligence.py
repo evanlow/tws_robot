@@ -160,22 +160,47 @@ def _build_dividend_candidates(positions):
     Tries to enrich each position with fundamental data (dividend_yield,
     payout_ratio, sector) using the ``data.fundamentals`` module.  Falls
     back gracefully if yfinance is unavailable or fetches fail.
+
+    Applies ticker validation and caps the number of lookups to avoid
+    excessive external API calls on a single page load.
     """
+    import re
+
+    _TICKER_RE = re.compile(r"^[A-Z0-9]{1,10}(\.[A-Z]{1,5})?$")
+    _MAX_DIVIDEND_LOOKUPS = 20
+
+    try:
+        from data.fundamentals import get_fundamentals
+    except Exception:
+        logger.warning("Unable to import get_fundamentals for dividend candidate enrichment")
+        return []
+
     candidates = []
+    lookups = 0
     for p in positions:
         sym = p.get("symbol", "?")
         sector = p.get("sector", "Unknown")
 
+        # Skip invalid or option-like symbols
+        if not _TICKER_RE.match(sym):
+            continue
+
+        # Cap the number of external lookups per request
+        if lookups >= _MAX_DIVIDEND_LOOKUPS:
+            break
+
         # Try to fetch fundamental data (cached, 24h TTL)
+        dy = 0.0
+        pr = 0.0
         try:
-            from data.fundamentals import get_fundamentals
             fund = get_fundamentals(sym, use_cache=True)
             dy = fund.get("dividend_yield") or 0.0
             pr = fund.get("payout_ratio") or 0.0
             sector = fund.get("sector") or sector
         except Exception:
-            dy = 0.0
-            pr = 0.0
+            logger.debug("Failed to fetch fundamentals for dividend candidate %s", sym)
+
+        lookups += 1
 
         if dy and dy > 0:
             candidates.append({

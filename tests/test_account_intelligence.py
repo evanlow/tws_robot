@@ -341,6 +341,20 @@ class TestOpportunityDetector:
         conc = [o for o in opps if o.opportunity_type == OpportunityType.CONCENTRATION]
         assert len(conc) == 0
 
+    def test_concentration_risk_small_portfolio(self):
+        """Concentration risk should fire for small portfolios (≤ top_n positions)."""
+        from data.opportunity_detector import OpportunityType
+        detector = self._make_detector(concentration_top_n=3, concentration_warn_pct=0.80)
+        # Only 2 positions but they represent 95% of equity (well above 80% threshold)
+        positions = [
+            {"symbol": "AAPL", "market_value": 70_000, "sector": "Technology"},
+            {"symbol": "GOOG", "market_value": 25_000, "sector": "Technology"},
+        ]
+        opps = detector.scan(positions=positions, equity=100_000)
+        conc = [o for o in opps if o.opportunity_type == OpportunityType.CONCENTRATION]
+        assert len(conc) == 1
+        assert conc[0].metadata["top_pct"] >= 0.80
+
     def test_rebalance_no_naive_equal_weight(self):
         """Rebalance should NOT produce naive equal-weight BUY suggestions."""
         detector = self._make_detector(max_single_position_pct=0.30)
