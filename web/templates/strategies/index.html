@@ -172,17 +172,15 @@
       </div>
       {% endif %}
 
-      <!-- AI Narrative Insight -->
-      <div class="insight-section" id="insight-{{ inf.id }}" style="margin-top:0.75rem;display:none;">
+      <!-- AI Narrative Insight (auto-loaded) -->
+      <div class="insight-section" id="insight-{{ inf.id }}" style="margin-top:0.75rem;">
         <div style="border-top:1px solid #2d2d44;padding-top:0.5rem;">
           <span style="font-size:0.7rem;color:#a0aec0;font-weight:600;">💡 AI Insight</span>
-          <p class="insight-text" style="font-size:0.8rem;color:#cbd5e0;margin-top:0.25rem;line-height:1.45;"></p>
+          <p class="insight-text" style="font-size:0.8rem;color:#cbd5e0;margin-top:0.25rem;line-height:1.45;">
+            <span class="insight-loading" style="color:#718096;">⏳ Loading insight…</span>
+          </p>
         </div>
       </div>
-      <button class="btn-sm btn-insight" onclick="loadInsight('{{ inf.id }}')" id="insight-btn-{{ inf.id }}"
-        style="margin-top:0.5rem;background:#2d2d44;color:#a0aec0;border:1px solid #4a5568;font-size:0.7rem;padding:3px 10px;border-radius:4px;cursor:pointer;">
-        💡 Get Insight
-      </button>
     </div>
     {% endfor %}
   </div>
@@ -290,35 +288,32 @@
 .inferred-card:hover {
   border-color: #4a5568 !important;
 }
-.btn-insight:hover {
-  background: #4a5568 !important;
-  color: #e2e8f0 !important;
-}
 </style>
 <script>
 window.loadInsight = async function(id) {
-  const btn = document.getElementById('insight-btn-' + id);
   const section = document.getElementById('insight-' + id);
-  if (!btn || !section) return;
-  btn.disabled = true;
-  btn.textContent = '⏳ Loading…';
+  if (!section) return;
+  const textEl = section.querySelector('.insight-text');
   try {
     const res = await fetch(`/api/strategies/inferred/${id}/insight`, { method: 'POST' });
     const data = await res.json();
     if (data.error) {
-      section.querySelector('.insight-text').textContent = data.error;
+      textEl.textContent = data.error;
     } else {
-      section.querySelector('.insight-text').textContent = data.insight;
+      textEl.textContent = data.insight;
     }
-    section.style.display = 'block';
-    btn.style.display = 'none';
   } catch(e) {
-    section.querySelector('.insight-text').textContent = 'Failed to load insight: ' + (e.message || e);
-    section.style.display = 'block';
-    btn.disabled = false;
-    btn.textContent = '💡 Get Insight';
+    textEl.textContent = 'Failed to load insight: ' + (e.message || e);
   }
 };
+
+// Auto-load AI insights for all inferred strategies on page load
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.inferred-card').forEach(function(card) {
+    const id = card.id.replace('inferred-', '');
+    if (id) loadInsight(id);
+  });
+});
 
 window.controlStrategy = async function(name, action) {
   try {
