@@ -20,11 +20,23 @@ Transform your trading ideas into automated strategies. Test them on historical 
 - 📊 **Multiple strategies** - Run Moving Average, Mean Reversion, Momentum simultaneously
 - ⚡ **Paper trading** - Validate strategies with real-time data before going live
 - 📈 **Performance tracking** - See what's working with Sharpe ratio, win rate, drawdown
-- 🏢 **Company name display** - See "Apple Inc." not just "AAPL" across all pages (supports international stocks: HK, JP, UK, AU, etc.)- 📰 **AI Market Outlook** - Daily market briefing with session recap, portfolio-relevant insights, and actionable recommendations- �🎯 **AI Portfolio Intelligence** - Auto-detect your trading strategies from positions:
+- 🏢 **Company name display** - See "Apple Inc." not just "AAPL" across all pages (supports international stocks: HK, JP, UK, AU, etc.)
+- 📰 **AI Market Outlook** - Daily market briefing with session recap, portfolio-relevant insights, and actionable recommendations
+- 🎯 **AI Portfolio Intelligence** - Auto-detect your trading strategies from positions:
   - 📍 Covered calls, protective puts, and collars
   - 📐 Bull/bear spreads, iron condors, straddles, strangles
   - 🎚️ Automatic profit targets, stop losses, and risk metrics
-  - 🧠 Confidence scores and actionable insights for each position  - 💬 AI-generated narrative insights explaining strategy status and next actions
+  - 🧠 Confidence scores and actionable insights for each position
+  - 💬 AI-generated narrative insights explaining strategy status and next actions
+- 🧠 **Account Intelligence Suite** - 8 advanced portfolio management modules:
+  - 💚 **Account Health** - Composite health scoring, margin analysis, diversification metrics
+  - 💰 **Cash Management** - Reserve optimization, cash flow forecasting, idle cash detection
+  - 🎯 **Opportunity Detector** - Sector gap analysis, rebalancing suggestions, dividend screening
+  - 📊 **Performance Benchmarking** - Compare against SPY/QQQ/IWM, calculate alpha/beta, track fees
+  - ⚠️ **Risk Intelligence** - Monte Carlo simulation (10k scenarios), stress testing, liquidity analysis
+  - 📋 **Report Generator** - Automated daily/weekly/monthly reports with threshold alerts
+  - 🏢 **Multi-Account Manager** - Aggregate views, cross-account risk, duplicate position detection
+  - ⚡ **Execution Quality** - Fill analysis, slippage tracking, rejection monitoring
 ### For Quantitative Developers
 - 🏗️ **Professional architecture** - Event-driven design, modular components
 - 🧬 **Extensible framework** - Build custom strategies on proven infrastructure

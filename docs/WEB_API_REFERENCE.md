@@ -26,7 +26,8 @@
 9. [Emergency Controls API](#emergency-controls-api)
 10. [Events & Monitoring API](#events--monitoring-api)
 11. [System API](#system-api)
-12. [AI Assistant APIs](#ai-assistant-apis)
+12. [Account Intelligence API](#account-intelligence-api)
+13. [AI Assistant APIs](#ai-assistant-apis)
 
 ---
 
@@ -1815,6 +1816,608 @@ Get system configuration.
   "daily_loss_limit_pct": 2.0,
   "risk_controls_enabled": true
 }
+```
+
+---
+
+## Account Intelligence API
+
+**NEW in v2.0** - Advanced portfolio management and analysis suite with 8 intelligence modules.
+
+The Account Intelligence API provides sophisticated analytics for portfolio optimization, risk assessment, and performance tracking. All endpoints are under `/api/intelligence/*`.
+
+### Overview
+
+The suite includes:
+- **Account Health** - Composite health scoring with margin analysis
+- **Cash Management** - Reserve optimization and cash flow forecasting
+- **Opportunity Detection** - Portfolio gap analysis and rebalancing suggestions
+- **Performance Benchmarking** - Compare returns against market indices
+- **Risk Intelligence** - Monte Carlo simulation and stress testing
+- **Report Generation** - Automated performance reports and alerts
+- **Multi-Account** - Aggregate views across multiple accounts
+- **Execution Quality** - Order fill analysis and slippage tracking
+
+---
+
+### `GET /api/intelligence/health`
+
+Compute a composite health score for your trading account.
+
+**What it analyzes:**
+- Overall account health grade (EXCELLENT, GOOD, FAIR, POOR, CRITICAL)
+- Cash balance adequacy (minimum 5% recommended)
+- Margin utilization (warning at 70%, critical at 90%)
+- Portfolio diversification across positions
+- Drawdown from peak equity
+- Buying power sufficiency
+
+**Response:**
+```json
+{
+  "overall_score": 78.5,
+  "grade": "GOOD",
+  "components": {
+    "cash_adequacy": 85.0,
+    "margin_safety": 90.0,
+    "diversification": 65.0,
+    "drawdown_health": 75.0
+  },
+  "warnings": [
+    "Portfolio is concentrated in Technology sector (45%)"
+  ],
+  "margin_utilization": {
+    "margin_used": 15000.00,
+    "margin_available": 85000.00,
+    "utilization_pct": 0.15,
+    "is_warning": false,
+    "is_critical": false
+  },
+  "buying_power_adequacy": {
+    "available": 85000.00,
+    "recommended_min": 10000.00,
+    "is_adequate": true
+  }
+}
+```
+
+**Use Cases:**
+```javascript
+// Display health score on dashboard
+fetch('/api/intelligence/health')
+  .then(res => res.json())
+  .then(data => {
+    const color = data.grade === 'EXCELLENT' ? 'green' : 
+                  data.grade === 'GOOD' ? 'blue' : 'orange';
+    displayHealthBadge(data.overall_score, data.grade, color);
+    if (data.warnings.length > 0) {
+      showWarnings(data.warnings);
+    }
+  });
+```
+
+---
+
+### `GET /api/intelligence/cash`
+
+Analyze cash reserve levels and provide management recommendations.
+
+**Query Parameters:**
+- `policy` (optional) - Reserve policy: `CONSERVATIVE`, `MODERATE` (default), `AGGRESSIVE`
+  - CONSERVATIVE: 20% minimum cash reserve
+  - MODERATE: 10% minimum cash reserve
+  - AGGRESSIVE: 5% minimum cash reserve
+
+**Response:**
+```json
+{
+  "cash_balance": 25000.00,
+  "equity": 150000.00,
+  "cash_pct": 0.1667,
+  "target_reserve": 15000.00,
+  "policy": "MODERATE",
+  "is_adequate": true,
+  "status": "HEALTHY",
+  "deficit_amount": 0.0,
+  "idle_cash_detected": false,
+  "recommendations": [
+    "Cash reserve is healthy at 16.7% of portfolio",
+    "Consider deploying $10,000 for investment opportunities"
+  ],
+  "expected_flows": [
+    {
+      "date": "2026-04-25",
+      "amount": 150.00,
+      "description": "Dividend payment - AAPL"
+    }
+  ]
+}
+```
+
+**Use Cases:**
+```javascript
+// Check if you have enough cash before placing large order
+fetch('/api/intelligence/cash?policy=CONSERVATIVE')
+  .then(res => res.json())
+  .then(data => {
+    if (!data.is_adequate) {
+      alert(`⚠️ Cash deficit: Need $${data.deficit_amount.toFixed(2)} more`);
+    }
+  });
+```
+
+---
+
+### `GET /api/intelligence/opportunities`
+
+Scan your portfolio for optimization opportunities.
+
+**What it detects:**
+- **Sector gaps** - Under/over-representation in sectors
+- **Rebalancing needs** - Positions that have drifted from targets
+- **Dividend opportunities** - High-yield stocks to consider
+- **Position sizing** - Positions that need adjustment
+
+**Response:**
+```json
+{
+  "opportunities": [
+    {
+      "type": "SECTOR_GAP",
+      "priority": "HIGH",
+      "sector": "Healthcare",
+      "description": "Healthcare sector underrepresented at 2% (target: 15%)",
+      "action": "Consider adding Healthcare positions",
+      "target_allocation_pct": 0.15,
+      "current_allocation_pct": 0.02
+    },
+    {
+      "type": "REBALANCE",
+      "priority": "MEDIUM",
+      "symbol": "AAPL",
+      "description": "AAPL position has grown to 25% of portfolio (target: 15%)",
+      "action": "SELL",
+      "suggested_amount": 5000.00,
+      "current_value": 37500.00,
+      "target_value": 22500.00
+    },
+    {
+      "type": "DIVIDEND_OPPORTUNITY",
+      "priority": "LOW",
+      "symbol": "T",
+      "description": "AT&T offers 6.2% yield with 70% payout ratio",
+      "dividend_yield": 0.062,
+      "payout_ratio": 0.70,
+      "sector": "Communication"
+    }
+  ],
+  "summary": {
+    "total_opportunities": 3,
+    "high_priority": 1,
+    "medium_priority": 1,
+    "low_priority": 1,
+    "sectors_underweight": ["Healthcare", "Energy"],
+    "sectors_overweight": ["Technology"]
+  }
+}
+```
+
+**Use Cases:**
+```javascript
+// Show portfolio optimization suggestions
+fetch('/api/intelligence/opportunities')
+  .then(res => res.json())
+  .then(data => {
+    const highPriority = data.opportunities.filter(o => o.priority === 'HIGH');
+    highPriority.forEach(opp => {
+      showNotification(opp.description, opp.action);
+    });
+  });
+```
+
+---
+
+### `GET /api/intelligence/benchmark`
+
+Compare your portfolio performance against market benchmarks.
+
+**Query Parameters:**
+- `period_days` (optional) - Analysis period in days (default: 30)
+- `benchmark` (optional) - Benchmark ticker: `SPY` (default), `QQQ`, `IWM`, `DIA`
+
+**Response:**
+```json
+{
+  "comparison": {
+    "benchmark": "SPY",
+    "period_days": 30,
+    "portfolio_return_pct": 8.5,
+    "benchmark_return_pct": 5.2,
+    "alpha": 3.3,
+    "beta": 1.15,
+    "tracking_error": 2.1,
+    "information_ratio": 1.57,
+    "outperformance": true
+  },
+  "fee_drag": {
+    "total_commissions": 125.50,
+    "estimated_slippage": 87.30,
+    "total_drag": 212.80,
+    "drag_pct": 0.14,
+    "impact_on_returns": "Fees reduced returns by 0.14%"
+  },
+  "summary": {
+    "performance_rating": "OUTPERFORMING",
+    "risk_adjusted_rating": "GOOD",
+    "message": "Portfolio outperformed SPY by 3.3% with moderate correlation (beta: 1.15)"
+  }
+}
+```
+
+**Use Cases:**
+```javascript
+// Compare against Nasdaq-100 for tech-heavy portfolio
+fetch('/api/intelligence/benchmark?benchmark=QQQ&period_days=90')
+  .then(res => res.json())
+  .then(data => {
+    if (data.comparison.alpha > 0) {
+      console.log(`🎉 Beating QQQ by ${data.comparison.alpha.toFixed(2)}%!`);
+    }
+  });
+```
+
+---
+
+### `GET /api/intelligence/risk`
+
+Advanced risk analysis using Monte Carlo simulation and stress testing.
+
+**What it provides:**
+- **Monte Carlo simulation** - 10,000 scenarios for portfolio outcomes
+- **Stress tests** - Portfolio response to market crash, sector rotation, rate shocks
+- **Liquidity analysis** - Days-to-liquidate for each position
+- **Value at Risk (VaR)** - Maximum expected loss at confidence levels
+
+**Response:**
+```json
+{
+  "monte_carlo": {
+    "scenarios_run": 10000,
+    "time_horizon_days": 30,
+    "expected_return_pct": 2.5,
+    "var_95": -3500.00,
+    "var_99": -6200.00,
+    "best_case_pct": 12.3,
+    "worst_case_pct": -8.7,
+    "probability_of_loss": 0.32,
+    "confidence_intervals": {
+      "50th_percentile": 2500.00,
+      "75th_percentile": 5200.00,
+      "95th_percentile": 9800.00
+    }
+  },
+  "stress_tests": [
+    {
+      "scenario": "MARKET_CRASH",
+      "description": "S&P 500 drops 20%",
+      "expected_loss": -23000.00,
+      "loss_pct": -15.3,
+      "severity": "HIGH"
+    },
+    {
+      "scenario": "SECTOR_ROTATION",
+      "description": "Technology sector underperforms by 15%",
+      "expected_loss": -6750.00,
+      "loss_pct": -4.5,
+      "severity": "MEDIUM"
+    },
+    {
+      "scenario": "RATE_SHOCK",
+      "description": "Interest rates rise 2%",
+      "expected_loss": -4500.00,
+      "loss_pct": -3.0,
+      "severity": "MEDIUM"
+    }
+  ],
+  "liquidity": [
+    {
+      "symbol": "AAPL",
+      "position_size": 500,
+      "avg_daily_volume": 50000000,
+      "days_to_liquidate": 0.00001,
+      "liquidity_score": "EXCELLENT"
+    },
+    {
+      "symbol": "SMCP",
+      "position_size": 1000,
+      "avg_daily_volume": 25000,
+      "days_to_liquidate": 0.04,
+      "liquidity_score": "GOOD"
+    }
+  ]
+}
+```
+
+**Use Cases:**
+```javascript
+// Check risk before market close
+fetch('/api/intelligence/risk')
+  .then(res => res.json())
+  .then(data => {
+    // Alert if VaR exceeds risk tolerance
+    if (Math.abs(data.monte_carlo.var_95) > 5000) {
+      alert(`⚠️ 95% VaR: $${data.monte_carlo.var_95.toFixed(2)}`);
+    }
+    
+    // Check for illiquid positions
+    const illiquid = data.liquidity.filter(l => l.days_to_liquidate > 0.1);
+    if (illiquid.length > 0) {
+      console.warn('Illiquid positions detected:', illiquid);
+    }
+  });
+```
+
+---
+
+### `GET /api/intelligence/reports`
+
+Generate automated performance reports.
+
+**Query Parameters:**
+- `period` (optional) - Report period: `DAILY` (default), `WEEKLY`, `MONTHLY`
+
+**Response:**
+```json
+{
+  "period": "DAILY",
+  "generated_at": "2026-04-20T15:30:00Z",
+  "summary": {
+    "total_return_pct": 2.3,
+    "best_performer": "NVDA (+5.2%)",
+    "worst_performer": "TSLA (-1.8%)",
+    "trades_executed": 3,
+    "win_rate": 0.667
+  },
+  "sections": [
+    {
+      "title": "Performance Overview",
+      "content": "Portfolio gained $3,450 today (2.3%). Outperformed SPY which was up 1.1%."
+    },
+    {
+      "title": "Position Changes",
+      "content": "Opened new position in NVDA (100 shares @ $875). Closed AAPL position for +$1,200 profit."
+    },
+    {
+      "title": "Risk Metrics",
+      "content": "Drawdown from peak: 3.2%. Margin utilization: 15%. All risk limits healthy."
+    }
+  ],
+  "alerts_triggered": [
+    {
+      "type": "PROFIT_TARGET",
+      "message": "AAPL reached profit target of +8%",
+      "timestamp": "2026-04-20T10:15:00Z"
+    }
+  ]
+}
+```
+
+**Use Cases:**
+```javascript
+// Email weekly performance report
+fetch('/api/intelligence/reports?period=WEEKLY')
+  .then(res => res.json())
+  .then(report => {
+    const emailBody = report.sections
+      .map(s => `${s.title}\n${s.content}`)
+      .join('\n\n');
+    sendEmail('Weekly Trading Report', emailBody);
+  });
+```
+
+---
+
+### `GET /api/intelligence/alerts`
+
+Retrieve recent threshold-based alerts.
+
+**Response:**
+```json
+{
+  "alerts": [
+    {
+      "id": "alert_001",
+      "type": "DRAWDOWN",
+      "severity": "WARNING",
+      "message": "Portfolio drawdown reached 8% (threshold: 7%)",
+      "triggered_at": "2026-04-20T14:30:00Z",
+      "acknowledged": false
+    },
+    {
+      "id": "alert_002",
+      "type": "CONCENTRATION",
+      "severity": "INFO",
+      "message": "AAPL position now represents 22% of portfolio",
+      "triggered_at": "2026-04-20T11:00:00Z",
+      "acknowledged": true
+    }
+  ],
+  "summary": {
+    "total_alerts": 2,
+    "unacknowledged": 1,
+    "by_severity": {
+      "CRITICAL": 0,
+      "WARNING": 1,
+      "INFO": 1
+    }
+  }
+}
+```
+
+---
+
+### `GET /api/intelligence/multi-account`
+
+Aggregate view across multiple trading accounts.
+
+**Response:**
+```json
+{
+  "aggregate": {
+    "total_equity": 350000.00,
+    "total_cash": 75000.00,
+    "total_unrealized_pnl": 12500.00,
+    "total_realized_pnl": 8300.00,
+    "total_positions": 15,
+    "accounts_count": 2,
+    "combined_return_pct": 6.3
+  },
+  "cross_account_risk": {
+    "aggregate_margin_used": 45000.00,
+    "aggregate_margin_available": 305000.00,
+    "overall_utilization_pct": 0.129,
+    "risk_status": "HEALTHY",
+    "duplicate_positions": [
+      {
+        "symbol": "AAPL",
+        "accounts": ["Primary", "IRA"],
+        "total_exposure": 75000.00
+      }
+    ],
+    "sector_concentration": {
+      "Technology": 0.42,
+      "Healthcare": 0.18,
+      "Financials": 0.25,
+      "Other": 0.15
+    }
+  }
+}
+```
+
+**Use Cases:**
+```javascript
+// Check total exposure across all accounts
+fetch('/api/intelligence/multi-account')
+  .then(res => res.json())
+  .then(data => {
+    const techExposure = data.cross_account_risk.sector_concentration.Technology;
+    if (techExposure > 0.40) {
+      alert(`⚠️ Technology sector represents ${(techExposure*100).toFixed(0)}% across all accounts`);
+    }
+  });
+```
+
+---
+
+### `GET /api/intelligence/execution`
+
+Analyze order execution quality and slippage.
+
+**Query Parameters:**
+- `period_days` (optional) - Analysis period in days (default: all time)
+
+**Response:**
+```json
+{
+  "total_fills": 147,
+  "total_rejections": 3,
+  "fill_rate": 0.98,
+  "avg_slippage_bps": 1.2,
+  "median_slippage_bps": 0.8,
+  "avg_fill_time_ms": 145.5,
+  "fill_quality_distribution": {
+    "EXCELLENT": 89,
+    "GOOD": 42,
+    "FAIR": 13,
+    "POOR": 3
+  },
+  "worst_slippage": {
+    "symbol": "TSLA",
+    "slippage_bps": 15.2,
+    "timestamp": "2026-04-18T09:35:00Z"
+  },
+  "top_rejection_reasons": [
+    "Risk limit exceeded (2 occurrences)",
+    "Insufficient buying power (1 occurrence)"
+  ],
+  "by_symbol": [
+    {
+      "symbol": "AAPL",
+      "fills": 25,
+      "avg_slippage_bps": 0.5,
+      "fill_quality": "EXCELLENT"
+    },
+    {
+      "symbol": "TSLA",
+      "fills": 12,
+      "avg_slippage_bps": 3.2,
+      "fill_quality": "GOOD"
+    }
+  ]
+}
+```
+
+**Use Cases:**
+```javascript
+// Monitor execution quality over last week
+fetch('/api/intelligence/execution?period_days=7')
+  .then(res => res.json())
+  .then(data => {
+    if (data.avg_slippage_bps > 5.0) {
+      console.warn(`High average slippage: ${data.avg_slippage_bps.toFixed(2)} bps`);
+    }
+    
+    // Alert on low fill rate
+    if (data.fill_rate < 0.90) {
+      alert(`⚠️ Fill rate only ${(data.fill_rate*100).toFixed(1)}%`);
+    }
+  });
+```
+
+---
+
+### `GET /api/intelligence/summary`
+
+High-level summary from all intelligence modules in a single call.
+
+**Perfect for dashboard widgets** - get key metrics without multiple API calls.
+
+**Response:**
+```json
+{
+  "health": {
+    "overall_score": 78.5,
+    "grade": "GOOD",
+    "warnings": []
+  },
+  "cash": {
+    "is_adequate": true,
+    "cash_pct": 16.7
+  },
+  "opportunities_count": 3,
+  "modules_available": [
+    "health",
+    "cash",
+    "opportunities",
+    "benchmark",
+    "risk",
+    "reports",
+    "multi-account",
+    "execution"
+  ]
+}
+```
+
+**Use Cases:**
+```javascript
+// Quick dashboard overview
+fetch('/api/intelligence/summary')
+  .then(res => res.json())
+  .then(data => {
+    updateHealthBadge(data.health.grade, data.health.overall_score);
+    updateCashStatus(data.cash.is_adequate, data.cash.cash_pct);
+    updateOpportunityCount(data.opportunities_count);
+  });
 ```
 
 ---
