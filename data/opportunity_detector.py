@@ -396,9 +396,9 @@ class OpportunityDetector:
     @staticmethod
     def _etf_symbol_for_sector(sector: str) -> str:
         """Return the primary ETF ticker for a sector, or empty string."""
-        etf = SECTOR_ETF_MAP.get(sector)
-        if etf:
-            return etf[0]["symbol"]
+        etfs = SECTOR_ETF_MAP.get(sector)
+        if etfs:
+            return etfs[0]["symbol"]
         return ""
 
     # ------------------------------------------------------------------
