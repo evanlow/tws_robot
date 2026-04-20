@@ -1,0 +1,368 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h1>🧠 {{ title }}</h1>
+
+{% if not connected %}
+<div class="disconnected-banner">
+  <h2>⚠ TWS Not Connected</h2>
+  <p>Connect to TWS to view live account intelligence data.</p>
+</div>
+{% endif %}
+
+<!-- Loading indicator -->
+<div id="loadingIndicator" style="text-align:center;padding:2rem;">
+  <p style="color:#63b3ed;font-size:1.1rem;">⏳ Loading account intelligence…</p>
+</div>
+
+<!-- Error banner (hidden by default) -->
+<div id="errorBanner" style="display:none;background:#2d1b1b;border:1px solid #fc8181;border-radius:8px;padding:1rem;margin-bottom:1rem;color:#fc8181;"></div>
+
+<!-- ============================================================
+     1. Account Health Score
+     ============================================================ -->
+<section id="healthSection" style="display:none;margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">💚 Account Health</h2>
+  <div class="stats-grid" id="healthStats"></div>
+  <div id="healthDetails" style="margin-top:0.75rem;"></div>
+</section>
+
+<!-- ============================================================
+     2. Cash Management
+     ============================================================ -->
+<section id="cashSection" style="display:none;margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">💰 Cash Management</h2>
+  <div class="stats-grid" id="cashStats"></div>
+  <div id="cashDetails" style="margin-top:0.75rem;"></div>
+</section>
+
+<!-- ============================================================
+     3. Opportunity Detection
+     ============================================================ -->
+<section id="opportunitiesSection" style="display:none;margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🔎 Opportunity Detection</h2>
+  <div class="stats-grid" id="opportunitiesStats"></div>
+  <div id="opportunitiesList" style="margin-top:0.75rem;"></div>
+</section>
+
+<!-- ============================================================
+     4. Benchmark Comparison
+     ============================================================ -->
+<section id="benchmarkSection" style="display:none;margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">📊 Performance vs. Benchmark</h2>
+  <div class="stats-grid" id="benchmarkStats"></div>
+</section>
+
+<!-- ============================================================
+     5. Risk Intelligence
+     ============================================================ -->
+<section id="riskIntelSection" style="display:none;margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">⚠️ Risk Intelligence</h2>
+  <div id="riskIntelContent"></div>
+</section>
+
+<!-- ============================================================
+     6. Execution Quality
+     ============================================================ -->
+<section id="executionSection" style="display:none;margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">⚡ Execution Quality</h2>
+  <div class="stats-grid" id="executionStats"></div>
+</section>
+
+<!-- ============================================================
+     7. Reports & Alerts
+     ============================================================ -->
+<section id="reportsSection" style="display:none;margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">📋 Reports &amp; Alerts</h2>
+  <div id="reportsContent"></div>
+</section>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Helper: build a stat card
+function statCard(label, value, extraClass) {
+  return '<div class="stat-card"><span class="stat-label">' + escapeHtml(label) +
+         '</span><span class="stat-value ' + (extraClass || '') + '">' +
+         escapeHtml(String(value != null ? value : '--')) + '</span></div>';
+}
+
+function escapeHtml(text) {
+  var div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function showSection(id) {
+  var el = document.getElementById(id);
+  if (el) el.style.display = '';
+}
+
+function fmtPct(v) {
+  if (v == null || v === '') return '--';
+  var n = Number(v);
+  if (isNaN(n) || !isFinite(n)) return '--';
+  return (n * 100).toFixed(1) + '%';
+}
+
+function fmtDollar(v) {
+  if (v == null || v === '') return '--';
+  var n = Number(v);
+  if (isNaN(n) || !isFinite(n)) return '--';
+  return '$' + n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function fmtNum(v, decimals) {
+  if (v == null || v === '') return '--';
+  var n = Number(v);
+  if (isNaN(n) || !isFinite(n)) return '--';
+  return n.toFixed(decimals != null ? decimals : 2);
+}
+
+// Fetch a JSON endpoint, return parsed data or null on error
+async function fetchJSON(url) {
+  try {
+    var res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error('Failed to fetch ' + url, e);
+    return null;
+  }
+}
+
+// ================================================================
+// Load all intelligence modules in parallel
+// ================================================================
+(async function() {
+  var loader = document.getElementById('loadingIndicator');
+  var errorBanner = document.getElementById('errorBanner');
+
+  var results = await Promise.allSettled([
+    fetchJSON('/api/intelligence/health'),
+    fetchJSON('/api/intelligence/cash'),
+    fetchJSON('/api/intelligence/opportunities'),
+    fetchJSON('/api/intelligence/benchmark'),
+    fetchJSON('/api/intelligence/risk'),
+    fetchJSON('/api/intelligence/execution'),
+    fetchJSON('/api/intelligence/reports'),
+  ]);
+
+  loader.style.display = 'none';
+
+  var health       = results[0].status === 'fulfilled' ? results[0].value : null;
+  var cash         = results[1].status === 'fulfilled' ? results[1].value : null;
+  var opportunities = results[2].status === 'fulfilled' ? results[2].value : null;
+  var benchmark    = results[3].status === 'fulfilled' ? results[3].value : null;
+  var riskIntel    = results[4].status === 'fulfilled' ? results[4].value : null;
+  var execution    = results[5].status === 'fulfilled' ? results[5].value : null;
+  var reports      = results[6].status === 'fulfilled' ? results[6].value : null;
+
+  var anyLoaded = false;
+
+  // --- 1. Account Health ---
+  if (health && !health.error) {
+    anyLoaded = true;
+    showSection('healthSection');
+    var grid = document.getElementById('healthStats');
+    var html = '';
+    html += statCard('Overall Score', fmtNum(health.overall_score, 0) + '/100');
+    html += statCard('Grade', health.grade || '--');
+    if (health.margin_health != null) html += statCard('Margin Health', fmtNum(health.margin_health, 0));
+    if (health.diversification_score != null) html += statCard('Diversification', fmtNum(health.diversification_score, 0));
+    if (health.drawdown_score != null) html += statCard('Drawdown Score', fmtNum(health.drawdown_score, 0));
+    if (health.cash_score != null) html += statCard('Cash Score', fmtNum(health.cash_score, 0));
+    grid.innerHTML = html;
+
+    // Component details
+    var details = document.getElementById('healthDetails');
+    if (health.components && health.components.length > 0) {
+      var dhtml = '<table class="data-table"><thead><tr><th>Component</th><th>Score</th><th>Weight</th></tr></thead><tbody>';
+      for (var i = 0; i < health.components.length; i++) {
+        var c = health.components[i];
+        dhtml += '<tr><td>' + escapeHtml(c.name || c.component || '--') + '</td><td>' +
+                 fmtNum(c.score, 1) + '</td><td>' + fmtPct(c.weight) + '</td></tr>';
+      }
+      dhtml += '</tbody></table>';
+      details.innerHTML = dhtml;
+    }
+  }
+
+  // --- 2. Cash Management ---
+  if (cash && !cash.error) {
+    anyLoaded = true;
+    showSection('cashSection');
+    var grid = document.getElementById('cashStats');
+    var html = '';
+    html += statCard('Cash Balance', fmtDollar(cash.cash_balance));
+    html += statCard('Cash %', fmtPct(cash.cash_pct));
+    html += statCard('Adequate', cash.is_adequate ? '✅ Yes' : '❌ No');
+    if (cash.target_cash_pct != null) html += statCard('Target Cash %', fmtPct(cash.target_cash_pct));
+    if (cash.excess_cash != null) html += statCard('Excess Cash', fmtDollar(cash.excess_cash));
+    if (cash.deficit != null && cash.deficit > 0) html += statCard('Deficit', fmtDollar(cash.deficit), 'pnl-negative');
+    grid.innerHTML = html;
+
+    var details = document.getElementById('cashDetails');
+    if (cash.recommendations && cash.recommendations.length > 0) {
+      var dhtml = '<h3 style="font-size:0.95rem;color:#a0aec0;margin-bottom:0.5rem;">Recommendations</h3><ul style="list-style:none;padding:0;">';
+      for (var i = 0; i < cash.recommendations.length; i++) {
+        dhtml += '<li style="padding:0.4rem 0.75rem;margin-bottom:0.35rem;background:#2d3748;border-radius:4px;border-left:3px solid #63b3ed;">' +
+                 escapeHtml(cash.recommendations[i]) + '</li>';
+      }
+      dhtml += '</ul>';
+      details.innerHTML = dhtml;
+    }
+  }
+
+  // --- 3. Opportunities ---
+  if (opportunities && !opportunities.error) {
+    anyLoaded = true;
+    showSection('opportunitiesSection');
+    var grid = document.getElementById('opportunitiesStats');
+    var opps = opportunities.opportunities || [];
+    var summary = opportunities.summary || {};
+    var html = statCard('Opportunities Found', opps.length);
+    if (summary.high_priority != null) html += statCard('High Priority', summary.high_priority);
+    grid.innerHTML = html;
+
+    var list = document.getElementById('opportunitiesList');
+    if (opps.length > 0) {
+      var lhtml = '<table class="data-table"><thead><tr><th>Type</th><th>Description</th><th>Priority</th></tr></thead><tbody>';
+      for (var i = 0; i < opps.length; i++) {
+        var o = opps[i];
+        var priorityClass = (o.priority === 'HIGH' || o.priority === 'high') ? 'pnl-negative' : '';
+        lhtml += '<tr><td>' + escapeHtml(o.type || o.opportunity_type || '--') + '</td><td>' +
+                 escapeHtml(o.description || o.message || '--') + '</td><td class="' + priorityClass + '">' +
+                 escapeHtml(o.priority || '--') + '</td></tr>';
+      }
+      lhtml += '</tbody></table>';
+      list.innerHTML = lhtml;
+    } else {
+      list.innerHTML = '<p class="empty-state">No opportunities detected at this time.</p>';
+    }
+  }
+
+  // --- 4. Benchmark ---
+  if (benchmark && !benchmark.error) {
+    anyLoaded = true;
+    showSection('benchmarkSection');
+    var grid = document.getElementById('benchmarkStats');
+    var comp = benchmark.comparison || {};
+    var html = '';
+    html += statCard('Portfolio Return', fmtPct(comp.portfolio_return));
+    html += statCard('Benchmark Return', fmtPct(comp.benchmark_return));
+    html += statCard('Alpha', fmtPct(comp.alpha));
+    if (comp.sharpe_ratio != null) html += statCard('Sharpe Ratio', fmtNum(comp.sharpe_ratio));
+    if (benchmark.fee_drag) {
+      html += statCard('Fee Drag', fmtPct(benchmark.fee_drag.total_drag_pct));
+    }
+    grid.innerHTML = html;
+  }
+
+  // --- 5. Risk Intelligence ---
+  if (riskIntel && !riskIntel.error) {
+    anyLoaded = true;
+    showSection('riskIntelSection');
+    var content = document.getElementById('riskIntelContent');
+    var rhtml = '';
+
+    // Monte Carlo
+    if (riskIntel.monte_carlo) {
+      var mc = riskIntel.monte_carlo;
+      rhtml += '<h3 style="font-size:0.95rem;color:#a0aec0;margin-bottom:0.5rem;">Monte Carlo Simulation</h3>';
+      rhtml += '<div class="stats-grid">';
+      rhtml += statCard('VaR (95%)', fmtPct(mc.var_95));
+      rhtml += statCard('CVaR (95%)', fmtPct(mc.cvar_95));
+      if (mc.median_return != null) rhtml += statCard('Median Return', fmtPct(mc.median_return));
+      if (mc.simulations != null) rhtml += statCard('Simulations', mc.simulations);
+      rhtml += '</div>';
+    }
+
+    // Stress Tests
+    if (riskIntel.stress_tests && riskIntel.stress_tests.length > 0) {
+      rhtml += '<h3 style="font-size:0.95rem;color:#a0aec0;margin:1rem 0 0.5rem;">Stress Test Results</h3>';
+      rhtml += '<table class="data-table"><thead><tr><th>Scenario</th><th>Impact</th><th>Severity</th></tr></thead><tbody>';
+      for (var i = 0; i < riskIntel.stress_tests.length; i++) {
+        var st = riskIntel.stress_tests[i];
+        rhtml += '<tr><td>' + escapeHtml(st.scenario || st.name || '--') + '</td><td>' +
+                 fmtPct(st.portfolio_impact || st.impact) + '</td><td>' +
+                 escapeHtml(st.severity || '--') + '</td></tr>';
+      }
+      rhtml += '</tbody></table>';
+    }
+
+    // Liquidity
+    if (riskIntel.liquidity && riskIntel.liquidity.length > 0) {
+      rhtml += '<h3 style="font-size:0.95rem;color:#a0aec0;margin:1rem 0 0.5rem;">Liquidity Analysis</h3>';
+      rhtml += '<table class="data-table"><thead><tr><th>Symbol</th><th>Days to Liquidate</th><th>Liquidity Score</th></tr></thead><tbody>';
+      for (var i = 0; i < riskIntel.liquidity.length; i++) {
+        var lq = riskIntel.liquidity[i];
+        rhtml += '<tr><td>' + escapeHtml(lq.symbol || '--') + '</td><td>' +
+                 fmtNum(lq.days_to_liquidate, 1) + '</td><td>' +
+                 fmtNum(lq.liquidity_score, 0) + '</td></tr>';
+      }
+      rhtml += '</tbody></table>';
+    }
+
+    content.innerHTML = rhtml;
+  }
+
+  // --- 6. Execution Quality ---
+  if (execution && !execution.error) {
+    anyLoaded = true;
+    showSection('executionSection');
+    var grid = document.getElementById('executionStats');
+    var html = '';
+    html += statCard('Total Orders', execution.total_orders != null ? execution.total_orders : '--');
+    html += statCard('Fill Rate', fmtPct(execution.fill_rate));
+    html += statCard('Avg Slippage', execution.avg_slippage != null ? fmtNum(execution.avg_slippage, 4) : '--');
+    if (execution.avg_fill_time != null) html += statCard('Avg Fill Time', fmtNum(execution.avg_fill_time, 1) + 's');
+    if (execution.quality_score != null) html += statCard('Quality Score', fmtNum(execution.quality_score, 0) + '/100');
+    grid.innerHTML = html;
+  }
+
+  // --- 7. Reports ---
+  if (reports && !reports.error) {
+    anyLoaded = true;
+    showSection('reportsSection');
+    var content = document.getElementById('reportsContent');
+    var rhtml = '';
+
+    if (reports.summary) {
+      rhtml += '<p style="margin-bottom:0.75rem;color:#e2e8f0;">' + escapeHtml(reports.summary) + '</p>';
+    }
+
+    if (reports.sections && reports.sections.length > 0) {
+      for (var i = 0; i < reports.sections.length; i++) {
+        var sec = reports.sections[i];
+        rhtml += '<div style="padding:0.75rem;margin-bottom:0.5rem;background:#2d3748;border-radius:4px;">';
+        rhtml += '<strong style="color:#63b3ed;">' + escapeHtml(sec.title || sec.name || 'Section') + '</strong>';
+        if (sec.content) rhtml += '<p style="margin-top:0.25rem;">' + escapeHtml(sec.content) + '</p>';
+        rhtml += '</div>';
+      }
+    }
+
+    if (reports.alerts && reports.alerts.length > 0) {
+      rhtml += '<h3 style="font-size:0.95rem;color:#a0aec0;margin:1rem 0 0.5rem;">Recent Alerts</h3>';
+      rhtml += '<ul style="list-style:none;padding:0;">';
+      for (var i = 0; i < reports.alerts.length; i++) {
+        var a = reports.alerts[i];
+        rhtml += '<li style="padding:0.4rem 0.75rem;margin-bottom:0.35rem;background:#2d3748;border-radius:4px;border-left:3px solid #ecc94b;">' +
+                 escapeHtml(a.message || a.description || JSON.stringify(a)) + '</li>';
+      }
+      rhtml += '</ul>';
+    }
+
+    content.innerHTML = rhtml || '<p class="empty-state">No report data available.</p>';
+  }
+
+  // If nothing loaded, show a message
+  if (!anyLoaded) {
+    errorBanner.style.display = '';
+    errorBanner.textContent = 'Unable to load intelligence data. Make sure TWS is connected and the intelligence modules are available.';
+  }
+})();
+</script>
+{% endblock %}

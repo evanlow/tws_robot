@@ -66,11 +66,12 @@
       </li>
 
       {# ---- Monitoring dropdown ---- #}
-      <li class="nav-dropdown {{ 'active' if active_page in ('risk', 'logs') }}">
+      <li class="nav-dropdown {{ 'active' if active_page in ('risk', 'logs', 'account_intelligence') }}">
         <button class="nav-dropdown-toggle" aria-expanded="false">Monitoring <span class="caret">▾</span></button>
         <ul class="nav-dropdown-menu">
           <li class="{{ 'active' if active_page == 'risk' }}"><a href="{{ url_for('risk.index') }}">Risk</a></li>
           <li class="{{ 'active' if active_page == 'logs' }}"><a href="{{ url_for('logs.index') }}">Events &amp; Logs</a></li>
+          <li class="{{ 'active' if active_page == 'account_intelligence' }}"><a href="{{ url_for('account_intelligence.index') }}">Account Intelligence</a></li>
         </ul>
       </li>
 
