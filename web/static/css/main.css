@@ -101,8 +101,81 @@ body {
   font-size: 0.9rem;
 }
 
-.navbar-nav .active a,
-.navbar-nav a:hover {
+.navbar-nav .active > a,
+.navbar-nav a:hover,
+.navbar-nav .active > .nav-dropdown-toggle {
+  color: #63b3ed;
+}
+
+/* ---- Nav Dropdowns ---------------------------------------------------- */
+.nav-dropdown {
+  position: relative;
+}
+
+.nav-dropdown-toggle {
+  background: none;
+  border: none;
+  color: #a0aec0;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.nav-dropdown-toggle:hover,
+.nav-dropdown.active > .nav-dropdown-toggle {
+  color: #63b3ed;
+}
+
+.nav-dropdown-toggle .caret {
+  font-size: 0.65rem;
+  transition: transform 0.15s;
+}
+
+.nav-dropdown.open .nav-dropdown-toggle .caret {
+  transform: rotate(180deg);
+}
+
+.nav-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  background: #1e1e2e;
+  border: 1px solid #2d2d44;
+  border-radius: 6px;
+  min-width: 160px;
+  list-style: none;
+  padding: 0.35rem 0;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.nav-dropdown.open .nav-dropdown-menu {
+  display: block;
+}
+
+.nav-dropdown-menu li {
+  padding: 0;
+}
+
+.nav-dropdown-menu a {
+  display: block;
+  padding: 0.45rem 1rem;
+  color: #a0aec0;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.nav-dropdown-menu a:hover {
+  background: #2d2d44;
+  color: #63b3ed;
+}
+
+.nav-dropdown-menu .active a {
   color: #63b3ed;
 }
 
@@ -903,3 +976,23 @@ h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
   }
 }
 
+
+/* ---- AI Chat Full Page ------------------------------------------------- */
+.ai-chat-fullpage {
+  max-width: 800px;
+}
+
+.ai-chat-fullpage .ai-chat-messages {
+  background: #1a1a2e;
+  border: 1px solid #2d2d44;
+  border-radius: 8px;
+  padding: 1rem;
+  min-height: 300px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.ai-chat-fullpage .ai-chat-input-row {
+  display: flex;
+  gap: 0.75rem;
+}

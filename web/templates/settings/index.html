@@ -7,139 +7,169 @@
 <p class="settings-message" style="color:#68d391;margin-bottom:1rem;">{{ message }}</p>
 {% endif %}
 
-<form method="POST" action="{{ url_for('settings.index') }}" style="max-width:640px;">
+<!-- Settings Tab Bar -->
+<div class="tab-bar" id="settingsTabBar">
+  <button class="tab-btn active" data-tab="settings-connection">🔌 Connection</button>
+  <button class="tab-btn" data-tab="settings-ai">🤖 AI</button>
+  <button class="tab-btn" data-tab="settings-data">📁 Data</button>
+  <button class="tab-btn" data-tab="settings-system">🔧 System</button>
+</div>
 
-  <!-- TWS Connection Settings -->
-  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
-    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🔌 TWS Connection</legend>
+<div style="max-width:640px;">
 
-    <div style="margin-bottom:1rem;">
-      <span style="font-size:0.85rem;color:#a0aec0;">Status:</span>
-      {% if connected %}
-      <span class="risk-badge risk-normal" style="margin-left:0.5rem;">Connected — {{ environment|upper }}</span>
-      {% else %}
-      <span class="risk-badge risk-critical" style="margin-left:0.5rem;">Disconnected</span>
-      {% endif %}
-    </div>
+  <!-- Connection Tab -->
+  <div class="tab-content active" id="tab-settings-connection">
+    <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+      <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🔌 TWS Connection</legend>
 
-    <div style="display:flex;gap:1rem;margin-bottom:1rem;">
-      <button type="button" class="btn-primary btn-sm" onclick="connectTWS('paper')">Connect Paper</button>
-      <button type="button" class="btn-secondary btn-sm" onclick="connectTWS('live')">Connect Live</button>
-      {% if connected %}
-      <button type="button" class="btn-danger btn-sm" onclick="disconnectTWS()">Disconnect</button>
-      {% endif %}
-    </div>
-
-    <div style="margin-bottom:0.75rem;">
-      <label class="form-label">Test Connection</label>
-      <div style="display:flex;gap:0.5rem;">
-        <input id="testHost" class="form-input" style="width:200px;" value="127.0.0.1" placeholder="Host" />
-        <input id="testPort" class="form-input" style="width:100px;" value="7497" placeholder="Port" />
-        <button type="button" class="btn-secondary btn-sm" onclick="testConnection()">Test</button>
+      <div style="margin-bottom:1rem;">
+        <span style="font-size:0.85rem;color:#a0aec0;">Status:</span>
+        {% if connected %}
+        <span class="risk-badge risk-normal" style="margin-left:0.5rem;">Connected — {{ environment|upper }}</span>
+        {% else %}
+        <span class="risk-badge risk-critical" style="margin-left:0.5rem;">Disconnected</span>
+        {% endif %}
       </div>
-      <div id="testResult" style="margin-top:0.5rem;font-size:0.85rem;"></div>
-    </div>
-  </fieldset>
 
-  <!-- Risk Parameters -->
-  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
-    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">⚡ Risk Parameters</legend>
-    <div class="stats-grid" style="grid-template-columns:1fr 1fr;">
-      <div>
-        <label class="form-label">Max Positions</label>
-        <input class="form-input" value="{{ risk_limits.max_positions|default(10) }}" disabled />
+      <div style="display:flex;gap:1rem;margin-bottom:1rem;">
+        <button type="button" class="btn-primary btn-sm" onclick="connectTWS('paper')">Connect Paper</button>
+        <button type="button" class="btn-secondary btn-sm" onclick="connectTWS('live')">Connect Live</button>
+        {% if connected %}
+        <button type="button" class="btn-danger btn-sm" onclick="disconnectTWS()">Disconnect</button>
+        {% endif %}
       </div>
-      <div>
-        <label class="form-label">Max Position %</label>
-        <input class="form-input" value="{{ "%.0f"|format((risk_limits.max_position_pct|default(0.25)) * 100) }}%" disabled />
+
+      <div style="margin-bottom:0.75rem;">
+        <label class="form-label">Test Connection</label>
+        <div style="display:flex;gap:0.5rem;">
+          <input id="testHost" class="form-input" style="width:200px;" value="127.0.0.1" placeholder="Host" />
+          <input id="testPort" class="form-input" style="width:100px;" value="7497" placeholder="Port" />
+          <button type="button" class="btn-secondary btn-sm" onclick="testConnection()">Test</button>
+        </div>
+        <div id="testResult" style="margin-top:0.5rem;font-size:0.85rem;"></div>
       </div>
-      <div>
-        <label class="form-label">Max Drawdown %</label>
-        <input class="form-input" value="{{ "%.0f"|format((risk_limits.max_drawdown_pct|default(0.20)) * 100) }}%" disabled />
+    </fieldset>
+
+    <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+      <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">⚡ Risk Parameters</legend>
+      <div class="stats-grid" style="grid-template-columns:1fr 1fr;">
+        <div>
+          <label class="form-label">Max Positions</label>
+          <input class="form-input" value="{{ risk_limits.max_positions|default(10) }}" disabled />
+        </div>
+        <div>
+          <label class="form-label">Max Position %</label>
+          <input class="form-input" value="{{ "%.0f"|format((risk_limits.max_position_pct|default(0.25)) * 100) }}%" disabled />
+        </div>
+        <div>
+          <label class="form-label">Max Drawdown %</label>
+          <input class="form-input" value="{{ "%.0f"|format((risk_limits.max_drawdown_pct|default(0.20)) * 100) }}%" disabled />
+        </div>
+        <div>
+          <label class="form-label">Daily Loss Limit %</label>
+          <input class="form-input" value="{{ "%.0f"|format((risk_limits.daily_loss_limit_pct|default(0.05)) * 100) }}%" disabled />
+        </div>
       </div>
-      <div>
-        <label class="form-label">Daily Loss Limit %</label>
-        <input class="form-input" value="{{ "%.0f"|format((risk_limits.daily_loss_limit_pct|default(0.05)) * 100) }}%" disabled />
+      <p style="color:#718096;font-size:0.78rem;margin-top:0.5rem;">Risk parameters are configured in env_config. A web editor is planned for a future release.</p>
+    </fieldset>
+  </div>
+
+  <!-- AI Tab -->
+  <div class="tab-content" id="tab-settings-ai">
+    <form method="POST" action="{{ url_for('settings.index') }}">
+      <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+        <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🤖 AI Configuration</legend>
+
+        {% if has_env_key %}
+        <div style="margin-bottom:1rem;padding:0.75rem;background:#1a365d;border-radius:4px;">
+          {% if ai_enabled %}
+          <span style="color:#68d391;font-size:0.9rem;">✅ AI features auto-enabled — API key loaded from <code>.env</code></span>
+          <p style="color:#a0aec0;font-size:0.78rem;margin-top:0.25rem;">
+            To change the key or model, edit <code>OPENAI_API_KEY</code> / <code>OPENAI_MODEL</code> in your <code>.env</code> file and restart the server.
+            Set <code>AI_ENABLED=false</code> in <code>.env</code> to disable.
+          </p>
+          {% else %}
+          <span style="color:#f6ad55;font-size:0.9rem;">⚠️ AI is disabled — API key loaded from <code>.env</code>, but <code>AI_ENABLED=false</code></span>
+          <p style="color:#a0aec0;font-size:0.78rem;margin-top:0.25rem;">
+            To enable AI, remove <code>AI_ENABLED=false</code> from your <code>.env</code> file and restart the server.
+          </p>
+          {% endif %}
+        </div>
+        {% else %}
+        <div style="margin-bottom:1rem;">
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;cursor:pointer;">
+            <input type="checkbox" name="ai_enabled" {% if ai_enabled %}checked{% endif %}
+                   style="width:16px;height:16px;accent-color:#63b3ed;">
+            Enable AI features
+          </label>
+          <p style="color:#718096;font-size:0.78rem;margin-top:0.25rem;margin-left:1.5rem;">
+            Requires a valid OpenAI API key. When disabled all AI endpoints return 503.
+          </p>
+        </div>
+
+        <div style="margin-bottom:1rem;">
+          <label class="form-label">OpenAI API Key</label>
+          <input type="password" name="openai_api_key" placeholder="sk-…" class="form-input">
+          <p style="color:#718096;font-size:0.78rem;margin-top:0.2rem;">
+            Leave blank to keep the current key. <strong>Tip:</strong> add <code>OPENAI_API_KEY</code> to your <code>.env</code> file to auto-enable AI on startup.
+          </p>
+        </div>
+
+        <div>
+          <label class="form-label">OpenAI Model</label>
+          <input type="text" name="openai_model" value="{{ openai_model }}" placeholder="gpt-4o" class="form-input">
+        </div>
+        {% endif %}
+      </fieldset>
+
+      <button type="submit" class="btn-primary">Save AI Settings</button>
+    </form>
+  </div>
+
+  <!-- Data Tab -->
+  <div class="tab-content" id="tab-settings-data">
+    <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+      <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">📁 Data Management</legend>
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+        <input id="dlSymbols" class="form-input" placeholder="AAPL, MSFT, GOOG" style="flex:1;" />
+        <button type="button" class="btn-primary btn-sm" onclick="downloadData()">Download Data</button>
       </div>
-    </div>
-    <p style="color:#718096;font-size:0.78rem;margin-top:0.5rem;">Risk parameters are configured in env_config. A web editor is planned for a future release.</p>
-  </fieldset>
+      <div id="dlStatus" style="font-size:0.85rem;color:#a0aec0;"></div>
+      <button type="button" class="btn-secondary btn-sm" onclick="viewDataStatus()" style="margin-top:0.5rem;">View Data Status</button>
+      <div id="dataStatusContainer" style="margin-top:0.5rem;"></div>
+    </fieldset>
+  </div>
 
-  <!-- AI Configuration -->
-  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
-    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🤖 AI Configuration</legend>
+  <!-- System Tab -->
+  <div class="tab-content" id="tab-settings-system">
+    <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
+      <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🔧 System</legend>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+        <button type="button" class="btn-secondary btn-sm" onclick="initDb()">Init Database</button>
+        <button type="button" class="btn-secondary btn-sm" onclick="checkHealth()">System Health</button>
+        <button type="button" class="btn-secondary btn-sm" onclick="checkMarket()">Market Status</button>
+      </div>
+      <div id="systemResult" style="margin-top:0.75rem;font-size:0.85rem;"></div>
+    </fieldset>
+  </div>
 
-    {% if has_env_key %}
-    <div style="margin-bottom:1rem;padding:0.75rem;background:#1a365d;border-radius:4px;">
-      {% if ai_enabled %}
-      <span style="color:#68d391;font-size:0.9rem;">✅ AI features auto-enabled — API key loaded from <code>.env</code></span>
-      <p style="color:#a0aec0;font-size:0.78rem;margin-top:0.25rem;">
-        To change the key or model, edit <code>OPENAI_API_KEY</code> / <code>OPENAI_MODEL</code> in your <code>.env</code> file and restart the server.
-        Set <code>AI_ENABLED=false</code> in <code>.env</code> to disable.
-      </p>
-      {% else %}
-      <span style="color:#f6ad55;font-size:0.9rem;">⚠️ AI is disabled — API key loaded from <code>.env</code>, but <code>AI_ENABLED=false</code></span>
-      <p style="color:#a0aec0;font-size:0.78rem;margin-top:0.25rem;">
-        To enable AI, remove <code>AI_ENABLED=false</code> from your <code>.env</code> file and restart the server.
-      </p>
-      {% endif %}
-    </div>
-    {% else %}
-    <div style="margin-bottom:1rem;">
-      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.9rem;cursor:pointer;">
-        <input type="checkbox" name="ai_enabled" {% if ai_enabled %}checked{% endif %}
-               style="width:16px;height:16px;accent-color:#63b3ed;">
-        Enable AI features
-      </label>
-      <p style="color:#718096;font-size:0.78rem;margin-top:0.25rem;margin-left:1.5rem;">
-        Requires a valid OpenAI API key. When disabled all AI endpoints return 503.
-      </p>
-    </div>
-
-    <div style="margin-bottom:1rem;">
-      <label class="form-label">OpenAI API Key</label>
-      <input type="password" name="openai_api_key" placeholder="sk-…" class="form-input">
-      <p style="color:#718096;font-size:0.78rem;margin-top:0.2rem;">
-        Leave blank to keep the current key. <strong>Tip:</strong> add <code>OPENAI_API_KEY</code> to your <code>.env</code> file to auto-enable AI on startup.
-      </p>
-    </div>
-
-    <div>
-      <label class="form-label">OpenAI Model</label>
-      <input type="text" name="openai_model" value="{{ openai_model }}" placeholder="gpt-4o" class="form-input">
-    </div>
-    {% endif %}
-  </fieldset>
-
-  <!-- Data Management -->
-  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
-    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">📁 Data Management</legend>
-    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
-      <input id="dlSymbols" class="form-input" placeholder="AAPL, MSFT, GOOG" style="flex:1;" />
-      <button type="button" class="btn-primary btn-sm" onclick="downloadData()">Download Data</button>
-    </div>
-    <div id="dlStatus" style="font-size:0.85rem;color:#a0aec0;"></div>
-    <button type="button" class="btn-secondary btn-sm" onclick="viewDataStatus()" style="margin-top:0.5rem;">View Data Status</button>
-    <div id="dataStatusContainer" style="margin-top:0.5rem;"></div>
-  </fieldset>
-
-  <!-- System -->
-  <fieldset style="border:1px solid #2d2d44;border-radius:6px;padding:1.25rem;margin-bottom:1.5rem;">
-    <legend style="color:#63b3ed;font-size:0.9rem;padding:0 0.5rem;">🔧 System</legend>
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;">
-      <button type="button" class="btn-secondary btn-sm" onclick="initDb()">Init Database</button>
-      <button type="button" class="btn-secondary btn-sm" onclick="checkHealth()">System Health</button>
-      <button type="button" class="btn-secondary btn-sm" onclick="checkMarket()">Market Status</button>
-    </div>
-    <div id="systemResult" style="margin-top:0.75rem;font-size:0.85rem;"></div>
-  </fieldset>
-
-  <button type="submit" class="btn-primary">Save AI Settings</button>
-</form>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
+// Settings tab switching
+(function() {
+  document.querySelectorAll('#settingsTabBar .tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#settingsTabBar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+})();
+
 window.connectTWS = async function(env) {
   try {
     const res = await fetch('/api/connection/connect', {
