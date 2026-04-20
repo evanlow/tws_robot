@@ -308,10 +308,12 @@ window.loadInsight = async function(id) {
 };
 
 // Auto-load AI insights for all inferred strategies on page load
+// Stagger requests to avoid overwhelming the server
 document.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('.inferred-card').forEach(function(card) {
+  const cards = document.querySelectorAll('.inferred-card');
+  cards.forEach(function(card, index) {
     const id = card.id.replace('inferred-', '');
-    if (id) loadInsight(id);
+    if (id) setTimeout(function() { loadInsight(id); }, index * 500);
   });
 });
 
