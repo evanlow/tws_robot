@@ -118,7 +118,7 @@
 
       <!-- Fallback when AI is unavailable -->
       <div class="market-outlook-noai" id="marketOutlookNoAI" style="display:none;">
-        <p class="empty-state">AI outlook not available — showing data-only summary.
+        <p class="empty-state" id="marketOutlookNoAIMsg">AI outlook not available — showing data-only summary.
           Enable AI in <a href="/settings">Settings</a> for full insights.</p>
       </div>
     </div>
@@ -925,9 +925,20 @@
           if (recSection) recSection.style.display = 'none';
         }
       } else {
-        // No AI content — show fallback
+        // No AI content — show fallback with appropriate message
         if (body) body.style.display = 'none';
         if (noAI) noAI.style.display = '';
+        var noAIMsg = document.getElementById('marketOutlookNoAIMsg');
+        if (noAIMsg) {
+          if (!noAIMsg.dataset.defaultHtml) {
+            noAIMsg.dataset.defaultHtml = noAIMsg.innerHTML;
+          }
+          if (data.ai_enabled) {
+            noAIMsg.textContent = 'AI outlook is loading \u2014 market data may still be refreshing. Click \u21bb Refresh in a moment.';
+          } else {
+            noAIMsg.innerHTML = noAIMsg.dataset.defaultHtml;
+          }
+        }
       }
     } catch (err) {
       pulseBar.innerHTML = '<span class="pulse-loading">Failed to load market outlook</span>';

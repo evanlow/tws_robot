@@ -377,11 +377,14 @@ class MarketOutlookGenerator:
                         cached["from_cache"] = True
                         return cached
             # Fallback: generation failed or timed out — compute pulse only
+            from ai.client import is_ai_enabled
+
             snapshots = []
             if market_overview:
                 snapshots = market_overview.get("snapshots", [])
             return {
                 "market_pulse": compute_market_pulse(snapshots),
+                "ai_enabled": is_ai_enabled(),
                 "ai_session_recap": None,
                 "ai_portfolio_outlook": None,
                 "ai_recommendations": [],
@@ -430,6 +433,8 @@ class MarketOutlookGenerator:
         account_summary: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Perform the actual generation (pulse + optional AI enrichment)."""
+        from ai.client import is_ai_enabled
+
         # Compute data-only market pulse (always available, no AI needed)
         snapshots = []
         if market_overview:
@@ -439,6 +444,7 @@ class MarketOutlookGenerator:
         # Build result with data-only defaults
         result: Dict[str, Any] = {
             "market_pulse": market_pulse,
+            "ai_enabled": is_ai_enabled(),
             "ai_session_recap": None,
             "ai_portfolio_outlook": None,
             "ai_recommendations": [],
