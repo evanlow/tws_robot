@@ -6,7 +6,7 @@ for dividend opportunities based on current holdings and market data.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -41,7 +41,7 @@ class Opportunity:
     suggested_action: str = ""
     potential_impact: float = 0.0  # estimated $ impact
     metadata: Dict = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {
