@@ -929,12 +929,8 @@
         if (body) body.style.display = 'none';
         if (noAI) noAI.style.display = '';
         var noAIMsg = document.getElementById('marketOutlookNoAIMsg');
-        if (noAIMsg) {
-          if (data.ai_enabled) {
-            noAIMsg.innerHTML = 'AI outlook is loading — market data may still be refreshing. Click <strong>↻ Refresh</strong> in a moment.';
-          } else {
-            noAIMsg.innerHTML = 'AI outlook not available — showing data-only summary. Enable AI in <a href="/settings">Settings</a> for full insights.';
-          }
+        if (noAIMsg && data.ai_enabled) {
+          noAIMsg.textContent = 'AI outlook is loading \u2014 market data may still be refreshing. Click \u21bb Refresh in a moment.';
         }
       }
     } catch (err) {
