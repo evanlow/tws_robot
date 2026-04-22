@@ -126,6 +126,12 @@ function fmtPctNum(v, decimals) {
   return s === '--' ? '--' : s + '%';
 }
 
+// Helper: convert SNAKE_CASE enum names to human-readable (e.g. MARKET_CRASH_2008 → Market Crash 2008)
+function fmtScenarioName(name) {
+  if (!name) return '--';
+  return name.toLowerCase().replace(/_/g, ' ').replace(/\b(\w)/g, function(c) { return c.toUpperCase(); });
+}
+
 // Fetch a JSON endpoint, return parsed data or null on error
 async function fetchJSON(url) {
   try {
@@ -330,12 +336,12 @@ async function fetchJSON(url) {
     var grid = document.getElementById('benchmarkStats');
     var comp = benchmark.comparison || {};
     var html = '';
-    html += statCard('Portfolio Return', fmtPct(comp.portfolio_return));
-    html += statCard('Benchmark Return', fmtPct(comp.benchmark_return));
-    html += statCard('Alpha', fmtPct(comp.alpha));
-    if (comp.sharpe_ratio != null) html += statCard('Sharpe Ratio', fmtNum(comp.sharpe_ratio));
+    html += statCard('Portfolio Return', fmtPct(comp.portfolio_return_pct));
+    html += statCard('Benchmark Return', fmtPct(comp.benchmark_return_pct));
+    html += statCard('Alpha', fmtPct(comp.alpha_pct));
+    if (comp.information_ratio != null) html += statCard('Info Ratio', fmtNum(comp.information_ratio));
     if (benchmark.fee_drag) {
-      html += statCard('Fee Drag', fmtPct(benchmark.fee_drag.total_drag_pct));
+      html += statCard('Fee Drag', fmtPct(benchmark.fee_drag.fee_drag_pct));
     }
     grid.innerHTML = html;
   }
@@ -365,7 +371,7 @@ async function fetchJSON(url) {
       rhtml += '<table class="data-table"><thead><tr><th>Scenario</th><th>Impact</th><th>Severity</th></tr></thead><tbody>';
       for (var i = 0; i < riskIntel.stress_tests.length; i++) {
         var st = riskIntel.stress_tests[i];
-        rhtml += '<tr><td>' + escapeHtml(st.scenario || st.name || '--') + '</td><td>' +
+        rhtml += '<tr><td>' + escapeHtml(fmtScenarioName(st.scenario || st.name)) + '</td><td>' +
                  fmtPctNum(st.loss_pct, 2) + '</td><td>' +
                  escapeHtml(st.severity || '--') + '</td></tr>';
       }
@@ -394,11 +400,13 @@ async function fetchJSON(url) {
     showSection('executionSection');
     var grid = document.getElementById('executionStats');
     var html = '';
-    html += statCard('Total Orders', execution.total_orders != null ? execution.total_orders : '--');
-    html += statCard('Fill Rate', fmtPct(execution.fill_rate));
-    html += statCard('Avg Slippage', execution.avg_slippage != null ? fmtNum(execution.avg_slippage, 4) : '--');
-    if (execution.avg_fill_time != null) html += statCard('Avg Fill Time', fmtNum(execution.avg_fill_time, 1) + 's');
-    if (execution.quality_score != null) html += statCard('Quality Score', fmtNum(execution.quality_score, 0) + '/100');
+    var totalOrders = (execution.total_fills != null && execution.total_rejections != null)
+      ? execution.total_fills + execution.total_rejections : null;
+    html += statCard('Total Orders', totalOrders != null ? totalOrders : '--');
+    html += statCard('Fill Rate', fmtPctNum(execution.fill_rate_pct, 1));
+    html += statCard('Avg Slippage', execution.avg_slippage_bps != null ? fmtNum(execution.avg_slippage_bps, 2) + ' bps' : '--');
+    if (execution.avg_fill_time_ms != null) html += statCard('Avg Fill Time', fmtNum(execution.avg_fill_time_ms / 1000, 2) + 's');
+    if (execution.total_slippage_cost != null) html += statCard('Slippage Cost', fmtDollar(execution.total_slippage_cost));
     grid.innerHTML = html;
   }
 
