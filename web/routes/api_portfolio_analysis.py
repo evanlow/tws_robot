@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
+from ai.client import is_ai_enabled
 from web.services import get_services
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ def portfolio_insights():
         "ai_recommendations": result.get("ai_recommendations", []),
         "ai_risk_assessment": result.get("ai_risk_assessment"),
         "ai_strategy_mix": result.get("ai_strategy_mix"),
+        "ai_enabled": is_ai_enabled(),
         "total_value": total_value,
         "position_count": len(positions),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -122,6 +124,7 @@ def stock_deep_dive(symbol: str):
                     "fundamentals": cached.get("fundamentals"),
                     "technicals": cached.get("technical"),
                     "ai_analysis": cached.get("ai_analysis"),
+                    "ai_enabled": is_ai_enabled(),
                     "timestamp": cached.get("analysis_date"),
                     "from_cache": True,
                 })
@@ -206,6 +209,7 @@ def stock_deep_dive(symbol: str):
         "fundamentals": result.get("fundamentals"),
         "technicals": result.get("technicals"),
         "ai_analysis": result.get("ai_analysis"),
+        "ai_enabled": is_ai_enabled(),
         "timestamp": result.get("timestamp"),
         "from_cache": False,
     }

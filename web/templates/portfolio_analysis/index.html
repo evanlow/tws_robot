@@ -181,8 +181,10 @@
     if (narrEl) {
       if (data.ai_narrative) {
         narrEl.innerHTML = '<p style="white-space:pre-wrap;line-height:1.6;">' + escapeHtml(data.ai_narrative) + '</p>';
-      } else {
+      } else if (data.ai_enabled === false) {
         narrEl.innerHTML = '<p class="empty-state">AI analysis not available (enable AI features in settings)</p>';
+      } else {
+        narrEl.innerHTML = '<p class="empty-state">AI analysis not available</p>';
       }
     }
 
@@ -334,7 +336,11 @@ window.deepDive = async function(symbol) {
       }
     } else {
       html += '<h3 style="color:#68d391;margin-top:1.5rem;">🤖 AI Analysis</h3>';
-      html += '<p class="empty-state">AI analysis not available (enable AI features in settings)</p>';
+      if (data.ai_enabled === false) {
+        html += '<p class="empty-state">AI analysis not available (enable AI features in settings)</p>';
+      } else {
+        html += '<p class="empty-state">AI analysis not available</p>';
+      }
     }
 
     if (data.from_cache) {
