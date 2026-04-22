@@ -2149,61 +2149,110 @@ Advanced risk analysis using Monte Carlo simulation and stress testing.
 ```json
 {
   "monte_carlo": {
-    "scenarios_run": 10000,
-    "time_horizon_days": 30,
-    "expected_return_pct": 2.5,
-    "var_95": -3500.00,
-    "var_99": -6200.00,
-    "best_case_pct": 12.3,
-    "worst_case_pct": -8.7,
-    "probability_of_loss": 0.32,
-    "confidence_intervals": {
-      "50th_percentile": 2500.00,
-      "75th_percentile": 5200.00,
-      "95th_percentile": 9800.00
-    }
+    "simulations": 10000,
+    "horizon_days": 30,
+    "mean_return_pct": 2.5432,
+    "median_return_pct": 2.3100,
+    "std_dev_pct": 5.6789,
+    "percentile_5_pct": -6.2100,
+    "percentile_25_pct": -1.4500,
+    "percentile_75_pct": 6.7800,
+    "percentile_95_pct": 12.3400,
+    "var_95_pct": -8.7500,
+    "cvar_95_pct": -11.2300,
+    "probability_of_loss_pct": 32.50,
+    "max_simulated_loss_pct": -15.6700,
+    "max_simulated_gain_pct": 18.4500,
+    "timestamp": "2026-04-22T10:30:00"
   },
   "stress_tests": [
     {
-      "scenario": "MARKET_CRASH",
-      "description": "S&P 500 drops 20%",
-      "expected_loss": -23000.00,
-      "loss_pct": -15.3,
-      "severity": "HIGH"
+      "scenario": "MARKET_CRASH_2008",
+      "shock_pct": -8.0,
+      "portfolio_value_before": 150000.00,
+      "portfolio_value_after": 127000.00,
+      "estimated_loss": -23000.00,
+      "loss_pct": -15.33,
+      "severity": "HIGH",
+      "positions_impacted": 12,
+      "worst_position": "AAPL",
+      "worst_position_loss": -4500.00
     },
     {
       "scenario": "SECTOR_ROTATION",
-      "description": "Technology sector underperforms by 15%",
-      "expected_loss": -6750.00,
-      "loss_pct": -4.5,
-      "severity": "MEDIUM"
+      "shock_pct": -3.0,
+      "portfolio_value_before": 150000.00,
+      "portfolio_value_after": 143250.00,
+      "estimated_loss": -6750.00,
+      "loss_pct": -4.50,
+      "severity": "LOW",
+      "positions_impacted": 5,
+      "worst_position": "NVDA",
+      "worst_position_loss": -2100.00
     },
     {
       "scenario": "RATE_SHOCK",
-      "description": "Interest rates rise 2%",
-      "expected_loss": -4500.00,
-      "loss_pct": -3.0,
-      "severity": "MEDIUM"
+      "shock_pct": -5.0,
+      "portfolio_value_before": 150000.00,
+      "portfolio_value_after": 138000.00,
+      "estimated_loss": -12000.00,
+      "loss_pct": -8.0,
+      "severity": "MEDIUM",
+      "positions_impacted": 8,
+      "worst_position": "BND",
+      "worst_position_loss": -3200.00
     }
   ],
   "liquidity": [
     {
       "symbol": "AAPL",
-      "position_size": 500,
       "avg_daily_volume": 50000000,
-      "days_to_liquidate": 0.00001,
-      "liquidity_score": "EXCELLENT"
+      "position_size": 500,
+      "days_to_liquidate": 0.00,
+      "liquidity_score": 98.5,
+      "is_illiquid": false
     },
     {
       "symbol": "SMCP",
-      "position_size": 1000,
       "avg_daily_volume": 25000,
+      "position_size": 1000,
       "days_to_liquidate": 0.04,
-      "liquidity_score": "GOOD"
+      "liquidity_score": 72.3,
+      "is_illiquid": false
+    },
+    {
+      "symbol": "THINLY_TRADED",
+      "avg_daily_volume": 500,
+      "position_size": 2000,
+      "days_to_liquidate": null,
+      "liquidity_score": 15.2,
+      "is_illiquid": true
     }
   ]
 }
 ```
+
+**Field Descriptions:**
+
+**Monte Carlo:**
+- All percentage fields end with `_pct` and represent percentage values (e.g., `2.5432` = 2.54%)
+- `var_95_pct` - Value at Risk at 95% confidence (expected max loss)
+- `cvar_95_pct` - Conditional VaR (expected shortfall beyond VaR)
+- `probability_of_loss_pct` - Probability of any loss occurring
+- `percentile_*_pct` - Distribution percentiles for expected returns
+
+**Stress Tests:**
+- `shock_pct` - Magnitude of the stress scenario shock
+- `severity` - Risk level: `"HIGH"` (≥15% loss), `"MEDIUM"` (7-15% loss), `"LOW"` (<7% loss)
+- `estimated_loss` - Dollar amount of expected loss
+- `loss_pct` - Loss as percentage of portfolio value
+- `worst_position` - Symbol with largest loss in scenario
+- `positions_impacted` - Number of positions affected
+
+**Liquidity:**
+- `liquidity_score` - Numeric score from 0-100 (higher = more liquid)
+- `days_to_liquidate` - Days needed to exit position (can be `null` for highly illiquid positions)
+- `is_illiquid` - Boolean flag for positions requiring >10 days to liquidate
 
 **Use Cases:**
 ```javascript
@@ -2211,15 +2260,21 @@ Advanced risk analysis using Monte Carlo simulation and stress testing.
 fetch('/api/intelligence/risk')
   .then(res => res.json())
   .then(data => {
-    // Alert if VaR exceeds risk tolerance
-    if (Math.abs(data.monte_carlo.var_95) > 5000) {
-      alert(`⚠️ 95% VaR: $${data.monte_carlo.var_95.toFixed(2)}`);
+    // Alert if VaR exceeds risk tolerance (note: values are percentages now)
+    if (Math.abs(data.monte_carlo.var_95_pct) > 10) {
+      alert(`⚠️ 95% VaR: ${data.monte_carlo.var_95_pct.toFixed(2)}%`);
     }
     
     // Check for illiquid positions
-    const illiquid = data.liquidity.filter(l => l.days_to_liquidate > 0.1);
+    const illiquid = data.liquidity.filter(l => l.is_illiquid);
     if (illiquid.length > 0) {
-      console.warn('Illiquid positions detected:', illiquid);
+      console.warn('Illiquid positions detected:', illiquid.map(l => l.symbol));
+    }
+    
+    // Flag high-severity stress scenarios
+    const highRisk = data.stress_tests.filter(t => t.severity === 'HIGH');
+    if (highRisk.length > 0) {
+      console.warn('High-risk scenarios:', highRisk);
     }
   });
 ```
