@@ -32,7 +32,11 @@ def _get_account_data():
     """Pull live account data from ServiceManager."""
     svc = get_services()
     summary = svc.get_account_summary() or {}
-    positions = list((svc.get_positions() or {}).values())
+    raw_positions = svc.get_positions() or {}
+    # Inject the symbol key into each position dict so downstream code can
+    # reliably call p.get("symbol") — the TWS bridge stores symbol only as
+    # the dict key, not inside the value dict.
+    positions = [dict(v, symbol=k) for k, v in raw_positions.items()]
     return svc, summary, positions
 
 
