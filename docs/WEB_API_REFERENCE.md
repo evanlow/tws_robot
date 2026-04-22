@@ -1831,7 +1831,7 @@ The Account Intelligence API provides sophisticated analytics for portfolio opti
 The suite includes:
 - **Account Health** - Composite health scoring with margin analysis
 - **Cash Management** - Reserve optimization and cash flow forecasting
-- **Opportunity Detection** - Portfolio gap analysis and rebalancing suggestions
+- **Opportunity Detection** - Portfolio gap analysis, ETF suggestions, concentration risk detection, rebalancing with urgency levels
 - **Performance Benchmarking** - Compare returns against market indices
 - **Risk Intelligence** - Monte Carlo simulation and stress testing
 - **Report Generation** - Automated performance reports and alerts
@@ -1950,13 +1950,27 @@ fetch('/api/intelligence/cash?policy=CONSERVATIVE')
 
 ### `GET /api/intelligence/opportunities`
 
-Scan your portfolio for optimization opportunities.
+Scan your portfolio for optimization opportunities with actionable ETF suggestions and urgency prioritization.
 
 **What it detects:**
-- **Sector gaps** - Under/over-representation in sectors
+- **Sector gaps** - Under/over-representation in sectors with specific ETF recommendations
+- **Concentration risk** - Detects when top positions represent too much of portfolio
 - **Rebalancing needs** - Positions that have drifted from targets
 - **Dividend opportunities** - High-yield stocks to consider
-- **Position sizing** - Positions that need adjustment
+- **Position sizing** - Overweight/underweight positions needing adjustment
+
+**Opportunity Types:**
+- `SECTOR_GAP` - Missing or underrepresented sector exposure
+- `CONCENTRATION` - Portfolio too concentrated in few positions
+- `REBALANCE` - Position has grown/shrunk significantly from target
+- `DIVIDEND` - High-yield dividend opportunity
+- `OVERWEIGHT` - Position exceeds target allocation
+- `UNDERWEIGHT` - Position below target allocation
+
+**Urgency Levels:**
+- `HIGH` - Requires immediate attention (e.g., overweight sectors, concentration risk)
+- `MEDIUM` - Should address soon (e.g., rebalancing needs)
+- `LOW` - Optional optimization (e.g., dividend opportunities)
 
 **Response:**
 ```json
@@ -1964,53 +1978,106 @@ Scan your portfolio for optimization opportunities.
   "opportunities": [
     {
       "type": "SECTOR_GAP",
-      "priority": "HIGH",
-      "sector": "Healthcare",
+      "symbol": "XLV",
+      "urgency": "HIGH",
       "description": "Healthcare sector underrepresented at 2% (target: 15%)",
-      "action": "Consider adding Healthcare positions",
-      "target_allocation_pct": 0.15,
-      "current_allocation_pct": 0.02
+      "suggested_action": "Consider adding XLV (Health Care Select Sector SPDR) - gap: $19,500",
+      "potential_impact": 19500.00,
+      "metadata": {
+        "sector": "Healthcare",
+        "etf_name": "Health Care Select Sector SPDR",
+        "target_allocation_pct": 0.15,
+        "current_allocation_pct": 0.02,
+        "gap_amount": 19500.00
+      }
+    },
+    {
+      "type": "CONCENTRATION",
+      "symbol": "Portfolio",
+      "urgency": "HIGH",
+      "description": "Top 3 positions represent 65% of portfolio (threshold: 50%)",
+      "suggested_action": "Reduce concentration - diversify holdings",
+      "potential_impact": 22500.00,
+      "metadata": {
+        "top_positions_pct": 0.65,
+        "threshold_pct": 0.50,
+        "excess_concentration": 0.15,
+        "top_symbols": ["AAPL", "MSFT", "GOOGL"]
+      }
     },
     {
       "type": "REBALANCE",
-      "priority": "MEDIUM",
       "symbol": "AAPL",
+      "urgency": "MEDIUM",
       "description": "AAPL position has grown to 25% of portfolio (target: 15%)",
-      "action": "SELL",
-      "suggested_amount": 5000.00,
-      "current_value": 37500.00,
-      "target_value": 22500.00
+      "suggested_action": "SELL $15,000 to rebalance",
+      "potential_impact": 15000.00,
+      "metadata": {
+        "current_value": 37500.00,
+        "target_value": 22500.00,
+        "suggested_amount": 15000.00
+      }
     },
     {
-      "type": "DIVIDEND_OPPORTUNITY",
-      "priority": "LOW",
+      "type": "DIVIDEND",
       "symbol": "T",
+      "urgency": "LOW",
       "description": "AT&T offers 6.2% yield with 70% payout ratio",
-      "dividend_yield": 0.062,
-      "payout_ratio": 0.70,
-      "sector": "Communication"
+      "suggested_action": "Consider adding dividend income",
+      "potential_impact": 620.00,
+      "metadata": {
+        "dividend_yield": 0.062,
+        "payout_ratio": 0.70,
+        "sector": "Communication"
+      }
     }
   ],
   "summary": {
-    "total_opportunities": 3,
-    "high_priority": 1,
-    "medium_priority": 1,
-    "low_priority": 1,
+    "total_opportunities": 4,
+    "high_urgency": 2,
+    "medium_urgency": 1,
+    "low_urgency": 1,
     "sectors_underweight": ["Healthcare", "Energy"],
-    "sectors_overweight": ["Technology"]
+    "sectors_overweight": ["Technology"],
+    "plain_summary": "Found 4 opportunities: 2 high-urgency items requiring attention. Portfolio shows concentration risk with top 3 positions at 65%. Healthcare sector significantly underrepresented - consider XLV."
   }
 }
 ```
 
+**ETF Recommendations by Sector:**
+
+The API provides specific ETF symbols for sector gaps:
+- **Technology**: XLK (Technology Select Sector SPDR), QQQ (Invesco QQQ Trust)
+- **Healthcare**: XLV (Health Care Select Sector SPDR)
+- **Financials**: XLF (Financial Select Sector SPDR)
+- **Consumer Discretionary**: XLY
+- **Industrials**: XLI
+- **Consumer Staples**: XLP
+- **Energy**: XLE
+- **Utilities**: XLU
+- **Materials**: XLB
+- **Real Estate**: XLRE
+- **Communication Services**: XLC
+
 **Use Cases:**
 ```javascript
-// Show portfolio optimization suggestions
+// Show portfolio optimization suggestions with urgency filtering
 fetch('/api/intelligence/opportunities')
   .then(res => res.json())
   .then(data => {
-    const highPriority = data.opportunities.filter(o => o.priority === 'HIGH');
-    highPriority.forEach(opp => {
-      showNotification(opp.description, opp.action);
+    // Show high-urgency items first
+    const highUrgency = data.opportunities.filter(o => o.urgency === 'HIGH');
+    highUrgency.forEach(opp => {
+      showAlert(opp.description, opp.suggested_action, 'red');
+    });
+    
+    // Display plain-text summary
+    displaySummary(data.summary.plain_summary);
+    
+    // Show ETF suggestions for sector gaps
+    const sectorGaps = data.opportunities.filter(o => o.type === 'SECTOR_GAP');
+    sectorGaps.forEach(gap => {
+      showETFSuggestion(gap.symbol, gap.metadata.etf_name, gap.metadata.gap_amount);
     });
   });
 ```
