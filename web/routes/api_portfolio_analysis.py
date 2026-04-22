@@ -106,7 +106,13 @@ def stock_deep_dive(symbol: str):
         try:
             from data.portfolio_persistence import get_latest_stock_analysis
             cached = get_latest_stock_analysis(symbol)
-            if cached is not None:
+            # Only use the cache when it already has an AI analysis, or when
+            # AI would not be used for a fresh run (disabled globally or by
+            # the caller via ?ai=false) — so the cache miss wouldn't add one.
+            ai_requested = use_ai and is_ai_enabled()
+            if cached is not None and (
+                cached.get("ai_analysis") is not None or not ai_requested
+            ):
                 # Normalize cached row to the same response schema as
                 # a fresh analysis so the frontend renders correctly.
                 enriched_position = dict(position)

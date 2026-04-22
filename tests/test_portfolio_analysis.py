@@ -1035,6 +1035,100 @@ class TestStockDeepDiveAPI:
         assert "analysis_date" not in data
         assert "technical" not in data
 
+    def test_cached_response_without_ai_analysis_triggers_fresh_when_ai_enabled(
+        self, client, services
+    ):
+        """A cached entry with ai_analysis=None must be bypassed when AI is enabled."""
+        services.update_position("GOOG", {
+            "quantity": 50,
+            "entry_price": 140.0,
+            "current_price": 165.0,
+            "market_value": 8250.0,
+            "unrealized_pnl": 1250.0,
+            "side": "LONG",
+        })
+
+        # Cached row has no AI analysis — simulates a pre-AI-enabled cache entry.
+        cached_row_no_ai = {
+            "id": 2,
+            "symbol": "GOOG",
+            "analysis_date": "2026-04-17T12:00:00+00:00",
+            "fundamentals": {"pe_trailing": 25.0},
+            "technical": {"sma_50": 160.0},
+            "ai_analysis": None,
+            "verdict": None,
+        }
+
+        with (
+            patch(
+                "data.portfolio_persistence.get_latest_stock_analysis",
+                return_value=cached_row_no_ai,
+            ) as mock_get,
+            patch("web.routes.api_portfolio_analysis.is_ai_enabled", return_value=True),
+            patch("data.fundamentals.get_fundamentals", return_value={"pe_trailing": 25.0}),
+            patch("data.fundamentals.fetch_price_history", return_value=[]),
+            patch(
+                "ai.stock_analyzer.StockAnalyzer.analyze_stock",
+                return_value={
+                    "symbol": "GOOG",
+                    "position": {},
+                    "fundamentals": {"pe_trailing": 25.0},
+                    "technicals": {},
+                    "ai_analysis": {"verdict": "BUY", "summary": "fresh result"},
+                    "timestamp": "2026-04-22T12:00:00+00:00",
+                },
+            ),
+            patch("data.portfolio_persistence.save_stock_analysis"),
+        ):
+            resp = client.get("/api/account/stock-deep-dive/GOOG")
+            data = resp.get_json()
+
+        assert resp.status_code == 200
+        # Must NOT return the stale cache entry
+        assert data["from_cache"] is False
+        # Fresh AI analysis should be present
+        assert data["ai_analysis"] is not None
+        assert data["ai_analysis"]["verdict"] == "BUY"
+
+    def test_cached_response_without_ai_analysis_used_when_ai_not_requested(
+        self, client, services
+    ):
+        """A cached entry with ai_analysis=None must be served when ?ai=false,
+        since a fresh run wouldn't produce AI output either."""
+        services.update_position("GOOG", {
+            "quantity": 50,
+            "entry_price": 140.0,
+            "current_price": 165.0,
+            "market_value": 8250.0,
+            "unrealized_pnl": 1250.0,
+            "side": "LONG",
+        })
+
+        cached_row_no_ai = {
+            "id": 3,
+            "symbol": "GOOG",
+            "analysis_date": "2026-04-17T12:00:00+00:00",
+            "fundamentals": {"pe_trailing": 25.0},
+            "technical": {"sma_50": 160.0},
+            "ai_analysis": None,
+            "verdict": None,
+        }
+
+        with (
+            patch(
+                "data.portfolio_persistence.get_latest_stock_analysis",
+                return_value=cached_row_no_ai,
+            ),
+            patch("web.routes.api_portfolio_analysis.is_ai_enabled", return_value=True),
+        ):
+            # Caller explicitly opts out of AI — cache should be served as-is.
+            resp = client.get("/api/account/stock-deep-dive/GOOG?ai=false")
+            data = resp.get_json()
+
+        assert resp.status_code == 200
+        assert data["from_cache"] is True
+        assert data["ai_analysis"] is None
+
 
 class TestPortfolioSnapshotAPI:
     """Tests for /api/account/portfolio-snapshot and /api/account/portfolio-snapshots."""
