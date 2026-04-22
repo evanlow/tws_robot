@@ -609,6 +609,59 @@ class TestRiskIntelligenceEngine:
         assert result.shock_pct == -0.15
         assert result.estimated_loss > 0
 
+    def test_stress_test_severity_bucketing(self):
+        from data.risk_intelligence import StressTestResult
+
+        def make(loss, total=100_000):
+            return StressTestResult(
+                scenario="TEST", shock_pct=-loss / total,
+                portfolio_value_before=total,
+                portfolio_value_after=total - loss,
+                estimated_loss=loss,
+                positions_impacted=1, worst_position="SPY", worst_position_loss=loss,
+            )
+
+        assert make(20_000).to_dict()["severity"] == "HIGH"    # 20% >= 15
+        assert make(15_000).to_dict()["severity"] == "HIGH"    # exactly 15% >= 15
+        assert make(14_999).to_dict()["severity"] == "MEDIUM"  # just below 15%
+        assert make(7_000).to_dict()["severity"] == "MEDIUM"   # exactly 7% >= 7
+        assert make(6_999).to_dict()["severity"] == "LOW"      # just below 7%
+        assert make(0).to_dict()["severity"] == "LOW"          # zero loss
+
+    def test_stress_test_severity_boundary_unrounded(self):
+        """Severity must be derived from the raw (unrounded) loss percentage.
+
+        6_995 / 100_000 = 6.995% which round()s to 7.00.  If severity were
+        computed from the rounded value this would be classified as MEDIUM
+        (>= 7), but the true raw value is below 7 so it must be LOW.
+        """
+        from data.risk_intelligence import StressTestResult
+
+        result = StressTestResult(
+            scenario="EDGE", shock_pct=-0.06995,
+            portfolio_value_before=100_000,
+            portfolio_value_after=93_005,
+            estimated_loss=6_995,
+            positions_impacted=1, worst_position="SPY", worst_position_loss=6_995,
+        )
+        d = result.to_dict()
+        assert d["loss_pct"] == 7.0  # rounds up from 6.995
+        assert d["severity"] == "LOW"  # raw 6.995% is below the 7.0 threshold
+
+    def test_liquidity_infinite_days_serializes_as_null(self):
+        import json
+        from data.risk_intelligence import LiquidityProfile
+
+        profile = LiquidityProfile(
+            symbol="ILLIQ", avg_daily_volume=0, position_size=50_000,
+            days_to_liquidate=float("inf"), liquidity_score=0, is_illiquid=True,
+        )
+        d = profile.to_dict()
+        assert d["days_to_liquidate"] is None
+        # Must serialize to valid JSON without raising
+        serialized = json.dumps(d)
+        assert '"days_to_liquidate": null' in serialized
+
 
 # ====================================================================
 # 6. Report Generator

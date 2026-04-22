@@ -121,6 +121,11 @@ function fmtNum(v, decimals) {
   return n.toFixed(decimals != null ? decimals : 2);
 }
 
+function fmtPctNum(v, decimals) {
+  var s = fmtNum(v, decimals);
+  return s === '--' ? '--' : s + '%';
+}
+
 // Fetch a JSON endpoint, return parsed data or null on error
 async function fetchJSON(url) {
   try {
@@ -347,9 +352,9 @@ async function fetchJSON(url) {
       var mc = riskIntel.monte_carlo;
       rhtml += '<h3 style="font-size:0.95rem;color:#a0aec0;margin-bottom:0.5rem;">Monte Carlo Simulation</h3>';
       rhtml += '<div class="stats-grid">';
-      rhtml += statCard('VaR (95%)', fmtPct(mc.var_95));
-      rhtml += statCard('CVaR (95%)', fmtPct(mc.cvar_95));
-      if (mc.median_return != null) rhtml += statCard('Median Return', fmtPct(mc.median_return));
+      rhtml += statCard('VaR (95%)', fmtPctNum(mc.var_95_pct, 2));
+      rhtml += statCard('CVaR (95%)', fmtPctNum(mc.cvar_95_pct, 2));
+      if (mc.median_return_pct != null) rhtml += statCard('Median Return', fmtPctNum(mc.median_return_pct, 2));
       if (mc.simulations != null) rhtml += statCard('Simulations', mc.simulations);
       rhtml += '</div>';
     }
@@ -361,7 +366,7 @@ async function fetchJSON(url) {
       for (var i = 0; i < riskIntel.stress_tests.length; i++) {
         var st = riskIntel.stress_tests[i];
         rhtml += '<tr><td>' + escapeHtml(st.scenario || st.name || '--') + '</td><td>' +
-                 fmtPct(st.portfolio_impact || st.impact) + '</td><td>' +
+                 fmtPctNum(st.loss_pct, 2) + '</td><td>' +
                  escapeHtml(st.severity || '--') + '</td></tr>';
       }
       rhtml += '</tbody></table>';
