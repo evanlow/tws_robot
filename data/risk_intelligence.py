@@ -87,15 +87,23 @@ class StressTestResult:
     worst_position_loss: float
 
     def to_dict(self) -> dict:
+        loss_pct = round(
+            self.estimated_loss / self.portfolio_value_before * 100, 2
+        ) if self.portfolio_value_before > 0 else 0.0
+        if loss_pct >= 15:
+            severity = "HIGH"
+        elif loss_pct >= 7:
+            severity = "MEDIUM"
+        else:
+            severity = "LOW"
         return {
             "scenario": self.scenario,
             "shock_pct": round(self.shock_pct * 100, 2),
             "portfolio_value_before": round(self.portfolio_value_before, 2),
             "portfolio_value_after": round(self.portfolio_value_after, 2),
             "estimated_loss": round(self.estimated_loss, 2),
-            "loss_pct": round(
-                self.estimated_loss / self.portfolio_value_before * 100, 2
-            ) if self.portfolio_value_before > 0 else 0.0,
+            "loss_pct": loss_pct,
+            "severity": severity,
             "positions_impacted": self.positions_impacted,
             "worst_position": self.worst_position,
             "worst_position_loss": round(self.worst_position_loss, 2),
@@ -113,11 +121,16 @@ class LiquidityProfile:
     is_illiquid: bool
 
     def to_dict(self) -> dict:
+        days = (
+            round(self.days_to_liquidate, 2)
+            if math.isfinite(self.days_to_liquidate)
+            else None
+        )
         return {
             "symbol": self.symbol,
             "avg_daily_volume": round(self.avg_daily_volume, 0),
             "position_size": round(self.position_size, 0),
-            "days_to_liquidate": round(self.days_to_liquidate, 2),
+            "days_to_liquidate": days,
             "liquidity_score": round(self.liquidity_score, 1),
             "is_illiquid": self.is_illiquid,
         }
