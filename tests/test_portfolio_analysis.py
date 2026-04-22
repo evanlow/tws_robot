@@ -1225,6 +1225,11 @@ class TestNewPrompts:
         assert "{position_json}" in Prompts.STOCK_DEEP_DIVE
         assert "{fundamentals_json}" in Prompts.STOCK_DEEP_DIVE
         assert "{technical_json}" in Prompts.STOCK_DEEP_DIVE
+        # Prompt must contain guidance so that short option positions receive
+        # appropriate recommendations instead of long-position "adding on dips"
+        # advice (which would be nonsensical for a short put at low premium).
+        assert "SHORT OPTION" in Prompts.STOCK_DEEP_DIVE
+        assert "quantity" in Prompts.STOCK_DEEP_DIVE
 
 
 # ===========================================================================
