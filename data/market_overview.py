@@ -42,6 +42,7 @@ INDEX_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "000001.SS": {"name": "Shanghai Composite", "region": "Asia"},
     "^KS11":     {"name": "KOSPI",             "region": "Asia"},
     "^AXJO":     {"name": "ASX 200",           "region": "Asia"},
+    "^STI":      {"name": "Straits Times Index", "region": "Asia"},
 }
 
 # Cache TTL — 5 minutes
