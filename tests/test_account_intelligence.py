@@ -401,11 +401,11 @@ class TestOpportunityDetector:
         from data.opportunity_detector import OpportunityType, Urgency
         detector = self._make_detector()
         positions = [
-            {"symbol": "AAPL", "market_value": 100_000, "sector": "Unknown"},
+            {"symbol": "AAPL", "market_value": 100_000, "sector": "Technology"},
         ]
         opps = detector.scan(positions=positions, equity=100_000)
         overweight = [o for o in opps if o.opportunity_type == OpportunityType.OVERWEIGHT]
-        # Unknown is 100% actual, 0% target → 100pp overweight
+        # Technology is 100% actual, well above target → 100pp overweight
         assert len(overweight) > 0
         assert overweight[0].urgency == Urgency.HIGH
 

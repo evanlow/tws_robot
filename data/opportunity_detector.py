@@ -217,6 +217,8 @@ class OpportunityDetector:
         actual: Dict[str, float] = {}
         for pos in positions:
             sector = pos.get("sector", "Unknown")
+            if sector == "Unknown":
+                continue
             mv = abs(pos.get("market_value", 0.0))
             actual[sector] = actual.get(sector, 0.0) + mv
 
