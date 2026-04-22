@@ -1064,7 +1064,7 @@ class TestStockDeepDiveAPI:
                 "data.portfolio_persistence.get_latest_stock_analysis",
                 return_value=cached_row_no_ai,
             ) as mock_get,
-            patch("ai.client.is_ai_enabled", return_value=True),
+            patch("web.routes.api_portfolio_analysis.is_ai_enabled", return_value=True),
             patch("data.fundamentals.get_fundamentals", return_value={"pe_trailing": 25.0}),
             patch("data.fundamentals.fetch_price_history", return_value=[]),
             patch(
