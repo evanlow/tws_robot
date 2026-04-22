@@ -405,9 +405,25 @@ class TestOpportunityDetector:
         ]
         opps = detector.scan(positions=positions, equity=100_000)
         overweight = [o for o in opps if o.opportunity_type == OpportunityType.OVERWEIGHT]
-        # Technology is 100% actual, well above target → 100pp overweight
+        # Technology is 100% actual vs ~25% target → 75pp overweight
         assert len(overweight) > 0
         assert overweight[0].urgency == Urgency.HIGH
+
+    def test_unknown_sector_does_not_emit_opportunities(self):
+        """Positions with sector 'Unknown' must not produce OVERWEIGHT or SECTOR_GAP opportunities."""
+        from data.opportunity_detector import OpportunityType
+        detector = self._make_detector()
+        positions = [
+            {"symbol": "AAPL_C", "market_value": 50_000, "sector": "Unknown"},
+            {"symbol": "JPM", "market_value": 50_000, "sector": "Financials"},
+        ]
+        opps = detector.scan(positions=positions, equity=100_000)
+        bad = [
+            o for o in opps
+            if o.opportunity_type in (OpportunityType.OVERWEIGHT, OpportunityType.SECTOR_GAP)
+            and o.metadata.get("sector") == "Unknown"
+        ]
+        assert len(bad) == 0, f"Unexpected Unknown-sector opportunities: {bad}"
 
     def test_opportunity_to_dict_has_urgency_key(self):
         """Opportunity.to_dict() should have 'urgency' key, not 'priority'."""
