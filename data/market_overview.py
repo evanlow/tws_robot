@@ -200,6 +200,25 @@ def _fetch_sparkline_from_yfinance(days: int = 5) -> Dict[str, List[float]]:
     except Exception as exc:
         logger.warning("Sparkline download failed: %s", exc)
 
+    # Per-symbol fallback: some indices (e.g. ^STI) may not return data in
+    # the batch download.  Retry those individually so their trend graphs
+    # are not silently dropped.
+    missing = [s for s in symbols if not sparklines.get(s)]
+    for symbol in missing:
+        try:
+            hist = yf.Ticker(symbol).history(
+                period=f"{days + 3}d", interval="1d"
+            )
+            closes = hist["Close"].dropna().tolist()
+            sparklines[symbol] = closes[-days:] if len(closes) > days else closes
+            if closes:
+                logger.debug("Sparkline fallback succeeded for %s", symbol)
+            else:
+                logger.warning("Sparkline fallback returned no data for %s", symbol)
+        except Exception as exc:
+            logger.warning("Sparkline fallback failed for %s: %s", symbol, exc)
+            sparklines[symbol] = []
+
     return sparklines
 
 
