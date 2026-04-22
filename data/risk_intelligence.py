@@ -87,12 +87,13 @@ class StressTestResult:
     worst_position_loss: float
 
     def to_dict(self) -> dict:
-        loss_pct = round(
-            self.estimated_loss / self.portfolio_value_before * 100, 2
-        ) if self.portfolio_value_before > 0 else 0.0
-        if loss_pct >= 15:
+        raw_loss_pct = (
+            self.estimated_loss / self.portfolio_value_before * 100
+            if self.portfolio_value_before > 0 else 0.0
+        )
+        if raw_loss_pct >= 15:
             severity = "HIGH"
-        elif loss_pct >= 7:
+        elif raw_loss_pct >= 7:
             severity = "MEDIUM"
         else:
             severity = "LOW"
@@ -102,7 +103,7 @@ class StressTestResult:
             "portfolio_value_before": round(self.portfolio_value_before, 2),
             "portfolio_value_after": round(self.portfolio_value_after, 2),
             "estimated_loss": round(self.estimated_loss, 2),
-            "loss_pct": loss_pct,
+            "loss_pct": round(raw_loss_pct, 2),
             "severity": severity,
             "positions_impacted": self.positions_impacted,
             "worst_position": self.worst_position,
