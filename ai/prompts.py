@@ -210,8 +210,11 @@ class Prompts:
         "Provide a thorough analysis covering:\n"
         "1. **Fundamental Assessment**: Valuation (P/E, P/B), profitability "
         "(margins, ROE), growth (revenue, EPS trends), balance sheet health. "
-        "For options, assess the underlying asset and note that standard "
-        "valuation ratios apply to the underlying, not the contract itself.\n"
+        "For options, assess the underlying asset — standard valuation ratios "
+        "apply to the underlying, not the contract itself. If the fundamentals "
+        "data is missing, unavailable, or contains errors (e.g., because the "
+        "symbol is an option ticker that yfinance cannot resolve), clearly state "
+        "that fundamental data is unavailable rather than inventing figures.\n"
         "2. **Technical Assessment**: Price action, trend, key levels, "
         "momentum indicators\n"
         "3. **Position Assessment**: Is the current position (entry price, "
@@ -222,9 +225,13 @@ class Prompts:
         "put, this means the underlying stays above the strike)\n"
         "5. **Bear Case**: Key risks (for a short put, this means the "
         "underlying falling toward or below the strike)\n"
-        "6. **Verdict**: Overall assessment — for long positions use STRONG "
-        "BUY / BUY / HOLD / REDUCE / SELL; for short options use "
-        "HOLD_TO_EXPIRY / CLOSE_FOR_PROFIT / ROLL / CLOSE_TO_LIMIT_RISK\n\n"
+        "6. **Verdict**: Overall assessment — use ONLY one of these values "
+        "for all positions: STRONG BUY / BUY / HOLD / REDUCE / SELL. "
+        "Do NOT invent any other verdict values.\n"
+        "7. **Target Action**: Provide the specific next step appropriate "
+        "for the position direction and type. For short options, express "
+        "actions here such as HOLD_TO_EXPIRY, CLOSE_FOR_PROFIT, ROLL, or "
+        "CLOSE_TO_LIMIT_RISK.\n\n"
         "Return ONLY a valid JSON object with this structure:\n"
         "{{\n"
         '  "fundamental_assessment": "...",\n'
@@ -232,7 +239,7 @@ class Prompts:
         '  "position_assessment": "...",\n'
         '  "bull_case": ["...", "..."],\n'
         '  "bear_case": ["...", "..."],\n'
-        '  "verdict": "HOLD",\n'
+        '  "verdict": "<STRONG BUY|BUY|HOLD|REDUCE|SELL>",\n'
         '  "confidence": 0.7,\n'
         '  "summary": "A concise 2-3 sentence summary...",\n'
         '  "target_action": "Concise action appropriate for the position direction and type"\n'
