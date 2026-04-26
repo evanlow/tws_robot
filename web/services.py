@@ -192,6 +192,15 @@ class ServiceManager:
         except Exception:  # pragma: no cover
             logger.debug("BollingerBandsStrategy not available for registration")
 
+        try:
+            from strategies.inferred_strategies import INFERRED_STRATEGY_CLASSES
+            for strategy_type, strategy_class in INFERRED_STRATEGY_CLASSES.items():
+                self._strategy_registry.register_strategy_class(
+                    strategy_type, strategy_class,
+                )
+        except Exception:  # pragma: no cover
+            logger.debug("Inferred strategy classes not available for registration")
+
     @property
     def position_analyzer(self):
         """Return the shared PositionAnalyzer (created on first access)."""
