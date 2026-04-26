@@ -421,6 +421,78 @@ class TestStrategyRegistry:
         assert summary['total_rejected'] == 12   # 2 + 4 + 6
         assert 'acceptance_rate' in summary
 
+    def test_inferred_strategy_types_registered(self):
+        """Regression: every type emitted by PositionAnalyzer must be registered.
+
+        This ensures that clicking 'Adopt' in the UI never fails with
+        '"<type>" is not registered' for auto-detected strategies.
+        """
+        from strategies.inferred_strategies import INFERRED_STRATEGY_CLASSES
+        from web.position_analyzer import PositionAnalyzer
+
+        # Collect all strategy_type values PositionAnalyzer can produce by
+        # analysing a synthetic portfolio that covers every detected pattern.
+        #
+        # positions schema: symbol -> {side, avg_cost, market_value, quantity}
+        synthetic_positions = {
+            # Covered call: long stock + short call
+            "GOOG": {
+                "side": "LONG", "avg_cost": 190.0,
+                "market_value": 34200.0, "quantity": 100,
+            },
+            "GOOG 260515C00380000": {
+                "side": "SHORT", "avg_cost": 1.0,
+                "market_value": -40.0, "quantity": -1,
+            },
+            # Protective put: long stock + long put
+            "AAPL": {
+                "side": "LONG", "avg_cost": 150.0,
+                "market_value": 15000.0, "quantity": 100,
+            },
+            "AAPL 260515P00140000": {
+                "side": "LONG", "avg_cost": 2.0,
+                "market_value": 200.0, "quantity": 1,
+            },
+            # Naked long equity
+            "MSFT": {
+                "side": "LONG", "avg_cost": 300.0,
+                "market_value": 30000.0, "quantity": 100,
+            },
+            # Naked short equity
+            "TSLA": {
+                "side": "SHORT", "avg_cost": 200.0,
+                "market_value": -20000.0, "quantity": -100,
+            },
+            # Naked short call
+            "SPY 260515C00600000": {
+                "side": "SHORT", "avg_cost": 1.0,
+                "market_value": -100.0, "quantity": -1,
+            },
+            # Naked long put
+            "QQQ 260515P00400000": {
+                "side": "LONG", "avg_cost": 3.0,
+                "market_value": 300.0, "quantity": 1,
+            },
+        }
+
+        analyzer = PositionAnalyzer()
+        inferred = analyzer.analyze(synthetic_positions)
+        detected_types = {s.strategy_type for s in inferred}
+
+        registry = StrategyRegistry()
+        registry.register_strategy_class("BollingerBands", MockStrategy)
+        for strategy_type, strategy_class in INFERRED_STRATEGY_CLASSES.items():
+            registry.register_strategy_class(strategy_type, strategy_class)
+
+        registered = set(registry.get_registered_classes())
+
+        for stype in detected_types:
+            assert stype in registered, (
+                f"Strategy type '{stype}' is detected by PositionAnalyzer "
+                f"but not registered in StrategyRegistry. "
+                f"The Adopt button will fail for this type."
+            )
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
