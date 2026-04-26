@@ -11,13 +11,10 @@ interface.  Instances are created when the user clicks "Adopt" on an inferred
 strategy card so that the position is tracked in the StrategyRegistry.
 """
 
-import logging
-from typing import Dict, Optional
+from typing import Dict, Type
 
-from strategies.base_strategy import BaseStrategy, StrategyConfig
+from strategies.base_strategy import BaseStrategy
 from strategies.signal import Signal
-
-logger = logging.getLogger(__name__)
 
 
 class _InferredBase(BaseStrategy):
@@ -33,8 +30,10 @@ class _InferredBase(BaseStrategy):
         pass
 
     def validate_signal(self, signal: Signal) -> bool:
-        """Accept any well-formed signal."""
-        return signal is not None and bool(signal.symbol)
+        """Delegate to Signal.validate() for consistent signal model enforcement."""
+        if signal is None:
+            return False
+        return signal.validate()
 
 
 class CoveredCallStrategy(_InferredBase):
@@ -122,7 +121,7 @@ class ShortPutStrategy(_InferredBase):
 
 
 # Mapping from strategy_type string (as produced by PositionAnalyzer) to class.
-INFERRED_STRATEGY_CLASSES: Dict[str, type] = {
+INFERRED_STRATEGY_CLASSES: Dict[str, Type[BaseStrategy]] = {
     "CoveredCall": CoveredCallStrategy,
     "ProtectivePut": ProtectivePutStrategy,
     "IronCondor": IronCondorStrategy,

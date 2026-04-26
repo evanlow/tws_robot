@@ -198,8 +198,11 @@ class ServiceManager:
                 self._strategy_registry.register_strategy_class(
                     strategy_type, strategy_class,
                 )
-        except Exception:  # pragma: no cover
-            logger.debug("Inferred strategy classes not available for registration")
+        except ImportError:  # pragma: no cover
+            logger.debug(
+                "Inferred strategy classes not available for registration",
+                exc_info=True,
+            )
 
     @property
     def position_analyzer(self):
