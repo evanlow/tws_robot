@@ -187,23 +187,51 @@ class Prompts:
     # ------------------------------------------------------------------
     STOCK_DEEP_DIVE = (
         "You are a senior equity research analyst providing a comprehensive "
-        "deep-dive analysis of a single stock held in a portfolio.\n\n"
-        "Stock: {symbol}\n"
+        "deep-dive analysis of a single position held in a portfolio.\n\n"
+        "Symbol: {symbol}\n"
         "Position context:\n{position_json}\n"
         "Fundamental data:\n{fundamentals_json}\n"
         "Technical data:\n{technical_json}\n\n"
+        "IMPORTANT — Position direction awareness:\n"
+        "Before generating any recommendation, inspect the position context "
+        "to determine the position type and direction:\n"
+        "- If 'sec_type' is 'OPT' (or the symbol contains an expiry/strike "
+        "pattern) AND 'quantity' is negative, this is a SHORT OPTION position "
+        "(the trader has sold the contract and collected premium).\n"
+        "- For SHORT OPTION positions: 'adding' means selling additional "
+        "contracts, which increases risk exposure. Do NOT recommend adding "
+        "when the option is near worthless (low premium), as that provides "
+        "almost no income for substantial risk. Instead, appropriate actions "
+        "are: letting the option expire worthless, buying it back to close "
+        "the position and lock in the gain, or rolling it to a later expiry "
+        "or different strike.\n"
+        "- For LONG positions (positive quantity stocks or options): adding "
+        "on price dips is a valid accumulation strategy.\n\n"
         "Provide a thorough analysis covering:\n"
         "1. **Fundamental Assessment**: Valuation (P/E, P/B), profitability "
-        "(margins, ROE), growth (revenue, EPS trends), balance sheet health\n"
+        "(margins, ROE), growth (revenue, EPS trends), balance sheet health. "
+        "For options, assess the underlying asset — standard valuation ratios "
+        "apply to the underlying, not the contract itself. If the fundamentals "
+        "data is missing, unavailable, or contains errors (e.g., because the "
+        "symbol is an option ticker that yfinance cannot resolve), clearly state "
+        "that fundamental data is unavailable rather than inventing figures.\n"
         "2. **Technical Assessment**: Price action, trend, key levels, "
         "momentum indicators\n"
         "3. **Position Assessment**: Is the current position (entry price, "
-        "size, holding period) well-positioned? Should it be added to, "
-        "reduced, or held?\n"
-        "4. **Bull Case**: Key reasons the stock could outperform\n"
-        "5. **Bear Case**: Key risks and reasons for concern\n"
-        "6. **Verdict**: Overall assessment — STRONG BUY, BUY, HOLD, "
-        "REDUCE, or SELL with confidence level\n\n"
+        "size, holding period) well-positioned? For short options, assess "
+        "proximity to the strike, time-to-expiry, and whether the premium "
+        "collected is at risk.\n"
+        "4. **Bull Case**: Key reasons the position benefits (for a short "
+        "put, this means the underlying stays above the strike)\n"
+        "5. **Bear Case**: Key risks (for a short put, this means the "
+        "underlying falling toward or below the strike)\n"
+        "6. **Verdict**: Overall assessment — use ONLY one of these values "
+        "for all positions: STRONG BUY / BUY / HOLD / REDUCE / SELL. "
+        "Do NOT invent any other verdict values.\n"
+        "7. **Target Action**: Provide the specific next step appropriate "
+        "for the position direction and type. For short options, express "
+        "actions here such as HOLD_TO_EXPIRY, CLOSE_FOR_PROFIT, ROLL, or "
+        "CLOSE_TO_LIMIT_RISK.\n\n"
         "Return ONLY a valid JSON object with this structure:\n"
         "{{\n"
         '  "fundamental_assessment": "...",\n'
@@ -211,10 +239,10 @@ class Prompts:
         '  "position_assessment": "...",\n'
         '  "bull_case": ["...", "..."],\n'
         '  "bear_case": ["...", "..."],\n'
-        '  "verdict": "HOLD",\n'
+        '  "verdict": "<STRONG BUY|BUY|HOLD|REDUCE|SELL>",\n'
         '  "confidence": 0.7,\n'
         '  "summary": "A concise 2-3 sentence summary...",\n'
-        '  "target_action": "Hold current position, consider adding on dips below $X"\n'
+        '  "target_action": "Concise action appropriate for the position direction and type"\n'
         "}}\n"
         "Do not include any text outside the JSON."
     )
