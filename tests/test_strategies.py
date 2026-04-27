@@ -8,6 +8,7 @@ import pytest
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from core.event_bus import Event, EventType
 from strategies.signal import Signal, SignalType, SignalStrength
 from strategies.base_strategy import (
     BaseStrategy, StrategyState, StrategyConfig
@@ -506,20 +507,20 @@ class MockEventBus:
         self.subscriptions = {}
         self.published_events = []
     
-    def subscribe(self, event_type: str, callback):
+    def subscribe(self, event_type, callback):
         """Subscribe to event"""
         if event_type not in self.subscriptions:
             self.subscriptions[event_type] = []
         self.subscriptions[event_type].append(callback)
     
-    def publish(self, event_type: str, data: dict):
+    def publish(self, event):
         """Publish event"""
-        self.published_events.append((event_type, data))
+        self.published_events.append(event)
         
         # Call subscribers
-        if event_type in self.subscriptions:
-            for callback in self.subscriptions[event_type]:
-                callback(data)
+        if event.event_type in self.subscriptions:
+            for callback in self.subscriptions[event.event_type]:
+                callback(event.data)
 
 
 def test_strategy_event_subscription():
@@ -532,9 +533,9 @@ def test_strategy_event_subscription():
     strategy = MockStrategy(config, event_bus)
     
     # Check subscriptions
-    assert "MARKET_DATA" in event_bus.subscriptions
-    assert "ORDER_FILLED" in event_bus.subscriptions
-    assert "POSITION_UPDATE" in event_bus.subscriptions
+    assert EventType.MARKET_DATA_RECEIVED in event_bus.subscriptions
+    assert EventType.ORDER_FILLED in event_bus.subscriptions
+    assert EventType.POSITION_UPDATED in event_bus.subscriptions
 
 
 def test_strategy_market_data_handling():
@@ -558,7 +559,7 @@ def test_strategy_market_data_handling():
         'volume': 1000000
     }
     
-    event_bus.publish("MARKET_DATA", market_data)
+    event_bus.publish(Event(EventType.MARKET_DATA_RECEIVED, data=market_data))
     
     # Check strategy processed it
     assert strategy.bars_processed == 1
@@ -586,9 +587,9 @@ def test_strategy_signal_publishing():
     
     # Check event was published
     signal_events = [e for e in event_bus.published_events 
-                    if e[0] == "SIGNAL_GENERATED"]
+                    if e.event_type == EventType.SIGNAL_GENERATED]
     assert len(signal_events) == 1
-    assert signal_events[0][1]['symbol'] == "AAPL"
+    assert signal_events[0].data['symbol'] == "AAPL"
 
 
 if __name__ == "__main__":

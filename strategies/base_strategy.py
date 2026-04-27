@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Any
 import logging
 from decimal import Decimal
 
+from core.event_bus import Event, EventType
 from .signal import Signal, SignalType, SignalStrength
 
 
@@ -158,14 +159,14 @@ class BaseStrategy(ABC):
             return
         
         # Subscribe to market data events
-        self.event_bus.subscribe("MARKET_DATA", self._handle_market_data)
+        self.event_bus.subscribe(EventType.MARKET_DATA_RECEIVED, self._handle_market_data)
         
         # Subscribe to order events
-        self.event_bus.subscribe("ORDER_FILLED", self._handle_order_filled)
-        self.event_bus.subscribe("ORDER_CANCELLED", self._handle_order_cancelled)
+        self.event_bus.subscribe(EventType.ORDER_FILLED, self._handle_order_filled)
+        self.event_bus.subscribe(EventType.ORDER_CANCELLED, self._handle_order_cancelled)
         
         # Subscribe to position updates
-        self.event_bus.subscribe("POSITION_UPDATE", self._handle_position_update)
+        self.event_bus.subscribe(EventType.POSITION_UPDATED, self._handle_position_update)
         
         logger.debug(f"Strategy {self.config.name} subscribed to events")
     
@@ -185,10 +186,11 @@ class BaseStrategy(ABC):
         logger.info(f"Strategy {self.config.name} started")
         
         if self.event_bus:
-            self.event_bus.publish("STRATEGY_STARTED", {
-                'strategy_name': self.config.name,
-                'timestamp': self.start_time.isoformat()
-            })
+            self.event_bus.publish(Event(
+                EventType.STRATEGY_STARTED,
+                data={'strategy_name': self.config.name, 'timestamp': self.start_time.isoformat()},
+                source=self.config.name,
+            ))
     
     def stop(self):
         """
@@ -205,10 +207,11 @@ class BaseStrategy(ABC):
         logger.info(f"Strategy {self.config.name} stopped")
         
         if self.event_bus:
-            self.event_bus.publish("STRATEGY_STOPPED", {
-                'strategy_name': self.config.name,
-                'timestamp': self.stop_time.isoformat()
-            })
+            self.event_bus.publish(Event(
+                EventType.STRATEGY_STOPPED,
+                data={'strategy_name': self.config.name, 'timestamp': self.stop_time.isoformat()},
+                source=self.config.name,
+            ))
     
     def pause(self):
         """
@@ -225,10 +228,11 @@ class BaseStrategy(ABC):
         logger.info(f"Strategy {self.config.name} paused")
         
         if self.event_bus:
-            self.event_bus.publish("STRATEGY_PAUSED", {
-                'strategy_name': self.config.name,
-                'timestamp': datetime.now().isoformat()
-            })
+            self.event_bus.publish(Event(
+                EventType.STRATEGY_PAUSED,
+                data={'strategy_name': self.config.name, 'timestamp': datetime.now().isoformat()},
+                source=self.config.name,
+            ))
     
     def resume(self):
         """
@@ -245,10 +249,11 @@ class BaseStrategy(ABC):
         logger.info(f"Strategy {self.config.name} resumed")
         
         if self.event_bus:
-            self.event_bus.publish("STRATEGY_RESUMED", {
-                'strategy_name': self.config.name,
-                'timestamp': datetime.now().isoformat()
-            })
+            self.event_bus.publish(Event(
+                EventType.STRATEGY_RESUMED,
+                data={'strategy_name': self.config.name, 'timestamp': datetime.now().isoformat()},
+                source=self.config.name,
+            ))
     
     def reload_config(self, new_config: StrategyConfig):
         """
@@ -267,12 +272,16 @@ class BaseStrategy(ABC):
         logger.info(f"Strategy {self.config.name} configuration reloaded")
         
         if self.event_bus:
-            self.event_bus.publish("STRATEGY_CONFIG_RELOADED", {
-                'strategy_name': self.config.name,
-                'old_config': old_config.__dict__,
-                'new_config': new_config.__dict__,
-                'timestamp': datetime.now().isoformat()
-            })
+            self.event_bus.publish(Event(
+                EventType.STRATEGY_CONFIG_RELOADED,
+                data={
+                    'strategy_name': self.config.name,
+                    'old_config': old_config.__dict__,
+                    'new_config': new_config.__dict__,
+                    'timestamp': datetime.now().isoformat(),
+                },
+                source=self.config.name,
+            ))
     
     def _handle_market_data(self, event_data: dict):
         """
@@ -388,7 +397,11 @@ class BaseStrategy(ABC):
         
         # Publish to event bus
         if self.event_bus:
-            self.event_bus.publish("SIGNAL_GENERATED", signal.to_dict())
+            self.event_bus.publish(Event(
+                EventType.SIGNAL_GENERATED,
+                data=signal.to_dict(),
+                source=self.config.name,
+            ))
     
     def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
