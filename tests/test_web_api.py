@@ -744,6 +744,88 @@ class TestStrategyAPI:
         resp = client.get("/api/strategies/nonexistent/metrics")
         assert resp.status_code == 404
 
+    # ------------------------------------------------------------------
+    # POST /api/strategies/create — Route Coverage Rule (Principle 1)
+    # ------------------------------------------------------------------
+
+    def test_create_strategy_happy_path(self, client):
+        """POST /api/strategies/create — happy path returns 200 and strategy dict."""
+        import uuid
+        name = f"LE_AAPL_{uuid.uuid4().hex[:8]}"
+        resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": name,
+            "symbols": ["AAPL"],
+        })
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert data["status"] == "created"
+        assert "strategy" in data
+        assert data["strategy"]["strategy_name"] == name
+
+    def test_create_strategy_missing_fields(self, client):
+        """POST /api/strategies/create — missing required fields returns 400."""
+        # Missing strategy_type
+        resp = client.post("/api/strategies/create", json={
+            "name": "LE_AAPL",
+            "symbols": ["AAPL"],
+        })
+        assert resp.status_code == 400
+
+        # Missing name
+        resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "symbols": ["AAPL"],
+        })
+        assert resp.status_code == 400
+
+        # Missing symbols
+        resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": "LE_AAPL_2",
+        })
+        assert resp.status_code == 400
+
+        # Empty body
+        resp = client.post("/api/strategies/create", json={})
+        assert resp.status_code == 400
+
+    def test_create_strategy_unknown_type(self, client):
+        """POST /api/strategies/create — unknown strategy_type returns 400."""
+        resp = client.post("/api/strategies/create", json={
+            "strategy_type": "NonExistentStrategy",
+            "name": "Bad_Strategy",
+            "symbols": ["AAPL"],
+        })
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "error" in data
+
+    def test_create_strategy_all_inferred_types(self, client):
+        """Adopt-flow integration test: every inferred strategy type must instantiate.
+
+        This is the regression test for the April 2026 Adopt-button crash.
+        It uses the REAL strategy classes (not Mock) so constructor-level failures
+        surface here instead of in production.  Principle 11 — Mock Fidelity.
+        """
+        import uuid
+        from strategies.inferred_strategies import INFERRED_STRATEGY_CLASSES
+
+        run_id = uuid.uuid4().hex[:8]
+        for idx, strategy_type in enumerate(INFERRED_STRATEGY_CLASSES):
+            resp = client.post("/api/strategies/create", json={
+                "strategy_type": strategy_type,
+                "name": f"adopt_{strategy_type}_{run_id}_{idx}",
+                "symbols": ["AAPL"],
+            })
+            data = resp.get_json()
+            assert resp.status_code == 200, (
+                f"Adopting '{strategy_type}' returned {resp.status_code}: {data}"
+            )
+            assert data["status"] == "created", (
+                f"Unexpected status for '{strategy_type}': {data}"
+            )
+
     def test_list_inferred_empty(self, client):
         """Test /api/strategies/inferred with no positions."""
         resp = client.get("/api/strategies/inferred")

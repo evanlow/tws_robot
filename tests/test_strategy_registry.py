@@ -8,6 +8,7 @@ import pytest
 from datetime import datetime
 from unittest.mock import Mock, MagicMock
 
+from core.event_bus import EventBus
 from strategies.strategy_registry import StrategyRegistry
 from strategies.base_strategy import BaseStrategy, StrategyState, StrategyConfig
 from strategies.signal import Signal, SignalType, SignalStrength
@@ -36,7 +37,7 @@ class TestStrategyRegistry:
     
     def test_registry_initialization(self):
         """Test registry initialization"""
-        event_bus = Mock()
+        event_bus = EventBus()
         registry = StrategyRegistry(event_bus)
         
         assert registry.event_bus == event_bus
@@ -82,7 +83,7 @@ class TestStrategyRegistry:
     
     def test_create_strategy(self):
         """Test creating a strategy instance"""
-        event_bus = Mock()
+        event_bus = EventBus()
         registry = StrategyRegistry(event_bus)
         
         # Register strategy class

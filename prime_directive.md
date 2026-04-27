@@ -1,6 +1,6 @@
 # Prime Directive: Development Guidelines
 
-**Last Updated:** April 8, 2026  
+**Last Updated:** April 27, 2026  
 **Purpose:** Ensure high-quality, maintainable code by learning from past experiences and establishing best practices for all team members, AI agents, and contributors.
 
 **Scope:** This directive is designed for use across all software projects. Project-specific case studies and stack/tool profiles are explicitly labeled as optional examples.
@@ -31,6 +31,9 @@ For UI Changes (HTML/CSS/JavaScript):
 □ Any strange behavior investigated (Principle 8)
 □ Manual testing documented in commit message
 □ No Python code with braces/f-strings passed via PowerShell -c (Principle 10)
+□ Every new/modified API endpoint has a test (Principle 1 — Route Coverage Rule)
+□ Every new mock enforces argument types with assert/isinstance (Principle 11)
+□ At least one test for each "adopt/create/instantiate" flow uses the real class (Principle 11)
 → Ready to commit
 
 Session Log Cadence (Mandatory):
@@ -331,6 +334,19 @@ Never redirect output to an assumed absolute path (e.g., `C:\Temp`) — the dire
 - **Integration:** Test complete workflows end-to-end
 - **Error handling:** Test invalid inputs return proper errors
 - **Minimum coverage:** 70%+ for new features, 90%+ for critical paths
+
+**Route Coverage Rule (Non-Negotiable):**
+Every new or modified API endpoint **must** have corresponding tests committed in the **same** change.
+
+| Required test | What it covers |
+|---|---|
+| Happy path → 200 + correct response shape | Confirms endpoint is reachable and returns expected data |
+| Missing required fields → 400 | Confirms input validation is enforced |
+| Unknown/invalid values → 400/404 | Confirms error handling is correct |
+| "Adopt / Create / Instantiate" flow → uses **real** domain class | Catches constructor-level crashes; `Mock()` cannot substitute here |
+
+**Adopt-flow test rule:**
+Any endpoint that internally calls `__init__` on a domain object (e.g., `POST /api/strategies/create`) must have at least one integration test that instantiates the **real** class — not a `Mock()`. Only real instantiation will catch attribute errors, missing imports, or wrong event-bus API calls at test time.
 
 **Warning Policy:**
 - Warnings are NOT acceptable - they must be investigated and resolved
@@ -1258,6 +1274,105 @@ Always `Remove-Item` the temp file immediately after use.
 - Use `@'...'@` (single-quoted here-string) when writing Python to a temp file — prevents PowerShell interpolation
 - Delete temp files immediately with `Remove-Item`
 - Treat a PowerShell `ParserError` on a `-c` command as a signal to switch to the file pattern, not to escape/rewrite the one-liner
+
+---
+
+### 11. **Mock Fidelity — Mocks Must Enforce the Real Interface**
+**CRITICAL:** A mock that doesn't replicate the real class's contract gives false confidence. Tests pass; production crashes.
+
+**The Rule:**
+Every mock of a collaborator must:
+1. Call the same methods in the same way the real class does
+2. Assert argument *types*, not just values
+3. Raise on violations — never silently accept wrong types
+
+**The Anti-Pattern (what caused the Adopt-button bug, April 2026):**
+```python
+# ❌ BAD — swallows everything silently; strings are valid dict keys so no error fires
+class MockEventBus:
+    def subscribe(self, event_type, callback):
+        self.subscriptions[event_type] = ...  # "MARKET_DATA" string works here!
+```
+`BaseStrategy._subscribe_to_events` was passing raw strings (`"MARKET_DATA"`) instead of
+`EventType` enum members. Because the mock accepted strings without complaint, every unit test
+passed — but every real instantiation crashed with `AttributeError: 'str' object has no attribute 'name'`.
+
+**The Correct Pattern:**
+```python
+# ✅ GOOD — enforces the same contract as the real EventBus
+from core.event_bus import Event, EventType
+
+class MockEventBus:
+    def __init__(self):
+        self.subscriptions = {}
+        self.published_events = []
+
+    def subscribe(self, event_type: EventType, callback):
+        assert isinstance(event_type, EventType), (
+            f"subscribe() requires EventType, got {type(event_type).__name__!r}"
+        )
+        self.subscriptions.setdefault(event_type, []).append(callback)
+
+    def publish(self, event: Event):
+        assert isinstance(event, Event), (
+            f"publish() requires Event, got {type(event).__name__!r}"
+        )
+        self.published_events.append(event)
+        for cb in self.subscriptions.get(event.event_type, []):
+            cb(event.data)
+```
+
+**Prefer real classes over mocks when possible:**
+If the real class has no side effects (no network, no disk, no heavy setup), use it directly.
+Reserve mocks for classes with I/O or expensive setup. `EventBus` is a pure in-memory object —
+use the real one in registry and strategy tests.
+
+**`unittest.mock.Mock()` is a last resort:**
+`Mock()` accepts any call and returns `Mock` for any attribute. It validates nothing. Use it only
+when the collaborator's interface is deliberately irrelevant to the specific test being written.
+
+**Regression test requirement:**
+Every mock that enforces types must have a corresponding **negative test** — a test that passes
+the wrong type and asserts it raises. This locks the enforcement in place against future refactors.
+
+```python
+def test_mock_event_bus_enforces_types():
+    """Verify MockEventBus raises on wrong argument types."""
+    bus = MockEventBus()
+
+    # Wrong type for subscribe — must raise, not silently key by string
+    with pytest.raises(AssertionError):
+        bus.subscribe("MARKET_DATA", lambda e: None)
+
+    # Wrong type for publish — must raise, not silently append string
+    with pytest.raises((AssertionError, AttributeError)):
+        bus.publish("SIGNAL_GENERATED")
+```
+
+**❌ Never:**
+- Use `Mock()` for a collaborator whose interface is the thing being tested
+- Write a mock that accepts raw strings/ints where the real class demands typed objects
+- Assert only that a key *exists* in `mock.subscriptions` without checking its type
+
+**✅ Always:**
+- Add `isinstance` assertions inside mock methods for all arguments with a documented type
+- Write at least one **negative test**: pass the wrong type and assert it raises
+- Prefer the real class when it has no side effects
+- If a `Mock()`-based test passes but production crashes, the mock is lying — fix the mock
+
+#### Incident: April 2026
+
+**What happened:**
+`BaseStrategy._subscribe_to_events` passed raw strings to `EventBus.subscribe()`, which calls
+`event_type.name`. `MockEventBus` silently keyed by those strings. All 50+ strategy unit tests
+passed; every `POST /api/strategies/create` call (the "Adopt" button) raised `AttributeError`.
+
+**Root causes:**
+1. `MockEventBus` accepted any hashable key — strings appeared equivalent to `EventType` members
+2. `POST /api/strategies/create` had no test at all (Route Coverage Rule violation)
+3. Registry tests used bare `Mock()` which swallowed every wrong-type call silently
+
+**Time to diagnose:** ~30 minutes. Time to prevent with this principle: ~2 minutes (add `isinstance` assert and one `POST /create` test).
 
 ---
 

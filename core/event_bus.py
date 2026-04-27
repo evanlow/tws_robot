@@ -69,6 +69,9 @@ class EventType(Enum):
     # Strategy Events
     STRATEGY_STARTED = auto()
     STRATEGY_STOPPED = auto()
+    STRATEGY_PAUSED = auto()
+    STRATEGY_RESUMED = auto()
+    STRATEGY_CONFIG_RELOADED = auto()
     STRATEGY_ERROR = auto()
     SIGNAL_GENERATED = auto()
     

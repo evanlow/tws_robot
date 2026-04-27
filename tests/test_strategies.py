@@ -8,6 +8,7 @@ import pytest
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from core.event_bus import Event, EventType
 from strategies.signal import Signal, SignalType, SignalStrength
 from strategies.base_strategy import (
     BaseStrategy, StrategyState, StrategyConfig
@@ -500,26 +501,35 @@ def test_strategy_str_repr():
 # Test event handling (requires mock event bus)
 
 class MockEventBus:
-    """Mock event bus for testing"""
-    
+    """Mock event bus for testing.
+
+    Enforces the same type contract as the real EventBus so that wrong argument
+    types (e.g. raw strings instead of EventType members) raise immediately in
+    tests rather than silently succeeding while production crashes.
+    """
+
     def __init__(self):
         self.subscriptions = {}
         self.published_events = []
-    
-    def subscribe(self, event_type: str, callback):
-        """Subscribe to event"""
-        if event_type not in self.subscriptions:
-            self.subscriptions[event_type] = []
-        self.subscriptions[event_type].append(callback)
-    
-    def publish(self, event_type: str, data: dict):
-        """Publish event"""
-        self.published_events.append((event_type, data))
-        
-        # Call subscribers
-        if event_type in self.subscriptions:
-            for callback in self.subscriptions[event_type]:
-                callback(data)
+
+    def subscribe(self, event_type, callback):
+        """Subscribe to event — requires EventType enum member."""
+        assert isinstance(event_type, EventType), (
+            f"subscribe() requires EventType, got {type(event_type).__name__!r}"
+        )
+        self.subscriptions.setdefault(event_type, []).append(callback)
+
+    def publish(self, event):
+        """Publish event — requires Event object."""
+        assert isinstance(event, Event), (
+            f"publish() requires Event, got {type(event).__name__!r}"
+        )
+        self.published_events.append(event)
+
+        # Call subscribers with the full Event object — matching the real EventBus
+        # contract where publish() calls handler(event), not handler(event.data).
+        for callback in self.subscriptions.get(event.event_type, []):
+            callback(event)
 
 
 def test_strategy_event_subscription():
@@ -532,9 +542,9 @@ def test_strategy_event_subscription():
     strategy = MockStrategy(config, event_bus)
     
     # Check subscriptions
-    assert "MARKET_DATA" in event_bus.subscriptions
-    assert "ORDER_FILLED" in event_bus.subscriptions
-    assert "POSITION_UPDATE" in event_bus.subscriptions
+    assert EventType.MARKET_DATA_RECEIVED in event_bus.subscriptions
+    assert EventType.ORDER_FILLED in event_bus.subscriptions
+    assert EventType.POSITION_UPDATED in event_bus.subscriptions
 
 
 def test_strategy_market_data_handling():
@@ -558,7 +568,7 @@ def test_strategy_market_data_handling():
         'volume': 1000000
     }
     
-    event_bus.publish("MARKET_DATA", market_data)
+    event_bus.publish(Event(EventType.MARKET_DATA_RECEIVED, data=market_data))
     
     # Check strategy processed it
     assert strategy.bars_processed == 1
@@ -586,9 +596,39 @@ def test_strategy_signal_publishing():
     
     # Check event was published
     signal_events = [e for e in event_bus.published_events 
-                    if e[0] == "SIGNAL_GENERATED"]
+                    if e.event_type == EventType.SIGNAL_GENERATED]
     assert len(signal_events) == 1
-    assert signal_events[0][1]['symbol'] == "AAPL"
+    assert signal_events[0].data['symbol'] == "AAPL"
+
+
+def test_mock_event_bus_enforces_types():
+    """MockEventBus must raise on wrong argument types (Principle 11).
+
+    This test locks in the type-enforcement behaviour so that any future
+    weakening of MockEventBus is caught immediately.
+    """
+    bus = MockEventBus()
+
+    # subscribe() must reject raw strings — they are NOT EventType members
+    with pytest.raises(AssertionError):
+        bus.subscribe("MARKET_DATA", lambda e: None)
+
+    # subscribe() must reject integers
+    with pytest.raises(AssertionError):
+        bus.subscribe(42, lambda e: None)
+
+    # publish() must reject raw strings — they are NOT Event objects
+    with pytest.raises(AssertionError):
+        bus.publish("SIGNAL_GENERATED")
+
+    # publish() must reject plain dicts — they are NOT Event objects
+    with pytest.raises(AssertionError):
+        bus.publish({"event_type": "SIGNAL_GENERATED"})
+
+    # Correct usage must NOT raise
+    bus.subscribe(EventType.SIGNAL_GENERATED, lambda data: None)
+    event = Event(EventType.SIGNAL_GENERATED, data={"symbol": "AAPL"})
+    bus.publish(event)  # should not raise
 
 
 if __name__ == "__main__":
