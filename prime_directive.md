@@ -14,6 +14,8 @@ Pre-Commit Checklist:
 □ Virtual environment active (Principle 0)
 □ Every new/modified module has a smoke test file (Principle 1 — Coverage Rule)
 □ Full regression suite passes: .\Scripts\python.exe tests/run_all_smoke.py — X/X passed, 0 failures (Principle 1) [run via run_in_terminal — never via execution_subagent (Principle 9)]
+□ No secrets or credentials in the diff (Principle 12)
+□ Change is on a feature branch, not directly on main (Principle 13)
 
 For Backend-Only Changes:
 □ Tests added/updated for new code
@@ -117,7 +119,7 @@ Every project must maintain a dedicated session log file at repository root:
 **Minimum entry fields:**
 
 1. Date and session identifier
-2. Directive Compliance KPI score (`X/6 green`)
+2. Directive Compliance KPI score (`X/8 green`)
 3. Green/Yellow/Red breakdown with reasons
 4. Checkpoint type and trigger event
 5. KPI delta since previous entry
@@ -137,8 +139,8 @@ Every project must maintain a dedicated session log file at repository root:
 ### Example Status Update
 
 ```markdown
-Directive Compliance KPI: 5/7 green
-- Green: #1, #2, #3, #5, #7
+Directive Compliance KPI: 6/8 green
+- Green: #1, #2, #3, #5, #7, #8
 - Yellow: #4 (awaiting post-change test run), #6 (no form input changes yet)
 - Red: none
 ```
@@ -1373,6 +1375,147 @@ passed; every `POST /api/strategies/create` call (the "Adopt" button) raised `At
 3. Registry tests used bare `Mock()` which swallowed every wrong-type call silently
 
 **Time to diagnose:** ~30 minutes. Time to prevent with this principle: ~2 minutes (add `isinstance` assert and one `POST /create` test).
+
+---
+
+### 12. **Secrets & Credentials Management — Never Commit Secrets**
+**CRITICAL:** Credentials, API keys, tokens, and passwords committed to version control are permanently exposed — even after deletion, the history remains. This is one of the most common and damaging security mistakes.
+
+**The Rule:**
+Never commit secrets to version control. Ever. Not even temporarily.
+
+**What counts as a secret:**
+- API keys and tokens (broker keys, OpenAI keys, third-party service keys)
+- Passwords and database connection strings
+- Private keys and certificates
+- OAuth client secrets
+- Webhook signing secrets
+- Any value your code uses to authenticate to an external service
+
+**The Correct Pattern:**
+```python
+# ✅ CORRECT — load secrets from environment variables
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Loads from .env file (which is in .gitignore!)
+
+API_KEY = os.environ["BROKER_API_KEY"]       # Raises KeyError if missing — catches misconfiguration
+DB_URL = os.environ.get("DATABASE_URL", "")  # Returns empty string if missing
+
+# ❌ WRONG — hardcoded credential
+API_KEY = "sk-abc123realkey..."  # Never!
+DB_URL = "postgresql://admin:password@prod-server/db"  # Never!
+```
+
+**Project Setup (Mandatory for every project):**
+```bash
+# Step 1: Create .env file for local secrets (never commit this)
+# .env
+BROKER_API_KEY=your_key_here
+DATABASE_URL=postgresql://localhost/mydb
+
+# Step 2: Create .env.example with placeholder values (SAFE to commit)
+# .env.example
+BROKER_API_KEY=your_broker_api_key_here
+DATABASE_URL=postgresql://localhost/mydb
+
+# Step 3: Ensure .gitignore includes .env
+echo ".env" >> .gitignore
+```
+
+**If a Secret Is Accidentally Committed:**
+1. **Rotate the credential immediately** — assume it is compromised
+2. Remove the secret from the codebase
+3. Force-push is NOT sufficient — git history retains it
+4. Use `git filter-branch` or BFG Repo Cleaner to scrub history
+5. Notify the service provider if the secret controls external access
+
+**❌ Never:**
+- Commit `.env` files containing real credentials
+- Hardcode secrets in source code, even in "dev" branches
+- Log or print secret values (they end up in log files)
+- Share secrets via chat messages, email, or tickets
+- Assume a private repository is safe for committing credentials
+
+**✅ Always:**
+- Use `.env` for local development secrets (with `.env` in `.gitignore`)
+- Commit `.env.example` with placeholder values to document required keys
+- Use environment variables in CI/CD pipelines and production deployments
+- Rotate any credential that may have been exposed
+- Check for secret leaks before every PR merge (use tools like `git-secrets` or GitHub secret scanning)
+
+---
+
+### 13. **Git Branching & Code Review — Protect the Main Branch**
+**CRITICAL:** Committing untested or unreviewed code directly to `main` bypasses quality gates and introduces regressions that affect everyone. Every change must be isolated and reviewed before merging.
+
+**The Branching Model:**
+```
+main          ← production-ready only; never commit directly here
+  └─ feature/my-feature     ← all new work starts here
+  └─ fix/bug-description    ← bug fixes
+  └─ chore/dependency-update ← maintenance tasks
+```
+
+**Branch Naming Convention:**
+```bash
+# ✅ Descriptive, type-prefixed names
+feature/add-risk-manager-stop-loss
+fix/order-rejected-on-market-open
+chore/upgrade-ibapi-to-10.19
+refactor/extract-position-calculator
+
+# ❌ Vague or unprefixed names
+my-branch
+update
+fix2
+```
+
+**The Workflow (Non-Negotiable):**
+1. **Create a feature branch** from up-to-date `main`
+   ```bash
+   git fetch origin
+   git checkout -b feature/my-feature origin/main
+   ```
+2. **Work on the branch** — commit frequently with descriptive messages
+3. **Pass all tests locally** before opening a PR (Principle 1)
+4. **Open a Pull Request** — describe what changed and why
+5. **Code review** — at least one reviewer must approve before merge
+6. **Merge** only after all checks pass and review is approved
+
+**Code Review Checklist (Reviewer):**
+- [ ] Does the code do what the PR description claims?
+- [ ] Are edge cases handled? (None, empty, boundary values — Principle 3)
+- [ ] Are tests present and meaningful? (Principle 1)
+- [ ] Are there any security concerns? (secrets, injection, input validation — Principles 7, 13)
+- [ ] Is the code readable without excessive explanation?
+- [ ] Does it introduce any new warnings or deprecations?
+
+**Code Review Checklist (Author):**
+- [ ] All tests pass with zero warnings (Principle 1)
+- [ ] No secrets or credentials in diff (Principle 12)
+- [ ] PR scope is focused — one logical change per PR
+- [ ] Commit messages are descriptive (type: summary format)
+- [ ] Breaking changes are documented
+
+**Keep PRs Small:**
+- Large PRs are harder to review and more likely to introduce subtle bugs
+- A PR should ideally change fewer than 400 lines
+- If a feature is large, split it into sequential PRs
+
+**❌ Never:**
+- Push directly to `main` (except for critical hotfixes with immediate retrospective)
+- Merge a PR without at least one review (for solo projects: self-review with a checklist)
+- Leave stale branches open for weeks — merge or delete
+- Use `git push --force` on shared branches (destroys collaborators' history)
+
+**✅ Always:**
+- Branch from the latest `main`
+- Keep `main` in a deployable state at all times
+- Write a clear PR description explaining the "why" not just the "what"
+- Respond to review comments before re-requesting review
+- Delete merged branches to keep the repo tidy
 
 ---
 
@@ -3018,10 +3161,14 @@ When deleting code:
 2. ✅ Search for all usages: `grep_search(query="module_name", isRegexp=True)`
 3. ✅ Analyze impact (is it in test suite? imported elsewhere?)
 4. ✅ Delete in logical groups (related files together)
+5. ✅ Verify tests still pass after deletion
+6. ✅ Commit with detailed message explaining what and why
+7. ✅ Reference commit hash in documentation if significant
+8. ✅ Never force-push (preserve git history)
 
 ---
 
-### 9. **Periodic Test Coverage Audit - Prevent Silent Gaps**
+### 14. **Periodic Test Coverage Audit - Prevent Silent Gaps**
 
 **CRITICAL:** New modules can accumulate without smoke tests if the Module → Smoke Test Hard Rule
 (Principle 1) is not enforced in every commit. This principle adds a **scheduled safety net**.
@@ -3091,10 +3238,6 @@ Record the audit result in `session_log.md` as a checkpoint entry with type `aud
 - Close all gaps before proceeding with new work
 - Record audit outcome in `session_log.md`
 - Run `tests/run_all_smoke.py` to confirm 0 failures after closing gaps
-5. ✅ Verify tests still pass after deletion
-6. ✅ Commit with detailed message explaining what and why
-7. ✅ Reference commit hash in documentation if significant
-8. ✅ Never force-push (preserve git history)
 
 ---
 
