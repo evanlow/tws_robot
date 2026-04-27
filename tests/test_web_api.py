@@ -750,16 +750,18 @@ class TestStrategyAPI:
 
     def test_create_strategy_happy_path(self, client):
         """POST /api/strategies/create — happy path returns 200 and strategy dict."""
+        import uuid
+        name = f"LE_AAPL_{uuid.uuid4().hex[:8]}"
         resp = client.post("/api/strategies/create", json={
             "strategy_type": "LongEquity",
-            "name": "LE_AAPL",
+            "name": name,
             "symbols": ["AAPL"],
         })
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["status"] == "created"
         assert "strategy" in data
-        assert data["strategy"]["strategy_name"] == "LE_AAPL"
+        assert data["strategy"]["strategy_name"] == name
 
     def test_create_strategy_missing_fields(self, client):
         """POST /api/strategies/create — missing required fields returns 400."""
@@ -806,12 +808,14 @@ class TestStrategyAPI:
         It uses the REAL strategy classes (not Mock) so constructor-level failures
         surface here instead of in production.  Principle 11 — Mock Fidelity.
         """
+        import uuid
         from strategies.inferred_strategies import INFERRED_STRATEGY_CLASSES
 
+        run_id = uuid.uuid4().hex[:8]
         for idx, strategy_type in enumerate(INFERRED_STRATEGY_CLASSES):
             resp = client.post("/api/strategies/create", json={
                 "strategy_type": strategy_type,
-                "name": f"adopt_{strategy_type}_{idx}",
+                "name": f"adopt_{strategy_type}_{run_id}_{idx}",
                 "symbols": ["AAPL"],
             })
             data = resp.get_json()
@@ -822,7 +826,7 @@ class TestStrategyAPI:
                 f"Unexpected status for '{strategy_type}': {data}"
             )
 
-
+    def test_list_inferred_empty(self, client):
         """Test /api/strategies/inferred with no positions."""
         resp = client.get("/api/strategies/inferred")
         data = resp.get_json()

@@ -526,10 +526,10 @@ class MockEventBus:
         )
         self.published_events.append(event)
 
-        # Call subscribers
-        if event.event_type in self.subscriptions:
-            for callback in self.subscriptions[event.event_type]:
-                callback(event.data)
+        # Call subscribers with the full Event object — matching the real EventBus
+        # contract where publish() calls handler(event), not handler(event.data).
+        for callback in self.subscriptions.get(event.event_type, []):
+            callback(event)
 
 
 def test_strategy_event_subscription():

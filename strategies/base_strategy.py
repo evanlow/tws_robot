@@ -158,15 +158,18 @@ class BaseStrategy(ABC):
         if not self.event_bus:
             return
         
-        # Subscribe to market data events
-        self.event_bus.subscribe(EventType.MARKET_DATA_RECEIVED, self._handle_market_data)
-        
+        # Subscribe to market data events.
+        # Handlers accept a plain dict (event_data), so wrap with a lambda that
+        # extracts event.data — matching the real EventBus contract where publish()
+        # calls handler(event) with the full Event object.
+        self.event_bus.subscribe(EventType.MARKET_DATA_RECEIVED, lambda e: self._handle_market_data(e.data))
+
         # Subscribe to order events
-        self.event_bus.subscribe(EventType.ORDER_FILLED, self._handle_order_filled)
-        self.event_bus.subscribe(EventType.ORDER_CANCELLED, self._handle_order_cancelled)
-        
+        self.event_bus.subscribe(EventType.ORDER_FILLED, lambda e: self._handle_order_filled(e.data))
+        self.event_bus.subscribe(EventType.ORDER_CANCELLED, lambda e: self._handle_order_cancelled(e.data))
+
         # Subscribe to position updates
-        self.event_bus.subscribe(EventType.POSITION_UPDATED, self._handle_position_update)
+        self.event_bus.subscribe(EventType.POSITION_UPDATED, lambda e: self._handle_position_update(e.data))
         
         logger.debug(f"Strategy {self.config.name} subscribed to events")
     
