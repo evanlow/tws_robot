@@ -69,7 +69,7 @@ class StrategyRegistry:
             try:
                 from strategy.lifecycle import StrategyLifecycle
                 self._lifecycle = StrategyLifecycle(db_path)
-            except Exception as exc:  # pragma: no cover
+            except (ImportError, OSError) as exc:  # pragma: no cover
                 logger.warning(f"Could not initialise persistence backend: {exc}")
         
         logger.info("StrategyRegistry initialized")
