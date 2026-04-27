@@ -178,8 +178,12 @@ class ServiceManager:
         """Return the shared StrategyRegistry (created on first access)."""
         if self._strategy_registry is None:
             from strategies.strategy_registry import StrategyRegistry
-            self._strategy_registry = StrategyRegistry(self.event_bus)
+            self._strategy_registry = StrategyRegistry(
+                self.event_bus,
+                db_path="strategy_lifecycle.db",
+            )
             self._register_default_strategies()
+            self._strategy_registry.load_persisted_strategies()
         return self._strategy_registry
 
     def _register_default_strategies(self) -> None:

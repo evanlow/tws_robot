@@ -164,6 +164,17 @@ class StrategyLifecycle:
                 approved_by TEXT
             )
         """)
+
+        # Persistent strategy instances (for StrategyRegistry persistence)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS strategy_instances (
+                name TEXT PRIMARY KEY,
+                strategy_type TEXT NOT NULL,
+                symbols_json TEXT NOT NULL,
+                parameters_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
         
         conn.commit()
         conn.close()
@@ -416,6 +427,115 @@ class StrategyLifecycle:
         conn.close()
         return history
     
+    def save_strategy_instance(
+        self,
+        name: str,
+        strategy_type: str,
+        symbols: list,
+        parameters: Dict[str, Any],
+    ) -> bool:
+        """
+        Persist a strategy instance so it can be restored after a restart.
+
+        Args:
+            name: Strategy instance name (unique key)
+            strategy_type: Registered strategy type string (e.g. "BollingerBands")
+            symbols: List of trading symbols
+            parameters: Strategy-specific parameters dict
+
+        Returns:
+            True on success, False if a record with the same name already exists
+        """
+        import json
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO strategy_instances
+                    (name, strategy_type, symbols_json, parameters_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    name,
+                    strategy_type,
+                    json.dumps(symbols),
+                    json.dumps(parameters),
+                    now,
+                ),
+            )
+            conn.commit()
+            logger.info(f"Persisted strategy instance '{name}' (type: {strategy_type})")
+            return True
+        except sqlite3.IntegrityError:
+            logger.warning(f"Strategy instance '{name}' already persisted")
+            return False
+        finally:
+            conn.close()
+
+    def delete_strategy_instance(self, name: str) -> bool:
+        """
+        Remove a persisted strategy instance record.
+
+        Args:
+            name: Strategy instance name
+
+        Returns:
+            True if a record was deleted, False if not found
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM strategy_instances WHERE name = ?",
+                (name,),
+            )
+            conn.commit()
+            deleted = cursor.rowcount > 0
+            if deleted:
+                logger.info(f"Deleted persisted strategy instance '{name}'")
+            else:
+                logger.warning(f"No persisted record found for strategy '{name}'")
+            return deleted
+        finally:
+            conn.close()
+
+    def load_strategy_instances(self) -> list[Dict[str, Any]]:
+        """
+        Load all persisted strategy instances from the database.
+
+        Returns:
+            List of dicts with keys: name, strategy_type, symbols, parameters, created_at
+        """
+        import json
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT name, strategy_type, symbols_json, parameters_json, created_at
+            FROM strategy_instances
+            ORDER BY created_at ASC
+            """
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        instances = []
+        for row in rows:
+            instances.append(
+                {
+                    "name": row[0],
+                    "strategy_type": row[1],
+                    "symbols": json.loads(row[2]),
+                    "parameters": json.loads(row[3]),
+                    "created_at": row[4],
+                }
+            )
+        return instances
+
     def list_strategies(self, state: Optional[StrategyState] = None) -> list[Dict[str, Any]]:
         """
         List all strategies, optionally filtered by state.

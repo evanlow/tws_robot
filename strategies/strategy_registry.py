@@ -25,6 +25,7 @@ class StrategyRegistry:
     - Lifecycle management for all strategies
     - Signal aggregation from multiple strategies
     - Performance monitoring and reporting
+    - Optional SQLite persistence via StrategyLifecycle
     
     Example:
         >>> registry = StrategyRegistry(event_bus)
@@ -43,12 +44,16 @@ class StrategyRegistry:
         >>> registry.stop_all()
     """
     
-    def __init__(self, event_bus=None):
+    def __init__(self, event_bus=None, db_path: Optional[str] = None):
         """
         Initialize strategy registry.
         
         Args:
             event_bus: Event bus instance for communication
+            db_path: Optional path to SQLite database for strategy persistence.
+                     When provided, strategies are saved to disk so they survive
+                     application restarts.  Call load_persisted_strategies() after
+                     registering all strategy classes to restore saved instances.
         """
         self.event_bus = event_bus
         
@@ -57,6 +62,15 @@ class StrategyRegistry:
         
         # Active strategy instances (name -> instance)
         self._strategies: Dict[str, BaseStrategy] = {}
+
+        # Optional persistence backend
+        self._lifecycle = None
+        if db_path is not None:
+            try:
+                from strategy.lifecycle import StrategyLifecycle
+                self._lifecycle = StrategyLifecycle(db_path)
+            except Exception as exc:  # pragma: no cover
+                logger.warning(f"Could not initialise persistence backend: {exc}")
         
         logger.info("StrategyRegistry initialized")
     
@@ -123,6 +137,15 @@ class StrategyRegistry:
         
         # Register instance
         self._strategies[config.name] = strategy
+
+        # Persist to database so it survives restarts
+        if self._lifecycle is not None:
+            self._lifecycle.save_strategy_instance(
+                name=config.name,
+                strategy_type=strategy_type,
+                symbols=list(config.symbols),
+                parameters=dict(config.parameters),
+            )
         
         logger.info(f"Created strategy instance: {config.name} (type: {strategy_type})")
         
@@ -148,8 +171,61 @@ class StrategyRegistry:
             strategy.stop()
         
         del self._strategies[strategy_name]
+
+        # Remove from persistence store
+        if self._lifecycle is not None:
+            self._lifecycle.delete_strategy_instance(strategy_name)
+
         logger.info(f"Removed strategy: {strategy_name}")
     
+    def load_persisted_strategies(self) -> int:
+        """
+        Reload strategy instances that were saved to the database in a previous run.
+
+        Must be called *after* all strategy classes have been registered so that
+        each persisted record can be matched to a class.  Entries whose type is no
+        longer registered are skipped with a warning rather than raising an error,
+        so a missing plugin never prevents other strategies from loading.
+
+        Returns:
+            Number of strategy instances successfully restored
+        """
+        if self._lifecycle is None:
+            return 0
+
+        records = self._lifecycle.load_strategy_instances()
+        restored = 0
+        for record in records:
+            name = record["name"]
+            strategy_type = record["strategy_type"]
+
+            # Skip if already in memory (e.g. created earlier in this session)
+            if name in self._strategies:
+                continue
+
+            if strategy_type not in self._strategy_classes:
+                logger.warning(
+                    f"Cannot restore strategy '{name}': type '{strategy_type}' is not registered"
+                )
+                continue
+
+            try:
+                strategy_class = self._strategy_classes[strategy_type]
+                config = StrategyConfig(
+                    name=name,
+                    symbols=record["symbols"],
+                    parameters=record["parameters"],
+                )
+                strategy = strategy_class(config, self.event_bus)
+                self._strategies[name] = strategy
+                restored += 1
+                logger.info(f"Restored strategy '{name}' (type: {strategy_type}) from database")
+            except Exception as exc:
+                logger.error(f"Failed to restore strategy '{name}': {exc}")
+
+        logger.info(f"Loaded {restored} persisted strategies from database")
+        return restored
+
     def get_strategy(self, strategy_name: str) -> Optional[BaseStrategy]:
         """
         Get a strategy instance by name.
