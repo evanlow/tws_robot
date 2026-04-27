@@ -494,5 +494,196 @@ class TestStrategyRegistry:
             )
 
 
+# ---------------------------------------------------------------------------
+# Persistence tests
+# ---------------------------------------------------------------------------
+
+import os
+import tempfile
+
+
+@pytest.fixture
+def temp_db_path():
+    """Return a path to a fresh temporary SQLite database, deleted after the test."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    os.unlink(path)  # let StrategyLifecycle create it fresh
+    yield path
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+class TestStrategyRegistryPersistence:
+    """Tests for the database-backed persistence of strategy instances."""
+
+    def _make_registry(self, db_path: str) -> StrategyRegistry:
+        """Create a registry with MockStrategy registered and persistence enabled."""
+        registry = StrategyRegistry(db_path=db_path)
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        return registry
+
+    def test_create_strategy_persists_to_db(self, temp_db_path):
+        """Creating a strategy should write a record to the database."""
+        registry = self._make_registry(temp_db_path)
+        config = StrategyConfig(name="Persist_1", symbols=["AAPL"])
+        registry.create_strategy("MockStrategy", config)
+
+        # Load records directly from the lifecycle store
+        records = registry._lifecycle.load_strategy_instances()
+        assert len(records) == 1
+        assert records[0]["name"] == "Persist_1"
+        assert records[0]["strategy_type"] == "MockStrategy"
+        assert records[0]["symbols"] == ["AAPL"]
+
+    def test_load_persisted_strategies_restores_instances(self, temp_db_path):
+        """Strategies created in one registry session are reloaded in the next."""
+        # Session 1: create two strategies
+        registry1 = self._make_registry(temp_db_path)
+        registry1.create_strategy(
+            "MockStrategy", StrategyConfig(name="BB_AAPL", symbols=["AAPL"])
+        )
+        registry1.create_strategy(
+            "MockStrategy",
+            StrategyConfig(name="BB_MSFT", symbols=["MSFT"], parameters={"period": 25}),
+        )
+
+        # Session 2: new registry, same DB — simulate an app restart
+        registry2 = self._make_registry(temp_db_path)
+        restored = registry2.load_persisted_strategies()
+
+        assert restored == 2
+        assert "BB_AAPL" in registry2
+        assert "BB_MSFT" in registry2
+
+        msft = registry2.get_strategy("BB_MSFT")
+        assert msft is not None
+        assert msft.config.symbols == ["MSFT"]
+        assert msft.config.parameters == {"period": 25}
+
+    def test_remove_strategy_deletes_from_db(self, temp_db_path):
+        """Removing a strategy must delete its persistence record."""
+        registry = self._make_registry(temp_db_path)
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="ToDelete", symbols=["GOOG"])
+        )
+
+        # Confirm it was persisted
+        assert len(registry._lifecycle.load_strategy_instances()) == 1
+
+        registry.remove_strategy("ToDelete")
+
+        # Confirm it was removed from the database
+        assert len(registry._lifecycle.load_strategy_instances()) == 0
+
+    def test_load_skips_unknown_strategy_types(self, temp_db_path):
+        """Strategies whose type is no longer registered are skipped, not raised."""
+        # Write a record for an unknown type directly via the lifecycle store
+        from strategy.lifecycle import StrategyLifecycle
+        lifecycle = StrategyLifecycle(temp_db_path)
+        lifecycle.save_strategy_instance(
+            name="Ghost", strategy_type="ObsoleteType", symbols=["X"], parameters={}
+        )
+
+        registry = self._make_registry(temp_db_path)
+        restored = registry.load_persisted_strategies()
+
+        assert restored == 0
+        assert "Ghost" not in registry
+
+    def test_no_db_path_no_persistence(self):
+        """Without a db_path the registry works purely in-memory with no errors."""
+        registry = StrategyRegistry()
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="InMemory", symbols=["AAPL"])
+        )
+
+        assert registry._lifecycle is None
+        restored = registry.load_persisted_strategies()
+        assert restored == 0
+        assert "InMemory" in registry
+
+    def test_load_does_not_duplicate_existing_strategies(self, temp_db_path):
+        """load_persisted_strategies must not create duplicates for in-memory entries."""
+        registry = self._make_registry(temp_db_path)
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="Once", symbols=["AAPL"])
+        )
+
+        # Calling load again should not duplicate the already-present strategy
+        restored = registry.load_persisted_strategies()
+        assert restored == 0
+        assert len(registry.get_all_strategies()) == 1
+
+    def test_upsert_updates_existing_record(self, temp_db_path):
+        """save_strategy_instance with same name must overwrite, not duplicate."""
+        from strategy.lifecycle import StrategyLifecycle
+        lifecycle = StrategyLifecycle(temp_db_path)
+
+        lifecycle.save_strategy_instance(
+            name="BB_AAPL", strategy_type="MockStrategy",
+            symbols=["AAPL"], parameters={"period": 20},
+        )
+        # Overwrite with new symbols/parameters
+        lifecycle.save_strategy_instance(
+            name="BB_AAPL", strategy_type="MockStrategy",
+            symbols=["AAPL", "MSFT"], parameters={"period": 30},
+        )
+
+        records = lifecycle.load_strategy_instances()
+        assert len(records) == 1
+        assert records[0]["symbols"] == ["AAPL", "MSFT"]
+        assert records[0]["parameters"] == {"period": 30}
+
+    def test_invalid_json_rows_are_skipped(self, temp_db_path):
+        """load_strategy_instances must skip rows with corrupted JSON, not raise."""
+        import sqlite3
+        from strategy.lifecycle import StrategyLifecycle
+
+        lifecycle = StrategyLifecycle(temp_db_path)
+
+        # Insert a row with invalid JSON directly
+        conn = sqlite3.connect(temp_db_path)
+        conn.execute(
+            """
+            INSERT INTO strategy_instances
+                (name, strategy_type, symbols_json, parameters_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("Corrupt", "MockStrategy", "NOT_JSON", "{}", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+
+        # A valid row
+        lifecycle.save_strategy_instance(
+            name="Good", strategy_type="MockStrategy",
+            symbols=["AAPL"], parameters={},
+        )
+
+        records = lifecycle.load_strategy_instances()
+        # Only the valid row should be returned
+        assert len(records) == 1
+        assert records[0]["name"] == "Good"
+
+    def test_invalid_config_rows_are_skipped_on_load(self, temp_db_path):
+        """load_persisted_strategies skips records that fail StrategyConfig.validate()."""
+        import sqlite3
+        from strategy.lifecycle import StrategyLifecycle
+
+        lifecycle = StrategyLifecycle(temp_db_path)
+        # Empty symbols list — will fail StrategyConfig.validate()
+        lifecycle.save_strategy_instance(
+            name="BadConfig", strategy_type="MockStrategy",
+            symbols=[], parameters={},
+        )
+
+        registry = self._make_registry(temp_db_path)
+        restored = registry.load_persisted_strategies()
+
+        assert restored == 0
+        assert "BadConfig" not in registry
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
