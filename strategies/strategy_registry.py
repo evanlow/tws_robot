@@ -67,9 +67,10 @@ class StrategyRegistry:
         self._lifecycle = None
         if db_path is not None:
             try:
+                import sqlite3 as _sqlite3
                 from strategy.lifecycle import StrategyLifecycle
                 self._lifecycle = StrategyLifecycle(db_path)
-            except (ImportError, OSError) as exc:  # pragma: no cover
+            except (ImportError, OSError, _sqlite3.Error) as exc:  # pragma: no cover
                 logger.warning(f"Could not initialise persistence backend: {exc}")
         
         logger.info("StrategyRegistry initialized")
@@ -216,12 +217,17 @@ class StrategyRegistry:
                     symbols=record["symbols"],
                     parameters=record["parameters"],
                 )
+                if not config.validate():
+                    raise ValueError(f"Persisted config for '{name}' failed validation")
                 strategy = strategy_class(config, self.event_bus)
                 self._strategies[name] = strategy
                 restored += 1
                 logger.info(f"Restored strategy '{name}' (type: {strategy_type}) from database")
             except Exception as exc:
-                logger.error(f"Failed to restore strategy '{name}': {exc}")
+                logger.warning(
+                    f"Skipping persisted strategy '{name}' (type: {strategy_type}): "
+                    f"invalid or failed to restore: {exc}"
+                )
 
         logger.info(f"Loaded {restored} persisted strategies from database")
         return restored

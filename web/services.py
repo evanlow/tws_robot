@@ -177,10 +177,21 @@ class ServiceManager:
     def strategy_registry(self):
         """Return the shared StrategyRegistry (created on first access)."""
         if self._strategy_registry is None:
+            from pathlib import Path
             from strategies.strategy_registry import StrategyRegistry
+
+            # Allow operators to override the path via env var; fall back to a
+            # path next to this module so the file ends up in a predictable,
+            # writable location regardless of the process working directory.
+            _default_db = str(
+                Path(os.environ.get(
+                    "STRATEGY_DB_PATH",
+                    str(Path(__file__).parent.parent / "strategy_lifecycle.db"),
+                )).resolve()
+            )
             self._strategy_registry = StrategyRegistry(
                 self.event_bus,
-                db_path="strategy_lifecycle.db",
+                db_path=_default_db,
             )
             self._register_default_strategies()
             self._strategy_registry.load_persisted_strategies()

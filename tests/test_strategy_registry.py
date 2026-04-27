@@ -615,6 +615,75 @@ class TestStrategyRegistryPersistence:
         assert restored == 0
         assert len(registry.get_all_strategies()) == 1
 
+    def test_upsert_updates_existing_record(self, temp_db_path):
+        """save_strategy_instance with same name must overwrite, not duplicate."""
+        from strategy.lifecycle import StrategyLifecycle
+        lifecycle = StrategyLifecycle(temp_db_path)
+
+        lifecycle.save_strategy_instance(
+            name="BB_AAPL", strategy_type="MockStrategy",
+            symbols=["AAPL"], parameters={"period": 20},
+        )
+        # Overwrite with new symbols/parameters
+        lifecycle.save_strategy_instance(
+            name="BB_AAPL", strategy_type="MockStrategy",
+            symbols=["AAPL", "MSFT"], parameters={"period": 30},
+        )
+
+        records = lifecycle.load_strategy_instances()
+        assert len(records) == 1
+        assert records[0]["symbols"] == ["AAPL", "MSFT"]
+        assert records[0]["parameters"] == {"period": 30}
+
+    def test_invalid_json_rows_are_skipped(self, temp_db_path):
+        """load_strategy_instances must skip rows with corrupted JSON, not raise."""
+        import sqlite3
+        from strategy.lifecycle import StrategyLifecycle
+
+        lifecycle = StrategyLifecycle(temp_db_path)
+
+        # Insert a row with invalid JSON directly
+        conn = sqlite3.connect(temp_db_path)
+        conn.execute(
+            """
+            INSERT INTO strategy_instances
+                (name, strategy_type, symbols_json, parameters_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("Corrupt", "MockStrategy", "NOT_JSON", "{}", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+
+        # A valid row
+        lifecycle.save_strategy_instance(
+            name="Good", strategy_type="MockStrategy",
+            symbols=["AAPL"], parameters={},
+        )
+
+        records = lifecycle.load_strategy_instances()
+        # Only the valid row should be returned
+        assert len(records) == 1
+        assert records[0]["name"] == "Good"
+
+    def test_invalid_config_rows_are_skipped_on_load(self, temp_db_path):
+        """load_persisted_strategies skips records that fail StrategyConfig.validate()."""
+        import sqlite3
+        from strategy.lifecycle import StrategyLifecycle
+
+        lifecycle = StrategyLifecycle(temp_db_path)
+        # Empty symbols list — will fail StrategyConfig.validate()
+        lifecycle.save_strategy_instance(
+            name="BadConfig", strategy_type="MockStrategy",
+            symbols=[], parameters={},
+        )
+
+        registry = self._make_registry(temp_db_path)
+        restored = registry.load_persisted_strategies()
+
+        assert restored == 0
+        assert "BadConfig" not in registry
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

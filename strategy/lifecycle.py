@@ -437,6 +437,10 @@ class StrategyLifecycle:
         """
         Persist a strategy instance so it can be restored after a restart.
 
+        If a record with the same name already exists it is updated in place
+        (UPSERT), keeping the in-memory registry and the database in sync even
+        when a strategy is recreated with different symbols or parameters.
+
         Args:
             name: Strategy instance name (unique key)
             strategy_type: Registered strategy type string (e.g. "BollingerBands")
@@ -444,7 +448,7 @@ class StrategyLifecycle:
             parameters: Strategy-specific parameters dict
 
         Returns:
-            True on success, False if a record with the same name already exists
+            True on success
         """
         import json
 
@@ -457,6 +461,10 @@ class StrategyLifecycle:
                 INSERT INTO strategy_instances
                     (name, strategy_type, symbols_json, parameters_json, created_at)
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    strategy_type  = excluded.strategy_type,
+                    symbols_json   = excluded.symbols_json,
+                    parameters_json = excluded.parameters_json
                 """,
                 (
                     name,
@@ -469,9 +477,6 @@ class StrategyLifecycle:
             conn.commit()
             logger.info(f"Persisted strategy instance '{name}' (type: {strategy_type})")
             return True
-        except sqlite3.IntegrityError:
-            logger.warning(f"Strategy instance '{name}' already persisted")
-            return False
         finally:
             conn.close()
 
@@ -525,15 +530,22 @@ class StrategyLifecycle:
 
         instances = []
         for row in rows:
-            instances.append(
-                {
-                    "name": row[0],
-                    "strategy_type": row[1],
-                    "symbols": json.loads(row[2]),
-                    "parameters": json.loads(row[3]),
-                    "created_at": row[4],
-                }
-            )
+            try:
+                instances.append(
+                    {
+                        "name": row[0],
+                        "strategy_type": row[1],
+                        "symbols": json.loads(row[2]),
+                        "parameters": json.loads(row[3]),
+                        "created_at": row[4],
+                    }
+                )
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Skipping persisted strategy instance '%s' due to invalid JSON: %s",
+                    row[0],
+                    exc,
+                )
         return instances
 
     def list_strategies(self, state: Optional[StrategyState] = None) -> list[Dict[str, Any]]:
