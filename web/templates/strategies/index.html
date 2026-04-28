@@ -224,7 +224,7 @@
         </div>
         <div style="display:flex;gap:0.4rem;align-items:center;">
           {% if s.state == 'RUNNING' %}
-          <button class="btn-sm btn-danger" data-action="stop" data-strategy-name="{{ s.strategy_name }}">Stop</button>
+          <button class="btn-sm btn-danger" data-action="stop" data-strategy-name="{{ s.strategy_name }}" title="Stops strategy automation only. Open positions remain in the account until exited separately.">Stop Strategy</button>
           {% elif s.state in ['READY', 'PAUSED'] %}
           <button class="btn-sm btn-success" data-action="start" data-strategy-name="{{ s.strategy_name }}">Start</button>
           {% endif %}
@@ -234,6 +234,10 @@
 
       {% if adp_desc %}
       <p style="font-size:0.85rem;color:#e2e8f0;margin-bottom:0.5rem;">{{ adp_desc }}</p>
+      {% endif %}
+
+      {% if s.state == 'RUNNING' %}
+      <p style="font-size:0.76rem;color:#f6ad55;margin:0 0 0.6rem 0;">Stopping disables automation only and does not close live positions.</p>
       {% endif %}
 
       <!-- Metrics row -->
@@ -478,6 +482,13 @@ window.loadInsight = async function(id) {
 };
 
 window.controlStrategy = async function(name, action) {
+  if (action === 'stop') {
+    const ok = window.confirm(
+      'Stop strategy automation for "' + name + '"?\n\n' +
+      'Open positions will remain live in the account until exited separately.'
+    );
+    if (!ok) return;
+  }
   try {
     const res = await fetch(`/api/strategies/${encodeURIComponent(name)}/${action}`, { method: 'POST' });
     const data = await res.json();

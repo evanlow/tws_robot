@@ -1116,11 +1116,17 @@ class TestPageRoutes:
             "symbols": ["AAPL"],
         })
         assert create_resp.status_code == 200
+        start_resp = client.post(f"/api/strategies/{strategy_name}/start")
+        assert start_resp.status_code == 200
 
         resp = client.get("/strategies/", follow_redirects=True)
         assert resp.status_code == 200
         assert b"Load AI Insight" in resp.data
         assert f'data-strategy-name="{strategy_name}"'.encode() in resp.data
+        assert b"Stop Strategy" in resp.data
+        assert b"does not close live positions" in resp.data
+        assert b"Stop strategy automation for" in resp.data
+        assert b"Open positions will remain live in the account until exited separately." in resp.data
 
     def test_strategy_detail_shows_live_positions_and_ai_insight_section(self, client, services):
         """Strategy detail page includes live positions and AI insight container."""
@@ -1133,6 +1139,8 @@ class TestPageRoutes:
             "symbols": ["AAPL"],
         })
         assert create_resp.status_code == 200
+        start_resp = client.post(f"/api/strategies/{strategy_name}/start")
+        assert start_resp.status_code == 200
 
         services.update_position("AAPL", {
             "quantity": 10,
@@ -1148,6 +1156,10 @@ class TestPageRoutes:
         assert b"AI Strategy Insight" in resp.data
         assert b"detailInsightBox" in resp.data
         assert f'data-strategy-name="{strategy_name}"'.encode() in resp.data
+        assert b"Stop Strategy" in resp.data
+        assert b"does not close live positions" in resp.data
+        assert b"Stop strategy automation for" in resp.data
+        assert b"Open positions will remain live in the account until exited separately." in resp.data
 
     def test_backtest(self, client):
         resp = client.get("/backtest/", follow_redirects=True)

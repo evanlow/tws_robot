@@ -6,11 +6,17 @@
 <div style="display:flex;gap:1rem;margin-bottom:1.5rem;">
   <a href="/strategies" class="btn-secondary">← All Strategies</a>
   {% if strategy and strategy.state == 'RUNNING' %}
-  <button class="btn-danger btn-sm" onclick="controlStrategy('{{ strategy_name }}', 'stop')">Stop</button>
+  <button class="btn-danger btn-sm" onclick="controlStrategy('{{ strategy_name }}', 'stop')" title="Stops strategy automation only. Open positions remain in the account until exited separately.">Stop Strategy</button>
   {% elif strategy and strategy.state in ['READY', 'PAUSED'] %}
   <button class="btn-success btn-sm" onclick="controlStrategy('{{ strategy_name }}', 'start')">Start</button>
   {% endif %}
 </div>
+
+{% if strategy and strategy.state == 'RUNNING' %}
+<p style="margin:-0.75rem 0 1.25rem 0;font-size:0.8rem;color:#f6ad55;">
+  Stopping disables this strategy's automation. It does not close live positions.
+</p>
+{% endif %}
 
 <!-- Performance Summary -->
 {% if strategy %}
@@ -125,8 +131,15 @@
 {% block extra_scripts %}
 <script>
 window.controlStrategy = async function(name, action) {
+  if (action === 'stop') {
+    const ok = window.confirm(
+      'Stop strategy automation for "' + name + '"?\n\n' +
+      'Open positions will remain live in the account until exited separately.'
+    );
+    if (!ok) return;
+  }
   try {
-    const res = await fetch(`/api/strategies/${name}/${action}`, { method: 'POST' });
+    const res = await fetch(`/api/strategies/${encodeURIComponent(name)}/${action}`, { method: 'POST' });
     const data = await res.json();
     if (data.error) alert(data.error);
     else location.reload();
