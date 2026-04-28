@@ -169,6 +169,20 @@ CREATE TABLE state_transitions (
 - Debugging: What happened before failure
 - Compliance: Prove trading activity authorized
 
+#### Running-State Column (`strategy_instances.running_state`)
+
+The `strategy_instances` table includes a `running_state` column (default
+`'READY'`) that is updated on every lifecycle transition. On restart,
+`load_persisted_strategies()` reads this column and restores each strategy to
+its last known active state:
+
+- **RUNNING** → strategy is auto-started.
+- **PAUSED** → strategy is started then immediately paused.
+- **STOPPED / READY** → strategy is loaded as READY (no auto-start).
+
+This means a server restart does not silently drop running strategies — they
+pick up exactly where they left off.
+
 ## Consequences
 
 ### Positive

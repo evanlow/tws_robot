@@ -436,6 +436,38 @@ CREATE TABLE state_transitions (
 );
 ```
 
+### Running-State Persistence (Restart Recovery)
+
+The `strategy_instances` table stores a `running_state` column so that each
+strategy's active state (RUNNING / PAUSED / STOPPED / READY) survives
+application restarts:
+
+```sql
+CREATE TABLE strategy_instances (
+    name              TEXT NOT NULL,
+    account_id        TEXT NOT NULL DEFAULT '',
+    strategy_type     TEXT NOT NULL,
+    symbols_json      TEXT NOT NULL,
+    parameters_json   TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    running_state     TEXT NOT NULL DEFAULT 'READY',
+    PRIMARY KEY (name, account_id)
+);
+```
+
+Every call to `start_strategy()`, `stop_strategy()`, `pause_strategy()`, or
+`resume_strategy()` immediately writes the new state back to this column via
+`StrategyLifecycle.update_instance_running_state()`.
+
+**Restart behaviour**
+
+| Persisted `running_state` | State after `load_persisted_strategies()` |
+|---|---|
+| `RUNNING` | Strategy is started automatically (`RUNNING`) |
+| `PAUSED` | Strategy is started then paused (`PAUSED`) |
+| `STOPPED` | Strategy is loaded as `READY` (not auto-restarted) |
+| `READY` | Strategy is loaded as `READY` |
+
 ### Querying State History
 
 ```python
