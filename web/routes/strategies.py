@@ -15,13 +15,10 @@ bp = Blueprint("strategies", __name__, url_prefix="/strategies")
 @bp.route("/")
 def index():
     svc = get_services()
-    strategies = []
+    raw_strategies = []
     classes = []
     try:
-        strategies = [
-            s.get_performance_summary()
-            for s in svc.strategy_registry.get_all_strategies()
-        ]
+        raw_strategies = list(svc.strategy_registry.get_all_strategies())
         classes = svc.strategy_registry.get_registered_classes()
     except Exception:
         pass
@@ -33,11 +30,24 @@ def index():
     except Exception:
         pass
 
-    positions = {}
+    all_positions = {}
     try:
-        positions = svc.get_positions()
+        all_positions = svc.get_positions()
     except Exception:
         pass
+
+    # Pre-compute per-strategy live positions using the strategy's configured
+    # symbols list so templates don't need fragile substring matching.
+    strategies = []
+    for s in raw_strategies:
+        perf = s.get_performance_summary()
+        symbols = s.config.symbols or []
+        perf["live_positions"] = {
+            sym: all_positions[sym]
+            for sym in symbols
+            if sym in all_positions
+        }
+        strategies.append(perf)
 
     context = {
         "title": "Strategies",
@@ -46,7 +56,6 @@ def index():
         "strategy_classes": classes,
         "summary": svc.strategy_registry.get_overall_summary() if strategies else {},
         "inferred_strategies": inferred,
-        "positions": positions,
     }
     return render_template("strategies/index.html", **context)
 

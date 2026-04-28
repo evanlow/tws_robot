@@ -231,11 +231,9 @@
         {% endif %}
       </div>
 
-      <!-- Live positions matched to this strategy's symbols -->
-      {% set ns = namespace(matched=false) %}
-      {% for sym, pos in positions.items() %}
-        {% if sym in s.strategy_name or (sym.split(' ')[0] in s.strategy_name) %}
-          {% set ns.matched = true %}
+      <!-- Live positions (pre-computed per strategy's configured symbols) -->
+      {% if s.live_positions %}
+        {% for sym, pos in s.live_positions.items() %}
           {% set cur = pos.current_price|default(0)|float %}
           {% set ent = pos.entry_price|default(0)|float %}
           {% set pnl = pos.unrealized_pnl|default(0)|float %}
@@ -258,8 +256,8 @@
               P&amp;L: {{ "+" if pnl >= 0 else "" }}${{ "%.2f"|format(pnl) }}
             </span>
           </div>
-        {% endif %}
-      {% endfor %}
+        {% endfor %}
+      {% endif %}
 
       <!-- AI Insight section (lazy on demand) -->
       <div class="sc-insight-section" id="sc-insight-{{ s.strategy_name }}" style="margin-top:0.6rem;">

@@ -82,7 +82,8 @@
 <!-- AI Insight -->
 <section style="margin-bottom:2rem;">
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">💡 AI Strategy Insight</h2>
-  <div id="detailInsightBox" class="stat-card" style="padding:1rem;min-height:50px;">
+  <div id="detailInsightBox" class="stat-card" style="padding:1rem;min-height:50px;"
+       data-strategy-name="{{ strategy_name }}">
     <p id="detailInsightText" class="empty-state">Loading AI insight…</p>
   </div>
 </section>
@@ -135,9 +136,12 @@ window.controlStrategy = async function(name, action) {
 // Auto-load AI insight on page load
 document.addEventListener('DOMContentLoaded', async function() {
   const textEl = document.getElementById('detailInsightText');
-  if (!textEl) return;
+  const box = document.getElementById('detailInsightBox');
+  if (!textEl || !box) return;
+  const strategyName = box.dataset.strategyName;
+  if (!strategyName) return;
   try {
-    const res = await fetch(`/api/strategies/{{ strategy_name|urlencode }}/insight`, { method: 'POST' });
+    const res = await fetch(`/api/strategies/${encodeURIComponent(strategyName)}/insight`, { method: 'POST' });
     const data = await res.json();
     textEl.style.color = '';
     textEl.textContent = data.error ? '⚠ ' + data.error : data.insight;

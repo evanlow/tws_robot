@@ -214,7 +214,11 @@ def strategy_insight(name: str):
     perf = strategy.get_performance_summary()
 
     # Enrich with live positions for this strategy's symbols
-    all_positions = svc.get_positions()
+    try:
+        all_positions = svc.get_positions()
+    except Exception as exc:
+        logger.error("Failed to fetch positions for strategy insight: %s", exc)
+        return jsonify({"error": "Failed to fetch live positions."}), 500
     symbols = strategy.config.symbols or []
     live_positions = [
         {"symbol": s, **all_positions[s]}

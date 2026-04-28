@@ -92,15 +92,12 @@
           <span>Signals: <strong style="color:#e2e8f0;">{{ s.signals_generated }}</strong></span>
           <span>Positions: <strong style="color:#e2e8f0;">{{ s.active_positions }}</strong></span>
         </div>
-        <!-- Matching live positions -->
-        {% set ns = namespace(strat_pnl=0.0, found=false) %}
-        {% for sym, pos in positions.items() %}
-          {% if sym in s.strategy_name or (sym.split(' ')[0] in s.strategy_name) %}
-            {% set ns.found = true %}
-            {% set ns.strat_pnl = ns.strat_pnl + (pos.unrealized_pnl|default(0)|float) %}
-          {% endif %}
+        <!-- Live positions (pre-computed from strategy's configured symbols) -->
+        {% if s.live_positions %}
+        {% set ns = namespace(strat_pnl=0.0) %}
+        {% for sym, pos in s.live_positions.items() %}
+          {% set ns.strat_pnl = ns.strat_pnl + (pos.unrealized_pnl|default(0)|float) %}
         {% endfor %}
-        {% if ns.found %}
         <div style="font-size:0.73rem;margin-top:0.2rem;">
           <span style="color:{{ '#48bb78' if ns.strat_pnl >= 0 else '#fc8181' }};">
             Unrealized P&amp;L: {{ "+" if ns.strat_pnl >= 0 else "" }}${{ "%.2f"|format(ns.strat_pnl) }}
