@@ -15,7 +15,7 @@ Models:
 
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Date,
-    Boolean, ForeignKey, Text, JSON, Enum as SQLEnum
+    Boolean, ForeignKey, Text, JSON, Enum as SQLEnum, UniqueConstraint
 )
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
@@ -187,8 +187,12 @@ class Strategy(Base):
     
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False, index=True)
-    account_id = Column(String(50), nullable=True, index=True)
+    account_id = Column(String(50), nullable=False, default='', index=True)
     description = Column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('account_id', 'name', name='uq_strategy_account_name'),
+    )
     
     # Status
     is_active = Column(Boolean, default=False, index=True)

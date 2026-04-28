@@ -183,8 +183,9 @@ class StrategyLifecycle:
 
         conn.commit()
 
-        # --- Zero-downtime migration: add account_id to legacy tables -------
-        # SQLite does not support IF NOT EXISTS on ALTER TABLE; use try/except.
+        # --- Zero-downtime migration for legacy databases -------------------
+        # Phase 1: add account_id column to any table that doesn't yet have it.
+        # SQLite does not support "IF NOT EXISTS" on ALTER TABLE; use try/except.
         # SECURITY: table names come from a hardcoded whitelist only.
         _allowed_tables = {"strategy_state", "state_transitions", "strategy_instances"}
         for table, column in [
@@ -192,7 +193,8 @@ class StrategyLifecycle:
             ("state_transitions", "account_id TEXT NOT NULL DEFAULT ''"),
             ("strategy_instances", "account_id TEXT NOT NULL DEFAULT ''"),
         ]:
-            assert table in _allowed_tables, f"Unexpected table name: {table!r}"
+            if table not in _allowed_tables:
+                raise ValueError(f"Unexpected table name: {table!r}")
             try:
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column}")  # noqa: S608
                 conn.commit()
@@ -200,6 +202,60 @@ class StrategyLifecycle:
             except sqlite3.OperationalError:
                 # Column already exists — expected on fresh or already-migrated DBs
                 pass
+
+        # Phase 2: rebuild strategy_state and strategy_instances if they still
+        # carry the legacy single-column primary key.  On a fresh DB the CREATE
+        # TABLE IF NOT EXISTS above already produced the correct composite PK, so
+        # PRAGMA table_info will report len(pk_cols) == 2 and no rebuild happens.
+        # On a legacy DB that was just column-migrated the PK is still single-
+        # column, so the ON CONFLICT(name, account_id) in the UPSERT would fail
+        # without this step.
+        _rebuild_specs = [
+            (
+                "strategy_state",
+                """CREATE TABLE strategy_state (
+                    strategy_name TEXT NOT NULL,
+                    account_id TEXT NOT NULL DEFAULT '',
+                    current_state TEXT NOT NULL,
+                    previous_state TEXT,
+                    updated_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    metrics_json TEXT,
+                    notes TEXT,
+                    PRIMARY KEY (strategy_name, account_id)
+                )""",
+                ("strategy_name, account_id, current_state, previous_state,"
+                 " updated_at, created_at, metrics_json, notes"),
+            ),
+            (
+                "strategy_instances",
+                """CREATE TABLE strategy_instances (
+                    name TEXT NOT NULL,
+                    account_id TEXT NOT NULL DEFAULT '',
+                    strategy_type TEXT NOT NULL,
+                    symbols_json TEXT NOT NULL,
+                    parameters_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (name, account_id)
+                )""",
+                "name, account_id, strategy_type, symbols_json, parameters_json, created_at",
+            ),
+        ]
+        for table, new_ddl, cols in _rebuild_specs:
+            cursor.execute(f"PRAGMA table_info({table})")  # noqa: S608
+            pk_cols = [row[1] for row in cursor.fetchall() if row[5] > 0]
+            if len(pk_cols) >= 2:
+                continue  # Already has composite PK — no rebuild needed
+            # Legacy single-column PK: rename, recreate, copy, drop old.
+            tmp = f"_{table}_legacy_tmp"
+            cursor.execute(f"ALTER TABLE {table} RENAME TO {tmp}")  # noqa: S608
+            cursor.execute(new_ddl)
+            cursor.execute(
+                f"INSERT INTO {table} ({cols}) SELECT {cols} FROM {tmp}"  # noqa: S608
+            )
+            cursor.execute(f"DROP TABLE {tmp}")  # noqa: S608
+            conn.commit()
+            logger.info(f"Migration: rebuilt {table} with composite primary key")
 
         conn.close()
         logger.info("Database schema initialized")

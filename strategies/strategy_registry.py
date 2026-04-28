@@ -179,9 +179,12 @@ class StrategyRegistry:
         
         del self._strategies[strategy_name]
 
-        # Remove from persistence store
+        # Remove from persistence store — use the strategy's own account_id so
+        # that strategies created with an explicit config.account_id (which may
+        # differ from self.account_id) are correctly removed from the DB.
         if self._lifecycle is not None:
-            self._lifecycle.delete_strategy_instance(strategy_name, self.account_id)
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.delete_strategy_instance(strategy_name, effective_account_id)
 
         logger.info(f"Removed strategy: {strategy_name}")
     
