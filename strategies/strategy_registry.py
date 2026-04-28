@@ -231,9 +231,23 @@ class StrategyRegistry:
                     raise ValueError(f"Persisted config for '{name}' failed validation")
                 strategy = strategy_class(config, self.event_bus)
                 self._strategies[name] = strategy
+
+                # Restore running state if the strategy was active before restart
+                persisted_state = record.get("running_state", StrategyState.READY.value)
+                if persisted_state == StrategyState.RUNNING.value:
+                    strategy.start()
+                elif persisted_state == StrategyState.PAUSED.value:
+                    strategy.start()
+                    strategy.pause()
+
                 restored += 1
-                logger.info(f"Restored strategy '{name}' (type: {strategy_type}) from database")
+                logger.info(
+                    f"Restored strategy '{name}' (type: {strategy_type}, "
+                    f"state: {persisted_state}) from database"
+                )
             except Exception as exc:
+                # Remove partially-registered entry so the registry stays consistent
+                self._strategies.pop(name, None)
                 logger.warning(
                     f"Skipping persisted strategy '{name}' (type: {strategy_type}): "
                     f"invalid or failed to restore: {exc}"
@@ -285,6 +299,12 @@ class StrategyRegistry:
             return
         
         strategy.start()
+
+        if self._lifecycle is not None:
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.update_instance_running_state(
+                strategy_name, strategy.state.value, effective_account_id
+            )
     
     def stop_strategy(self, strategy_name: str):
         """
@@ -299,6 +319,12 @@ class StrategyRegistry:
             return
         
         strategy.stop()
+
+        if self._lifecycle is not None:
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.update_instance_running_state(
+                strategy_name, strategy.state.value, effective_account_id
+            )
     
     def pause_strategy(self, strategy_name: str):
         """
@@ -313,6 +339,12 @@ class StrategyRegistry:
             return
         
         strategy.pause()
+
+        if self._lifecycle is not None:
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.update_instance_running_state(
+                strategy_name, strategy.state.value, effective_account_id
+            )
     
     def resume_strategy(self, strategy_name: str):
         """
@@ -327,29 +359,35 @@ class StrategyRegistry:
             return
         
         strategy.resume()
+
+        if self._lifecycle is not None:
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.update_instance_running_state(
+                strategy_name, strategy.state.value, effective_account_id
+            )
     
     def start_all(self):
         """Start all registered strategies"""
-        for strategy in self._strategies.values():
+        for name, strategy in list(self._strategies.items()):
             if strategy.state in [StrategyState.READY, StrategyState.PAUSED]:
-                strategy.start()
+                self.start_strategy(name)
         
         logger.info(f"Started {len(self._strategies)} strategies")
     
     def stop_all(self):
         """Stop all registered strategies"""
-        for strategy in self._strategies.values():
+        for name, strategy in list(self._strategies.items()):
             if strategy.state != StrategyState.STOPPED:
-                strategy.stop()
+                self.stop_strategy(name)
         
         logger.info(f"Stopped {len(self._strategies)} strategies")
     
     def pause_all(self):
         """Pause all running strategies"""
         paused_count = 0
-        for strategy in self._strategies.values():
+        for name, strategy in list(self._strategies.items()):
             if strategy.state == StrategyState.RUNNING:
-                strategy.pause()
+                self.pause_strategy(name)
                 paused_count += 1
         
         logger.info(f"Paused {paused_count} strategies")
@@ -357,9 +395,9 @@ class StrategyRegistry:
     def resume_all(self):
         """Resume all paused strategies"""
         resumed_count = 0
-        for strategy in self._strategies.values():
+        for name, strategy in list(self._strategies.items()):
             if strategy.state == StrategyState.PAUSED:
-                strategy.resume()
+                self.resume_strategy(name)
                 resumed_count += 1
         
         logger.info(f"Resumed {resumed_count} strategies")

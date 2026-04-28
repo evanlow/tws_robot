@@ -177,6 +177,7 @@ class StrategyLifecycle:
                 symbols_json TEXT NOT NULL,
                 parameters_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                running_state TEXT NOT NULL DEFAULT 'READY',
                 PRIMARY KEY (name, account_id)
             )
         """)
@@ -184,7 +185,7 @@ class StrategyLifecycle:
         conn.commit()
 
         # --- Zero-downtime migration for legacy databases -------------------
-        # Phase 1: add account_id column to any table that doesn't yet have it.
+        # Phase 1: add missing columns to any table that doesn't yet have them.
         # SQLite does not support "IF NOT EXISTS" on ALTER TABLE; use try/except.
         # SECURITY: table names come from a hardcoded whitelist only.
         _allowed_tables = {"strategy_state", "state_transitions", "strategy_instances"}
@@ -192,6 +193,7 @@ class StrategyLifecycle:
             ("strategy_state", "account_id TEXT NOT NULL DEFAULT ''"),
             ("state_transitions", "account_id TEXT NOT NULL DEFAULT ''"),
             ("strategy_instances", "account_id TEXT NOT NULL DEFAULT ''"),
+            ("strategy_instances", "running_state TEXT NOT NULL DEFAULT 'READY'"),
         ]:
             if table not in _allowed_tables:
                 raise ValueError(f"Unexpected table name: {table!r}")
@@ -236,6 +238,7 @@ class StrategyLifecycle:
                     symbols_json TEXT NOT NULL,
                     parameters_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    running_state TEXT NOT NULL DEFAULT 'READY',
                     PRIMARY KEY (name, account_id)
                 )""",
                 "name, account_id, strategy_type, symbols_json, parameters_json, created_at",
@@ -588,6 +591,51 @@ class StrategyLifecycle:
         finally:
             conn.close()
 
+    def update_instance_running_state(
+        self,
+        name: str,
+        running_state: str,
+        account_id: str = "",
+    ) -> bool:
+        """
+        Update the persisted running state for a strategy instance.
+
+        Called whenever a strategy is started, stopped, or paused so that
+        the state survives application restarts.
+
+        Args:
+            name: Strategy instance name
+            running_state: New running state value (e.g. ``'RUNNING'``,
+                ``'STOPPED'``, ``'PAUSED'``, ``'READY'``)
+            account_id: IBKR account identifier
+
+        Returns:
+            True if the record was updated, False if not found
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE strategy_instances SET running_state = ? "
+                "WHERE name = ? AND account_id = ?",
+                (running_state, name, account_id),
+            )
+            conn.commit()
+            updated = cursor.rowcount > 0
+            if updated:
+                logger.debug(
+                    f"Updated running_state for strategy '{name}' "
+                    f"(account: '{account_id}') to '{running_state}'"
+                )
+            else:
+                logger.warning(
+                    f"No persisted record found for strategy '{name}' "
+                    f"(account: '{account_id}') when updating running_state"
+                )
+            return updated
+        finally:
+            conn.close()
+
     def delete_strategy_instance(self, name: str,
                                  account_id: str = "") -> bool:
         """
@@ -631,7 +679,7 @@ class StrategyLifecycle:
 
         Returns:
             List of dicts with keys: name, account_id, strategy_type, symbols,
-            parameters, created_at
+            parameters, created_at, running_state
         """
         import json
 
@@ -641,7 +689,7 @@ class StrategyLifecycle:
             cursor.execute(
                 """
                 SELECT name, account_id, strategy_type, symbols_json,
-                       parameters_json, created_at
+                       parameters_json, created_at, running_state
                 FROM strategy_instances
                 WHERE account_id = ?
                 ORDER BY created_at ASC
@@ -652,7 +700,7 @@ class StrategyLifecycle:
             cursor.execute(
                 """
                 SELECT name, account_id, strategy_type, symbols_json,
-                       parameters_json, created_at
+                       parameters_json, created_at, running_state
                 FROM strategy_instances
                 ORDER BY created_at ASC
                 """
@@ -671,6 +719,7 @@ class StrategyLifecycle:
                         "symbols": json.loads(row[3]),
                         "parameters": json.loads(row[4]),
                         "created_at": row[5],
+                        "running_state": row[6],
                     }
                 )
             except json.JSONDecodeError as exc:

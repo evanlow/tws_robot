@@ -774,5 +774,127 @@ class TestStrategyRegistryAccountIsolation:
         assert len(records_registry) == 0
 
 
+# ---------------------------------------------------------------------------
+# Running-state persistence tests
+# ---------------------------------------------------------------------------
+
+
+class TestStrategyRunningStatePersistence:
+    """Tests that a strategy's running state is saved and restored across sessions."""
+
+    def _make_registry(self, db_path: str) -> StrategyRegistry:
+        registry = StrategyRegistry(db_path=db_path)
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        return registry
+
+    def test_start_persists_running_state(self, temp_db_path):
+        """Starting a strategy must update the persisted running_state to RUNNING."""
+        registry = self._make_registry(temp_db_path)
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="S1", symbols=["AAPL"])
+        )
+        registry.start_strategy("S1")
+
+        records = registry._lifecycle.load_strategy_instances()
+        assert records[0]["running_state"] == StrategyState.RUNNING.value
+
+    def test_stop_persists_stopped_state(self, temp_db_path):
+        """Stopping a strategy must update the persisted running_state to STOPPED."""
+        registry = self._make_registry(temp_db_path)
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="S1", symbols=["AAPL"])
+        )
+        registry.start_strategy("S1")
+        registry.stop_strategy("S1")
+
+        records = registry._lifecycle.load_strategy_instances()
+        assert records[0]["running_state"] == StrategyState.STOPPED.value
+
+    def test_pause_persists_paused_state(self, temp_db_path):
+        """Pausing a strategy must update the persisted running_state to PAUSED."""
+        registry = self._make_registry(temp_db_path)
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="S1", symbols=["AAPL"])
+        )
+        registry.start_strategy("S1")
+        registry.pause_strategy("S1")
+
+        records = registry._lifecycle.load_strategy_instances()
+        assert records[0]["running_state"] == StrategyState.PAUSED.value
+
+    def test_resume_persists_running_state(self, temp_db_path):
+        """Resuming a paused strategy must update the persisted running_state to RUNNING."""
+        registry = self._make_registry(temp_db_path)
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="S1", symbols=["AAPL"])
+        )
+        registry.start_strategy("S1")
+        registry.pause_strategy("S1")
+        registry.resume_strategy("S1")
+
+        records = registry._lifecycle.load_strategy_instances()
+        assert records[0]["running_state"] == StrategyState.RUNNING.value
+
+    def test_running_state_restored_on_load(self, temp_db_path):
+        """A strategy that was RUNNING before restart is RUNNING after load."""
+        # Session 1: create and start a strategy
+        registry1 = self._make_registry(temp_db_path)
+        registry1.create_strategy(
+            "MockStrategy", StrategyConfig(name="Runner", symbols=["AAPL"])
+        )
+        registry1.start_strategy("Runner")
+
+        # Session 2: new registry, same DB
+        registry2 = self._make_registry(temp_db_path)
+        registry2.load_persisted_strategies()
+
+        strategy = registry2.get_strategy("Runner")
+        assert strategy is not None
+        assert strategy.state == StrategyState.RUNNING
+
+    def test_paused_state_restored_on_load(self, temp_db_path):
+        """A strategy that was PAUSED before restart is PAUSED after load."""
+        registry1 = self._make_registry(temp_db_path)
+        registry1.create_strategy(
+            "MockStrategy", StrategyConfig(name="Pauser", symbols=["AAPL"])
+        )
+        registry1.start_strategy("Pauser")
+        registry1.pause_strategy("Pauser")
+
+        registry2 = self._make_registry(temp_db_path)
+        registry2.load_persisted_strategies()
+
+        strategy = registry2.get_strategy("Pauser")
+        assert strategy is not None
+        assert strategy.state == StrategyState.PAUSED
+
+    def test_stopped_state_not_restarted_on_load(self, temp_db_path):
+        """A strategy that was STOPPED before restart stays READY (not restarted)."""
+        registry1 = self._make_registry(temp_db_path)
+        registry1.create_strategy(
+            "MockStrategy", StrategyConfig(name="Stopper", symbols=["AAPL"])
+        )
+        registry1.start_strategy("Stopper")
+        registry1.stop_strategy("Stopper")
+
+        registry2 = self._make_registry(temp_db_path)
+        registry2.load_persisted_strategies()
+
+        strategy = registry2.get_strategy("Stopper")
+        assert strategy is not None
+        # STOPPED strategies are restored as READY — they are not auto-restarted
+        assert strategy.state == StrategyState.READY
+
+    def test_new_strategy_defaults_to_ready_state(self, temp_db_path):
+        """A newly created strategy (never started) has running_state READY in DB."""
+        registry = self._make_registry(temp_db_path)
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="Fresh", symbols=["AAPL"])
+        )
+
+        records = registry._lifecycle.load_strategy_instances()
+        assert records[0]["running_state"] == "READY"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
