@@ -142,13 +142,15 @@ class StrategyLifecycle:
         # Strategy state table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS strategy_state (
-                strategy_name TEXT PRIMARY KEY,
+                strategy_name TEXT NOT NULL,
+                account_id TEXT NOT NULL DEFAULT '',
                 current_state TEXT NOT NULL,
                 previous_state TEXT,
                 updated_at TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 metrics_json TEXT,
-                notes TEXT
+                notes TEXT,
+                PRIMARY KEY (strategy_name, account_id)
             )
         """)
         
@@ -157,6 +159,7 @@ class StrategyLifecycle:
             CREATE TABLE IF NOT EXISTS state_transitions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 strategy_name TEXT NOT NULL,
+                account_id TEXT NOT NULL DEFAULT '',
                 from_state TEXT NOT NULL,
                 to_state TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
@@ -168,25 +171,45 @@ class StrategyLifecycle:
         # Persistent strategy instances (for StrategyRegistry persistence)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS strategy_instances (
-                name TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                account_id TEXT NOT NULL DEFAULT '',
                 strategy_type TEXT NOT NULL,
                 symbols_json TEXT NOT NULL,
                 parameters_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (name, account_id)
             )
         """)
-        
+
         conn.commit()
+
+        # --- Zero-downtime migration: add account_id to legacy tables -------
+        # SQLite does not support IF NOT EXISTS on ALTER TABLE; use try/except.
+        for table, column in [
+            ("strategy_state", "account_id TEXT NOT NULL DEFAULT ''"),
+            ("state_transitions", "account_id TEXT NOT NULL DEFAULT ''"),
+            ("strategy_instances", "account_id TEXT NOT NULL DEFAULT ''"),
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
+                conn.commit()
+                logger.info(f"Migrated: added account_id column to {table}")
+            except sqlite3.OperationalError:
+                # Column already exists — expected on fresh or already-migrated DBs
+                pass
+
         conn.close()
         logger.info("Database schema initialized")
     
-    def register_strategy(self, strategy_name: str, notes: str = "") -> bool:
+    def register_strategy(self, strategy_name: str, notes: str = "",
+                          account_id: str = "") -> bool:
         """
         Register a new strategy in BACKTEST state.
         
         Args:
             strategy_name: Unique name for the strategy
             notes: Optional notes about the strategy
+            account_id: IBKR account identifier this strategy belongs to
         
         Returns:
             True if registered, False if already exists
@@ -198,28 +221,31 @@ class StrategyLifecycle:
             now = datetime.now().isoformat()
             cursor.execute("""
                 INSERT INTO strategy_state (
-                    strategy_name, current_state, previous_state, 
+                    strategy_name, account_id, current_state, previous_state, 
                     updated_at, created_at, notes
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (strategy_name, StrategyState.BACKTEST.value, None, now, now, notes))
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (strategy_name, account_id, StrategyState.BACKTEST.value, None,
+                  now, now, notes))
             
             conn.commit()
-            logger.info(f"Registered strategy '{strategy_name}' in BACKTEST state")
+            logger.info(f"Registered strategy '{strategy_name}' (account: '{account_id}') in BACKTEST state")
             return True
             
         except sqlite3.IntegrityError:
-            logger.warning(f"Strategy '{strategy_name}' already registered")
+            logger.warning(f"Strategy '{strategy_name}' already registered for account '{account_id}'")
             return False
         finally:
             conn.close()
     
-    def get_state(self, strategy_name: str) -> Optional[StrategyState]:
+    def get_state(self, strategy_name: str,
+                  account_id: str = "") -> Optional[StrategyState]:
         """
         Get current state of a strategy.
         
         Args:
             strategy_name: Name of the strategy
+            account_id: IBKR account identifier (empty string matches legacy rows)
         
         Returns:
             Current StrategyState or None if not found
@@ -228,8 +254,9 @@ class StrategyLifecycle:
         cursor = conn.cursor()
         
         cursor.execute(
-            "SELECT current_state FROM strategy_state WHERE strategy_name = ?",
-            (strategy_name,)
+            "SELECT current_state FROM strategy_state "
+            "WHERE strategy_name = ? AND account_id = ?",
+            (strategy_name, account_id)
         )
         
         row = cursor.fetchone()
@@ -239,12 +266,14 @@ class StrategyLifecycle:
             return StrategyState(row[0])
         return None
     
-    def get_metrics(self, strategy_name: str) -> Optional[StrategyMetrics]:
+    def get_metrics(self, strategy_name: str,
+                    account_id: str = "") -> Optional[StrategyMetrics]:
         """
         Get strategy metrics.
         
         Args:
             strategy_name: Name of the strategy
+            account_id: IBKR account identifier
         
         Returns:
             StrategyMetrics or None if not found
@@ -253,8 +282,9 @@ class StrategyLifecycle:
         cursor = conn.cursor()
         
         cursor.execute(
-            "SELECT metrics_json FROM strategy_state WHERE strategy_name = ?",
-            (strategy_name,)
+            "SELECT metrics_json FROM strategy_state "
+            "WHERE strategy_name = ? AND account_id = ?",
+            (strategy_name, account_id)
         )
         
         row = cursor.fetchone()
@@ -265,13 +295,15 @@ class StrategyLifecycle:
             return StrategyMetrics.from_dict(json.loads(row[0]))
         return StrategyMetrics()  # Return empty metrics if none stored
     
-    def update_metrics(self, strategy_name: str, metrics: StrategyMetrics) -> bool:
+    def update_metrics(self, strategy_name: str, metrics: StrategyMetrics,
+                       account_id: str = "") -> bool:
         """
         Update strategy metrics.
         
         Args:
             strategy_name: Name of the strategy
             metrics: Updated metrics
+            account_id: IBKR account identifier
         
         Returns:
             True if updated successfully
@@ -285,8 +317,9 @@ class StrategyLifecycle:
             cursor.execute("""
                 UPDATE strategy_state 
                 SET metrics_json = ?, updated_at = ?
-                WHERE strategy_name = ?
-            """, (json.dumps(metrics.to_dict()), datetime.now().isoformat(), strategy_name))
+                WHERE strategy_name = ? AND account_id = ?
+            """, (json.dumps(metrics.to_dict()), datetime.now().isoformat(),
+                  strategy_name, account_id))
             
             conn.commit()
             success = cursor.rowcount > 0
@@ -301,18 +334,20 @@ class StrategyLifecycle:
         finally:
             conn.close()
     
-    def can_transition(self, strategy_name: str, to_state: StrategyState) -> tuple[bool, str]:
+    def can_transition(self, strategy_name: str, to_state: StrategyState,
+                       account_id: str = "") -> tuple[bool, str]:
         """
         Check if transition is allowed.
         
         Args:
             strategy_name: Name of the strategy
             to_state: Target state
+            account_id: IBKR account identifier
         
         Returns:
             (is_allowed, reason)
         """
-        current_state = self.get_state(strategy_name)
+        current_state = self.get_state(strategy_name, account_id)
         
         if current_state is None:
             return False, f"Strategy '{strategy_name}' not found"
@@ -325,7 +360,7 @@ class StrategyLifecycle:
         
         # Special validation for PAPER → VALIDATED transition
         if current_state == StrategyState.PAPER and to_state == StrategyState.VALIDATED:
-            metrics = self.get_metrics(strategy_name)
+            metrics = self.get_metrics(strategy_name, account_id)
             criteria = ValidationCriteria()
             is_valid, failures = criteria.validate(metrics)
             
@@ -340,7 +375,8 @@ class StrategyLifecycle:
         strategy_name: str, 
         to_state: StrategyState,
         reason: str = "",
-        approved_by: str = ""
+        approved_by: str = "",
+        account_id: str = ""
     ) -> bool:
         """
         Transition strategy to new state.
@@ -350,17 +386,18 @@ class StrategyLifecycle:
             to_state: Target state
             reason: Reason for transition
             approved_by: Who approved (for LIVE transitions)
+            account_id: IBKR account identifier
         
         Returns:
             True if transition successful
         """
-        can_transition, transition_reason = self.can_transition(strategy_name, to_state)
+        can_transition, transition_reason = self.can_transition(strategy_name, to_state, account_id)
         
         if not can_transition:
             logger.error(f"Transition denied for '{strategy_name}': {transition_reason}")
             return False
         
-        current_state = self.get_state(strategy_name)
+        current_state = self.get_state(strategy_name, account_id)
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -372,16 +409,18 @@ class StrategyLifecycle:
             cursor.execute("""
                 UPDATE strategy_state
                 SET current_state = ?, previous_state = ?, updated_at = ?
-                WHERE strategy_name = ?
-            """, (to_state.value, current_state.value, now, strategy_name))
+                WHERE strategy_name = ? AND account_id = ?
+            """, (to_state.value, current_state.value, now, strategy_name, account_id))
             
             # Record transition history
             cursor.execute("""
                 INSERT INTO state_transitions (
-                    strategy_name, from_state, to_state, timestamp, reason, approved_by
+                    strategy_name, account_id, from_state, to_state,
+                    timestamp, reason, approved_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (strategy_name, current_state.value, to_state.value, now, reason, approved_by))
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (strategy_name, account_id, current_state.value, to_state.value,
+                  now, reason, approved_by))
             
             conn.commit()
             logger.info(f"Strategy '{strategy_name}' transitioned: {current_state} → {to_state}")
@@ -394,12 +433,14 @@ class StrategyLifecycle:
         finally:
             conn.close()
     
-    def get_history(self, strategy_name: str) -> list[Dict[str, Any]]:
+    def get_history(self, strategy_name: str,
+                    account_id: str = "") -> list[Dict[str, Any]]:
         """
         Get state transition history for a strategy.
         
         Args:
             strategy_name: Name of the strategy
+            account_id: IBKR account identifier
         
         Returns:
             List of transition records
@@ -410,9 +451,9 @@ class StrategyLifecycle:
         cursor.execute("""
             SELECT from_state, to_state, timestamp, reason, approved_by
             FROM state_transitions
-            WHERE strategy_name = ?
+            WHERE strategy_name = ? AND account_id = ?
             ORDER BY timestamp ASC
-        """, (strategy_name,))
+        """, (strategy_name, account_id))
         
         history = []
         for row in cursor.fetchall():
@@ -433,19 +474,22 @@ class StrategyLifecycle:
         strategy_type: str,
         symbols: list,
         parameters: Dict[str, Any],
+        account_id: str = "",
     ) -> bool:
         """
         Persist a strategy instance so it can be restored after a restart.
 
-        If a record with the same name already exists it is updated in place
-        (UPSERT), keeping the in-memory registry and the database in sync even
-        when a strategy is recreated with different symbols or parameters.
+        If a record with the same (name, account_id) already exists it is
+        updated in place (UPSERT), keeping the in-memory registry and the
+        database in sync even when a strategy is recreated with different
+        symbols or parameters.
 
         Args:
-            name: Strategy instance name (unique key)
+            name: Strategy instance name
             strategy_type: Registered strategy type string (e.g. "BollingerBands")
             symbols: List of trading symbols
             parameters: Strategy-specific parameters dict
+            account_id: IBKR account identifier this instance belongs to
 
         Returns:
             True on success
@@ -459,15 +503,17 @@ class StrategyLifecycle:
             cursor.execute(
                 """
                 INSERT INTO strategy_instances
-                    (name, strategy_type, symbols_json, parameters_json, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(name) DO UPDATE SET
-                    strategy_type  = excluded.strategy_type,
-                    symbols_json   = excluded.symbols_json,
+                    (name, account_id, strategy_type, symbols_json,
+                     parameters_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name, account_id) DO UPDATE SET
+                    strategy_type   = excluded.strategy_type,
+                    symbols_json    = excluded.symbols_json,
                     parameters_json = excluded.parameters_json
                 """,
                 (
                     name,
+                    account_id,
                     strategy_type,
                     json.dumps(symbols),
                     json.dumps(parameters),
@@ -475,17 +521,22 @@ class StrategyLifecycle:
                 ),
             )
             conn.commit()
-            logger.info(f"Persisted strategy instance '{name}' (type: {strategy_type})")
+            logger.info(
+                f"Persisted strategy instance '{name}' "
+                f"(type: {strategy_type}, account: '{account_id}')"
+            )
             return True
         finally:
             conn.close()
 
-    def delete_strategy_instance(self, name: str) -> bool:
+    def delete_strategy_instance(self, name: str,
+                                 account_id: str = "") -> bool:
         """
         Remove a persisted strategy instance record.
 
         Args:
             name: Strategy instance name
+            account_id: IBKR account identifier
 
         Returns:
             True if a record was deleted, False if not found
@@ -494,37 +545,59 @@ class StrategyLifecycle:
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "DELETE FROM strategy_instances WHERE name = ?",
-                (name,),
+                "DELETE FROM strategy_instances WHERE name = ? AND account_id = ?",
+                (name, account_id),
             )
             conn.commit()
             deleted = cursor.rowcount > 0
             if deleted:
-                logger.info(f"Deleted persisted strategy instance '{name}'")
+                logger.info(f"Deleted persisted strategy instance '{name}' (account: '{account_id}')")
             else:
-                logger.warning(f"No persisted record found for strategy '{name}'")
+                logger.warning(
+                    f"No persisted record found for strategy '{name}' (account: '{account_id}')"
+                )
             return deleted
         finally:
             conn.close()
 
-    def load_strategy_instances(self) -> list[Dict[str, Any]]:
+    def load_strategy_instances(self,
+                                account_id: Optional[str] = None) -> list[Dict[str, Any]]:
         """
-        Load all persisted strategy instances from the database.
+        Load persisted strategy instances from the database.
+
+        Args:
+            account_id: When provided, only instances belonging to this account
+                are returned.  When ``None``, all instances are returned
+                (intended for admin/migration use only).
 
         Returns:
-            List of dicts with keys: name, strategy_type, symbols, parameters, created_at
+            List of dicts with keys: name, account_id, strategy_type, symbols,
+            parameters, created_at
         """
         import json
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT name, strategy_type, symbols_json, parameters_json, created_at
-            FROM strategy_instances
-            ORDER BY created_at ASC
-            """
-        )
+        if account_id is not None:
+            cursor.execute(
+                """
+                SELECT name, account_id, strategy_type, symbols_json,
+                       parameters_json, created_at
+                FROM strategy_instances
+                WHERE account_id = ?
+                ORDER BY created_at ASC
+                """,
+                (account_id,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT name, account_id, strategy_type, symbols_json,
+                       parameters_json, created_at
+                FROM strategy_instances
+                ORDER BY created_at ASC
+                """
+            )
         rows = cursor.fetchall()
         conn.close()
 
@@ -534,10 +607,11 @@ class StrategyLifecycle:
                 instances.append(
                     {
                         "name": row[0],
-                        "strategy_type": row[1],
-                        "symbols": json.loads(row[2]),
-                        "parameters": json.loads(row[3]),
-                        "created_at": row[4],
+                        "account_id": row[1],
+                        "strategy_type": row[2],
+                        "symbols": json.loads(row[3]),
+                        "parameters": json.loads(row[4]),
+                        "created_at": row[5],
                     }
                 )
             except json.JSONDecodeError as exc:
@@ -548,41 +622,52 @@ class StrategyLifecycle:
                 )
         return instances
 
-    def list_strategies(self, state: Optional[StrategyState] = None) -> list[Dict[str, Any]]:
+    def list_strategies(self, state: Optional[StrategyState] = None,
+                        account_id: Optional[str] = None) -> list[Dict[str, Any]]:
         """
-        List all strategies, optionally filtered by state.
+        List all strategies, optionally filtered by state and/or account.
         
         Args:
-            state: Filter by this state (None for all)
+            state: Filter by this state (None for all states)
+            account_id: Filter by this account (None for all accounts)
         
         Returns:
             List of strategy info dictionaries
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        if state:
-            cursor.execute("""
-                SELECT strategy_name, current_state, updated_at, created_at, notes
-                FROM strategy_state
-                WHERE current_state = ?
-                ORDER BY strategy_name
-            """, (state.value,))
-        else:
-            cursor.execute("""
-                SELECT strategy_name, current_state, updated_at, created_at, notes
-                FROM strategy_state
-                ORDER BY strategy_name
-            """)
+
+        conditions = []
+        params: list = []
+        if state is not None:
+            conditions.append("current_state = ?")
+            params.append(state.value)
+        if account_id is not None:
+            conditions.append("account_id = ?")
+            params.append(account_id)
+
+        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        cursor.execute(
+            f"""
+            SELECT strategy_name, account_id, current_state, updated_at,
+                   created_at, notes
+            FROM strategy_state
+            {where_clause}
+            ORDER BY strategy_name
+            """,
+            params,
+        )
         
         strategies = []
         for row in cursor.fetchall():
             strategies.append({
                 'name': row[0],
-                'state': row[1],
-                'updated_at': row[2],
-                'created_at': row[3],
-                'notes': row[4]
+                'account_id': row[1],
+                'state': row[2],
+                'updated_at': row[3],
+                'created_at': row[4],
+                'notes': row[5],
             })
         
         conn.close()

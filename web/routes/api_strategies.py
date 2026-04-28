@@ -73,7 +73,8 @@ def create_strategy():
 
     try:
         from strategies.base_strategy import StrategyConfig
-        config = StrategyConfig(name=name, symbols=symbols, parameters=parameters)
+        config = StrategyConfig(name=name, symbols=symbols, parameters=parameters,
+                                account_id=svc.current_account_id)
         strategy = svc.strategy_registry.create_strategy(strategy_type, config)
         return jsonify({
             "status": "created",

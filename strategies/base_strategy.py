@@ -64,6 +64,7 @@ class StrategyConfig:
     enabled: bool = True
     parameters: Dict[str, Any] = field(default_factory=dict)
     risk_limits: Dict[str, Any] = field(default_factory=dict)
+    account_id: str = ""
     
     def validate(self) -> bool:
         """
@@ -445,6 +446,7 @@ class BaseStrategy(ABC):
         
         return {
             'strategy_name': self.config.name,
+            'account_id': self.config.account_id,
             'state': self.state.value,
             'signals_generated': self.signals_generated,
             'signals_accepted': self.signals_accepted,

@@ -186,7 +186,8 @@ class Strategy(Base):
     __tablename__ = 'strategies'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False, unique=True, index=True)
+    name = Column(String(100), nullable=False, index=True)
+    account_id = Column(String(50), nullable=True, index=True)
     description = Column(Text, nullable=True)
     
     # Status

@@ -447,3 +447,167 @@ class TestLifecycleIntegration:
         assert len(history) == 4  # Four transitions
         assert history[-1]['to_state'] == "live_active"
         assert history[-2]['approved_by'] == "admin"
+
+
+# ---------------------------------------------------------------------------
+# Account isolation tests
+# ---------------------------------------------------------------------------
+
+
+class TestStrategyLifecycleAccountIsolation:
+    """Tests that verify strategies are scoped by account_id."""
+
+    def test_same_name_different_accounts_are_independent(self, temp_db):
+        """Two accounts may own a strategy with the same name without collision."""
+        lifecycle = StrategyLifecycle(temp_db)
+
+        lifecycle.register_strategy("covered_call", account_id="DU111111")
+        lifecycle.register_strategy("covered_call", account_id="DU222222")
+
+        # Each account starts in BACKTEST
+        assert lifecycle.get_state("covered_call", "DU111111") == StrategyState.BACKTEST
+        assert lifecycle.get_state("covered_call", "DU222222") == StrategyState.BACKTEST
+
+        # Transitioning account A does NOT affect account B
+        lifecycle.transition("covered_call", StrategyState.PAPER, account_id="DU111111")
+        assert lifecycle.get_state("covered_call", "DU111111") == StrategyState.PAPER
+        assert lifecycle.get_state("covered_call", "DU222222") == StrategyState.BACKTEST
+
+    def test_register_duplicate_same_account_rejected(self, temp_db):
+        """Registering the same name + account twice is rejected."""
+        lifecycle = StrategyLifecycle(temp_db)
+        assert lifecycle.register_strategy("s1", account_id="DU111111") is True
+        assert lifecycle.register_strategy("s1", account_id="DU111111") is False
+
+    def test_register_same_name_different_account_allowed(self, temp_db):
+        """Same strategy name under a different account is allowed."""
+        lifecycle = StrategyLifecycle(temp_db)
+        assert lifecycle.register_strategy("s1", account_id="DU111111") is True
+        assert lifecycle.register_strategy("s1", account_id="DU222222") is True
+
+    def test_get_state_unknown_account_returns_none(self, temp_db):
+        """Looking up a name in the wrong account returns None."""
+        lifecycle = StrategyLifecycle(temp_db)
+        lifecycle.register_strategy("s1", account_id="DU111111")
+        assert lifecycle.get_state("s1", "DU999999") is None
+
+    def test_metrics_are_account_scoped(self, temp_db):
+        """Metrics written to account A are not visible in account B."""
+        lifecycle = StrategyLifecycle(temp_db)
+        lifecycle.register_strategy("s1", account_id="DU111111")
+        lifecycle.register_strategy("s1", account_id="DU222222")
+
+        metrics_a = StrategyMetrics(days_running=20, total_trades=10)
+        lifecycle.update_metrics("s1", metrics_a, account_id="DU111111")
+
+        # Account B should see empty (default) metrics
+        metrics_b = lifecycle.get_metrics("s1", account_id="DU222222")
+        assert metrics_b.days_running == 0
+
+    def test_history_is_account_scoped(self, temp_db):
+        """Transition history for account A is not mixed with account B."""
+        lifecycle = StrategyLifecycle(temp_db)
+        lifecycle.register_strategy("s1", account_id="DU111111")
+        lifecycle.register_strategy("s1", account_id="DU222222")
+
+        lifecycle.transition("s1", StrategyState.PAPER,
+                             reason="A paper", account_id="DU111111")
+
+        history_a = lifecycle.get_history("s1", "DU111111")
+        history_b = lifecycle.get_history("s1", "DU222222")
+        assert len(history_a) == 1
+        assert len(history_b) == 0
+
+    def test_list_strategies_filtered_by_account(self, temp_db):
+        """list_strategies(account_id=...) only returns that account's strategies."""
+        lifecycle = StrategyLifecycle(temp_db)
+        lifecycle.register_strategy("s1", account_id="DU111111")
+        lifecycle.register_strategy("s2", account_id="DU111111")
+        lifecycle.register_strategy("s3", account_id="DU222222")
+
+        result_a = lifecycle.list_strategies(account_id="DU111111")
+        result_b = lifecycle.list_strategies(account_id="DU222222")
+        all_strats = lifecycle.list_strategies()
+
+        assert len(result_a) == 2
+        assert len(result_b) == 1
+        assert len(all_strats) == 3
+
+    def test_save_and_load_instances_account_scoped(self, temp_db):
+        """save_strategy_instance / load_strategy_instances respect account_id."""
+        lifecycle = StrategyLifecycle(temp_db)
+
+        lifecycle.save_strategy_instance(
+            "bb_goog", "BollingerBands", ["GOOG"], {}, account_id="DU111111"
+        )
+        lifecycle.save_strategy_instance(
+            "bb_aapl", "BollingerBands", ["AAPL"], {}, account_id="DU222222"
+        )
+
+        instances_a = lifecycle.load_strategy_instances(account_id="DU111111")
+        instances_b = lifecycle.load_strategy_instances(account_id="DU222222")
+        all_instances = lifecycle.load_strategy_instances()
+
+        assert len(instances_a) == 1
+        assert instances_a[0]["name"] == "bb_goog"
+        assert instances_a[0]["account_id"] == "DU111111"
+
+        assert len(instances_b) == 1
+        assert instances_b[0]["name"] == "bb_aapl"
+
+        assert len(all_instances) == 2
+
+    def test_delete_instance_account_scoped(self, temp_db):
+        """delete_strategy_instance only removes the matching account's record."""
+        lifecycle = StrategyLifecycle(temp_db)
+
+        lifecycle.save_strategy_instance(
+            "bb_goog", "BollingerBands", ["GOOG"], {}, account_id="DU111111"
+        )
+        lifecycle.save_strategy_instance(
+            "bb_goog", "BollingerBands", ["GOOG"], {}, account_id="DU222222"
+        )
+
+        # Delete only account A's copy
+        deleted = lifecycle.delete_strategy_instance("bb_goog", account_id="DU111111")
+        assert deleted is True
+
+        # Account B's copy must survive
+        remaining = lifecycle.load_strategy_instances(account_id="DU222222")
+        assert len(remaining) == 1
+        assert remaining[0]["account_id"] == "DU222222"
+
+    def test_migration_adds_account_id_to_legacy_schema(self, temp_db):
+        """A legacy database (without account_id) is migrated automatically."""
+        import sqlite3
+
+        # Create a database that mimics the old schema (no account_id column)
+        conn = sqlite3.connect(temp_db)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE strategy_instances (
+                name TEXT PRIMARY KEY,
+                strategy_type TEXT NOT NULL,
+                symbols_json TEXT NOT NULL,
+                parameters_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        # Insert a legacy record
+        cursor.execute(
+            "INSERT INTO strategy_instances VALUES (?, ?, ?, ?, ?)",
+            ("old_strat", "BollingerBands", '["AAPL"]', '{}', "2025-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+
+        # Open via StrategyLifecycle — migration must succeed
+        lifecycle = StrategyLifecycle(temp_db)
+
+        # Legacy row should have account_id = '' after migration
+        all_instances = lifecycle.load_strategy_instances()
+        assert len(all_instances) == 1
+        assert all_instances[0]["account_id"] == ""
+

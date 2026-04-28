@@ -44,7 +44,8 @@ class StrategyRegistry:
         >>> registry.stop_all()
     """
     
-    def __init__(self, event_bus=None, db_path: Optional[str] = None):
+    def __init__(self, event_bus=None, db_path: Optional[str] = None,
+                 account_id: str = ""):
         """
         Initialize strategy registry.
         
@@ -54,8 +55,12 @@ class StrategyRegistry:
                      When provided, strategies are saved to disk so they survive
                      application restarts.  Call load_persisted_strategies() after
                      registering all strategy classes to restore saved instances.
+            account_id: IBKR account identifier to scope this registry to.
+                        Only strategies belonging to this account are loaded
+                        and persisted.
         """
         self.event_bus = event_bus
+        self.account_id = account_id
         
         # Registry of strategy classes (name -> class)
         self._strategy_classes: Dict[str, Type[BaseStrategy]] = {}
@@ -146,6 +151,7 @@ class StrategyRegistry:
                 strategy_type=strategy_type,
                 symbols=list(config.symbols),
                 parameters=dict(config.parameters),
+                account_id=config.account_id or self.account_id,
             )
         
         logger.info(f"Created strategy instance: {config.name} (type: {strategy_type})")
@@ -175,7 +181,7 @@ class StrategyRegistry:
 
         # Remove from persistence store
         if self._lifecycle is not None:
-            self._lifecycle.delete_strategy_instance(strategy_name)
+            self._lifecycle.delete_strategy_instance(strategy_name, self.account_id)
 
         logger.info(f"Removed strategy: {strategy_name}")
     
@@ -194,7 +200,7 @@ class StrategyRegistry:
         if self._lifecycle is None:
             return 0
 
-        records = self._lifecycle.load_strategy_instances()
+        records = self._lifecycle.load_strategy_instances(account_id=self.account_id)
         restored = 0
         for record in records:
             name = record["name"]
@@ -216,6 +222,7 @@ class StrategyRegistry:
                     name=name,
                     symbols=record["symbols"],
                     parameters=record["parameters"],
+                    account_id=record.get("account_id", self.account_id),
                 )
                 if not config.validate():
                     raise ValueError(f"Persisted config for '{name}' failed validation")
