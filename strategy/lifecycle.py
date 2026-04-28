@@ -185,13 +185,16 @@ class StrategyLifecycle:
 
         # --- Zero-downtime migration: add account_id to legacy tables -------
         # SQLite does not support IF NOT EXISTS on ALTER TABLE; use try/except.
+        # SECURITY: table names come from a hardcoded whitelist only.
+        _allowed_tables = {"strategy_state", "state_transitions", "strategy_instances"}
         for table, column in [
             ("strategy_state", "account_id TEXT NOT NULL DEFAULT ''"),
             ("state_transitions", "account_id TEXT NOT NULL DEFAULT ''"),
             ("strategy_instances", "account_id TEXT NOT NULL DEFAULT ''"),
         ]:
+            assert table in _allowed_tables, f"Unexpected table name: {table!r}"
             try:
-                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column}")  # noqa: S608
                 conn.commit()
                 logger.info(f"Migrated: added account_id column to {table}")
             except sqlite3.OperationalError:
@@ -646,18 +649,23 @@ class StrategyLifecycle:
             conditions.append("account_id = ?")
             params.append(account_id)
 
-        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        if conditions:
+            query = (
+                "SELECT strategy_name, account_id, current_state, updated_at,"
+                " created_at, notes"
+                " FROM strategy_state"
+                " WHERE " + " AND ".join(conditions) +
+                " ORDER BY strategy_name"
+            )
+        else:
+            query = (
+                "SELECT strategy_name, account_id, current_state, updated_at,"
+                " created_at, notes"
+                " FROM strategy_state"
+                " ORDER BY strategy_name"
+            )
 
-        cursor.execute(
-            f"""
-            SELECT strategy_name, account_id, current_state, updated_at,
-                   created_at, notes
-            FROM strategy_state
-            {where_clause}
-            ORDER BY strategy_name
-            """,
-            params,
-        )
+        cursor.execute(query, params)
         
         strategies = []
         for row in cursor.fetchall():
