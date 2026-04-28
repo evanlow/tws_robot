@@ -719,7 +719,7 @@ class StrategyLifecycle:
                         "symbols": json.loads(row[3]),
                         "parameters": json.loads(row[4]),
                         "created_at": row[5],
-                        "running_state": row[6] if len(row) > 6 else "READY",
+                        "running_state": row[6],
                     }
                 )
             except json.JSONDecodeError as exc:

@@ -298,10 +298,10 @@ class StrategyRegistry:
         
         strategy.start()
 
-        if self._lifecycle is not None and strategy.state == StrategyState.RUNNING:
+        if self._lifecycle is not None:
             effective_account_id = strategy.config.account_id or self.account_id
             self._lifecycle.update_instance_running_state(
-                strategy_name, StrategyState.RUNNING.value, effective_account_id
+                strategy_name, strategy.state.value, effective_account_id
             )
     
     def stop_strategy(self, strategy_name: str):
@@ -321,7 +321,7 @@ class StrategyRegistry:
         if self._lifecycle is not None:
             effective_account_id = strategy.config.account_id or self.account_id
             self._lifecycle.update_instance_running_state(
-                strategy_name, StrategyState.STOPPED.value, effective_account_id
+                strategy_name, strategy.state.value, effective_account_id
             )
     
     def pause_strategy(self, strategy_name: str):
@@ -338,10 +338,10 @@ class StrategyRegistry:
         
         strategy.pause()
 
-        if self._lifecycle is not None and strategy.state == StrategyState.PAUSED:
+        if self._lifecycle is not None:
             effective_account_id = strategy.config.account_id or self.account_id
             self._lifecycle.update_instance_running_state(
-                strategy_name, StrategyState.PAUSED.value, effective_account_id
+                strategy_name, strategy.state.value, effective_account_id
             )
     
     def resume_strategy(self, strategy_name: str):
@@ -358,10 +358,10 @@ class StrategyRegistry:
         
         strategy.resume()
 
-        if self._lifecycle is not None and strategy.state == StrategyState.RUNNING:
+        if self._lifecycle is not None:
             effective_account_id = strategy.config.account_id or self.account_id
             self._lifecycle.update_instance_running_state(
-                strategy_name, StrategyState.RUNNING.value, effective_account_id
+                strategy_name, strategy.state.value, effective_account_id
             )
     
     def start_all(self):
