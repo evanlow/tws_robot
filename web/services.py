@@ -271,8 +271,12 @@ class ServiceManager:
                 for s in reg.get_all_strategies():
                     if isinstance(s, _InferredBase):
                         adopted_symbol_sets.add(frozenset(s.config.symbols))
-        except Exception:
-            pass
+        except (ImportError, AttributeError):
+            logger.debug(
+                "Unable to apply adopted inferred-strategy filtering; "
+                "continuing without adopted-strategy suppression.",
+                exc_info=True,
+            )
 
         with self._lock:
             dismissed = self._dismissed_inferred.get(account_id, set())

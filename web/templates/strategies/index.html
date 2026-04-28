@@ -552,7 +552,18 @@ window.adoptInferred = async function(id, strategyType, symbolsCsv) {
 
     // Auto-start the adopted strategy: positions are already in place, so
     // there is no reason to require a manual Start click after adopting.
-    await fetch(`/api/strategies/${encodeURIComponent(name)}/start`, { method: 'POST' });
+    const startRes = await fetch(`/api/strategies/${encodeURIComponent(name)}/start`, { method: 'POST' });
+    let startData = {};
+    try {
+      startData = await startRes.json();
+    } catch (_) {
+      startData = {};
+    }
+
+    if (!startRes.ok || startData.error) {
+      alert(startData.error || ('Failed to start adopted strategy "' + name + '".'));
+      return;
+    }
 
     // Dismiss the inferred card (also suppressed on restart via symbol-set matching).
     await fetch(`/api/strategies/inferred/${id}/dismiss`, { method: 'POST' });
