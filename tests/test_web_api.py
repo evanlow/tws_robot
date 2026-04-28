@@ -982,10 +982,47 @@ class TestStrategyAPI:
         assert "insight" in data
         assert "position is up" in data["insight"]
 
+    # ------------------------------------------------------------------
+    # POST /api/strategies/<name>/insight — registered strategy insights
+    # ------------------------------------------------------------------
 
-# ==============================================================================
-# Event API
-# ==============================================================================
+    @patch("ai.client.get_client")
+    def test_insight_registered_not_found(self, mock_get_client, client):
+        """Test POST /api/strategies/<name>/insight returns 404 for unknown strategy."""
+        mock_get_client.return_value = mock_get_client  # non-None → AI enabled
+        resp = client.post("/api/strategies/nonexistent_strategy/insight")
+        assert resp.status_code == 404
+        assert "error" in resp.get_json()
+
+    @patch("ai.client.get_client")
+    def test_insight_registered_ai_disabled(self, mock_get_client, client):
+        """Test POST /api/strategies/<name>/insight returns 503 when AI is disabled."""
+        mock_get_client.return_value = None
+        resp = client.post("/api/strategies/some_strategy/insight")
+        assert resp.status_code == 503
+        assert "error" in resp.get_json()
+
+    @patch("ai.client.get_client")
+    def test_insight_registered_success(self, mock_get_client, client):
+        """Test POST /api/strategies/<name>/insight returns AI insight for a known strategy."""
+        import uuid
+        mock_client = mock_get_client.return_value
+        mock_client.chat.return_value = "Strategy is performing well with 0 active positions."
+
+        # Create a real strategy instance first
+        strategy_name = f"LE_AAPL_insight_{uuid.uuid4().hex[:8]}"
+        create_resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": strategy_name,
+            "symbols": ["AAPL"],
+        })
+        assert create_resp.status_code == 200
+
+        resp = client.post(f"/api/strategies/{strategy_name}/insight")
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert "insight" in data
+        assert "Strategy is performing well" in data["insight"]
 
 
 class TestEventAPI:

@@ -60,7 +60,7 @@
   <section class="panel panel-strategies">
     <h2 class="panel-title">📊 Strategies</h2>
     {% if strategies %}
-    {% set running_count = strategies|selectattr('state', 'equalto', 'RUNNING')|list|length %}
+    {% set running_strats = strategies|selectattr('state', 'equalto', 'RUNNING')|list %}
     {% set stopped_count = strategies|rejectattr('state', 'equalto', 'RUNNING')|list|length %}
     <div class="strategy-summary-widget">
       <div class="stat-row">
@@ -69,13 +69,46 @@
       </div>
       <div class="stat-row">
         <span>Running</span>
-        <strong class="pnl-positive">{{ running_count }}</strong>
+        <strong class="pnl-positive">{{ running_strats|length }}</strong>
       </div>
       <div class="stat-row">
         <span>Stopped / Other</span>
         <strong>{{ stopped_count }}</strong>
       </div>
     </div>
+
+    <!-- Running strategy cards -->
+    {% if running_strats %}
+    <div style="margin-top:0.75rem;display:grid;gap:0.5rem;">
+      {% for s in running_strats %}
+      <div style="background:#0f1929;border:1px solid #2d4a5a;border-radius:6px;padding:0.5rem 0.65rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.2rem;">
+          <a href="/strategies/{{ s.strategy_name }}" style="font-size:0.8rem;font-weight:700;color:#90cdf4;text-decoration:none;">
+            {{ s.strategy_name }}
+          </a>
+          <span style="font-size:0.65rem;background:#1b2d1b;color:#68d391;padding:1px 6px;border-radius:8px;">RUNNING</span>
+        </div>
+        <div style="display:flex;gap:1rem;font-size:0.72rem;color:#a0aec0;">
+          <span>Signals: <strong style="color:#e2e8f0;">{{ s.signals_generated }}</strong></span>
+          <span>Positions: <strong style="color:#e2e8f0;">{{ s.active_positions }}</strong></span>
+        </div>
+        <!-- Live positions (pre-computed from strategy's configured symbols) -->
+        {% if s.live_positions %}
+        {% set ns = namespace(strat_pnl=0.0) %}
+        {% for sym, pos in s.live_positions.items() %}
+          {% set ns.strat_pnl = ns.strat_pnl + (pos.unrealized_pnl|default(0)|float) %}
+        {% endfor %}
+        <div style="font-size:0.73rem;margin-top:0.2rem;">
+          <span style="color:{{ '#48bb78' if ns.strat_pnl >= 0 else '#fc8181' }};">
+            Unrealized P&amp;L: {{ "+" if ns.strat_pnl >= 0 else "" }}${{ "%.2f"|format(ns.strat_pnl) }}
+          </span>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <a href="{{ url_for('strategies.index') }}" class="btn-secondary btn-sm" style="margin-top:0.75rem;display:inline-block;">Manage Strategies →</a>
     {% else %}
     <p class="empty-state">No strategies registered. <a href="{{ url_for('strategies.index') }}">Create one →</a></p>

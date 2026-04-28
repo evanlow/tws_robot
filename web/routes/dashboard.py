@@ -21,14 +21,20 @@ def index():
     risk_summary = svc.risk_manager.get_risk_summary()
     positions = svc.get_positions()
     insights = svc.get_account_insights()
-    strategies = []
+    raw_strategies = []
     try:
-        strategies = [
-            s.get_performance_summary()
-            for s in svc.strategy_registry.get_all_strategies()
-        ]
+        raw_strategies = list(svc.strategy_registry.get_all_strategies())
     except Exception:
         pass
+
+    # Pre-compute per-strategy live positions using the strategy's configured
+    # symbols list so the template can display precise P&L per strategy.
+    strategies = []
+    for s in raw_strategies:
+        perf = s.get_performance_summary()
+        syms = s.config.symbols or []
+        perf["live_positions"] = {sym: positions[sym] for sym in syms if sym in positions}
+        strategies.append(perf)
 
     # Market overview (cached / DB — auto-refreshes in the background when stale)
     market_overview = {"regions": [], "market_status": {}, "last_updated": None, "snapshots": []}
