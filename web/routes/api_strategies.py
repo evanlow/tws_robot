@@ -73,7 +73,8 @@ def create_strategy():
 
     try:
         from strategies.base_strategy import StrategyConfig
-        config = StrategyConfig(name=name, symbols=symbols, parameters=parameters)
+        config = StrategyConfig(name=name, symbols=symbols, parameters=parameters,
+                                account_id=svc.current_account_id)
         strategy = svc.strategy_registry.create_strategy(strategy_type, config)
         return jsonify({
             "status": "created",
@@ -150,6 +151,7 @@ def update_config(name: str):
             parameters=data.get("parameters", strategy.config.parameters),
             risk_limits=data.get("risk_limits", strategy.config.risk_limits),
             enabled=data.get("enabled", strategy.config.enabled),
+            account_id=strategy.config.account_id,
         )
         svc.strategy_registry.reload_config(name, new_config)
         return jsonify({"status": "updated", "config": new_config.__dict__})

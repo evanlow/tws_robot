@@ -686,5 +686,93 @@ class TestStrategyRegistryPersistence:
         assert "BadConfig" not in registry
 
 
+# ---------------------------------------------------------------------------
+# Account-scoped registry tests
+# ---------------------------------------------------------------------------
+
+
+class TestStrategyRegistryAccountIsolation:
+    """Verify the registry only loads/persists strategies for its own account."""
+
+    def _make_registry(self, db_path: str, account_id: str = "") -> StrategyRegistry:
+        registry = StrategyRegistry(db_path=db_path, account_id=account_id)
+        registry.register_strategy_class("MockStrategy", MockStrategy)
+        return registry
+
+    def test_registry_account_id_stored(self, temp_db_path):
+        """account_id passed to StrategyRegistry is stored."""
+        registry = self._make_registry(temp_db_path, "DU111111")
+        assert registry.account_id == "DU111111"
+
+    def test_strategies_persisted_with_registry_account(self, temp_db_path):
+        """Creating a strategy in an account-scoped registry stores account_id."""
+        registry = self._make_registry(temp_db_path, "DU111111")
+        registry.create_strategy(
+            "MockStrategy", StrategyConfig(name="BB_AAPL", symbols=["AAPL"])
+        )
+
+        # Verify the persisted record carries the correct account_id
+        records = registry._lifecycle.load_strategy_instances(account_id="DU111111")
+        assert len(records) == 1
+        assert records[0]["account_id"] == "DU111111"
+
+    def test_load_only_restores_own_account_strategies(self, temp_db_path):
+        """A registry for account A must not restore account B's strategies."""
+        # Session 1: create strategies in two different accounts
+        reg_a = self._make_registry(temp_db_path, "DU111111")
+        reg_a.create_strategy(
+            "MockStrategy", StrategyConfig(name="Strat_A", symbols=["AAPL"])
+        )
+
+        reg_b = self._make_registry(temp_db_path, "DU222222")
+        reg_b.create_strategy(
+            "MockStrategy", StrategyConfig(name="Strat_B", symbols=["MSFT"])
+        )
+
+        # Session 2: new registry for account A only
+        new_reg_a = self._make_registry(temp_db_path, "DU111111")
+        restored = new_reg_a.load_persisted_strategies()
+
+        assert restored == 1
+        assert "Strat_A" in new_reg_a
+        assert "Strat_B" not in new_reg_a
+
+    def test_remove_strategy_only_deletes_own_account_record(self, temp_db_path):
+        """remove_strategy for account A must not delete account B's record."""
+        reg_a = self._make_registry(temp_db_path, "DU111111")
+        reg_b = self._make_registry(temp_db_path, "DU222222")
+
+        # Both accounts create a strategy with the same name
+        reg_a.create_strategy(
+            "MockStrategy", StrategyConfig(name="SharedName", symbols=["GOOG"])
+        )
+        reg_b.create_strategy(
+            "MockStrategy", StrategyConfig(name="SharedName", symbols=["GOOG"])
+        )
+
+        reg_a.remove_strategy("SharedName")
+
+        # Account B's record must survive
+        instances_b = reg_b._lifecycle.load_strategy_instances(account_id="DU222222")
+        assert len(instances_b) == 1
+
+    def test_config_account_id_takes_precedence(self, temp_db_path):
+        """If config.account_id is set explicitly it is used over registry.account_id."""
+        registry = self._make_registry(temp_db_path, "DU111111")
+        config = StrategyConfig(name="Explicit", symbols=["AAPL"],
+                                account_id="DU999999")
+        registry.create_strategy("MockStrategy", config)
+
+        # Record should carry the explicit account_id from the config
+        records_explicit = registry._lifecycle.load_strategy_instances(
+            account_id="DU999999"
+        )
+        records_registry = registry._lifecycle.load_strategy_instances(
+            account_id="DU111111"
+        )
+        assert len(records_explicit) == 1
+        assert len(records_registry) == 0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

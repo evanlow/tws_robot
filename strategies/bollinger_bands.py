@@ -76,11 +76,30 @@ class BollingerBandsStrategy(BaseStrategy):
             stop_loss_pct: Stop loss percentage from entry
             **kwargs: Additional parameters for base strategy
         """
-        # Create strategy config
+        # Create strategy config.
+        # When invoked from StrategyRegistry the first positional argument is a
+        # StrategyConfig object (bound to `name` due to the parameter signature).
+        # Extract the relevant fields so they are not lost.
         from strategies.base_strategy import StrategyConfig
+        if isinstance(name, StrategyConfig):
+            _orig = name
+            _name_val: str = _orig.name
+            _symbols_val = list(_orig.symbols)
+            _account_id: str = _orig.account_id
+            params = _orig.parameters or {}
+            period = params.get('period', period)
+            std_dev = params.get('std_dev', std_dev)
+            min_volume = params.get('min_volume', min_volume)
+            position_size = params.get('position_size', position_size)
+            stop_loss_pct = params.get('stop_loss_pct', stop_loss_pct)
+        else:
+            _name_val = name
+            _symbols_val = list(symbols) if symbols else []
+            _account_id = ""
+
         config = StrategyConfig(
-            name=name,
-            symbols=symbols or [],
+            name=_name_val,
+            symbols=_symbols_val,
             enabled=True,
             parameters={
                 'period': period,
@@ -88,7 +107,8 @@ class BollingerBandsStrategy(BaseStrategy):
                 'min_volume': min_volume,
                 'position_size': position_size,
                 'stop_loss_pct': stop_loss_pct
-            }
+            },
+            account_id=_account_id,
         )
         
         super().__init__(config=config)

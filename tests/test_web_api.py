@@ -1056,3 +1056,122 @@ class TestPageRoutes:
         resp = client.get("/account-intelligence/", follow_redirects=True)
         assert resp.status_code == 200
         assert b"Account Intelligence" in resp.data
+
+
+# ==============================================================================
+# Account isolation – strategy API tests
+# ==============================================================================
+
+
+class TestStrategyAccountIsolation:
+    """Verify that account_id is stamped on strategies at creation time and that
+    switching accounts produces an isolated strategy view."""
+
+    def test_create_strategy_carries_account_id(self, client, services):
+        """Strategies created via the API must carry the current account's ID."""
+        import uuid
+        run_id = uuid.uuid4().hex[:8]
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497,
+                                          "client_id": 1, "account": "DU111111"})
+        resp = client.post("/api/strategies/create", json={
+            "strategy_type": "BollingerBands",
+            "name": f"BB_acct_test_{run_id}",
+            "symbols": ["AAPL"],
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["strategy"]["account_id"] == "DU111111"
+        services.set_disconnected()
+
+    def test_performance_summary_contains_account_id(self, client, services):
+        """GET /api/strategies/ must include account_id in each strategy entry."""
+        import uuid
+        run_id = uuid.uuid4().hex[:8]
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497,
+                                          "client_id": 1, "account": "DU123456"})
+        client.post("/api/strategies/create", json={
+            "strategy_type": "BollingerBands",
+            "name": f"BB_summary_{run_id}",
+            "symbols": ["AAPL"],
+        })
+        resp = client.get("/api/strategies/")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        for s in data["strategies"]:
+            assert "account_id" in s
+        services.set_disconnected()
+
+    def test_switch_account_hides_previous_strategies(self, client, services):
+        """After switching accounts the strategy list must be empty (no cross-account leak)."""
+        import uuid
+        run_id = uuid.uuid4().hex[:8]
+        # Connect as account A and adopt a strategy
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497,
+                                          "client_id": 1, "account": "DU111111"})
+        client.post("/api/strategies/create", json={
+            "strategy_type": "BollingerBands",
+            "name": f"BB_acct_switch_{run_id}",
+            "symbols": ["AAPL"],
+        })
+        resp = client.get("/api/strategies/")
+        assert len(resp.get_json()["strategies"]) >= 1
+
+        # Disconnect then reconnect as account B
+        services.set_disconnected()
+        services.set_connected("live", {"host": "127.0.0.1", "port": 7496,
+                                         "client_id": 2, "account": "DU222222"})
+
+        # Account B must see an empty strategy list (no persistence leakage)
+        resp = client.get("/api/strategies/")
+        strategies = resp.get_json()["strategies"]
+        assert all(s["account_id"] == "DU222222" for s in strategies), (
+            "Found strategies belonging to a different account in the list"
+        )
+        services.set_disconnected()
+
+    def test_dismissed_inferred_scoped_per_account(self, services):
+        """Dismissed inferred strategies are scoped to the account that dismissed them."""
+        # Connect as account A
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497,
+                                          "client_id": 1, "account": "DU111111"})
+        services.update_position("AAPL", {
+            "quantity": 100, "entry_price": 150.0,
+            "current_price": 155.0, "unrealized_pnl": 500.0,
+            "market_value": 15500.0, "side": "LONG", "sec_type": "STK",
+        })
+        inferred = services.get_inferred_strategies()
+        assert len(inferred) > 0
+        first_id = inferred[0]["id"]
+
+        # Dismiss for account A
+        assert services.dismiss_inferred_strategy(first_id) is True
+        after_dismiss = services.get_inferred_strategies()
+        assert all(s["id"] != first_id for s in after_dismiss)
+
+        # Switch to account B — dismissed set should be fresh
+        services.set_disconnected()
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497,
+                                          "client_id": 2, "account": "DU222222"})
+        services.update_position("AAPL", {
+            "quantity": 100, "entry_price": 150.0,
+            "current_price": 155.0, "unrealized_pnl": 500.0,
+            "market_value": 15500.0, "side": "LONG", "sec_type": "STK",
+        })
+        inferred_b = services.get_inferred_strategies()
+        # The same inferred strategy must be visible for account B (not dismissed)
+        assert any(s["id"] == first_id for s in inferred_b), (
+            "Dismissal in account A incorrectly hid the strategy in account B"
+        )
+        services.set_disconnected()
+
+    def test_current_account_id_empty_when_not_connected(self, services):
+        """current_account_id returns empty string when not connected."""
+        assert services.current_account_id == ""
+
+    def test_current_account_id_reflects_connection(self, services):
+        """current_account_id returns the account set in connection info."""
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497,
+                                          "client_id": 1, "account": "DU999999"})
+        assert services.current_account_id == "DU999999"
+        services.set_disconnected()
+        assert services.current_account_id == ""

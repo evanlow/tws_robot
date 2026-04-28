@@ -64,7 +64,8 @@ class ServiceManager:
 
         # Auto-detected strategies cache
         self._inferred_strategies: List[Dict[str, Any]] = []
-        self._dismissed_inferred: set = set()  # IDs dismissed by user
+        # Dismissed inferred IDs scoped per account: account_id -> set of IDs
+        self._dismissed_inferred: Dict[str, set] = {}
 
         # SSE subscribers — list of queues that receive serialised events
         self._sse_queues: List[Any] = []
@@ -99,11 +100,19 @@ class ServiceManager:
     def connection_info(self) -> Dict[str, Any]:
         return dict(self._connection_info)
 
+    @property
+    def current_account_id(self) -> str:
+        """Return the IBKR account ID for the active connection (empty string if not connected)."""
+        with self._lock:
+            return self._connection_info.get("account", "")
+
     def set_connected(self, env: str, info: Dict[str, Any]) -> None:
         with self._lock:
             self._connected = True
             self._connection_env = env
             self._connection_info = dict(info)
+            # Invalidate the registry so it is rebuilt with the new account_id
+            self._strategy_registry = None
         self.event_bus.publish(Event(
             EventType.CONNECTION_ESTABLISHED,
             data={"environment": env, **info},
@@ -115,6 +124,9 @@ class ServiceManager:
             self._connected = False
             self._connection_env = None
             self._connection_info = {}
+            # Invalidate the registry — strategies from the previous account
+            # must not be visible under a different (or no) account.
+            self._strategy_registry = None
         self.event_bus.publish(Event(
             EventType.CONNECTION_LOST,
             data={},
@@ -175,7 +187,12 @@ class ServiceManager:
 
     @property
     def strategy_registry(self):
-        """Return the shared StrategyRegistry (created on first access)."""
+        """Return the shared StrategyRegistry (created on first access).
+
+        The registry is scoped to the currently connected IBKR account.
+        It is invalidated (set to None) on every connect/disconnect so that
+        switching accounts always produces a fresh, correctly-scoped registry.
+        """
         if self._strategy_registry is None:
             from pathlib import Path
             from strategies.strategy_registry import StrategyRegistry
@@ -192,6 +209,7 @@ class ServiceManager:
             self._strategy_registry = StrategyRegistry(
                 self.event_bus,
                 db_path=_default_db,
+                account_id=self.current_account_id,
             )
             self._register_default_strategies()
             self._strategy_registry.load_persisted_strategies()
@@ -231,34 +249,41 @@ class ServiceManager:
         """Run position analysis and return inferred strategies.
 
         Results are cached and refreshed each time this method is called.
-        Dismissed inferred IDs are filtered out.
+        Dismissed inferred IDs (scoped to the current account) are filtered out.
         """
         positions = self.get_positions()
         inferred = self.position_analyzer.analyze(positions)
+        account_id = self.current_account_id
         with self._lock:
+            dismissed = self._dismissed_inferred.get(account_id, set())
             self._inferred_strategies = [
                 s.to_dict() for s in inferred
-                if s.id not in self._dismissed_inferred
+                if s.id not in dismissed
             ]
             return list(self._inferred_strategies)
 
     def dismiss_inferred_strategy(self, inferred_id: str) -> bool:
         """Mark an inferred strategy as dismissed so it's hidden.
 
+        The dismissal is scoped to the current account so switching accounts
+        produces a clean slate.
+
         Returns False if the inferred_id is not in the current set of
         inferred strategies (prevents unbounded growth of the dismissed set).
         """
+        account_id = self.current_account_id
         with self._lock:
             valid_ids = {s["id"] for s in self._inferred_strategies}
             if inferred_id not in valid_ids:
                 return False
-            self._dismissed_inferred.add(inferred_id)
+            self._dismissed_inferred.setdefault(account_id, set()).add(inferred_id)
         return True
 
     def reset_dismissed_inferred(self) -> None:
-        """Clear all dismissed inferred strategy IDs."""
+        """Clear dismissed inferred strategy IDs for the current account."""
+        account_id = self.current_account_id
         with self._lock:
-            self._dismissed_inferred.clear()
+            self._dismissed_inferred.pop(account_id, None)
 
     # ------------------------------------------------------------------
     # Account / positions state (written by event handlers)
