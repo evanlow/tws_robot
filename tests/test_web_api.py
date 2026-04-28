@@ -1061,6 +1061,50 @@ class TestPageRoutes:
         assert resp.status_code == 200
         assert b"Strategies" in resp.data
 
+    def test_strategies_page_has_registered_strategy_insight_controls(self, client):
+        """Strategies page renders AI insight controls for registered strategies."""
+        import uuid
+
+        strategy_name = f"LE_page_{uuid.uuid4().hex[:8]}"
+        create_resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": strategy_name,
+            "symbols": ["AAPL"],
+        })
+        assert create_resp.status_code == 200
+
+        resp = client.get("/strategies/", follow_redirects=True)
+        assert resp.status_code == 200
+        assert b"Load AI Insight" in resp.data
+        assert f'data-strategy-name="{strategy_name}"'.encode() in resp.data
+
+    def test_strategy_detail_shows_live_positions_and_ai_insight_section(self, client, services):
+        """Strategy detail page includes live positions and AI insight container."""
+        import uuid
+
+        strategy_name = f"LE_detail_{uuid.uuid4().hex[:8]}"
+        create_resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": strategy_name,
+            "symbols": ["AAPL"],
+        })
+        assert create_resp.status_code == 200
+
+        services.update_position("AAPL", {
+            "quantity": 10,
+            "entry_price": 150.0,
+            "current_price": 155.0,
+            "unrealized_pnl": 50.0,
+            "side": "LONG",
+        })
+
+        resp = client.get(f"/strategies/{strategy_name}", follow_redirects=True)
+        assert resp.status_code == 200
+        assert b"Live Positions" in resp.data
+        assert b"AI Strategy Insight" in resp.data
+        assert b"detailInsightBox" in resp.data
+        assert f'data-strategy-name="{strategy_name}"'.encode() in resp.data
+
     def test_backtest(self, client):
         resp = client.get("/backtest/", follow_redirects=True)
         assert resp.status_code == 200

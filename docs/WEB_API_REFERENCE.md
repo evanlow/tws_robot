@@ -1585,6 +1585,71 @@ fetch('/api/strategies/inferred/inferred_NVDA_long_equity_1/insight', {
 - Includes specific numbers from position data
 - Safe to call repeatedly, but consider rate limiting in production
 
+### `POST /api/strategies/{name}/insight`
+
+**Generate an AI narrative insight for a registered strategy.**
+
+Uses the live strategy performance summary plus current positions for that
+strategy's configured symbols.
+
+Requires AI features to be enabled (set `OPENAI_API_KEY` environment variable).
+
+**Path Parameters:**
+- `name` - Registered strategy name (e.g., `"LE_AAPL_core"`)
+
+**Response:**
+```json
+{
+  "insight": "The strategy remains in positive territory with stable unrealized gains and no concentrated downside pressure. Consider keeping current stops while monitoring momentum for partial profit-taking signals."
+}
+```
+
+**Error Responses:**
+
+*404 - Strategy Not Found:*
+```json
+{
+  "error": "Strategy 'unknown_strategy' not found"
+}
+```
+
+*503 - AI Not Enabled:*
+```json
+{
+  "error": "AI features are not enabled. Set OPENAI_API_KEY to auto-enable, or set AI_ENABLED=true explicitly."
+}
+```
+
+*500 - Position Fetch Error:*
+```json
+{
+  "error": "Failed to fetch live positions."
+}
+```
+
+*502 - AI Request Failed:*
+```json
+{
+  "error": "AI request failed. Please try again."
+}
+```
+
+**Example:**
+```javascript
+// Get AI insight for a registered strategy
+fetch('/api/strategies/LE_AAPL_core/insight', {
+  method: 'POST'
+})
+.then(res => res.json())
+.then(data => {
+  if (data.insight) {
+    console.log('Registered strategy insight:', data.insight);
+  } else {
+    console.error('Error:', data.error);
+  }
+});
+```
+
 ---
 
 ## Backtest API

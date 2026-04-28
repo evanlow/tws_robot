@@ -81,6 +81,8 @@ The dashboard has several pages accessible from the navigation bar:
 - 🚨 **Emergency Stop Button** — always visible in the top status bar; one click halts all trading
 - 📊 **Real-time Status Bar** — shows connection status, equity, daily P&L, and risk level
 - 🤖 **AI Strategy Assistant** — get AI-powered help creating and refining strategies
+- 🧭 **Strategy Monitor Cards** — on the Strategies page, each registered strategy card shows live position rows and quick start/stop controls
+- 💡 **Per-Strategy AI Insight** — load an on-demand AI summary for each registered strategy from the card or strategy detail page
 
 ---
 
