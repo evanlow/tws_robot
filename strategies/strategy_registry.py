@@ -246,6 +246,8 @@ class StrategyRegistry:
                     f"state: {persisted_state}) from database"
                 )
             except Exception as exc:
+                # Remove partially-registered entry so the registry stays consistent
+                self._strategies.pop(name, None)
                 logger.warning(
                     f"Skipping persisted strategy '{name}' (type: {strategy_type}): "
                     f"invalid or failed to restore: {exc}"
@@ -366,26 +368,26 @@ class StrategyRegistry:
     
     def start_all(self):
         """Start all registered strategies"""
-        for strategy in self._strategies.values():
+        for name, strategy in list(self._strategies.items()):
             if strategy.state in [StrategyState.READY, StrategyState.PAUSED]:
-                strategy.start()
+                self.start_strategy(name)
         
         logger.info(f"Started {len(self._strategies)} strategies")
     
     def stop_all(self):
         """Stop all registered strategies"""
-        for strategy in self._strategies.values():
+        for name, strategy in list(self._strategies.items()):
             if strategy.state != StrategyState.STOPPED:
-                strategy.stop()
+                self.stop_strategy(name)
         
         logger.info(f"Stopped {len(self._strategies)} strategies")
     
     def pause_all(self):
         """Pause all running strategies"""
         paused_count = 0
-        for strategy in self._strategies.values():
+        for name, strategy in list(self._strategies.items()):
             if strategy.state == StrategyState.RUNNING:
-                strategy.pause()
+                self.pause_strategy(name)
                 paused_count += 1
         
         logger.info(f"Paused {paused_count} strategies")
@@ -393,9 +395,9 @@ class StrategyRegistry:
     def resume_all(self):
         """Resume all paused strategies"""
         resumed_count = 0
-        for strategy in self._strategies.values():
+        for name, strategy in list(self._strategies.items()):
             if strategy.state == StrategyState.PAUSED:
-                strategy.resume()
+                self.resume_strategy(name)
                 resumed_count += 1
         
         logger.info(f"Resumed {resumed_count} strategies")
