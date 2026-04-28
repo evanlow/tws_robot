@@ -231,8 +231,20 @@ class StrategyRegistry:
                     raise ValueError(f"Persisted config for '{name}' failed validation")
                 strategy = strategy_class(config, self.event_bus)
                 self._strategies[name] = strategy
+
+                # Restore running state if the strategy was active before restart
+                persisted_state = record.get("running_state", StrategyState.READY.value)
+                if persisted_state == StrategyState.RUNNING.value:
+                    strategy.start()
+                elif persisted_state == StrategyState.PAUSED.value:
+                    strategy.start()
+                    strategy.pause()
+
                 restored += 1
-                logger.info(f"Restored strategy '{name}' (type: {strategy_type}) from database")
+                logger.info(
+                    f"Restored strategy '{name}' (type: {strategy_type}, "
+                    f"state: {persisted_state}) from database"
+                )
             except Exception as exc:
                 logger.warning(
                     f"Skipping persisted strategy '{name}' (type: {strategy_type}): "
@@ -285,6 +297,12 @@ class StrategyRegistry:
             return
         
         strategy.start()
+
+        if self._lifecycle is not None and strategy.state == StrategyState.RUNNING:
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.update_instance_running_state(
+                strategy_name, StrategyState.RUNNING.value, effective_account_id
+            )
     
     def stop_strategy(self, strategy_name: str):
         """
@@ -299,6 +317,12 @@ class StrategyRegistry:
             return
         
         strategy.stop()
+
+        if self._lifecycle is not None:
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.update_instance_running_state(
+                strategy_name, StrategyState.STOPPED.value, effective_account_id
+            )
     
     def pause_strategy(self, strategy_name: str):
         """
@@ -313,6 +337,12 @@ class StrategyRegistry:
             return
         
         strategy.pause()
+
+        if self._lifecycle is not None and strategy.state == StrategyState.PAUSED:
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.update_instance_running_state(
+                strategy_name, StrategyState.PAUSED.value, effective_account_id
+            )
     
     def resume_strategy(self, strategy_name: str):
         """
@@ -327,6 +357,12 @@ class StrategyRegistry:
             return
         
         strategy.resume()
+
+        if self._lifecycle is not None and strategy.state == StrategyState.RUNNING:
+            effective_account_id = strategy.config.account_id or self.account_id
+            self._lifecycle.update_instance_running_state(
+                strategy_name, StrategyState.RUNNING.value, effective_account_id
+            )
     
     def start_all(self):
         """Start all registered strategies"""
