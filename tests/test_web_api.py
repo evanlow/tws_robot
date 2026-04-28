@@ -213,6 +213,50 @@ class TestServiceManager:
         """Test dismissing a non-existent strategy ID returns False."""
         assert services.dismiss_inferred_strategy("invalid_id") is False
 
+    def test_get_inferred_strategies_suppresses_adopted(self, services):
+        """Inferred detections whose symbol-set matches an adopted _InferredBase
+        strategy should be suppressed so they don't reappear after restart."""
+        from strategies.strategy_registry import StrategyRegistry
+        from strategies.base_strategy import StrategyConfig
+        from strategies.inferred_strategies import LongEquityStrategy, INFERRED_STRATEGY_CLASSES
+
+        # Inject a fresh in-memory registry (no DB) to avoid cross-test contamination.
+        reg = StrategyRegistry(event_bus=services.event_bus, account_id="")
+        for stype, cls in INFERRED_STRATEGY_CLASSES.items():
+            reg.register_strategy_class(stype, cls)
+        services._strategy_registry = reg
+
+        # Add a long equity position so the analyzer detects it.
+        services.update_position("AAPL", {
+            "quantity": 100,
+            "entry_price": 150.0,
+            "current_price": 155.0,
+            "unrealized_pnl": 500.0,
+            "market_value": 15500.0,
+            "side": "LONG",
+            "sec_type": "STK",
+        })
+
+        # Confirm it is detected before adoption.
+        inferred_before = services.get_inferred_strategies()
+        assert len(inferred_before) > 0
+        aapl_before = [s for s in inferred_before if "AAPL" in s["symbols"]]
+        assert len(aapl_before) > 0
+
+        # Simulate adoption: register a LongEquityStrategy covering the same symbols.
+        config = StrategyConfig(name="LongEquity_AAPL", symbols=["AAPL"])
+        reg.create_strategy("LongEquity", config)
+
+        # The matching inferred card should now be suppressed.
+        inferred_after = services.get_inferred_strategies()
+        aapl_after = [s for s in inferred_after if "AAPL" in s["symbols"]]
+        assert len(aapl_after) == 0, (
+            "Adopted LongEquity_AAPL should suppress the AAPL inferred detection"
+        )
+
+        # Restore the registry to its default state so subsequent tests are unaffected.
+        services._strategy_registry = None
+
     def test_reset_dismissed_inferred(self, services):
         """Test resetting dismissed strategies."""
         # Add position and dismiss it

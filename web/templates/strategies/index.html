@@ -193,6 +193,11 @@
   {% if strategies %}
   <div style="display:grid;gap:1rem;">
     {% for s in strategies %}
+    {% set cp = s.config_parameters|default({}) %}
+    {% set adp_targets = cp.targets|default({}) %}
+    {% set adp_stype = cp.strategy_type|default('') %}
+    {% set adp_desc = cp.description|default('') %}
+    {% set adp_conf = cp.confidence|default(0)|float %}
     <div class="strategy-monitor-card" id="sc-{{ loop.index }}" data-strategy-name="{{ s.strategy_name }}"
          style="background:#1a1a2e;border:1px solid {% if s.state == 'RUNNING' %}#2d4a5a{% else %}#2d2d44{% endif %};border-radius:8px;padding:1rem;">
 
@@ -203,6 +208,14 @@
             {{ s.strategy_name }}
           </a>
           <span class="state-badge state-{{ s.state|lower }}">{{ s.state }}</span>
+          {% if adp_stype %}
+          <span style="display:inline-block;background:#1c3d5a;color:#63b3ed;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:10px;">
+            {{ adp_stype }}
+          </span>
+          {% endif %}
+          {% if adp_conf > 0 %}
+          <span style="font-size:0.7rem;color:#a0aec0;">{{ "%.0f"|format(adp_conf * 100) }}% confidence</span>
+          {% endif %}
           {% if s.active_positions > 0 %}
           <span style="font-size:0.7rem;background:#1b2d1b;color:#68d391;padding:2px 7px;border-radius:10px;">
             {{ s.active_positions }} position{{ 's' if s.active_positions != 1 else '' }}
@@ -218,6 +231,10 @@
           <a href="/strategies/{{ s.strategy_name }}" class="btn-sm btn-secondary">Details →</a>
         </div>
       </div>
+
+      {% if adp_desc %}
+      <p style="font-size:0.85rem;color:#e2e8f0;margin-bottom:0.5rem;">{{ adp_desc }}</p>
+      {% endif %}
 
       <!-- Metrics row -->
       <div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:0.78rem;color:#a0aec0;margin-bottom:0.6rem;">
@@ -248,23 +265,116 @@
             {% set price_chg = -raw_chg if side == 'SHORT' else raw_chg %}
             <span style="font-size:0.75rem;font-weight:600;color:{{ '#48bb78' if price_chg >= 0 else '#fc8181' }};">
               {{ "+" if price_chg >= 0 else "" }}{{ "%.2f"|format(price_chg) }}
-              ({{ "+" if price_chg >= 0 else "" }}{{ "%.1f"|format(price_chg / ent * 100) }}%)
+              ({{ "+" if price_chg >= 0 else "" }}{{ "%.1f"|format(price_chg / ent * 100) }}%) from entry ${{ "%.2f"|format(ent) }}
             </span>
             {% endif %}
             {% endif %}
             <span style="font-size:0.75rem;color:{{ '#48bb78' if pnl >= 0 else '#fc8181' }};margin-left:auto;">
-              P&amp;L: {{ "+" if pnl >= 0 else "" }}${{ "%.2f"|format(pnl) }}
+              Unrealized P&amp;L: {{ "+" if pnl >= 0 else "" }}${{ "%.2f"|format(pnl) }}
             </span>
           </div>
         {% endfor %}
       {% endif %}
 
-      <!-- AI Insight section (lazy on demand) -->
-      <div class="sc-insight-section" id="sc-insight-{{ loop.index }}" data-strategy-name="{{ s.strategy_name }}" style="margin-top:0.6rem;">
+      <!-- Adopted targets (from inferred strategy metadata) -->
+      {% if adp_targets %}
+      <div style="margin-top:0.5rem;">
+        <div style="font-size:0.75rem;color:#a0aec0;margin-bottom:0.35rem;"><strong>Targets:</strong></div>
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+          {% if adp_targets.stop_loss_price %}
+          <span class="target-badge target-stop">
+            🛑 Stop: ${{ "%.2f"|format(adp_targets.stop_loss_price) }}
+            {% if adp_targets.stop_loss_pct %} ({{ "%.1f"|format(adp_targets.stop_loss_pct * 100) }}%){% endif %}
+          </span>
+          {% endif %}
+          {% if adp_targets.profit_target_price %}
+          <span class="target-badge target-profit">
+            🎯 Target: ${{ "%.2f"|format(adp_targets.profit_target_price) }}
+            {% if adp_targets.profit_target_pct %} ({{ "%.1f"|format(adp_targets.profit_target_pct * 100) }}%){% endif %}
+          </span>
+          {% endif %}
+          {% if adp_targets.trailing_stop_pct %}
+          <span class="target-badge target-trailing">
+            📉 Trail: {{ "%.1f"|format(adp_targets.trailing_stop_pct * 100) }}%
+          </span>
+          {% endif %}
+          {% if adp_targets.max_profit is not none and adp_targets.max_profit is number %}
+          <span class="target-badge target-profit">
+            💰 Max Profit: ${{ "%.2f"|format(adp_targets.max_profit) }}
+          </span>
+          {% elif adp_targets.max_profit is not none %}
+          <span class="target-badge target-profit">
+            💰 Max Profit: {{ adp_targets.max_profit }}
+          </span>
+          {% endif %}
+          {% if adp_targets.max_loss %}
+          <span class="target-badge target-stop">
+            ⚠️ Max Loss: ${{ "%.2f"|format(adp_targets.max_loss) }}
+          </span>
+          {% endif %}
+          {% if adp_targets.profit_target_pct and not adp_targets.profit_target_price %}
+          <span class="target-badge target-profit">
+            🎯 Close at {{ "%.0f"|format(adp_targets.profit_target_pct * 100) }}% profit
+          </span>
+          {% endif %}
+        </div>
+
+        <!-- Visual target bar (shown when we have a primary live position with entry price) -->
+        {% if adp_targets.stop_loss_price and adp_targets.profit_target_price and s.live_positions %}
+        {% set first_pos = s.live_positions.values()|list|first %}
+        {% set entry_price = first_pos.entry_price|default(0)|float %}
+        {% set current_price = first_pos.current_price|default(entry_price)|float %}
+        {% if entry_price > 0 %}
+        {% set is_short = adp_stype in ['ShortEquity'] %}
+        {% if is_short %}
+        {% set bar_low = adp_targets.profit_target_price %}
+        {% set bar_high = adp_targets.stop_loss_price %}
+        {% else %}
+        {% set bar_low = adp_targets.stop_loss_price %}
+        {% set bar_high = adp_targets.profit_target_price %}
+        {% endif %}
+        {% set range_total = bar_high - bar_low %}
+        {% if range_total > 0 %}
+        {% set progress = ((current_price - bar_low) / range_total * 100)|round(1) %}
+        {% set progress = [0, [progress, 100]|min]|max %}
+        <div style="margin-top:0.5rem;">
+          <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#a0aec0;">
+            {% if is_short %}
+            <span>🎯 ${{ "%.2f"|format(adp_targets.profit_target_price) }}</span>
+            <span>Entry ${{ "%.2f"|format(entry_price) }}</span>
+            <span>🛑 ${{ "%.2f"|format(adp_targets.stop_loss_price) }}</span>
+            {% else %}
+            <span>🛑 ${{ "%.2f"|format(adp_targets.stop_loss_price) }}</span>
+            <span>Entry ${{ "%.2f"|format(entry_price) }}</span>
+            <span>🎯 ${{ "%.2f"|format(adp_targets.profit_target_price) }}</span>
+            {% endif %}
+          </div>
+          <div style="background:#1e1e2e;border-radius:4px;height:8px;position:relative;margin-top:3px;">
+            {% if is_short %}
+            <div style="background:{{ '#48bb78' if current_price <= entry_price else '#fc8181' }};height:100%;border-radius:4px;width:{{ progress }}%;transition:width 0.3s;"></div>
+            {% else %}
+            <div style="background:{{ '#48bb78' if current_price >= entry_price else '#fc8181' }};height:100%;border-radius:4px;width:{{ progress }}%;transition:width 0.3s;"></div>
+            {% endif %}
+            <div style="position:absolute;top:-1px;left:{{ ((entry_price - bar_low) / range_total * 100)|round(1) }}%;width:2px;height:10px;background:#e2e8f0;" title="Entry"></div>
+          </div>
+        </div>
+        {% endif %}
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- AI Insight section (auto-loaded for adopted strategies, lazy for others) -->
+      <div class="sc-insight-section" id="sc-insight-{{ loop.index }}" data-strategy-name="{{ s.strategy_name }}"
+           data-adopted="{{ 'true' if adp_stype else 'false' }}" style="margin-top:0.6rem;">
         <div style="border-top:1px solid #2d2d44;padding-top:0.45rem;display:flex;align-items:flex-start;gap:0.5rem;">
           <span style="font-size:0.7rem;color:#a0aec0;font-weight:600;white-space:nowrap;">💡 AI Insight</span>
           <p class="sc-insight-text" style="font-size:0.78rem;color:#cbd5e0;margin:0;line-height:1.45;flex:1;">
+            {% if adp_stype %}
+            <span style="color:#718096;">⏳ Loading insight…</span>
+            {% else %}
             <button class="btn-sm btn-secondary sc-load-insight-btn" style="font-size:0.68rem;padding:1px 7px;">Load AI Insight</button>
+            {% endif %}
           </p>
         </div>
       </div>
@@ -347,6 +457,9 @@
 }
 </style>
 <script>
+// Embed full inferred strategy data so adoptInferred can access targets/description/confidence.
+const INFERRED_DATA = {{ inferred_strategies|tojson }};
+
 window.loadInsight = async function(id) {
   const section = document.getElementById('insight-' + id);
   if (!section) return;
@@ -408,6 +521,10 @@ window.adoptInferred = async function(id, strategyType, symbolsCsv) {
   const name = prompt('Enter a name for this strategy:', strategyType + '_' + symbolsCsv.split(',')[0]);
   if (!name) return;
   const symbols = symbolsCsv.split(',').map(s => s.trim()).filter(Boolean);
+
+  // Look up the full inferred strategy data to preserve targets/description/confidence.
+  const infData = INFERRED_DATA.find(function(s) { return s.id === id; }) || {};
+
   try {
     const classesRes = await fetch('/api/strategies/classes');
     const classesData = await classesRes.json();
@@ -418,17 +535,39 @@ window.adoptInferred = async function(id, strategyType, symbolsCsv) {
       return;
     }
 
+    // Pass inferred metadata as parameters so the registered card can show full detail.
+    const parameters = {
+      strategy_type: strategyType,
+      description: infData.description || '',
+      confidence: infData.confidence || 0,
+      targets: infData.targets || {},
+    };
+
     const res = await fetch('/api/strategies/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ strategy_type: strategyType, name: name, symbols: symbols })
+      body: JSON.stringify({ strategy_type: strategyType, name: name, symbols: symbols, parameters: parameters })
     });
     const data = await res.json();
-    if (data.error) alert(data.error);
-    else {
-      // Also dismiss the inferred card
-      await fetch(`/api/strategies/inferred/${id}/dismiss`, { method: 'POST' });
-      location.reload();
+    if (data.error) { alert(data.error); return; }
+
+    // Auto-start the adopted strategy: positions are already in place, so
+    // there is no reason to require a manual Start click after adopting.
+    const startRes = await fetch(`/api/strategies/${encodeURIComponent(name)}/start`, { method: 'POST' });
+    let startData = {};
+    try {
+      startData = await startRes.json();
+    } catch (_) {
+      startData = {};
     }
+
+    if (!startRes.ok || startData.error) {
+      alert(startData.error || ('Failed to start adopted strategy "' + name + '".'));
+      return;
+    }
+
+    // Dismiss the inferred card (also suppressed on restart via symbol-set matching).
+    await fetch(`/api/strategies/inferred/${id}/dismiss`, { method: 'POST' });
+    location.reload();
   } catch(e) { alert('Error: ' + e); }
 };
 
@@ -455,11 +594,16 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // Load AI Insight buttons on registered strategy cards
+  // Load AI Insight buttons on registered strategy cards (non-adopted strategies)
   document.querySelectorAll('.sc-load-insight-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       loadStrategyInsight(btn.closest('.sc-insight-section'));
     });
+  });
+
+  // Auto-load AI insights for adopted strategy cards (staggered, same as inferred)
+  document.querySelectorAll('.sc-insight-section[data-adopted="true"]').forEach(function(section, index) {
+    setTimeout(function() { loadStrategyInsight(section); }, index * 500);
   });
 });
 

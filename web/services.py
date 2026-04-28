@@ -250,15 +250,40 @@ class ServiceManager:
 
         Results are cached and refreshed each time this method is called.
         Dismissed inferred IDs (scoped to the current account) are filtered out.
+        Strategies that were already adopted (registered as an inferred-type
+        strategy with matching symbols) are also suppressed so they do not
+        reappear as unadopted inferred cards after an application restart.
         """
         positions = self.get_positions()
         inferred = self.position_analyzer.analyze(positions)
         account_id = self.current_account_id
+
+        # Build set of symbol-sets already covered by adopted inferred strategies
+        # so we don't re-surface their inferred cards after a restart.
+        # Use the private attribute intentionally to avoid triggering lazy
+        # initialization — if the registry hasn't been created yet there are
+        # no adopted strategies to filter.
+        adopted_symbol_sets = set()
+        try:
+            from strategies.inferred_strategies import _InferredBase
+            reg = self._strategy_registry
+            if reg is not None:
+                for s in reg.get_all_strategies():
+                    if isinstance(s, _InferredBase):
+                        adopted_symbol_sets.add(frozenset(s.config.symbols))
+        except (ImportError, AttributeError):
+            logger.debug(
+                "Unable to apply adopted inferred-strategy filtering; "
+                "continuing without adopted-strategy suppression.",
+                exc_info=True,
+            )
+
         with self._lock:
             dismissed = self._dismissed_inferred.get(account_id, set())
             self._inferred_strategies = [
                 s.to_dict() for s in inferred
                 if s.id not in dismissed
+                and frozenset(s.symbols) not in adopted_symbol_sets
             ]
             return list(self._inferred_strategies)
 

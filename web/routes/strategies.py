@@ -47,6 +47,9 @@ def index():
             for sym in symbols
             if sym in all_positions
         }
+        # Expose config parameters so the template can render adoption metadata
+        # (targets, description, confidence, strategy_type) stored at adopt-time.
+        perf["config_parameters"] = dict(s.config.parameters)
         strategies.append(perf)
 
     context = {
