@@ -260,10 +260,13 @@ class ServiceManager:
 
         # Build set of symbol-sets already covered by adopted inferred strategies
         # so we don't re-surface their inferred cards after a restart.
-        adopted_symbol_sets: set = set()
+        # Use the private attribute intentionally to avoid triggering lazy
+        # initialization — if the registry hasn't been created yet there are
+        # no adopted strategies to filter.
+        adopted_symbol_sets = set()
         try:
             from strategies.inferred_strategies import _InferredBase
-            reg = self._strategy_registry  # access private attr to avoid triggering lazy init
+            reg = self._strategy_registry
             if reg is not None:
                 for s in reg.get_all_strategies():
                     if isinstance(s, _InferredBase):
