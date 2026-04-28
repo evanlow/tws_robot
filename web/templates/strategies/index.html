@@ -193,7 +193,7 @@
   {% if strategies %}
   <div style="display:grid;gap:1rem;">
     {% for s in strategies %}
-    <div class="strategy-monitor-card" id="sc-{{ s.strategy_name }}"
+    <div class="strategy-monitor-card" id="sc-{{ loop.index }}" data-strategy-name="{{ s.strategy_name }}"
          style="background:#1a1a2e;border:1px solid {% if s.state == 'RUNNING' %}#2d4a5a{% else %}#2d2d44{% endif %};border-radius:8px;padding:1rem;">
 
       <!-- Header row -->
@@ -211,9 +211,9 @@
         </div>
         <div style="display:flex;gap:0.4rem;align-items:center;">
           {% if s.state == 'RUNNING' %}
-          <button class="btn-sm btn-danger" onclick="controlStrategy('{{ s.strategy_name }}', 'stop')">Stop</button>
+          <button class="btn-sm btn-danger" data-action="stop" data-strategy-name="{{ s.strategy_name }}">Stop</button>
           {% elif s.state in ['READY', 'PAUSED'] %}
-          <button class="btn-sm btn-success" onclick="controlStrategy('{{ s.strategy_name }}', 'start')">Start</button>
+          <button class="btn-sm btn-success" data-action="start" data-strategy-name="{{ s.strategy_name }}">Start</button>
           {% endif %}
           <a href="/strategies/{{ s.strategy_name }}" class="btn-sm btn-secondary">Details →</a>
         </div>
@@ -260,12 +260,11 @@
       {% endif %}
 
       <!-- AI Insight section (lazy on demand) -->
-      <div class="sc-insight-section" id="sc-insight-{{ s.strategy_name }}" style="margin-top:0.6rem;">
+      <div class="sc-insight-section" id="sc-insight-{{ loop.index }}" data-strategy-name="{{ s.strategy_name }}" style="margin-top:0.6rem;">
         <div style="border-top:1px solid #2d2d44;padding-top:0.45rem;display:flex;align-items:flex-start;gap:0.5rem;">
           <span style="font-size:0.7rem;color:#a0aec0;font-weight:600;white-space:nowrap;">💡 AI Insight</span>
           <p class="sc-insight-text" style="font-size:0.78rem;color:#cbd5e0;margin:0;line-height:1.45;flex:1;">
-            <button class="btn-sm btn-secondary sc-load-insight-btn" style="font-size:0.68rem;padding:1px 7px;"
-                    onclick="loadStrategyInsight('{{ s.strategy_name }}')">Load AI Insight</button>
+            <button class="btn-sm btn-secondary sc-load-insight-btn" style="font-size:0.68rem;padding:1px 7px;">Load AI Insight</button>
           </p>
         </div>
       </div>
@@ -365,23 +364,28 @@ window.loadInsight = async function(id) {
   }
 };
 
-// Auto-load AI insights for all inferred strategies on page load
-// Stagger requests to avoid overwhelming the server
-document.addEventListener('DOMContentLoaded', function() {
-  const cards = document.querySelectorAll('.inferred-card');
-  cards.forEach(function(card, index) {
-    const id = card.id.replace('inferred-', '');
-    if (id) setTimeout(function() { loadInsight(id); }, index * 500);
-  });
-});
-
 window.controlStrategy = async function(name, action) {
   try {
-    const res = await fetch(`/api/strategies/${name}/${action}`, { method: 'POST' });
+    const res = await fetch(`/api/strategies/${encodeURIComponent(name)}/${action}`, { method: 'POST' });
     const data = await res.json();
     if (data.error) alert(data.error);
     else location.reload();
   } catch(e) { alert('Error: ' + e); }
+};
+
+window.loadStrategyInsight = async function(insightSection) {
+  if (!insightSection) return;
+  const name = insightSection.dataset.strategyName;
+  if (!name) return;
+  const textEl = insightSection.querySelector('.sc-insight-text');
+  textEl.innerHTML = '<span style="color:#718096;">⏳ Loading insight…</span>';
+  try {
+    const res = await fetch(`/api/strategies/${encodeURIComponent(name)}/insight`, { method: 'POST' });
+    const data = await res.json();
+    textEl.textContent = data.error ? '⚠ ' + data.error : data.insight;
+  } catch(e) {
+    textEl.textContent = 'Failed to load insight: ' + (e.message || e);
+  }
 };
 
 window.createStrategy = async function() {
@@ -436,19 +440,28 @@ window.dismissInferred = async function(id) {
   } catch(e) { alert('Error: ' + e); }
 };
 
-window.loadStrategyInsight = async function(name) {
-  const section = document.getElementById('sc-insight-' + name);
-  if (!section) return;
-  const textEl = section.querySelector('.sc-insight-text');
-  textEl.innerHTML = '<span style="color:#718096;">⏳ Loading insight…</span>';
-  try {
-    const res = await fetch(`/api/strategies/${encodeURIComponent(name)}/insight`, { method: 'POST' });
-    const data = await res.json();
-    textEl.textContent = data.error ? '⚠ ' + data.error : data.insight;
-  } catch(e) {
-    textEl.textContent = 'Failed to load insight: ' + (e.message || e);
-  }
-};
+// Wire up all event listeners once DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+  // Auto-load AI insights for inferred strategy cards (staggered)
+  document.querySelectorAll('.inferred-card').forEach(function(card, index) {
+    const id = card.id.replace('inferred-', '');
+    if (id) setTimeout(function() { loadInsight(id); }, index * 500);
+  });
+
+  // Start/Stop buttons on registered strategy cards (no inline onclick)
+  document.querySelectorAll('[data-action="start"], [data-action="stop"]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      controlStrategy(btn.dataset.strategyName, btn.dataset.action);
+    });
+  });
+
+  // Load AI Insight buttons on registered strategy cards
+  document.querySelectorAll('.sc-load-insight-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      loadStrategyInsight(btn.closest('.sc-insight-section'));
+    });
+  });
+});
 
 // AI Generate
 (function () {
