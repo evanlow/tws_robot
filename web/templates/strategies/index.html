@@ -191,30 +191,90 @@
 <section>
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Strategy Instances</h2>
   {% if strategies %}
-  <table class="data-table">
-    <thead>
-      <tr><th>Name</th><th>State</th><th>Signals</th><th>Accepted</th><th>Rate</th><th>Positions</th><th>Actions</th></tr>
-    </thead>
-    <tbody>
-      {% for s in strategies %}
-      <tr>
-        <td><a href="/strategies/{{ s.strategy_name }}"><strong>{{ s.strategy_name }}</strong></a></td>
-        <td><span class="state-badge state-{{ s.state|lower }}">{{ s.state }}</span></td>
-        <td>{{ s.signals_generated }}</td>
-        <td>{{ s.signals_accepted }}</td>
-        <td>{{ "%.0f"|format(s.acceptance_rate * 100) }}%</td>
-        <td>{{ s.active_positions }}</td>
-        <td>
+  <div style="display:grid;gap:1rem;">
+    {% for s in strategies %}
+    <div class="strategy-monitor-card" id="sc-{{ s.strategy_name }}"
+         style="background:#1a1a2e;border:1px solid {% if s.state == 'RUNNING' %}#2d4a5a{% else %}#2d2d44{% endif %};border-radius:8px;padding:1rem;">
+
+      <!-- Header row -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.6rem;">
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+          <a href="/strategies/{{ s.strategy_name }}" style="font-size:0.95rem;font-weight:700;color:#90cdf4;text-decoration:none;">
+            {{ s.strategy_name }}
+          </a>
+          <span class="state-badge state-{{ s.state|lower }}">{{ s.state }}</span>
+          {% if s.active_positions > 0 %}
+          <span style="font-size:0.7rem;background:#1b2d1b;color:#68d391;padding:2px 7px;border-radius:10px;">
+            {{ s.active_positions }} position{{ 's' if s.active_positions != 1 else '' }}
+          </span>
+          {% endif %}
+        </div>
+        <div style="display:flex;gap:0.4rem;align-items:center;">
           {% if s.state == 'RUNNING' %}
           <button class="btn-sm btn-danger" onclick="controlStrategy('{{ s.strategy_name }}', 'stop')">Stop</button>
           {% elif s.state in ['READY', 'PAUSED'] %}
           <button class="btn-sm btn-success" onclick="controlStrategy('{{ s.strategy_name }}', 'start')">Start</button>
           {% endif %}
-        </td>
-      </tr>
+          <a href="/strategies/{{ s.strategy_name }}" class="btn-sm btn-secondary">Details →</a>
+        </div>
+      </div>
+
+      <!-- Metrics row -->
+      <div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:0.78rem;color:#a0aec0;margin-bottom:0.6rem;">
+        <span>Signals: <strong style="color:#e2e8f0;">{{ s.signals_generated }}</strong></span>
+        <span>Accepted: <strong style="color:#e2e8f0;">{{ s.signals_accepted }}</strong></span>
+        <span>Rate: <strong style="color:#e2e8f0;">{{ "%.0f"|format(s.acceptance_rate * 100) }}%</strong></span>
+        {% if s.uptime_seconds %}
+        {% set hrs = (s.uptime_seconds / 3600)|int %}
+        {% set mins = ((s.uptime_seconds % 3600) / 60)|int %}
+        <span>Uptime: <strong style="color:#e2e8f0;">{{ hrs }}h {{ mins }}m</strong></span>
+        {% endif %}
+      </div>
+
+      <!-- Live positions matched to this strategy's symbols -->
+      {% set ns = namespace(matched=false) %}
+      {% for sym, pos in positions.items() %}
+        {% if sym in s.strategy_name or (sym.split(' ')[0] in s.strategy_name) %}
+          {% set ns.matched = true %}
+          {% set cur = pos.current_price|default(0)|float %}
+          {% set ent = pos.entry_price|default(0)|float %}
+          {% set pnl = pos.unrealized_pnl|default(0)|float %}
+          {% set side = pos.side|default('LONG') %}
+          <div style="display:flex;align-items:center;gap:0.75rem;background:#0f0f13;border-radius:5px;padding:0.4rem 0.6rem;margin-bottom:0.3rem;flex-wrap:wrap;">
+            <span style="font-size:0.78rem;font-weight:600;color:#e2e8f0;">{{ sym }}</span>
+            <span style="font-size:0.72rem;color:#a0aec0;">{{ side }} {{ pos.quantity|default(0)|abs }}</span>
+            {% if cur > 0 %}
+            <span style="font-size:0.82rem;font-weight:700;color:#e2e8f0;">${{ "%.2f"|format(cur) }}</span>
+            {% if ent > 0 %}
+            {% set raw_chg = cur - ent %}
+            {% set price_chg = -raw_chg if side == 'SHORT' else raw_chg %}
+            <span style="font-size:0.75rem;font-weight:600;color:{{ '#48bb78' if price_chg >= 0 else '#fc8181' }};">
+              {{ "+" if price_chg >= 0 else "" }}{{ "%.2f"|format(price_chg) }}
+              ({{ "+" if price_chg >= 0 else "" }}{{ "%.1f"|format(price_chg / ent * 100) }}%)
+            </span>
+            {% endif %}
+            {% endif %}
+            <span style="font-size:0.75rem;color:{{ '#48bb78' if pnl >= 0 else '#fc8181' }};margin-left:auto;">
+              P&amp;L: {{ "+" if pnl >= 0 else "" }}${{ "%.2f"|format(pnl) }}
+            </span>
+          </div>
+        {% endif %}
       {% endfor %}
-    </tbody>
-  </table>
+
+      <!-- AI Insight section (lazy on demand) -->
+      <div class="sc-insight-section" id="sc-insight-{{ s.strategy_name }}" style="margin-top:0.6rem;">
+        <div style="border-top:1px solid #2d2d44;padding-top:0.45rem;display:flex;align-items:flex-start;gap:0.5rem;">
+          <span style="font-size:0.7rem;color:#a0aec0;font-weight:600;white-space:nowrap;">💡 AI Insight</span>
+          <p class="sc-insight-text" style="font-size:0.78rem;color:#cbd5e0;margin:0;line-height:1.45;flex:1;">
+            <button class="btn-sm btn-secondary sc-load-insight-btn" style="font-size:0.68rem;padding:1px 7px;"
+                    onclick="loadStrategyInsight('{{ s.strategy_name }}')">Load AI Insight</button>
+          </p>
+        </div>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
   {% else %}
   <p class="empty-state">No strategy instances created yet.</p>
   {% endif %}
@@ -376,6 +436,20 @@ window.dismissInferred = async function(id) {
     const card = document.getElementById('inferred-' + id);
     if (card) card.style.display = 'none';
   } catch(e) { alert('Error: ' + e); }
+};
+
+window.loadStrategyInsight = async function(name) {
+  const section = document.getElementById('sc-insight-' + name);
+  if (!section) return;
+  const textEl = section.querySelector('.sc-insight-text');
+  textEl.innerHTML = '<span style="color:#718096;">⏳ Loading insight…</span>';
+  try {
+    const res = await fetch(`/api/strategies/${encodeURIComponent(name)}/insight`, { method: 'POST' });
+    const data = await res.json();
+    textEl.textContent = data.error ? '⚠ ' + data.error : data.insight;
+  } catch(e) {
+    textEl.textContent = 'Failed to load insight: ' + (e.message || e);
+  }
 };
 
 // AI Generate

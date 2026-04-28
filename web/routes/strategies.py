@@ -33,6 +33,12 @@ def index():
     except Exception:
         pass
 
+    positions = {}
+    try:
+        positions = svc.get_positions()
+    except Exception:
+        pass
+
     context = {
         "title": "Strategies",
         "active_page": "strategies",
@@ -40,6 +46,7 @@ def index():
         "strategy_classes": classes,
         "summary": svc.strategy_registry.get_overall_summary() if strategies else {},
         "inferred_strategies": inferred,
+        "positions": positions,
     }
     return render_template("strategies/index.html", **context)
 
@@ -51,11 +58,21 @@ def detail(name: str):
     perf = strategy.get_performance_summary() if strategy else {}
     config_dict = strategy.config.__dict__ if strategy else {}
 
+    # Enrich with live positions matching this strategy's symbols
+    all_positions = {}
+    try:
+        all_positions = svc.get_positions()
+    except Exception:
+        pass
+    symbols = config_dict.get("symbols", [])
+    strategy_positions = {s: all_positions[s] for s in symbols if s in all_positions}
+
     context = {
         "title": f"Strategy — {name}",
         "active_page": "strategies",
         "strategy_name": name,
         "strategy": perf,
         "config": config_dict,
+        "strategy_positions": strategy_positions,
     }
     return render_template("strategies/detail.html", **context)

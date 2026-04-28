@@ -188,6 +188,65 @@ def reset_dismissed():
     return jsonify({"status": "reset"})
 
 
+@bp.route("/<name>/insight", methods=["POST"])
+def strategy_insight(name: str):
+    """Generate an AI narrative insight for a registered (adopted) strategy.
+
+    Combines the strategy performance summary with its live positions so the
+    AI can reason about current P&L, entry prices, targets and risk.
+    Returns ``{"insight": "..."}`` or an error if AI is unavailable.
+    """
+    from ai.client import get_client
+    from ai.prompts import Prompts
+
+    client = get_client()
+    if client is None:
+        return jsonify({
+            "error": "AI features are not enabled. "
+                     "Set OPENAI_API_KEY to auto-enable, or set AI_ENABLED=true explicitly."
+        }), 503
+
+    svc = get_services()
+    strategy = svc.strategy_registry.get_strategy(name)
+    if not strategy:
+        return jsonify({"error": f"Strategy '{name}' not found"}), 404
+
+    perf = strategy.get_performance_summary()
+
+    # Enrich with live positions for this strategy's symbols
+    all_positions = svc.get_positions()
+    symbols = strategy.config.symbols or []
+    live_positions = [
+        {"symbol": s, **all_positions[s]}
+        for s in symbols
+        if s in all_positions
+    ]
+
+    strategy_data = {
+        **perf,
+        "strategy_type": type(strategy).__name__,
+        "symbols": symbols,
+        "positions": live_positions,
+        "config_parameters": strategy.config.parameters,
+    }
+
+    system_prompt = Prompts.STRATEGY_INSIGHT.format(
+        strategy_json=json.dumps(strategy_data, indent=2, default=str),
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "Please provide a brief insight for this strategy."},
+    ]
+
+    try:
+        insight = client.chat(messages, temperature=0.4)
+    except RuntimeError as exc:
+        logger.error("AI strategy-insight error: %s", exc)
+        return jsonify({"error": "AI request failed. Please try again."}), 502
+
+    return jsonify({"insight": insight})
+
+
 @bp.route("/inferred/<inferred_id>/insight", methods=["POST"])
 def inferred_insight(inferred_id: str):
     """Generate an AI narrative insight for an inferred strategy.

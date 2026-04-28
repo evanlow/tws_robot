@@ -40,6 +40,53 @@
 <p class="empty-state">Strategy "{{ strategy_name }}" not found in registry.</p>
 {% endif %}
 
+<!-- Live Positions -->
+{% if strategy_positions %}
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">📍 Live Positions</h2>
+  <div style="display:grid;gap:0.6rem;">
+    {% for sym, pos in strategy_positions.items() %}
+    {% set cur = pos.current_price|default(0)|float %}
+    {% set ent = pos.entry_price|default(0)|float %}
+    {% set pnl = pos.unrealized_pnl|default(0)|float %}
+    {% set side = pos.side|default('LONG') %}
+    <div style="background:#1a1a2e;border:1px solid #2d2d44;border-radius:6px;padding:0.75rem;display:flex;flex-wrap:wrap;align-items:center;gap:1rem;">
+      <div>
+        <span style="font-size:0.85rem;font-weight:700;color:#e2e8f0;">{{ sym }}</span>
+        <span style="font-size:0.75rem;color:#a0aec0;margin-left:0.4rem;">{{ side }} {{ pos.quantity|default(0)|abs }}</span>
+      </div>
+      {% if cur > 0 %}
+      <div>
+        <span style="font-size:1.1rem;font-weight:700;color:#e2e8f0;">${{ "%.2f"|format(cur) }}</span>
+        {% if ent > 0 %}
+        {% set raw_chg = cur - ent %}
+        {% set price_chg = -raw_chg if side == 'SHORT' else raw_chg %}
+        <span style="font-size:0.78rem;font-weight:600;margin-left:0.4rem;color:{{ '#48bb78' if price_chg >= 0 else '#fc8181' }};">
+          {{ "+" if price_chg >= 0 else "" }}{{ "%.2f"|format(price_chg) }}
+          ({{ "+" if price_chg >= 0 else "" }}{{ "%.1f"|format(price_chg / ent * 100) }}%) from entry ${{ "%.2f"|format(ent) }}
+        </span>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div style="margin-left:auto;">
+        <span style="font-size:0.85rem;font-weight:600;color:{{ '#48bb78' if pnl >= 0 else '#fc8181' }};">
+          Unrealized P&amp;L: {{ "+" if pnl >= 0 else "" }}${{ "%.2f"|format(pnl) }}
+        </span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<!-- AI Insight -->
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">💡 AI Strategy Insight</h2>
+  <div id="detailInsightBox" class="stat-card" style="padding:1rem;min-height:50px;">
+    <p id="detailInsightText" class="empty-state">Loading AI insight…</p>
+  </div>
+</section>
+
 <!-- Configuration -->
 {% if config %}
 <section style="margin-bottom:2rem;">
@@ -84,6 +131,20 @@ window.controlStrategy = async function(name, action) {
     else location.reload();
   } catch(e) { alert('Error: ' + e); }
 };
+
+// Auto-load AI insight on page load
+document.addEventListener('DOMContentLoaded', async function() {
+  const textEl = document.getElementById('detailInsightText');
+  if (!textEl) return;
+  try {
+    const res = await fetch(`/api/strategies/{{ strategy_name|urlencode }}/insight`, { method: 'POST' });
+    const data = await res.json();
+    textEl.style.color = '';
+    textEl.textContent = data.error ? '⚠ ' + data.error : data.insight;
+  } catch(e) {
+    textEl.textContent = 'Failed to load insight.';
+  }
+});
 
 (function () {
   const suggestBtn   = document.getElementById('suggestParamsBtn');
