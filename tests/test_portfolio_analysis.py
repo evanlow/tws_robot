@@ -1231,6 +1231,20 @@ class TestNewPrompts:
         assert "SHORT OPTION" in Prompts.STOCK_DEEP_DIVE
         assert "quantity" in Prompts.STOCK_DEEP_DIVE
 
+    def test_strategy_insight_prompt_has_required_placeholders_and_length(self):
+        from ai.prompts import Prompts
+        assert hasattr(Prompts, "STRATEGY_INSIGHT")
+        assert "{strategy_json}" in Prompts.STRATEGY_INSIGHT
+        assert "3-5 sentences" in Prompts.STRATEGY_INSIGHT
+        assert "strategy_type" in Prompts.STRATEGY_INSIGHT
+
+    def test_strategy_insight_prompt_has_non_hallucination_guards(self):
+        from ai.prompts import Prompts
+        prompt = Prompts.STRATEGY_INSIGHT
+        assert "do NOT invent one" in prompt
+        assert "If the expiry cannot be determined from the data" in prompt
+        assert "omit all DTE and time-to-expiry commentary" in prompt
+
 
 # ===========================================================================
 # Integration test: full pipeline without AI

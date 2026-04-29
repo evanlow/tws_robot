@@ -1514,10 +1514,21 @@ fetch('/api/strategies/inferred/reset', {
 
 **NEW in v1.8 (PR #27)** - AI Strategy Insights
 
-Analyzes an auto-detected strategy and generates a concise 2-3 sentence narrative covering:
-- Current P&L status relative to entry price
-- Proximity to stop loss and profit target levels
-- One actionable observation or recommendation
+Analyzes an auto-detected strategy and generates a concise 3-5 sentence narrative.
+
+The insight is strategy-type-aware and adapts guidance to the detected
+`strategy_type` (for example: covered calls, vertical spreads, iron condors,
+long/short equity, and long/short options).
+
+It emphasizes:
+- Current P&L and position context
+- Strategy-specific risk and moneyness framing
+- One clear, actionable next step
+
+Guardrails:
+- Uses only values present in input data
+- Does not invent entry/open dates
+- Includes DTE and expiry commentary only when expiry is parseable from symbol data
 
 Requires AI features to be enabled (set `OPENAI_API_KEY` environment variable).
 
@@ -1591,6 +1602,9 @@ fetch('/api/strategies/inferred/inferred_NVDA_long_equity_1/insight', {
 
 Uses the live strategy performance summary plus current positions for that
 strategy's configured symbols.
+
+Insight generation uses the same strategy-type-aware framework and guardrails
+as inferred strategy insights (3-5 sentences, no invented dates/expiry).
 
 Requires AI features to be enabled (set `OPENAI_API_KEY` environment variable).
 
