@@ -324,6 +324,12 @@ def test_strategy_lifecycle():
     assert strategy.state == StrategyState.STOPPED
     assert strategy.stop_time is not None
 
+    # Restart from STOPPED — stop_time is cleared and start_time is refreshed
+    strategy.start()
+    assert strategy.state == StrategyState.RUNNING
+    assert strategy.stop_time is None
+    assert strategy.start_time is not None
+
 
 def test_strategy_invalid_transitions():
     """Test invalid state transitions"""
@@ -341,9 +347,13 @@ def test_strategy_invalid_transitions():
     strategy.resume()
     assert strategy.state == StrategyState.READY
     
-    # Stop, then can't start
+    # Can't pause from STOPPED
     strategy.stop()
-    strategy.start()
+    strategy.pause()
+    assert strategy.state == StrategyState.STOPPED
+    
+    # Can't resume from STOPPED
+    strategy.resume()
     assert strategy.state == StrategyState.STOPPED
 
 

@@ -7,7 +7,7 @@
   <a href="/strategies" class="btn-secondary">← All Strategies</a>
   {% if strategy and strategy.state == 'RUNNING' %}
   <button class="btn-danger btn-sm" onclick="controlStrategy('{{ strategy_name }}', 'stop')" title="Stops strategy automation only. Open positions remain in the account until exited separately.">Stop Strategy</button>
-  {% elif strategy and strategy.state in ['READY', 'PAUSED'] %}
+  {% elif strategy and strategy.state in ['READY', 'PAUSED', 'STOPPED'] %}
   <button class="btn-success btn-sm" onclick="controlStrategy('{{ strategy_name }}', 'start')">Start</button>
   {% endif %}
 </div>
