@@ -23,6 +23,8 @@
       <span class="status-bar-disconnected">⚠ TWS NOT CONNECTED</span>
       <span class="status-divider">|</span>
       {% endif %}
+      <span id="haltedIndicator" class="status-bar-halted"{% if not risk_summary.emergency_stop_active %} style="display:none"{% endif %}>🚨 TRADING HALTED</span>
+      <span id="haltedDivider" class="status-divider"{% if not risk_summary.emergency_stop_active %} style="display:none"{% endif %}>|</span>
       <span class="status-item" id="equityDisplay">
         Equity: <strong id="equityVal">{% if connected %}${{ "%.2f"|format(risk_summary.current_equity) }}{% else %}--{% endif %}</strong>
       </span>
@@ -42,9 +44,19 @@
       </span>
     </div>
     <div class="status-bar-right">
-      <button class="btn-emergency" id="emergencyBtn" title="Emergency Stop — halt all trading">
+      {% if risk_summary.emergency_stop_active %}
+      <button class="btn-emergency btn-emergency--active" id="emergencyBtn"
+              data-halted="true"
+              title="Resume trading — lift the emergency halt">
+        ▶ RESUME TRADING
+      </button>
+      {% else %}
+      <button class="btn-emergency" id="emergencyBtn"
+              data-halted="false"
+              title="Emergency Stop — halt all new orders and stop all strategies">
         🚨 EMERGENCY STOP
       </button>
+      {% endif %}
     </div>
   </div>
 
@@ -115,26 +127,102 @@
   })();
   </script>
 
-  <!-- Emergency stop handler -->
+  <!-- Emergency stop / resume handler -->
   <script>
   (function() {
     const emergencyBtn = document.getElementById('emergencyBtn');
-    if (emergencyBtn) {
-      emergencyBtn.addEventListener('click', async () => {
-        if (!confirm('\u26a0\ufe0f EMERGENCY STOP\n\nThis will immediately halt ALL trading and stop ALL strategies.\n\nAre you sure?')) return;
+    if (!emergencyBtn) return;
+
+    emergencyBtn.addEventListener('click', async () => {
+      const isHalted = emergencyBtn.dataset.halted === 'true';
+
+      if (isHalted) {
+        // Resume trading
+        if (!confirm('▶ RESUME TRADING\n\nThis will re-enable automated order submission.\nNote: stopped strategies must be restarted manually.\n\nAre you sure?')) return;
         try {
-          const res = await fetch('/api/emergency/halt', { method: 'POST',
+          const res = await fetch('/api/emergency/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'Manual resume from web dashboard' })
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            alert('Failed to resume trading: ' + (data.error || res.status));
+            return;
+          }
+          _setHaltState(false);
+          alert('Trading resumed: ' + (data.reason || 'Order submission re-enabled'));
+        } catch (err) {
+          alert('Error resuming trading: ' + err);
+        }
+      } else {
+        // Trigger emergency stop
+        if (!confirm('\u26a0\ufe0f EMERGENCY STOP\n\nThis will immediately block ALL new orders and stop ALL strategies.\n\nAre you sure?')) return;
+        try {
+          const res = await fetch('/api/emergency/halt', {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reason: 'Manual halt from web dashboard' })
           });
           const data = await res.json();
-          alert('Emergency halt activated: ' + (data.reason || 'All trading stopped'));
-          location.reload();
+          if (!res.ok) {
+            alert('Failed to trigger emergency halt: ' + (data.error || res.status));
+            return;
+          }
+          _setHaltState(true);
+          alert('Emergency halt activated: ' + (data.reason || 'All new orders blocked'));
         } catch (err) {
           alert('Error triggering emergency halt: ' + err);
         }
-      });
-    }
+      }
+    });
+
+    /**
+     * Update the status bar and emergency button to reflect the current halt state.
+     * Called by the button click handler and by the auto-refresh poller on other pages.
+     *
+     * @param {boolean} halted        - Whether the emergency stop is currently active.
+     * @param {string}  [riskStatus]  - Current risk status string (e.g. 'NORMAL', 'WARNING').
+     *                                  Only used when halted=false to restore the badge to the
+     *                                  real risk level instead of assuming NORMAL.
+     */
+    window._setHaltState = function(halted, riskStatus) {
+      const btn = document.getElementById('emergencyBtn');
+      const indicator = document.getElementById('haltedIndicator');
+      const divider = document.getElementById('haltedDivider');
+      const riskEl = document.getElementById('riskBadge');
+
+      if (btn) {
+        if (halted) {
+          btn.dataset.halted = 'true';
+          btn.textContent = '\u25b6 RESUME TRADING';
+          btn.className = 'btn-emergency btn-emergency--active';
+          btn.title = 'Resume trading \u2014 lift the emergency halt';
+        } else {
+          btn.dataset.halted = 'false';
+          btn.textContent = '🚨 EMERGENCY STOP';
+          btn.className = 'btn-emergency';
+          btn.title = 'Emergency Stop \u2014 halt all new orders and stop all strategies';
+        }
+      }
+
+      if (indicator) indicator.style.display = halted ? '' : 'none';
+      if (divider)   divider.style.display   = halted ? '' : 'none';
+
+      // Update risk badge: force EMERGENCY_STOP when halting; restore to the
+      // provided riskStatus when resuming (don't assume NORMAL).
+      if (riskEl) {
+        if (halted) {
+          riskEl.textContent = 'EMERGENCY_STOP';
+          riskEl.className = 'risk-badge risk-emergency_stop';
+        } else if (riskStatus) {
+          riskEl.textContent = riskStatus;
+          riskEl.className = 'risk-badge risk-' + riskStatus.toLowerCase();
+        }
+        // If riskStatus is not provided (e.g. called from the button handler
+        // right after halt, with no poller data available), leave the badge as-is.
+      }
+    };
   })();
   </script>
 
