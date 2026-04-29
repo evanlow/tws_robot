@@ -178,7 +178,7 @@ class BaseStrategy(ABC):
         """
         Start the strategy.
         
-        Transitions state from READY or PAUSED to RUNNING.
+        Transitions state from READY, PAUSED, or STOPPED to RUNNING.
         """
         if self.state not in [StrategyState.READY, StrategyState.PAUSED, StrategyState.STOPPED]:
             logger.warning(f"Cannot start strategy from state {self.state}")
