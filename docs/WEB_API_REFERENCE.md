@@ -1754,53 +1754,61 @@ Get backtest results.
 
 ## Emergency Controls API
 
-### `POST /api/emergency/stop`
+### `POST /api/emergency/halt`
 
-Emergency stop all strategies.
+Activate emergency stop: blocks all new orders and stops all running strategies.
 
 **Response:**
 ```json
 {
-  "status": "all_strategies_stopped",
-  "strategies_stopped": 3,
-  "timestamp": "2026-04-15T15:45:00Z"
+  "status": "halted",
+  "reason": "Manual halt from web dashboard"
 }
 ```
 
-### `POST /api/emergency/liquidate`
+### `POST /api/emergency/close-all`
 
-Liquidate all positions immediately.
+Force-close all tracked positions and activate emergency stop.
 
-**Response:**
-```json
-{
-  "status": "liquidation_initiated",
-  "positions_closed": 5,
-  "timestamp": "2026-04-15T15:45:00Z"
-}
-```
-
-### `POST /api/emergency/pause`
-
-Pause all trading (stop entries, keep positions).
+Notes:
+- This endpoint currently clears tracked positions in the service layer.
+- It is a placeholder and does not submit real liquidation orders to TWS.
 
 **Response:**
 ```json
 {
-  "status": "trading_paused",
-  "timestamp": "2026-04-15T15:45:00Z"
+  "status": "positions_cleared",
+  "positions_closed": 5
 }
 ```
 
 ### `POST /api/emergency/resume`
 
-Resume normal trading.
+Release emergency stop and allow order submission again.
+
+Important:
+- This does not restart strategies that were stopped during halt.
+- Strategies must be restarted manually.
 
 **Response:**
 ```json
 {
-  "status": "trading_resumed",
-  "timestamp": "2026-04-15T15:45:00Z"
+  "status": "resumed",
+  "reason": "Manual resume from web dashboard"
+}
+```
+
+### `GET /api/emergency/status`
+
+Get current emergency and risk state.
+
+**Response:**
+```json
+{
+  "emergency_stop_active": false,
+  "risk_status": "NORMAL",
+  "drawdown_breached": false,
+  "daily_limit_breached": false
 }
 ```
 

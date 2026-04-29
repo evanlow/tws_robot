@@ -1100,6 +1100,25 @@ class TestPageRoutes:
         assert resp.status_code == 200
         assert b"Dashboard" in resp.data
 
+    def test_dashboard_shows_emergency_stop_button_when_not_halted(self, client, services):
+        """Dashboard renders the emergency stop action when trading is not halted."""
+        services.risk_manager.release_emergency_stop("test setup")
+
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert b"EMERGENCY STOP" in resp.data
+        assert b'data-halted="false"' in resp.data
+
+    def test_dashboard_shows_resume_button_when_halted(self, client, services):
+        """Dashboard renders resume action and halted indicator when emergency stop is active."""
+        services.risk_manager.trigger_emergency_stop("test setup")
+
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert b"RESUME TRADING" in resp.data
+        assert b'data-halted="true"' in resp.data
+        assert b"TRADING HALTED" in resp.data
+
     def test_strategies(self, client):
         resp = client.get("/strategies/", follow_redirects=True)
         assert resp.status_code == 200
