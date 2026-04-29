@@ -781,17 +781,21 @@
         pnlEl.className = parseFloat(pnl) >= 0 ? 'pnl-positive' : 'pnl-negative';
       }
       const riskEl = document.getElementById('riskBadge');
-      if (riskEl) {
-        riskEl.textContent = d.risk_status || 'NORMAL';
-        riskEl.className = 'risk-badge risk-' + (d.risk_status || 'NORMAL').toLowerCase();
-      }
 
-      // Sync emergency halt indicator and button
+      // Sync emergency halt indicator and button first, passing the real
+      // risk_status so _setHaltState can restore the badge on resume without
+      // assuming NORMAL. We do this before the explicit riskEl update below
+      // so the poller's value always wins.
       if (typeof window._setHaltState === 'function') {
         const btn = document.getElementById('emergencyBtn');
         const currentlyHalted = btn && btn.dataset.halted === 'true';
         const apiHalted = !!d.emergency_stop;
-        if (currentlyHalted !== apiHalted) window._setHaltState(apiHalted);
+        if (currentlyHalted !== apiHalted) window._setHaltState(apiHalted, d.risk_status || 'NORMAL');
+      }
+
+      if (riskEl) {
+        riskEl.textContent = d.risk_status || 'NORMAL';
+        riskEl.className = 'risk-badge risk-' + (d.risk_status || 'NORMAL').toLowerCase();
       }
 
       // Update quick stats
