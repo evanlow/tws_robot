@@ -1106,7 +1106,7 @@ class TestPageRoutes:
         assert b"Strategies" in resp.data
 
     def test_strategies_page_has_registered_strategy_insight_controls(self, client):
-        """Strategies page renders AI insight controls for registered strategies."""
+        """Strategies page renders AI insight section for registered strategies."""
         import uuid
 
         strategy_name = f"LE_page_{uuid.uuid4().hex[:8]}"
@@ -1121,7 +1121,7 @@ class TestPageRoutes:
 
         resp = client.get("/strategies/", follow_redirects=True)
         assert resp.status_code == 200
-        assert b"Load AI Insight" in resp.data
+        assert b"sc-insight-section" in resp.data
         assert f'data-strategy-name="{strategy_name}"'.encode() in resp.data
         assert b"Stop Strategy" in resp.data
         assert b"does not close live positions" in resp.data
