@@ -47,6 +47,26 @@ body {
     opacity: 1;
   }
 }
+
+/* ---- Emergency-halted state ------------------------------------------- */
+.status-bar-halted {
+  color: #fc8181;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.03em;
+  animation: pulse-halted 1.5s ease-in-out infinite;
+}
+@keyframes pulse-halted {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-bar-halted {
+    animation: none;
+    opacity: 1;
+  }
+}
 .disconnected-banner {
   background: #2d1b1b;
   border: 1px solid #fc8181;
@@ -255,6 +275,25 @@ h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
 @keyframes pulse-border {
   0%, 100% { border-color: #fc8181; }
   50% { border-color: #e53e3e; }
+}
+
+/* Resume state: green button shown when emergency stop is active */
+.btn-emergency.btn-emergency--active {
+  background: #276749;
+  border-color: #68d391;
+  animation: pulse-border-resume 2s infinite;
+}
+.btn-emergency.btn-emergency--active:hover { background: #22543d; }
+
+@keyframes pulse-border-resume {
+  0%, 100% { border-color: #68d391; }
+  50% { border-color: #276749; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-emergency.btn-emergency--active {
+    animation: none;
+  }
 }
 
 /* ---- Dashboard Grid --------------------------------------------------- */
