@@ -368,17 +368,13 @@
       </div>
       {% endif %}
 
-      <!-- AI Insight section (auto-loaded for adopted strategies, lazy for others) -->
+      <!-- AI Insight section (auto-loaded for all strategy instances) -->
       <div class="sc-insight-section" id="sc-insight-{{ loop.index }}" data-strategy-name="{{ s.strategy_name }}"
-           data-adopted="{{ 'true' if adp_stype else 'false' }}" style="margin-top:0.6rem;">
+           style="margin-top:0.6rem;">
         <div style="border-top:1px solid #2d2d44;padding-top:0.45rem;display:flex;align-items:flex-start;gap:0.5rem;">
           <span style="font-size:0.7rem;color:#a0aec0;font-weight:600;white-space:nowrap;">💡 AI Insight</span>
           <p class="sc-insight-text" style="font-size:0.78rem;color:#cbd5e0;margin:0;line-height:1.45;flex:1;">
-            {% if adp_stype %}
             <span style="color:#718096;">⏳ Loading insight…</span>
-            {% else %}
-            <button class="btn-sm btn-secondary sc-load-insight-btn" style="font-size:0.68rem;padding:1px 7px;">Load AI Insight</button>
-            {% endif %}
           </p>
         </div>
       </div>
@@ -605,15 +601,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // Load AI Insight buttons on registered strategy cards (non-adopted strategies)
-  document.querySelectorAll('.sc-load-insight-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      loadStrategyInsight(btn.closest('.sc-insight-section'));
-    });
-  });
-
-  // Auto-load AI insights for adopted strategy cards (staggered, same as inferred)
-  document.querySelectorAll('.sc-insight-section[data-adopted="true"]').forEach(function(section, index) {
+  // Auto-load AI insights for all strategy instance cards (staggered)
+  document.querySelectorAll('.sc-insight-section').forEach(function(section, index) {
     setTimeout(function() { loadStrategyInsight(section); }, index * 500);
   });
 });
