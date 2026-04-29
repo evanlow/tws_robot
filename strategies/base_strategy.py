@@ -186,6 +186,7 @@ class BaseStrategy(ABC):
         
         self.state = StrategyState.RUNNING
         self.start_time = datetime.now()
+        self.stop_time = None
         
         logger.info(f"Strategy {self.config.name} started")
         
