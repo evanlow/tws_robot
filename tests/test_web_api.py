@@ -1128,6 +1128,49 @@ class TestPageRoutes:
         assert b"Stop strategy automation for" in resp.data
         assert b"Open positions will remain live in the account until exited separately." in resp.data
 
+    def test_strategies_page_shows_ai_disabled_state(self, client):
+        """Strategies page shows a disabled state for insights when AI is unavailable."""
+        import uuid
+
+        strategy_name = f"LE_page_off_{uuid.uuid4().hex[:8]}"
+        create_resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": strategy_name,
+            "symbols": ["AAPL"],
+        })
+        assert create_resp.status_code == 200
+        start_resp = client.post(f"/api/strategies/{strategy_name}/start")
+        assert start_resp.status_code == 200
+
+        with patch("web.routes.strategies.is_ai_enabled", return_value=False):
+            resp = client.get("/strategies/", follow_redirects=True)
+
+        assert resp.status_code == 200
+        assert b"sc-insight-section" in resp.data
+        assert b"AI not enabled" in resp.data
+
+    def test_strategies_page_shows_ai_loading_state_when_enabled(self, client):
+        """Strategies page shows loading placeholders when AI is enabled."""
+        import uuid
+
+        strategy_name = f"LE_page_on_{uuid.uuid4().hex[:8]}"
+        create_resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": strategy_name,
+            "symbols": ["AAPL"],
+        })
+        assert create_resp.status_code == 200
+        start_resp = client.post(f"/api/strategies/{strategy_name}/start")
+        assert start_resp.status_code == 200
+
+        with patch("web.routes.strategies.is_ai_enabled", return_value=True):
+            resp = client.get("/strategies/", follow_redirects=True)
+
+        assert resp.status_code == 200
+        assert b"sc-insight-section" in resp.data
+        assert b"Loading insight" in resp.data
+        assert b"AI not enabled" not in resp.data
+
     def test_strategy_detail_shows_live_positions_and_ai_insight_section(self, client, services):
         """Strategy detail page includes live positions and AI insight container."""
         import uuid

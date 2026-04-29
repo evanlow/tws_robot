@@ -82,7 +82,7 @@ The dashboard has several pages accessible from the navigation bar:
 - 📊 **Real-time Status Bar** — shows connection status, equity, daily P&L, and risk level
 - 🤖 **AI Strategy Assistant** — get AI-powered help creating and refining strategies
 - 🧭 **Strategy Monitor Cards** — on the Strategies page, each registered strategy card shows live position rows and quick start/stop controls
-- 💡 **Per-Strategy AI Insight** — load an on-demand AI summary for each registered strategy from the card or strategy detail page
+- 💡 **Per-Strategy AI Insight** — AI summaries auto-load for inferred and registered strategies when AI is enabled; otherwise cards show an "AI not enabled" status
 
 ---
 
