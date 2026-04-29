@@ -229,7 +229,7 @@
         <div style="display:flex;gap:0.4rem;align-items:center;">
           {% if s.state == 'RUNNING' %}
           <button class="btn-sm btn-danger" data-action="stop" data-strategy-name="{{ s.strategy_name }}" title="Stops strategy automation only. Open positions remain in the account until exited separately.">Stop Strategy</button>
-          {% elif s.state in ['READY', 'PAUSED'] %}
+          {% elif s.state in ['READY', 'PAUSED', 'STOPPED'] %}
           <button class="btn-sm btn-success" data-action="start" data-strategy-name="{{ s.strategy_name }}">Start</button>
           {% endif %}
           <a href="/strategies/{{ s.strategy_name }}" class="btn-sm btn-secondary">Details →</a>

@@ -341,10 +341,10 @@ def test_strategy_invalid_transitions():
     strategy.resume()
     assert strategy.state == StrategyState.READY
     
-    # Stop, then can't start
+    # Stop, then can start again
     strategy.stop()
     strategy.start()
-    assert strategy.state == StrategyState.STOPPED
+    assert strategy.state == StrategyState.RUNNING
 
 
 def test_strategy_signal_generation():
