@@ -7,6 +7,7 @@ POST /strategies/<name>   →  update parameters
 
 from flask import Blueprint, render_template
 
+from ai.client import is_ai_enabled
 from web.services import get_services
 
 bp = Blueprint("strategies", __name__, url_prefix="/strategies")
@@ -59,6 +60,7 @@ def index():
         "strategy_classes": classes,
         "summary": svc.strategy_registry.get_overall_summary() if strategies else {},
         "inferred_strategies": inferred,
+        "ai_enabled": is_ai_enabled(),
     }
     return render_template("strategies/index.html", **context)
 

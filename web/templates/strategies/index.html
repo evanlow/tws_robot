@@ -177,7 +177,11 @@
         <div style="border-top:1px solid #2d2d44;padding-top:0.5rem;">
           <span style="font-size:0.7rem;color:#a0aec0;font-weight:600;">💡 AI Insight</span>
           <p class="insight-text" style="font-size:0.8rem;color:#cbd5e0;margin-top:0.25rem;line-height:1.45;">
+            {% if ai_enabled %}
             <span class="insight-loading" style="color:#718096;">⏳ Loading insight…</span>
+            {% else %}
+            <span style="color:#718096;">AI not enabled</span>
+            {% endif %}
           </p>
         </div>
       </div>
@@ -368,16 +372,16 @@
       </div>
       {% endif %}
 
-      <!-- AI Insight section (auto-loaded for adopted strategies, lazy for others) -->
+      <!-- AI Insight section (auto-loaded for all strategy instances) -->
       <div class="sc-insight-section" id="sc-insight-{{ loop.index }}" data-strategy-name="{{ s.strategy_name }}"
-           data-adopted="{{ 'true' if adp_stype else 'false' }}" style="margin-top:0.6rem;">
+           style="margin-top:0.6rem;">
         <div style="border-top:1px solid #2d2d44;padding-top:0.45rem;display:flex;align-items:flex-start;gap:0.5rem;">
           <span style="font-size:0.7rem;color:#a0aec0;font-weight:600;white-space:nowrap;">💡 AI Insight</span>
           <p class="sc-insight-text" style="font-size:0.78rem;color:#cbd5e0;margin:0;line-height:1.45;flex:1;">
-            {% if adp_stype %}
+            {% if ai_enabled %}
             <span style="color:#718096;">⏳ Loading insight…</span>
             {% else %}
-            <button class="btn-sm btn-secondary sc-load-insight-btn" style="font-size:0.68rem;padding:1px 7px;">Load AI Insight</button>
+            <span style="color:#718096;">AI not enabled</span>
             {% endif %}
           </p>
         </div>
@@ -592,12 +596,6 @@ window.dismissInferred = async function(id) {
 
 // Wire up all event listeners once DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-  // Auto-load AI insights for inferred strategy cards (staggered)
-  document.querySelectorAll('.inferred-card').forEach(function(card, index) {
-    const id = card.id.replace('inferred-', '');
-    if (id) setTimeout(function() { loadInsight(id); }, index * 500);
-  });
-
   // Start/Stop buttons on registered strategy cards (no inline onclick)
   document.querySelectorAll('[data-action="start"], [data-action="stop"]').forEach(function(btn) {
     btn.addEventListener('click', function() {
@@ -605,17 +603,22 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // Load AI Insight buttons on registered strategy cards (non-adopted strategies)
-  document.querySelectorAll('.sc-load-insight-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      loadStrategyInsight(btn.closest('.sc-insight-section'));
-    });
+  // Auto-load AI insights for all insight sections (inferred + instances) in a
+  // single staggered queue so requests are truly serialized, 500 ms apart.
+  // Skip all fetches if AI is not configured.
+  {% if ai_enabled %}
+  var insightQueue = [];
+  document.querySelectorAll('.inferred-card').forEach(function(card) {
+    var id = card.id.replace('inferred-', '');
+    if (id) insightQueue.push(function() { loadInsight(id); });
   });
-
-  // Auto-load AI insights for adopted strategy cards (staggered, same as inferred)
-  document.querySelectorAll('.sc-insight-section[data-adopted="true"]').forEach(function(section, index) {
-    setTimeout(function() { loadStrategyInsight(section); }, index * 500);
+  document.querySelectorAll('.sc-insight-section').forEach(function(section) {
+    insightQueue.push(function() { loadStrategyInsight(section); });
   });
+  insightQueue.forEach(function(fn, index) {
+    setTimeout(fn, index * 500);
+  });
+  {% endif %}
 });
 
 // AI Generate
