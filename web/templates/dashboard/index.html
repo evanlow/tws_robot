@@ -162,6 +162,7 @@
       <button class="tab-btn" data-tab="trades">Recent Trades</button>
       <button class="tab-btn" data-tab="alerts">Alerts</button>
       <button class="tab-btn" data-tab="market">Market</button>
+      <button class="tab-btn" data-tab="events" id="eventsTabBtn">Events 🗓</button>
     </div>
 
     <!-- Portfolio Tab -->
@@ -502,6 +503,26 @@
           </span>
         </div>
         {% endif %}
+      </div>
+    </div>
+
+    <!-- Events Tab -->
+    <div class="tab-content" id="tab-events">
+      <div class="events-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+        <h3 style="margin:0;">🗓 Upcoming Market Events</h3>
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <label style="font-size:0.8rem;color:#a0aec0;">Next
+            <select id="eventsDaysSelect" style="background:#1a2332;color:#e2e8f0;border:1px solid #2d4a5a;border-radius:4px;padding:2px 4px;font-size:0.8rem;">
+              <option value="7">7 days</option>
+              <option value="14" selected>14 days</option>
+              <option value="30">30 days</option>
+            </select>
+          </label>
+          <button class="btn-sm btn-secondary" id="eventsRefreshBtn" onclick="refreshEvents()">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="eventsTimeline">
+        <p class="empty-state">Loading events…</p>
       </div>
     </div>
   </section>
@@ -1042,6 +1063,175 @@
       console.error('AI narrative fetch error:', err);
     }
   })();
+
+  // ---------------------------------------------------------------
+  // Market Events tab
+  // ---------------------------------------------------------------
+  var _eventsLoaded = false;
+
+  // Load events when the tab is first clicked
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (btn.dataset.tab === 'events' && !_eventsLoaded) {
+        loadEvents(false);
+      }
+    });
+  });
+
+  // Re-load when the days selector changes
+  var daysSelect = document.getElementById('eventsDaysSelect');
+  if (daysSelect) {
+    daysSelect.addEventListener('change', function() { loadEvents(false); });
+  }
+
+  window.refreshEvents = async function() {
+    var btn = document.getElementById('eventsRefreshBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '↻ Loading…'; }
+    try {
+      // Trigger a backend re-fetch
+      await fetch('/api/market-events/refresh', { method: 'POST' });
+
+      // Poll the upcoming endpoint until new data appears (up to ~15 s)
+      var days = 14;
+      var sel = document.getElementById('eventsDaysSelect');
+      if (sel) days = parseInt(sel.value) || 14;
+
+      var maxAttempts = 10;
+      var baselineCount = null;
+      try {
+        var baseRes = await fetch('/api/market-events/upcoming?days=' + days);
+        if (baseRes.ok) {
+          var baseData = await baseRes.json();
+          baselineCount = baseData.count;
+        }
+      } catch(e) {}
+
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise(function(r) { setTimeout(r, 1500); });
+        try {
+          var checkRes = await fetch('/api/market-events/upcoming?days=' + days);
+          if (checkRes.ok) {
+            var checkData = await checkRes.json();
+            // Stop polling when count changed or we've reached the last attempt
+            if (baselineCount === null || checkData.count !== baselineCount || attempt === maxAttempts - 1) {
+              _renderEvents(document.getElementById('eventsTimeline'), checkData.events || []);
+              var urgent = (checkData.events || []).filter(function(e) {
+                return e.is_portfolio_relevant && (e.days_away || 0) <= 2;
+              }).length;
+              _updateEventsTabBadge(urgent);
+              _eventsLoaded = true;
+              break;
+            }
+          }
+        } catch(e) {
+          break;
+        }
+      }
+    } catch(e) {
+      console.error('Events refresh error:', e);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+    }
+  };
+
+  async function loadEvents(force) {
+    var container = document.getElementById('eventsTimeline');
+    if (!container) return;
+
+    var days = 14;
+    var sel = document.getElementById('eventsDaysSelect');
+    if (sel) days = parseInt(sel.value) || 14;
+
+    container.innerHTML = '<p class="empty-state">Loading events…</p>';
+
+    try {
+      var res = await fetch('/api/market-events/upcoming?days=' + days);
+      if (!res.ok) {
+        container.innerHTML = '<p class="empty-state">Failed to load events</p>';
+        return;
+      }
+      var data = await res.json();
+      _eventsLoaded = true;
+
+      if (!data.events || data.events.length === 0) {
+        container.innerHTML = '<p class="empty-state">No events found in the next ' + days + ' days. Click ↻ Refresh to fetch from external sources.</p>';
+        // Update badge
+        _updateEventsTabBadge(0);
+        return;
+      }
+
+      _renderEvents(container, data.events);
+
+      // Badge: count portfolio-relevant events within 2 days
+      var urgent = data.events.filter(function(e) {
+        return e.is_portfolio_relevant && (e.days_away || 0) <= 2;
+      }).length;
+      _updateEventsTabBadge(urgent);
+    } catch(e) {
+      container.innerHTML = '<p class="empty-state">Error loading events: ' + escapeHtml(String(e)) + '</p>';
+      console.error('Events load error:', e);
+    }
+  }
+
+  function _updateEventsTabBadge(count) {
+    var btn = document.getElementById('eventsTabBtn');
+    if (!btn) return;
+    btn.textContent = count > 0 ? 'Events 🗓 (' + count + ')' : 'Events 🗓';
+  }
+
+  function _renderEvents(container, events) {
+    var icons = { EARNINGS: '📊', FOMC: '🏛', DIVIDEND: '💰', ECONOMIC: '📈' };
+    var html = '<div class="events-list">';
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    events.forEach(function(ev) {
+      var icon = icons[ev.event_type] || '📅';
+      var relevant = ev.is_portfolio_relevant;
+      var daysAway = ev.days_away !== null && ev.days_away !== undefined ? ev.days_away : '';
+      var daysLabel = daysAway === 0 ? 'Today' : (daysAway === 1 ? 'Tomorrow' : daysAway + 'd away');
+
+      var borderColor = relevant ? '#f6e05e' : (ev.event_type === 'FOMC' ? '#63b3ed' : (ev.event_type === 'DIVIDEND' ? '#38b2ac' : '#4a5568'));
+      var badgeHtml = relevant ? '<span style="font-size:0.65rem;background:#2d3218;color:#f6e05e;padding:1px 6px;border-radius:8px;margin-left:0.4rem;">⚡ Portfolio</span>' : '';
+
+      // Format date
+      var dateStr = ev.event_date ? ev.event_date.substring(0, 10) : '';
+      var timeStr = ev.event_time ? ' · ' + escapeHtml(ev.event_time) : '';
+
+      // Detail extras
+      var detailParts = [];
+      if (ev.detail) {
+        if (ev.detail.eps_estimate !== null && ev.detail.eps_estimate !== undefined)
+          detailParts.push('EPS est: <strong>$' + Number(ev.detail.eps_estimate).toFixed(2) + '</strong>');
+        if (ev.detail.revenue_estimate !== null && ev.detail.revenue_estimate !== undefined) {
+          var rev = ev.detail.revenue_estimate;
+          var revStr = rev >= 1e9 ? (rev / 1e9).toFixed(1) + 'B' : (rev >= 1e6 ? (rev / 1e6).toFixed(1) + 'M' : rev.toFixed(0));
+          detailParts.push('Rev est: <strong>$' + revStr + '</strong>');
+        }
+        if (ev.detail.dividend_rate !== null && ev.detail.dividend_rate !== undefined)
+          detailParts.push('Div rate: <strong>$' + Number(ev.detail.dividend_rate).toFixed(2) + '</strong>');
+        if (ev.detail.dividend_yield !== null && ev.detail.dividend_yield !== undefined)
+          detailParts.push('Yield: <strong>' + (Number(ev.detail.dividend_yield) * 100).toFixed(1) + '%</strong>');
+      }
+      var detailHtml = detailParts.length ? '<div style="font-size:0.72rem;color:#a0aec0;margin-top:0.2rem;">' + detailParts.join(' &nbsp;·&nbsp; ') + '</div>' : '';
+
+      html += '<div style="display:flex;gap:0.6rem;align-items:flex-start;padding:0.55rem 0.65rem;margin-bottom:0.4rem;background:#0f1929;border-radius:6px;border-left:3px solid ' + borderColor + ';">';
+      html += '<span style="font-size:1.1rem;min-width:1.4rem;">' + icon + '</span>';
+      html += '<div style="flex:1;min-width:0;">';
+      html +=   '<div style="display:flex;justify-content:space-between;align-items:center;">';
+      html +=     '<span style="font-size:0.82rem;font-weight:600;color:#e2e8f0;">' + escapeHtml(ev.title) + (ev.symbol ? ' <span style="color:#90cdf4;">(' + escapeHtml(ev.symbol) + ')</span>' : '') + '</span>';
+      html +=     badgeHtml;
+      html +=   '</div>';
+      html +=   '<div style="font-size:0.72rem;color:#718096;margin-top:0.1rem;">' + escapeHtml(dateStr) + escapeHtml(timeStr) + ' &nbsp;·&nbsp; <span style="color:' + (daysAway <= 2 && relevant ? '#f6e05e' : '#a0aec0') + ';">' + daysLabel + '</span></div>';
+      html +=   detailHtml;
+      html += '</div>';
+      html += '</div>';
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
 })();
 </script>
 {% endblock %}

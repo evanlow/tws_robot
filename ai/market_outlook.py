@@ -158,6 +158,7 @@ def build_outlook_context(
     positions: Optional[Dict[str, Dict[str, Any]]] = None,
     strategy_mix: Optional[Dict[str, float]] = None,
     account_summary: Optional[Dict[str, Any]] = None,
+    upcoming_events: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Build a JSON context string for the LLM market outlook prompt.
 
@@ -173,6 +174,8 @@ def build_outlook_context(
         Strategy name → weight from :mod:`ai.portfolio_analyzer`.
     account_summary : dict, optional
         Account-level data (equity, cash, buying power).
+    upcoming_events : list[dict], optional
+        Upcoming market events from :mod:`data.market_events`.
 
     Returns
     -------
@@ -228,6 +231,30 @@ def build_outlook_context(
         "index_data": index_summaries,
         "portfolio": portfolio_summary,
     }
+
+    # Include upcoming market events when provided — cap at 10 for prompt size
+    if upcoming_events:
+        compact_events = []
+        for ev in upcoming_events[:10]:
+            entry: Dict[str, Any] = {
+                "type": ev.get("event_type"),
+                "title": ev.get("title"),
+                "date": ev.get("event_date"),
+                "days_away": ev.get("days_away"),
+                "relevant": ev.get("is_portfolio_relevant", False),
+            }
+            if ev.get("event_time"):
+                entry["time"] = ev["event_time"]
+            detail = ev.get("detail") or {}
+            if detail.get("eps_estimate") is not None:
+                entry["eps_estimate"] = detail["eps_estimate"]
+            if detail.get("revenue_estimate") is not None:
+                entry["revenue_estimate"] = detail["revenue_estimate"]
+            if ev.get("symbol"):
+                entry["symbol"] = ev["symbol"]
+            compact_events.append(entry)
+        ctx["upcoming_events"] = compact_events
+
     return json.dumps(ctx, indent=2, default=str)
 
 
@@ -459,12 +486,26 @@ class MarketOutlookGenerator:
 
             client = get_client()
             if client is not None and snapshots:
+                # Fetch upcoming events to enrich the AI context
+                upcoming_events: Optional[List[Dict[str, Any]]] = None
+                try:
+                    from data.market_events import get_market_events_service
+                    ev_svc = get_market_events_service()
+                    portfolio_symbols = list(positions.keys()) if positions else []
+                    upcoming_events = ev_svc.get_upcoming_events(
+                        days_ahead=14,
+                        portfolio_symbols=portfolio_symbols,
+                    )
+                except Exception:
+                    logger.debug("Could not fetch upcoming events for AI context", exc_info=True)
+
                 context_json = build_outlook_context(
                     market_pulse=market_pulse,
                     snapshots=snapshots,
                     positions=positions,
                     strategy_mix=strategy_mix,
                     account_summary=account_summary,
+                    upcoming_events=upcoming_events,
                 )
                 system_prompt = Prompts.MARKET_OUTLOOK.format(
                     context_json=context_json,
