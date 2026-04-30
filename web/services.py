@@ -82,6 +82,9 @@ class ServiceManager:
         self._start_time = datetime.now()
         self._backtest_runs: Dict[str, Dict[str, Any]] = {}
 
+        # Market events background refresh
+        self._start_market_events_refresh()
+
         logger.info("ServiceManager initialised")
 
     # ------------------------------------------------------------------
@@ -667,6 +670,81 @@ class ServiceManager:
             "sse_clients": len(self._sse_queues),
             "timestamp": datetime.now().isoformat(),
         }
+
+    # ------------------------------------------------------------------
+    # Market events
+    # ------------------------------------------------------------------
+
+    @property
+    def market_events(self):
+        """Return the shared MarketEventsService singleton."""
+        from data.market_events import get_market_events_service
+        return get_market_events_service()
+
+    def _start_market_events_refresh(self) -> None:
+        """Launch a daemon thread that keeps market events up-to-date.
+
+        Schedule:
+        - On startup: fetch FOMC dates immediately (FOMC has a 24-h TTL so
+          this is cheap after the first run) then wait for positions to load
+          before fetching per-symbol events.
+        - Every 6 hours: refresh earnings + dividends for current portfolio.
+        - Every 24 hours (aligned to first run): refresh FOMC calendar.
+        """
+        def _refresh_loop():
+            import time as _time
+
+            # Short initial delay so the web server is fully up before we
+            # make outbound HTTP calls.
+            _time.sleep(5)
+
+            last_fomc_refresh: Optional[datetime] = None
+            _FOMC_INTERVAL_HOURS = 24
+            _SYMBOL_INTERVAL_HOURS = 6
+
+            while True:
+                try:
+                    svc = self.market_events
+
+                    # Collect current portfolio symbols
+                    portfolio_symbols: List[str] = []
+                    try:
+                        portfolio_symbols = list(self.get_positions().keys())
+                    except Exception:
+                        pass
+                    try:
+                        for s in (self._strategy_registry.get_all_strategies()
+                                  if self._strategy_registry else []):
+                            for sym in (s.config.symbols or []):
+                                if sym not in portfolio_symbols:
+                                    portfolio_symbols.append(sym)
+                    except Exception:
+                        pass
+
+                    now = datetime.now()
+
+                    # FOMC refresh (24-hour cadence)
+                    if (last_fomc_refresh is None
+                            or (now - last_fomc_refresh).total_seconds()
+                            > _FOMC_INTERVAL_HOURS * 3600):
+                        svc._refresh_fomc(force=False)
+                        last_fomc_refresh = now
+
+                    # Per-symbol refresh (6-hour cadence)
+                    if portfolio_symbols:
+                        svc._refresh_earnings(portfolio_symbols, force=False)
+                        svc._refresh_dividends(portfolio_symbols, force=False)
+
+                except Exception as exc:
+                    logger.warning("Market events background refresh error: %s", exc)
+
+                # Sleep for 30 minutes, then re-evaluate TTLs
+                _time.sleep(30 * 60)
+
+        thread = threading.Thread(target=_refresh_loop, daemon=True,
+                                  name="market-events-refresh")
+        thread.start()
+        logger.debug("Market events background refresh thread started")
 
 
 def get_services() -> ServiceManager:

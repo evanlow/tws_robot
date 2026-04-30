@@ -447,3 +447,76 @@ class FundamentalsCache(Base):
     data_json = Column(Text, nullable=False)
     fetched_at = Column(String(50), nullable=False)
     created_at = Column(DateTime, default=datetime.now)
+
+
+class MarketEvent(Base):
+    """Scheduled market-moving event (earnings, FOMC, dividends, economic releases).
+
+    One row per event occurrence.  The unique constraint on
+    ``(event_type, symbol, event_date)`` prevents duplicate rows when the
+    fetcher re-runs during the same calendar day.
+
+    ``symbol`` is NULL for macro events (FOMC, economic data releases) that
+    are not tied to a specific ticker.
+    """
+    __tablename__ = 'market_events'
+
+    id = Column(Integer, primary_key=True)
+
+    # Categorisation
+    event_type = Column(String(50), nullable=False, index=True)
+    # "EARNINGS" | "FOMC" | "DIVIDEND" | "ECONOMIC"
+
+    symbol = Column(String(20), nullable=True, index=True)
+    title = Column(String(200), nullable=False)
+
+    # Timing
+    event_date = Column(DateTime, nullable=False, index=True)
+    event_time = Column(String(20), nullable=True)   # "BMO" / "AMC" / "09:00 ET" etc.
+
+    # Provenance
+    source = Column(String(100), nullable=True)       # "yfinance" / "federalreserve.gov" etc.
+
+    # Rich payload (EPS estimates, rate-decision context, etc.)
+    detail_json = Column(Text, nullable=True)
+
+    # Portfolio relevance flag (set at fetch time based on active strategy symbols)
+    is_portfolio_relevant = Column(Boolean, default=False, nullable=False)
+
+    # Freshness tracking
+    fetched_at = Column(DateTime, nullable=False, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            'event_type', 'symbol', 'event_date',
+            name='uq_market_event_type_symbol_date',
+        ),
+    )
+
+    def to_dict(self):
+        import json as _json
+        detail = None
+        if self.detail_json:
+            try:
+                detail = _json.loads(self.detail_json)
+            except Exception:
+                detail = self.detail_json
+        return {
+            "id": self.id,
+            "event_type": self.event_type,
+            "symbol": self.symbol,
+            "title": self.title,
+            "event_date": self.event_date.isoformat() if self.event_date else None,
+            "event_time": self.event_time,
+            "source": self.source,
+            "detail": detail,
+            "is_portfolio_relevant": self.is_portfolio_relevant,
+            "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
+        }
+
+    def __repr__(self):
+        return (
+            f"<MarketEvent(id={self.id}, type={self.event_type}, "
+            f"symbol={self.symbol}, date={self.event_date})>"
+        )
