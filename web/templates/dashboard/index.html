@@ -1088,12 +1088,45 @@
     var btn = document.getElementById('eventsRefreshBtn');
     if (btn) { btn.disabled = true; btn.textContent = '↻ Loading…'; }
     try {
-      // Trigger a backend re-fetch, then reload the display
+      // Trigger a backend re-fetch
       await fetch('/api/market-events/refresh', { method: 'POST' });
-      // Small delay to allow the background thread to populate the DB
-      await new Promise(function(r) { setTimeout(r, 2000); });
-      await loadEvents(false);
-      _eventsLoaded = true;
+
+      // Poll the upcoming endpoint until new data appears (up to ~15 s)
+      var days = 14;
+      var sel = document.getElementById('eventsDaysSelect');
+      if (sel) days = parseInt(sel.value) || 14;
+
+      var maxAttempts = 10;
+      var baselineCount = null;
+      try {
+        var baseRes = await fetch('/api/market-events/upcoming?days=' + days);
+        if (baseRes.ok) {
+          var baseData = await baseRes.json();
+          baselineCount = baseData.count;
+        }
+      } catch(e) {}
+
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise(function(r) { setTimeout(r, 1500); });
+        try {
+          var checkRes = await fetch('/api/market-events/upcoming?days=' + days);
+          if (checkRes.ok) {
+            var checkData = await checkRes.json();
+            // Stop polling when count changed or we've reached the last attempt
+            if (baselineCount === null || checkData.count !== baselineCount || attempt === maxAttempts - 1) {
+              _renderEvents(document.getElementById('eventsTimeline'), checkData.events || []);
+              var urgent = (checkData.events || []).filter(function(e) {
+                return e.is_portfolio_relevant && (e.days_away || 0) <= 2;
+              }).length;
+              _updateEventsTabBadge(urgent);
+              _eventsLoaded = true;
+              break;
+            }
+          }
+        } catch(e) {
+          break;
+        }
+      }
     } catch(e) {
       console.error('Events refresh error:', e);
     } finally {
