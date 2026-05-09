@@ -1088,6 +1088,100 @@ class TestEventAPI:
 
 
 # ==============================================================================
+# Market Events API
+# ==============================================================================
+
+
+class TestMarketEventsAPI:
+    """Tests for /api/market-events/* endpoints."""
+
+    @patch("web.routes.api_market_events._get_event_service")
+    def test_upcoming_default_days_and_portfolio_symbols(self, mock_get_event_service, client, services):
+        """GET /api/market-events/upcoming uses default window and portfolio symbols."""
+        import uuid
+
+        services.update_position("aapl", {"quantity": 10})
+        create_resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": f"ME_symbols_test_{uuid.uuid4().hex[:8]}",
+            "symbols": ["msft"],
+        })
+        assert create_resp.status_code == 200
+
+        event_svc = mock_get_event_service.return_value
+        event_svc.get_upcoming_events.return_value = [{
+            "event_type": "EARNINGS",
+            "symbol": "AAPL",
+            "title": "AAPL Earnings",
+            "event_date": "2026-05-20T00:00:00",
+            "event_time": "AMC",
+            "source": "yfinance",
+            "detail": {},
+            "is_portfolio_relevant": True,
+            "days_away": 11,
+        }]
+
+        resp = client.get("/api/market-events/upcoming")
+        data = resp.get_json()
+
+        assert resp.status_code == 200
+        assert data["count"] == 1
+        assert data["days_ahead"] == 14
+        assert {"AAPL", "MSFT"}.issubset(set(data["portfolio_symbols"]))
+
+        called_kwargs = event_svc.get_upcoming_events.call_args.kwargs
+        assert called_kwargs["days_ahead"] == 14
+        assert {"AAPL", "MSFT"}.issubset(set(called_kwargs["portfolio_symbols"]))
+
+    @patch("web.routes.api_market_events._get_event_service")
+    def test_upcoming_days_validation_and_clamping(self, mock_get_event_service, client):
+        """GET /api/market-events/upcoming clamps days to [1, 90] and handles invalid input."""
+        event_svc = mock_get_event_service.return_value
+        event_svc.get_upcoming_events.return_value = []
+
+        resp = client.get("/api/market-events/upcoming?days=0")
+        assert resp.status_code == 200
+        assert resp.get_json()["days_ahead"] == 1
+        assert event_svc.get_upcoming_events.call_args.kwargs["days_ahead"] == 1
+
+        resp = client.get("/api/market-events/upcoming?days=999")
+        assert resp.status_code == 200
+        assert resp.get_json()["days_ahead"] == 90
+        assert event_svc.get_upcoming_events.call_args.kwargs["days_ahead"] == 90
+
+        resp = client.get("/api/market-events/upcoming?days=abc")
+        assert resp.status_code == 200
+        assert resp.get_json()["days_ahead"] == 14
+        assert event_svc.get_upcoming_events.call_args.kwargs["days_ahead"] == 14
+
+    @patch("web.routes.api_market_events._get_event_service")
+    def test_refresh_triggers_async_force_refresh(self, mock_get_event_service, client, services):
+        """POST /api/market-events/refresh starts async refresh with force=True."""
+        import uuid
+
+        services.update_position("GOOG", {"quantity": 5})
+        create_resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": f"ME_refresh_test_{uuid.uuid4().hex[:8]}",
+            "symbols": ["nvda"],
+        })
+        assert create_resp.status_code == 200
+
+        event_svc = mock_get_event_service.return_value
+
+        resp = client.post("/api/market-events/refresh")
+        data = resp.get_json()
+
+        assert resp.status_code == 200
+        assert data["status"] == "refresh_started"
+        assert {"GOOG", "NVDA"}.issubset(set(data["portfolio_symbols"]))
+
+        called_kwargs = event_svc.refresh_async.call_args.kwargs
+        assert called_kwargs["force"] is True
+        assert {"GOOG", "NVDA"}.issubset(set(called_kwargs["portfolio_symbols"]))
+
+
+# ==============================================================================
 # Page routes (smoke tests)
 # ==============================================================================
 

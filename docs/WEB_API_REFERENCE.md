@@ -1261,6 +1261,65 @@ Same format as `GET /api/market/overview`
 
 **Note:** This endpoint blocks until the fetch completes (typically 2-5 seconds).
 
+### `GET /api/market-events/upcoming`
+
+Get upcoming market-moving events from the cached event store.
+
+**Query Parameters:**
+- `days` (optional, default `14`) - Calendar days ahead to return events for
+
+Validation rules:
+- Minimum = `1`
+- Maximum = `90`
+- Non-numeric values fall back to `14`
+
+**Response:**
+```json
+{
+  "events": [
+    {
+      "id": 12,
+      "event_type": "EARNINGS",
+      "symbol": "AAPL",
+      "title": "Apple Earnings",
+      "event_date": "2026-05-20T00:00:00",
+      "event_time": "AMC",
+      "source": "yfinance",
+      "detail": {
+        "eps_estimate": 1.23
+      },
+      "is_portfolio_relevant": true,
+      "fetched_at": "2026-05-09T09:41:22",
+      "days_away": 11
+    }
+  ],
+  "count": 1,
+  "days_ahead": 14,
+  "portfolio_symbols": ["AAPL", "MSFT"]
+}
+```
+
+**Notes:**
+- `portfolio_symbols` is collected from open positions and registered strategies.
+- Event records are returned in chronological order.
+
+### `POST /api/market-events/refresh`
+
+Trigger a non-blocking refresh of market events from external sources.
+
+**Behavior:**
+- Starts background refresh (returns immediately)
+- Forces a refresh even if TTL has not expired
+- Uses current `portfolio_symbols` from positions + strategies
+
+**Response:**
+```json
+{
+  "status": "refresh_started",
+  "portfolio_symbols": ["AAPL", "MSFT"]
+}
+```
+
 ---
 
 ## Strategies API
