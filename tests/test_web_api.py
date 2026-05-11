@@ -300,21 +300,51 @@ class TestConnectionAPI:
         assert data["connected"] is False
 
     def test_connect(self, client):
-        resp = client.post("/api/connection/connect",
-                           json={"environment": "paper"})
+        with patch.object(ServiceManager, "connect_tws", return_value=True):
+            resp = client.post("/api/connection/connect",
+                               json={"environment": "paper"})
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["status"] == "connected"
         assert data["environment"] == "paper"
 
-    def test_connect_already_connected(self, client):
-        client.post("/api/connection/connect", json={"environment": "paper"})
+    def test_connect_failure(self, client):
+        with patch.object(ServiceManager, "connect_tws", return_value=False):
+            resp = client.post("/api/connection/connect",
+                               json={"environment": "paper"})
+
+        data = resp.get_json()
+        assert resp.status_code == 503
+        assert data["status"] == "connection_failed"
+        assert data["connected"] is False
+        assert data["environment"] == "paper"
+        assert data["host"] == "127.0.0.1"
+        assert data["port"] == 7497
+        assert "not reachable" in data["message"]
+
+        status_resp = client.get("/api/connection/status")
+        status_data = status_resp.get_json()
+        assert status_resp.status_code == 200
+        assert status_data["connected"] is False
+
+    def test_connect_already_connected(self, client, services):
+        services.set_connected("paper", {
+            "host": "127.0.0.1",
+            "port": 7497,
+            "client_id": 1,
+            "account": "",
+        })
         resp = client.post("/api/connection/connect",
                            json={"environment": "paper"})
         assert resp.status_code == 409
 
-    def test_disconnect(self, client):
-        client.post("/api/connection/connect", json={"environment": "paper"})
+    def test_disconnect(self, client, services):
+        services.set_connected("paper", {
+            "host": "127.0.0.1",
+            "port": 7497,
+            "client_id": 1,
+            "account": "",
+        })
         resp = client.post("/api/connection/disconnect")
         data = resp.get_json()
         assert resp.status_code == 200
