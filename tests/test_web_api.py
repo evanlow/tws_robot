@@ -293,6 +293,13 @@ class TestServiceManager:
 class TestConnectionAPI:
     """Tests for /api/connection/* endpoints."""
 
+    PAPER_CONNECTION_INFO = {
+        "host": "127.0.0.1",
+        "port": 7497,
+        "client_id": 1,
+        "account": "",
+    }
+
     def test_status_disconnected(self, client):
         resp = client.get("/api/connection/status")
         data = resp.get_json()
@@ -328,23 +335,13 @@ class TestConnectionAPI:
         assert status_data["connected"] is False
 
     def test_connect_already_connected(self, client, services):
-        services.set_connected("paper", {
-            "host": "127.0.0.1",
-            "port": 7497,
-            "client_id": 1,
-            "account": "",
-        })
+        services.set_connected("paper", self.PAPER_CONNECTION_INFO)
         resp = client.post("/api/connection/connect",
                            json={"environment": "paper"})
         assert resp.status_code == 409
 
     def test_disconnect(self, client, services):
-        services.set_connected("paper", {
-            "host": "127.0.0.1",
-            "port": 7497,
-            "client_id": 1,
-            "account": "",
-        })
+        services.set_connected("paper", self.PAPER_CONNECTION_INFO)
         resp = client.post("/api/connection/disconnect")
         data = resp.get_json()
         assert resp.status_code == 200
