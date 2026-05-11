@@ -66,7 +66,7 @@ def connect():
             "host": cfg["host"],
             "port": cfg["port"],
             "error": error,
-            "message": error,
+            "message": error,  # Backward compatibility for existing clients.
         }), 503
 
     logger.info("Connection initiated: env=%s host=%s port=%s",

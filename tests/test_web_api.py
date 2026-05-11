@@ -342,7 +342,10 @@ class TestConnectionAPI:
         assert data["environment"] == "paper"
         assert data["host"] == "127.0.0.1"
         assert data["port"] == 7497
-        assert "not reachable" in data["error"]
+        assert data["error"] == (
+            "TWS or IB Gateway is not reachable. Please check that it is "
+            "running and API access is enabled."
+        )
         assert data["message"] == data["error"]
 
         status_resp = client.get("/api/connection/status")
