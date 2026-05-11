@@ -293,28 +293,74 @@ class TestServiceManager:
 class TestConnectionAPI:
     """Tests for /api/connection/* endpoints."""
 
+    PAPER_CONNECTION_INFO = {
+        "host": "127.0.0.1",
+        "port": 7497,
+        "client_id": 1,
+        "account": "",
+    }
+
     def test_status_disconnected(self, client):
         resp = client.get("/api/connection/status")
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["connected"] is False
 
-    def test_connect(self, client):
-        resp = client.post("/api/connection/connect",
-                           json={"environment": "paper"})
+    def test_connect(self, client, services):
+        def _connect_success(env, cfg, timeout=10):
+            services.set_connected(env, {
+                "host": cfg["host"],
+                "port": cfg["port"],
+                "client_id": cfg["client_id"],
+                "account": cfg.get("account", ""),
+            })
+            return True
+
+        with patch.object(ServiceManager, "connect_tws", side_effect=_connect_success):
+            resp = client.post("/api/connection/connect",
+                               json={"environment": "paper"})
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["status"] == "connected"
         assert data["environment"] == "paper"
 
-    def test_connect_already_connected(self, client):
-        client.post("/api/connection/connect", json={"environment": "paper"})
+        status_resp = client.get("/api/connection/status")
+        status_data = status_resp.get_json()
+        assert status_resp.status_code == 200
+        assert status_data["connected"] is True
+        assert status_data["environment"] == "paper"
+
+    def test_connect_failure(self, client):
+        with patch.object(ServiceManager, "connect_tws", return_value=False):
+            resp = client.post("/api/connection/connect",
+                               json={"environment": "paper"})
+
+        data = resp.get_json()
+        assert resp.status_code == 503
+        assert data["status"] == "connection_failed"
+        assert data["connected"] is False
+        assert data["environment"] == "paper"
+        assert data["host"] == "127.0.0.1"
+        assert data["port"] == 7497
+        assert data["error"] == (
+            "TWS or IB Gateway is not reachable. Please check that it is "
+            "running and API access is enabled."
+        )
+        assert data["message"] == data["error"]
+
+        status_resp = client.get("/api/connection/status")
+        status_data = status_resp.get_json()
+        assert status_resp.status_code == 200
+        assert status_data["connected"] is False
+
+    def test_connect_already_connected(self, client, services):
+        services.set_connected("paper", self.PAPER_CONNECTION_INFO)
         resp = client.post("/api/connection/connect",
                            json={"environment": "paper"})
         assert resp.status_code == 409
 
-    def test_disconnect(self, client):
-        client.post("/api/connection/connect", json={"environment": "paper"})
+    def test_disconnect(self, client, services):
+        services.set_connected("paper", self.PAPER_CONNECTION_INFO)
         resp = client.post("/api/connection/disconnect")
         data = resp.get_json()
         assert resp.status_code == 200
