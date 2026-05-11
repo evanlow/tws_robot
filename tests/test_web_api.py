@@ -677,7 +677,7 @@ class TestOrdersAPI:
         assert resp.status_code == 201
         assert data["status"] == "recorded"
         assert data["execution_mode"] == "local_only"
-        assert "not submitted to TWS" in data["message"]
+        assert "not submitted to a broker" in data["message"]
         assert data["order"]["symbol"] == "AAPL"
         assert data["order"]["status"] == "RECORDED"
         assert data["order"]["execution_mode"] == "local_only"

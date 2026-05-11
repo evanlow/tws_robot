@@ -74,7 +74,7 @@ def submit_order():
     return jsonify({
         "status": "recorded",
         "execution_mode": "local_only",
-        "message": "Order was recorded locally but not submitted to TWS.",
+        "message": "Order was recorded locally but not submitted to a broker.",
         "order": order_record,
     }), 201
 
