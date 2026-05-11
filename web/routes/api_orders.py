@@ -1,7 +1,7 @@
 """Order management API.
 
 GET    /api/orders       — all orders with status
-POST   /api/orders       — submit a manual order
+POST   /api/orders       — record a manual order request (local-only)
 DELETE /api/orders/<id>  — cancel an order
 """
 
@@ -27,7 +27,7 @@ def list_orders():
 
 @bp.route("/", methods=["POST"])
 def submit_order():
-    """Submit a manual order.
+    """Record a manual order request (local-only).
 
     Body::
 
@@ -62,15 +62,21 @@ def submit_order():
         "quantity": quantity,
         "order_type": order_type,
         "limit_price": limit_price,
-        "status": "SUBMITTED",
+        "status": "RECORDED",
+        "execution_mode": "local_only",
         "submitted_at": datetime.now().isoformat(),
         "source": "web_dashboard",
     }
 
     svc.add_order(order_record)
-    logger.info("Manual order submitted: %s", order_record)
+    logger.info("Manual order recorded locally (not broker-submitted): %s", order_record)
 
-    return jsonify({"status": "submitted", "order": order_record}), 201
+    return jsonify({
+        "status": "recorded",
+        "execution_mode": "local_only",
+        "message": "Order was recorded locally but not submitted to TWS.",
+        "order": order_record,
+    }), 201
 
 
 @bp.route("/<order_id>", methods=["DELETE"])

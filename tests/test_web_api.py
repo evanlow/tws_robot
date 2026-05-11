@@ -675,8 +675,12 @@ class TestOrdersAPI:
         })
         data = resp.get_json()
         assert resp.status_code == 201
-        assert data["status"] == "submitted"
+        assert data["status"] == "recorded"
+        assert data["execution_mode"] == "local_only"
+        assert "not submitted to TWS" in data["message"]
         assert data["order"]["symbol"] == "AAPL"
+        assert data["order"]["status"] == "RECORDED"
+        assert data["order"]["execution_mode"] == "local_only"
 
     def test_submit_order_validation(self, client):
         resp = client.post("/api/orders/", json={
