@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from web import create_app
+from web.routes.api_connection import TWS_CONNECTION_FAILED_MESSAGE
 from web.services import ServiceManager
 
 
@@ -307,7 +308,7 @@ class TestConnectionAPI:
         assert data["connected"] is False
 
     def test_connect(self, client, services):
-        def _connect_success(env, cfg, timeout=10):
+        def mock_connect_success(env, cfg, timeout=10):
             services.set_connected(env, {
                 "host": cfg["host"],
                 "port": cfg["port"],
@@ -316,7 +317,7 @@ class TestConnectionAPI:
             })
             return True
 
-        with patch.object(ServiceManager, "connect_tws", side_effect=_connect_success):
+        with patch.object(ServiceManager, "connect_tws", side_effect=mock_connect_success):
             resp = client.post("/api/connection/connect",
                                json={"environment": "paper"})
         data = resp.get_json()
@@ -342,10 +343,7 @@ class TestConnectionAPI:
         assert data["environment"] == "paper"
         assert data["host"] == "127.0.0.1"
         assert data["port"] == 7497
-        assert data["error"] == (
-            "TWS or IB Gateway is not reachable. Please check that it is "
-            "running and API access is enabled."
-        )
+        assert data["error"] == TWS_CONNECTION_FAILED_MESSAGE
         assert data["message"] == data["error"]
 
         status_resp = client.get("/api/connection/status")

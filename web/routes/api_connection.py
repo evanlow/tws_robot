@@ -14,6 +14,10 @@ from web.services import get_services
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("api_connection", __name__, url_prefix="/api/connection")
+TWS_CONNECTION_FAILED_MESSAGE = (
+    "TWS or IB Gateway is not reachable. Please check that it is "
+    "running and API access is enabled."
+)
 
 
 @bp.route("/status", methods=["GET"])
@@ -54,10 +58,6 @@ def connect():
     ok = svc.connect_tws(env, cfg, timeout=10)
 
     if not ok:
-        error = (
-            "TWS or IB Gateway is not reachable. Please check that it is "
-            "running and API access is enabled."
-        )
         logger.warning("TWS not reachable for %s", env)
         return jsonify({
             "status": "connection_failed",
@@ -65,8 +65,8 @@ def connect():
             "environment": env,
             "host": cfg["host"],
             "port": cfg["port"],
-            "error": error,
-            "message": error,  # Backward compatibility for existing clients.
+            "error": TWS_CONNECTION_FAILED_MESSAGE,
+            "message": TWS_CONNECTION_FAILED_MESSAGE,  # Backward compatibility for existing clients.
         }), 503
 
     logger.info("Connection initiated: env=%s host=%s port=%s",
