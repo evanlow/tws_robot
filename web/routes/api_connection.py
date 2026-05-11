@@ -54,6 +54,10 @@ def connect():
     ok = svc.connect_tws(env, cfg, timeout=10)
 
     if not ok:
+        error = (
+            "TWS or IB Gateway is not reachable. Please check that it is "
+            "running and API access is enabled."
+        )
         logger.warning("TWS not reachable for %s", env)
         return jsonify({
             "status": "connection_failed",
@@ -61,10 +65,8 @@ def connect():
             "environment": env,
             "host": cfg["host"],
             "port": cfg["port"],
-            "message": (
-                "TWS or IB Gateway is not reachable. Please check that it is "
-                "running and API access is enabled."
-            ),
+            "error": error,
+            "message": error,
         }), 503
 
     logger.info("Connection initiated: env=%s host=%s port=%s",

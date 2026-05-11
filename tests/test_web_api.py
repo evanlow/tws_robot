@@ -306,14 +306,29 @@ class TestConnectionAPI:
         assert resp.status_code == 200
         assert data["connected"] is False
 
-    def test_connect(self, client):
-        with patch.object(ServiceManager, "connect_tws", return_value=True):
+    def test_connect(self, client, services):
+        def _connect_success(env, cfg, timeout=10):
+            services.set_connected(env, {
+                "host": cfg["host"],
+                "port": cfg["port"],
+                "client_id": cfg["client_id"],
+                "account": cfg.get("account", ""),
+            })
+            return True
+
+        with patch.object(ServiceManager, "connect_tws", side_effect=_connect_success):
             resp = client.post("/api/connection/connect",
                                json={"environment": "paper"})
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["status"] == "connected"
         assert data["environment"] == "paper"
+
+        status_resp = client.get("/api/connection/status")
+        status_data = status_resp.get_json()
+        assert status_resp.status_code == 200
+        assert status_data["connected"] is True
+        assert status_data["environment"] == "paper"
 
     def test_connect_failure(self, client):
         with patch.object(ServiceManager, "connect_tws", return_value=False):
@@ -327,7 +342,8 @@ class TestConnectionAPI:
         assert data["environment"] == "paper"
         assert data["host"] == "127.0.0.1"
         assert data["port"] == 7497
-        assert "not reachable" in data["message"]
+        assert "not reachable" in data["error"]
+        assert data["message"] == data["error"]
 
         status_resp = client.get("/api/connection/status")
         status_data = status_resp.get_json()
