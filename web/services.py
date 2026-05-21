@@ -558,6 +558,49 @@ class ServiceManager:
         with self._lock:
             return list(self._orders)
 
+    def cancel_order(self, order_id: str, cancelled_at: str) -> Dict[str, Any]:
+        """Atomically cancel a tracked order in the local store."""
+        terminal_statuses = {"CANCELLED", "FILLED", "REJECTED"}
+        with self._lock:
+            for order in self._orders:
+                if order.get("id") != order_id:
+                    continue
+                status = order.get("status", "")
+                if status in terminal_statuses:
+                    return {
+                        "result": "terminal",
+                        "status": status,
+                    }
+                order["status"] = "CANCELLED"
+                order["cancelled_at"] = cancelled_at
+                return {
+                    "result": "cancelled",
+                    "order": dict(order),
+                }
+        return {"result": "not_found"}
+
+    def cancel_broker_order(self, broker_order_id: int) -> bool:
+        """Forward a cancellation request to the connected broker.
+
+        Returns ``True`` if the cancel was successfully forwarded to TWS;
+        ``False`` if there is no active broker connection or the bridge
+        raised an exception.
+        """
+        with self._lock:
+            bridge = self._tws_bridge
+        if bridge is None or not bridge.is_connected:
+            return False
+        try:
+            bridge.cancel_order(broker_order_id)
+            return True
+        except (OSError, RuntimeError):
+            logger.warning(
+                "Failed to forward cancel to broker for order %s",
+                broker_order_id,
+                exc_info=True,
+            )
+            return False
+
     # ------------------------------------------------------------------
     # Trades
     # ------------------------------------------------------------------
