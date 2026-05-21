@@ -12,8 +12,8 @@ The DELETE endpoint marks such orders as CANCELLED in the local store only
 and returns a ``warning`` field in the response to make this explicit.
 
 If an order carries a ``broker_order_id`` field the cancellation request is
-also forwarded to the connected broker (if any); the response will contain
-``execution_mode = "broker"`` in that case.
+also forwarded to the connected broker (if any); successful forwarding
+returns ``status = "cancel_requested"`` with ``execution_mode = "broker"``.
 """
 
 import logging
@@ -100,59 +100,78 @@ def cancel_order(order_id: str):
     ``execution_mode = "local_only"`` so callers are never misled.
 
     For orders that carry a ``broker_order_id`` field a cancellation request
-    is also forwarded to the connected broker (if any).  The response will
-    contain ``execution_mode = "broker"`` in that case.
+    is also forwarded to the connected broker (if any). Successful forwarding
+    returns ``status = "cancel_requested"`` with
+    ``execution_mode = "broker"``.
 
     Returns 409 if the order is already in a terminal state
     (CANCELLED, FILLED, or REJECTED).
     """
     svc = get_services()
-    orders = svc.get_orders()
-    for order in orders:
-        if order.get("id") == order_id:
-            status = order.get("status", "")
-            if status in ("CANCELLED", "FILLED", "REJECTED"):
-                return jsonify({
-                    "error": (
-                        f"Order '{order_id}' cannot be cancelled "
-                        f"(current status: {status})"
-                    ),
-                }), 409
+    cancelled_at = datetime.now().isoformat()
+    cancellation = svc.cancel_order(order_id, cancelled_at)
 
-            order["status"] = "CANCELLED"
-            order["cancelled_at"] = datetime.now().isoformat()
+    if cancellation["result"] == "terminal":
+        return jsonify({
+            "error": (
+                f"Order '{order_id}' cannot be cancelled "
+                f"(current status: {cancellation['status']})"
+            ),
+        }), 409
 
-            broker_order_id = order.get("broker_order_id")
-            broker_cancel_sent = False
-            if broker_order_id is not None:
-                broker_cancel_sent = svc.cancel_broker_order(int(broker_order_id))
+    if cancellation["result"] == "not_found":
+        return jsonify({"error": f"Order '{order_id}' not found"}), 404
 
-            if broker_cancel_sent:
-                logger.info(
-                    "Order cancellation forwarded to broker: %s "
-                    "(broker_order_id=%s)",
-                    order_id,
-                    broker_order_id,
-                )
-                return jsonify({
-                    "status": "cancelled",
-                    "order_id": order_id,
-                    "execution_mode": "broker",
-                    "broker_order_id": broker_order_id,
-                })
+    order = cancellation["order"]
+    broker_order_id = order.get("broker_order_id")
+    broker_cancel_sent = False
+    if broker_order_id is not None:
+        broker_cancel_sent = svc.cancel_broker_order(int(broker_order_id))
 
-            logger.info(
-                "Order cancelled locally (not forwarded to broker): %s",
-                order_id,
-            )
-            return jsonify({
-                "status": "cancelled",
-                "order_id": order_id,
-                "execution_mode": "local_only",
-                "warning": (
-                    "Cancellation applied to local record only — "
-                    "no request was sent to the broker."
-                ),
-            })
+    if broker_cancel_sent:
+        logger.info(
+            "Order cancellation forwarded to broker: %s "
+            "(broker_order_id=%s)",
+            order_id,
+            broker_order_id,
+        )
+        return jsonify({
+            "status": "cancel_requested",
+            "order_id": order_id,
+            "execution_mode": "broker",
+            "broker_order_id": broker_order_id,
+            "forwarded_to_broker": True,
+        })
 
-    return jsonify({"error": f"Order '{order_id}' not found"}), 404
+    if broker_order_id is not None:
+        logger.info(
+            "Order cancelled locally but broker forwarding was unavailable: %s "
+            "(broker_order_id=%s)",
+            order_id,
+            broker_order_id,
+        )
+        return jsonify({
+            "status": "cancelled",
+            "order_id": order_id,
+            "execution_mode": "broker",
+            "broker_order_id": broker_order_id,
+            "forwarded_to_broker": False,
+            "warning": (
+                "Cancellation was recorded locally, but forwarding to the "
+                "broker was not possible."
+            ),
+        })
+
+    logger.info(
+        "Order cancelled locally (not forwarded to broker): %s",
+        order_id,
+    )
+    return jsonify({
+        "status": "cancelled",
+        "order_id": order_id,
+        "execution_mode": "local_only",
+        "warning": (
+            "Cancellation applied to local record only — "
+            "no request was sent to the broker."
+        ),
+    })

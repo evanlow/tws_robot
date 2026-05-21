@@ -13,6 +13,7 @@ from datetime import datetime
 from core.tws_bridge import TWSBridge, _BridgeApp, _to_float
 from core.event_bus import EventBus, Event, EventType
 from ibapi.contract import Contract
+from ibapi.order_cancel import OrderCancel
 
 
 # ==============================================================================
@@ -526,6 +527,36 @@ class TestTWSBridge:
         mock_app_instance._connected = False
         mock_app_instance._ready = True
         assert bridge.is_connected is False
+
+    @pytest.mark.unit
+    def test_cancel_order_when_connected(self, bridge):
+        """Test cancel_order forwards the cancel request to TWS."""
+        mock_app = Mock()
+        mock_app._connected = True
+        mock_app._ready = True
+        mock_app.cancelOrder = Mock()
+        bridge._app = mock_app
+
+        bridge.cancel_order(42)
+
+        mock_app.cancelOrder.assert_called_once()
+        call_args = mock_app.cancelOrder.call_args[0]
+        assert call_args[0] == 42
+        assert isinstance(call_args[1], OrderCancel)
+
+    @pytest.mark.unit
+    def test_cancel_order_requires_ready_connection(self, bridge):
+        """Test cancel_order rejects partially connected bridge state."""
+        mock_app = Mock()
+        mock_app._connected = True
+        mock_app._ready = False
+        mock_app.cancelOrder = Mock()
+        bridge._app = mock_app
+
+        with pytest.raises(RuntimeError, match="not connected to TWS"):
+            bridge.cancel_order(42)
+
+        mock_app.cancelOrder.assert_not_called()
 
 
 # ==============================================================================

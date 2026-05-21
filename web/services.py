@@ -558,6 +558,27 @@ class ServiceManager:
         with self._lock:
             return list(self._orders)
 
+    def cancel_order(self, order_id: str, cancelled_at: str) -> Dict[str, Any]:
+        """Atomically cancel a tracked order in the local store."""
+        terminal_statuses = {"CANCELLED", "FILLED", "REJECTED"}
+        with self._lock:
+            for order in self._orders:
+                if order.get("id") != order_id:
+                    continue
+                status = order.get("status", "")
+                if status in terminal_statuses:
+                    return {
+                        "result": "terminal",
+                        "status": status,
+                    }
+                order["status"] = "CANCELLED"
+                order["cancelled_at"] = cancelled_at
+                return {
+                    "result": "cancelled",
+                    "order": dict(order),
+                }
+        return {"result": "not_found"}
+
     def cancel_broker_order(self, broker_order_id: int) -> bool:
         """Forward a cancellation request to the connected broker.
 

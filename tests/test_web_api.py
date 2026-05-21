@@ -76,6 +76,23 @@ class TestServiceManager:
         assert len(orders) == 1
         assert orders[0]["symbol"] == "AAPL"
 
+    def test_cancel_order(self, services):
+        services.add_order({"id": "1", "symbol": "AAPL", "status": "SUBMITTED"})
+        cancelled_at = "2026-05-21T00:00:00"
+
+        result = services.cancel_order("1", cancelled_at)
+
+        assert result["result"] == "cancelled"
+        assert result["order"]["status"] == "CANCELLED"
+        assert result["order"]["cancelled_at"] == cancelled_at
+
+    def test_cancel_order_terminal_status(self, services):
+        services.add_order({"id": "1", "symbol": "AAPL", "status": "FILLED"})
+
+        result = services.cancel_order("1", "2026-05-21T00:00:00")
+
+        assert result == {"result": "terminal", "status": "FILLED"}
+
     def test_alerts(self, services):
         services.add_alert({"id": "a1", "level": "WARNING", "message": "Test"})
         alerts = services.get_alerts()
@@ -788,12 +805,37 @@ class TestOrdersAPI:
         resp = client.delete("/api/orders/broker-ord-1")
         assert resp.status_code == 200
         data = resp.get_json()
+        assert data["status"] == "cancel_requested"
         assert data["execution_mode"] == "broker"
         assert data["broker_order_id"] == 42
+        assert data["forwarded_to_broker"] is True
         mock_bridge.cancel_order.assert_called_once_with(42)
 
         # Cleanup so subsequent tests are unaffected
         services._tws_bridge = None
+
+    def test_cancel_order_broker_not_forwarded_keeps_broker_context(
+        self, client, services
+    ):
+        order = {
+            "id": "broker-ord-2",
+            "symbol": "AAPL",
+            "action": "BUY",
+            "quantity": 100,
+            "status": "SUBMITTED",
+            "execution_mode": "broker",
+            "broker_order_id": 84,
+        }
+        services.add_order(order)
+
+        resp = client.delete("/api/orders/broker-ord-2")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "cancelled"
+        assert data["execution_mode"] == "broker"
+        assert data["broker_order_id"] == 84
+        assert data["forwarded_to_broker"] is False
+        assert "broker was not possible" in data["warning"]
 
     def test_cancel_nonexistent(self, client):
         resp = client.delete("/api/orders/nonexistent-id")

@@ -270,7 +270,7 @@ class TWSBridge:
 
         Raises ``RuntimeError`` if the bridge is not currently connected.
         """
-        if self._app is None or not self._app.isConnected():
+        if not self.is_connected:
             raise RuntimeError("TWSBridge: not connected to TWS")
         from ibapi.order_cancel import OrderCancel
         self._app.cancelOrder(broker_order_id, OrderCancel())
