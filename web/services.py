@@ -558,6 +558,28 @@ class ServiceManager:
         with self._lock:
             return list(self._orders)
 
+    def cancel_broker_order(self, broker_order_id: int) -> bool:
+        """Forward a cancellation request to the connected broker.
+
+        Returns ``True`` if the cancel was successfully forwarded to TWS;
+        ``False`` if there is no active broker connection or the bridge
+        raised an exception.
+        """
+        with self._lock:
+            bridge = self._tws_bridge
+        if bridge is None or not bridge.is_connected:
+            return False
+        try:
+            bridge.cancel_order(broker_order_id)
+            return True
+        except (OSError, RuntimeError):
+            logger.warning(
+                "Failed to forward cancel to broker for order %s",
+                broker_order_id,
+                exc_info=True,
+            )
+            return False
+
     # ------------------------------------------------------------------
     # Trades
     # ------------------------------------------------------------------

@@ -3,6 +3,17 @@
 GET    /api/orders       — all orders with status
 POST   /api/orders       — record a manual order request (local-only)
 DELETE /api/orders/<id>  — cancel an order
+
+Note on cancellation
+--------------------
+Orders created through this API are recorded locally with
+``execution_mode = "local_only"`` and are never submitted to a broker.
+The DELETE endpoint marks such orders as CANCELLED in the local store only
+and returns a ``warning`` field in the response to make this explicit.
+
+If an order carries a ``broker_order_id`` field the cancellation request is
+also forwarded to the connected broker (if any); the response will contain
+``execution_mode = "broker"`` in that case.
 """
 
 import logging
@@ -81,14 +92,67 @@ def record_order():
 
 @bp.route("/<order_id>", methods=["DELETE"])
 def cancel_order(order_id: str):
-    """Cancel a pending order (mark as CANCELLED in local store)."""
+    """Cancel a pending order.
+
+    For orders with ``execution_mode`` of ``local_only`` the cancellation is
+    applied to the local store only — no request is forwarded to the broker.
+    The response includes an explicit ``warning`` field and
+    ``execution_mode = "local_only"`` so callers are never misled.
+
+    For orders that carry a ``broker_order_id`` field a cancellation request
+    is also forwarded to the connected broker (if any).  The response will
+    contain ``execution_mode = "broker"`` in that case.
+
+    Returns 409 if the order is already in a terminal state
+    (CANCELLED, FILLED, or REJECTED).
+    """
     svc = get_services()
     orders = svc.get_orders()
     for order in orders:
         if order.get("id") == order_id:
+            status = order.get("status", "")
+            if status in ("CANCELLED", "FILLED", "REJECTED"):
+                return jsonify({
+                    "error": (
+                        f"Order '{order_id}' cannot be cancelled "
+                        f"(current status: {status})"
+                    ),
+                }), 409
+
             order["status"] = "CANCELLED"
             order["cancelled_at"] = datetime.now().isoformat()
-            logger.info("Order cancelled: %s", order_id)
-            return jsonify({"status": "cancelled", "order_id": order_id})
+
+            broker_order_id = order.get("broker_order_id")
+            broker_cancel_sent = False
+            if broker_order_id is not None:
+                broker_cancel_sent = svc.cancel_broker_order(int(broker_order_id))
+
+            if broker_cancel_sent:
+                logger.info(
+                    "Order cancellation forwarded to broker: %s "
+                    "(broker_order_id=%s)",
+                    order_id,
+                    broker_order_id,
+                )
+                return jsonify({
+                    "status": "cancelled",
+                    "order_id": order_id,
+                    "execution_mode": "broker",
+                    "broker_order_id": broker_order_id,
+                })
+
+            logger.info(
+                "Order cancelled locally (not forwarded to broker): %s",
+                order_id,
+            )
+            return jsonify({
+                "status": "cancelled",
+                "order_id": order_id,
+                "execution_mode": "local_only",
+                "warning": (
+                    "Cancellation applied to local record only — "
+                    "no request was sent to the broker."
+                ),
+            })
 
     return jsonify({"error": f"Order '{order_id}' not found"}), 404

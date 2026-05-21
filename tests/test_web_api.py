@@ -720,6 +720,80 @@ class TestOrdersAPI:
         # Cancel
         resp = client.delete(f"/api/orders/{order_id}")
         assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "cancelled"
+        assert data["order_id"] == order_id
+        # Local-only order: must include execution_mode and warning
+        assert data["execution_mode"] == "local_only"
+        assert "warning" in data
+        assert "broker" in data["warning"].lower()
+
+    def test_cancel_order_already_cancelled(self, client):
+        """Cancelling a CANCELLED order must return 409."""
+        resp = client.post("/api/orders/", json={
+            "symbol": "AAPL",
+            "action": "BUY",
+            "quantity": 10,
+        })
+        order_id = resp.get_json()["order"]["id"]
+
+        # First cancellation succeeds
+        resp = client.delete(f"/api/orders/{order_id}")
+        assert resp.status_code == 200
+
+        # Second cancellation must be rejected
+        resp = client.delete(f"/api/orders/{order_id}")
+        assert resp.status_code == 409
+        assert "cannot be cancelled" in resp.get_json()["error"]
+
+    def test_cancel_order_terminal_states(self, client, services):
+        """FILLED and REJECTED orders cannot be cancelled."""
+        for terminal_status in ("FILLED", "REJECTED"):
+            order = {
+                "id": f"test-{terminal_status}",
+                "symbol": "TSLA",
+                "action": "BUY",
+                "quantity": 1,
+                "status": terminal_status,
+                "execution_mode": "local_only",
+            }
+            services.add_order(order)
+            resp = client.delete(f"/api/orders/test-{terminal_status}")
+            assert resp.status_code == 409, (
+                f"Expected 409 for {terminal_status} order"
+            )
+
+    def test_cancel_order_broker_forwarded(self, client, services):
+        """When a broker_order_id is present and broker is connected,
+        the cancellation must be forwarded."""
+        from unittest.mock import MagicMock
+
+        # Inject a fake bridge that is "connected"
+        mock_bridge = MagicMock()
+        mock_bridge.is_connected = True
+        mock_bridge.cancel_order = MagicMock()
+        services._tws_bridge = mock_bridge
+
+        order = {
+            "id": "broker-ord-1",
+            "symbol": "AAPL",
+            "action": "BUY",
+            "quantity": 100,
+            "status": "SUBMITTED",
+            "execution_mode": "broker",
+            "broker_order_id": 42,
+        }
+        services.add_order(order)
+
+        resp = client.delete("/api/orders/broker-ord-1")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["execution_mode"] == "broker"
+        assert data["broker_order_id"] == 42
+        mock_bridge.cancel_order.assert_called_once_with(42)
+
+        # Cleanup so subsequent tests are unaffected
+        services._tws_bridge = None
 
     def test_cancel_nonexistent(self, client):
         resp = client.delete("/api/orders/nonexistent-id")
