@@ -406,7 +406,7 @@ h1 { font-size: 1.75rem; margin-bottom: 1rem; color: #f7fafc; }
 .state-badge.state-ready, .state-badge.state-paused   { background: #2c5282; color: #63b3ed; }
 .state-badge.state-stopped { background: #4a5568; color: #a0aec0; }
 .state-badge.state-error, .state-badge.state-failed  { background: #742a2a; color: #fc8181; }
-.state-badge.state-submitted { background: #553c1a; color: #ecc94b; }
+.state-badge.state-submitted, .state-badge.state-recorded { background: #553c1a; color: #ecc94b; }
 .state-badge.state-cancelled { background: #4a5568; color: #a0aec0; }
 
 /* ---- Risk Badges ------------------------------------------------------ */

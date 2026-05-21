@@ -26,7 +26,7 @@ def list_orders():
 
 
 @bp.route("/", methods=["POST"])
-def submit_order():
+def record_order():
     """Record a manual order request (local-only).
 
     Body::
@@ -41,7 +41,7 @@ def submit_order():
     """
     svc = get_services()
     if svc.risk_manager.emergency_stop_active:
-        return jsonify({"error": "Emergency stop is active — cannot submit orders"}), 403
+        return jsonify({"error": "Emergency stop is active — cannot record orders"}), 403
 
     data = request.get_json(silent=True) or {}
     symbol = data.get("symbol", "").upper()
@@ -64,7 +64,7 @@ def submit_order():
         "limit_price": limit_price,
         "status": "RECORDED",
         "execution_mode": "local_only",
-        "submitted_at": datetime.now().isoformat(),
+        "recorded_at": datetime.now().isoformat(),
         "source": "web_dashboard",
     }
 

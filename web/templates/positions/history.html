@@ -19,14 +19,14 @@
       {% for o in orders %}
       <tr>
         <td><code>{{ o.id|default('') }}</code></td>
-        <td>{{ o.submitted_at|default('') }}</td>
+        <td>{{ o.recorded_at|default(o.submitted_at|default('')) }}</td>
         <td data-symbol="{{ o.symbol }}"><strong>{{ o.symbol }}</strong></td>
         <td class="{{ 'text-buy' if o.action == 'BUY' else 'text-sell' }}">{{ o.action }}</td>
         <td>{{ o.quantity }}</td>
         <td>{{ o.order_type|default('MARKET') }}</td>
         <td><span class="state-badge state-{{ o.status|default('SUBMITTED')|lower }}">{{ o.status|default('SUBMITTED') }}</span></td>
         <td>
-          {% if o.status == 'SUBMITTED' %}
+          {% if o.status in ['SUBMITTED', 'RECORDED'] %}
           <button class="btn-sm btn-danger" onclick="cancelOrder('{{ o.id }}')">Cancel</button>
           {% endif %}
         </td>

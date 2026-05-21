@@ -85,10 +85,14 @@ class TestServiceManager:
         assert len(services.get_alerts()) == 0
 
     def test_system_health(self, services):
+        services.add_order({"id": "1", "symbol": "AAPL", "status": "SUBMITTED"})
+        services.add_order({"id": "2", "symbol": "MSFT", "status": "RECORDED"})
+        services.add_order({"id": "3", "symbol": "TSLA", "status": "CANCELLED"})
         health = services.get_system_health()
         assert health["status"] == "ok"
         assert "uptime_seconds" in health
         assert health["connected"] is False
+        assert health["pending_orders"] == 2
 
     def test_backtest_runs(self, services):
         services.store_backtest_run("r1", {
@@ -681,6 +685,8 @@ class TestOrdersAPI:
         assert data["order"]["symbol"] == "AAPL"
         assert data["order"]["status"] == "RECORDED"
         assert data["order"]["execution_mode"] == "local_only"
+        assert "recorded_at" in data["order"]
+        assert "submitted_at" not in data["order"]
 
     def test_submit_order_validation(self, client):
         resp = client.post("/api/orders/", json={
@@ -698,6 +704,7 @@ class TestOrdersAPI:
             "quantity": 100,
         })
         assert resp.status_code == 403
+        assert "cannot record orders" in resp.get_json()["error"]
         # Cleanup
         client.post("/api/emergency/resume", json={})
 
