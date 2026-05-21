@@ -665,7 +665,7 @@ class ServiceManager:
             ),
             "open_positions": len(self._positions),
             "pending_orders": len([
-                o for o in self._orders if o.get("status") == "SUBMITTED"
+                o for o in self._orders if o.get("status") in {"SUBMITTED", "RECORDED"}
             ]),
             "sse_clients": len(self._sse_queues),
             "timestamp": datetime.now().isoformat(),
