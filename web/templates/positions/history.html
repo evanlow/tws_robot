@@ -19,7 +19,7 @@
       {% for o in orders %}
       <tr>
         <td><code>{{ o.id|default('') }}</code></td>
-        <td>{{ o.recorded_at|default(o.submitted_at|default('')) }}</td>
+        <td>{{ o.recorded_at or o.submitted_at or '' }}</td>
         <td data-symbol="{{ o.symbol }}"><strong>{{ o.symbol }}</strong></td>
         <td class="{{ 'text-buy' if o.action == 'BUY' else 'text-sell' }}">{{ o.action }}</td>
         <td>{{ o.quantity }}</td>
