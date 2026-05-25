@@ -91,9 +91,16 @@ def login():
             user = AdminUser(username)
             login_user(user)
             next_page = request.args.get("next")
-            # Prevent open redirect — only allow relative paths on this host
-            if next_page and _is_safe_url(next_page):
-                return redirect(next_page)
+            # Prevent open redirect — only allow path portion of relative URLs
+            if next_page:
+                from urllib.parse import urlparse
+                parsed = urlparse(next_page)
+                # Only use path (and query) if there's no scheme/netloc (relative URL)
+                if not parsed.scheme and not parsed.netloc:
+                    safe_path = parsed.path
+                    if parsed.query:
+                        safe_path += "?" + parsed.query
+                    return redirect(safe_path)
             return redirect(url_for("dashboard.index"))
         else:
             error = "Invalid username or password."
