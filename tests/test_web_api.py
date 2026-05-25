@@ -708,12 +708,6 @@ class TestToYfinanceSymbol:
 class TestEmergencyAPI:
     """Tests for /api/emergency/* endpoints."""
 
-    @pytest.fixture(autouse=True)
-    def _isolate_stop_file(self, tmp_path, monkeypatch):
-        """Redirect EMERGENCY_STOP_FILE to tmp_path so tests don't pollute CWD."""
-        from web.routes import api_emergency
-        monkeypatch.setattr(api_emergency, "EMERGENCY_STOP_FILE", tmp_path / "EMERGENCY_STOP")
-
     def test_status(self, client):
         resp = client.get("/api/emergency/status")
         data = resp.get_json()
@@ -781,35 +775,31 @@ class TestEmergencyAPI:
                     json={"reason": "cleanup", "confirm": True})
         services.set_disconnected()
 
-    def test_halt_creates_emergency_stop_file(self, client, services, tmp_path, monkeypatch):
+    def test_halt_creates_emergency_stop_file(self, client, services):
         """Halt endpoint creates the EMERGENCY_STOP file marker."""
         from web.routes import api_emergency
-        stop_file = tmp_path / "EMERGENCY_STOP"
-        monkeypatch.setattr(api_emergency, "EMERGENCY_STOP_FILE", stop_file)
 
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
         resp = client.post("/api/emergency/halt", json={"reason": "file test"})
         assert resp.status_code == 200
-        assert stop_file.exists()
+        assert api_emergency.EMERGENCY_STOP_FILE.exists()
 
         # Cleanup
         client.post("/api/emergency/resume",
                     json={"reason": "cleanup", "confirm": True})
         services.set_disconnected()
 
-    def test_resume_removes_emergency_stop_file(self, client, services, tmp_path, monkeypatch):
+    def test_resume_removes_emergency_stop_file(self, client, services):
         """Resume endpoint removes the EMERGENCY_STOP file marker."""
         from web.routes import api_emergency
-        stop_file = tmp_path / "EMERGENCY_STOP"
-        monkeypatch.setattr(api_emergency, "EMERGENCY_STOP_FILE", stop_file)
 
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
         client.post("/api/emergency/halt", json={"reason": "file test"})
-        assert stop_file.exists()
+        assert api_emergency.EMERGENCY_STOP_FILE.exists()
 
         client.post("/api/emergency/resume",
                     json={"reason": "release", "confirm": True})
-        assert not stop_file.exists()
+        assert not api_emergency.EMERGENCY_STOP_FILE.exists()
 
         services.set_disconnected()
 
@@ -840,12 +830,6 @@ class TestEmergencyAPI:
 
 class TestOrdersAPI:
     """Tests for /api/orders/* endpoints."""
-
-    @pytest.fixture(autouse=True)
-    def _isolate_stop_file(self, tmp_path, monkeypatch):
-        """Redirect EMERGENCY_STOP_FILE to tmp_path so tests don't pollute CWD."""
-        from web.routes import api_emergency
-        monkeypatch.setattr(api_emergency, "EMERGENCY_STOP_FILE", tmp_path / "EMERGENCY_STOP")
 
     def test_list_empty(self, client):
         resp = client.get("/api/orders/")
