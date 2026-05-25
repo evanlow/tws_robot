@@ -50,6 +50,23 @@ def load_user(user_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_safe_url(target: str) -> bool:
+    """Validate that redirect target is a relative URL on the same host.
+
+    Prevents open redirect attacks by rejecting absolute URLs to external sites.
+    """
+    from urllib.parse import urlparse, urljoin
+
+    ref_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    return test_url.scheme in ("http", "https") and ref_url.netloc == test_url.netloc
+
+
+# ---------------------------------------------------------------------------
 # Blueprint
 # ---------------------------------------------------------------------------
 
@@ -74,7 +91,10 @@ def login():
             user = AdminUser(username)
             login_user(user)
             next_page = request.args.get("next")
-            return redirect(next_page or url_for("dashboard.index"))
+            # Prevent open redirect — only allow relative paths on this host
+            if next_page and _is_safe_url(next_page):
+                return redirect(next_page)
+            return redirect(url_for("dashboard.index"))
         else:
             error = "Invalid username or password."
 
