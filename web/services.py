@@ -157,6 +157,8 @@ class ServiceManager:
             self._connected = True
             self._connection_env = env
             self._connection_info = dict(info)
+            if self._risk_manager is not None:
+                self._risk_manager._equity_initialized = False
             # Invalidate the registry so it is rebuilt with the new account_id
             self._strategy_registry = None
             # Derive trading state from environment, but preserve an active
@@ -177,6 +179,8 @@ class ServiceManager:
             self._connected = False
             self._connection_env = None
             self._connection_info = {}
+            if self._risk_manager is not None:
+                self._risk_manager._equity_initialized = False
             # Preserve EMERGENCY_STOP while an emergency stop is still active
             # so that health/status endpoints remain accurate after a disconnect.
             if not (self._risk_manager is not None

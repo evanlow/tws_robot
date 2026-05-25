@@ -36,13 +36,24 @@ body {
   font-size: 0.85rem;
   animation: pulse-disconnected 2s ease-in-out infinite;
 }
+.status-bar-loading {
+  color: #ecc94b;
+  font-weight: 600;
+  font-size: 0.85rem;
+  animation: pulse-loading 2s ease-in-out infinite;
+}
 @keyframes pulse-disconnected {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+@keyframes pulse-loading {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .status-bar-disconnected {
+  .status-bar-disconnected,
+  .status-bar-loading {
     animation: none;
     opacity: 1;
   }

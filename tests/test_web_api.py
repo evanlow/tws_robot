@@ -4,12 +4,21 @@ Tests the new Super Dashboard API endpoints using the Flask test client.
 """
 
 import json
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
 
 from web import create_app
 from web.services import ServiceManager
+
+
+def _mark_account_data_ready(services, equity: float = 100000.0) -> None:
+    services.risk_manager.update(
+        equity=equity,
+        positions={},
+        current_date=datetime.now(),
+    )
 
 
 @pytest.fixture
@@ -164,7 +173,7 @@ class TestServiceManager:
     def test_account_data_ready_connected_with_equity(self, services):
         """account_data_ready must be True once equity has been initialized."""
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
-        services.risk_manager._equity_initialized = True
+        _mark_account_data_ready(services)
         assert services.account_data_ready is True
         services.set_disconnected()
 
@@ -762,7 +771,7 @@ class TestOrdersAPI:
 
     def test_submit_order(self, client, services):
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
-        services.risk_manager._equity_initialized = True
+        _mark_account_data_ready(services)
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
             "action": "BUY",
@@ -809,7 +818,7 @@ class TestOrdersAPI:
 
     def test_submit_order_validation(self, client, services):
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
-        services.risk_manager._equity_initialized = True
+        _mark_account_data_ready(services)
         resp = client.post("/api/orders/", json={
             "symbol": "",
             "action": "HOLD",
@@ -820,7 +829,7 @@ class TestOrdersAPI:
 
     def test_submit_order_during_emergency(self, client, services):
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
-        services.risk_manager._equity_initialized = True
+        _mark_account_data_ready(services)
         client.post("/api/emergency/halt", json={})
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
@@ -836,7 +845,7 @@ class TestOrdersAPI:
 
     def test_cancel_order(self, client, services):
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
-        services.risk_manager._equity_initialized = True
+        _mark_account_data_ready(services)
         # Submit first
         resp = client.post("/api/orders/", json={
             "symbol": "MSFT",
@@ -860,7 +869,7 @@ class TestOrdersAPI:
     def test_cancel_order_already_cancelled(self, client, services):
         """Cancelling a CANCELLED order must return 409."""
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
-        services.risk_manager._equity_initialized = True
+        _mark_account_data_ready(services)
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
             "action": "BUY",

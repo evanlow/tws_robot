@@ -1,6 +1,7 @@
 """Tests for SECRET_KEY production enforcement and centralized order safety gate."""
 
 import os
+from datetime import datetime
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -120,8 +121,12 @@ class TestOrderSafetyGate:
     def services(self, app):
         svc = app.config["services"]
         # Enable order submission by setting trading state
-        from web.trading_state import TradingState
-        svc._trading_state = TradingState.PAPER_TRADING_ENABLED
+        svc.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        svc.risk_manager.update(
+            equity=100000.0,
+            positions={},
+            current_date=datetime.now(),
+        )
         return svc
 
     def test_order_blocked_by_emergency_stop(self, client, services):
