@@ -265,6 +265,20 @@ class TWSBridge:
                 and self._app._connected
                 and self._app._ready)
 
+    def cancel_order(self, broker_order_id: int) -> None:
+        """Send a cancellation request to TWS for the given order ID.
+
+        Raises ``RuntimeError`` if the bridge is not currently connected.
+        """
+        if not self.is_connected:
+            raise RuntimeError("TWSBridge: not connected to TWS")
+        from ibapi.order_cancel import OrderCancel
+        self._app.cancelOrder(broker_order_id, OrderCancel())
+        logger.info(
+            "TWSBridge: cancel request sent for broker order %s",
+            broker_order_id,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Helpers

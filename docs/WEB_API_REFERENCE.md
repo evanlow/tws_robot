@@ -979,15 +979,46 @@ Submit a new order.
 
 ### `DELETE /api/orders/{order_id}`
 
-Cancel an order.
+Cancel a pending order.
 
-**Response:**
+**Behaviour**
+
+- Orders created through `POST /api/orders` are recorded locally with
+  `execution_mode = "local_only"` and are **never** submitted to a broker.
+  Cancelling such an order marks it as `CANCELLED` in the local store only.
+  The response includes an explicit `warning` field to make this clear.
+- If the order carries a `broker_order_id` field **and** the system is
+  connected to a broker, the cancellation request is also forwarded to the
+  broker.  The response will contain `execution_mode = "broker"` in that case.
+- Returns **409 Conflict** if the order is already in a terminal state
+  (`CANCELLED`, `FILLED`, or `REJECTED`).
+
+**Response — local-only cancellation:**
 ```json
 {
   "status": "cancelled",
-  "order_id": "ord_123"
+  "order_id": "ord_123",
+  "execution_mode": "local_only",
+  "warning": "Cancellation applied to local record only — no request was sent to the broker."
 }
 ```
+
+**Response — broker cancellation forwarded:**
+```json
+{
+  "status": "cancelled",
+  "order_id": "ord_123",
+  "execution_mode": "broker",
+  "broker_order_id": 42
+}
+```
+
+**Error responses:**
+
+| Status | Body | Reason |
+|--------|------|--------|
+| 404 | `{"error": "Order '...' not found"}` | Unknown order ID |
+| 409 | `{"error": "Order '...' cannot be cancelled (current status: ...)"}` | Order is in a terminal state |
 
 ---
 
