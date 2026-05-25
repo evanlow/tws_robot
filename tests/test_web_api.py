@@ -734,7 +734,7 @@ class TestEmergencyAPI:
 
         # Resume
         resp = client.post("/api/emergency/resume",
-                           json={"reason": "Test resume"})
+                           json={"reason": "Test resume", "confirm": True})
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["status"] == "resumed"
@@ -753,6 +753,74 @@ class TestEmergencyAPI:
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["positions_closed"] == 1
+
+    def test_resume_requires_confirmation(self, client, services):
+        """Resume without confirm=true returns 400."""
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        client.post("/api/emergency/halt", json={"reason": "test"})
+
+        # Attempt resume without confirmation
+        resp = client.post("/api/emergency/resume",
+                           json={"reason": "No confirm"})
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "confirm" in data["message"].lower()
+
+        # Confirm emergency is still active
+        resp = client.get("/api/emergency/status")
+        assert resp.get_json()["emergency_stop_active"] is True
+
+        # Cleanup
+        client.post("/api/emergency/resume",
+                    json={"reason": "cleanup", "confirm": True})
+        services.set_disconnected()
+
+    def test_halt_creates_emergency_stop_file(self, client, services):
+        """Halt endpoint creates the EMERGENCY_STOP file marker."""
+        from web.routes import api_emergency
+
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        resp = client.post("/api/emergency/halt", json={"reason": "file test"})
+        assert resp.status_code == 200
+        assert api_emergency.EMERGENCY_STOP_FILE.exists()
+
+        # Cleanup
+        client.post("/api/emergency/resume",
+                    json={"reason": "cleanup", "confirm": True})
+        services.set_disconnected()
+
+    def test_resume_removes_emergency_stop_file(self, client, services):
+        """Resume endpoint removes the EMERGENCY_STOP file marker."""
+        from web.routes import api_emergency
+
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        client.post("/api/emergency/halt", json={"reason": "file test"})
+        assert api_emergency.EMERGENCY_STOP_FILE.exists()
+
+        client.post("/api/emergency/resume",
+                    json={"reason": "release", "confirm": True})
+        assert not api_emergency.EMERGENCY_STOP_FILE.exists()
+
+        services.set_disconnected()
+
+    def test_resume_does_not_restore_live_trading(self, client, services):
+        """Resuming after halt in live env restores to read-only, not live."""
+        services.set_connected("live", {"host": "127.0.0.1", "port": 7496})
+        client.post("/api/emergency/halt", json={"reason": "test"})
+        client.post("/api/emergency/resume",
+                    json={"reason": "release", "confirm": True})
+
+        resp = client.get("/api/emergency/status")
+        data = resp.get_json()
+        # Should be read-only, NOT LIVE_TRADING_ARMED
+        assert data["trading_state"] == "CONNECTED_READ_ONLY"
+        services.set_disconnected()
+
+    def test_status_includes_file_field(self, client):
+        """Status endpoint includes emergency_stop_file_exists field."""
+        resp = client.get("/api/emergency/status")
+        data = resp.get_json()
+        assert "emergency_stop_file_exists" in data
 
 
 # ==============================================================================
@@ -840,7 +908,7 @@ class TestOrdersAPI:
         error_msg = resp.get_json()["error"].lower()
         assert "not allowed" in error_msg or "emergency" in error_msg
         # Cleanup
-        client.post("/api/emergency/resume", json={})
+        client.post("/api/emergency/resume", json={"confirm": True})
         services.set_disconnected()
 
     def test_cancel_order(self, client, services):

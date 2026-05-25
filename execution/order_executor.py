@@ -215,10 +215,15 @@ class OrderExecutor:
         
         # === SAFETY CHECK 1: Emergency Stop ===
         if self._check_emergency_stop():
+            stop_detail = (
+                f"stop file present ({self.emergency_stop_file})"
+                if self.emergency_stop_file.exists()
+                else "risk manager emergency_stop_active flag set"
+            )
             result = OrderResult.rejected(
                 RejectionReason.EMERGENCY_STOP_ACTIVE,
                 signal,
-                f"Emergency stop file exists: {self.emergency_stop_file}"
+                f"Emergency stop active: {stop_detail}"
             )
             self._record_order(result)
             logger.error(f"❌ EMERGENCY STOP ACTIVE - Order blocked")
@@ -296,9 +301,9 @@ class OrderExecutor:
         Check if emergency stop is active.
         
         Returns:
-            True if emergency stop file exists
+            True if emergency stop file exists OR risk manager flag is set
         """
-        return self.emergency_stop_file.exists()
+        return self.emergency_stop_file.exists() or self.risk_manager.emergency_stop_active
     
     def _validate_signal(self, signal: Signal) -> bool:
         """

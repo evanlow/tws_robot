@@ -159,7 +159,7 @@
           const res = await fetch('/api/emergency/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: 'Manual resume from web dashboard' })
+            body: JSON.stringify({ reason: 'Manual resume from web dashboard', confirm: true })
           });
           const data = await res.json();
           if (!res.ok) {
