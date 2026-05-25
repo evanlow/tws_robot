@@ -1,5 +1,7 @@
 # TWS Robot - Your Automated Trading Assistant
 
+[![CI](https://github.com/evanlow/tws_robot/actions/workflows/ci.yml/badge.svg)](https://github.com/evanlow/tws_robot/actions/workflows/ci.yml)
+
 **Test trading strategies, automate execution, manage risk — all from your browser.**
 
 Transform your trading ideas into automated strategies. Test them on historical data, validate with paper trading, then deploy them live. TWS Robot's **web dashboard** handles the execution, risk management, and monitoring so you can focus on strategy — no terminal experience required.
