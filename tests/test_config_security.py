@@ -1,0 +1,173 @@
+"""Tests for SECRET_KEY production enforcement and centralized order safety gate."""
+
+import os
+from unittest.mock import patch, MagicMock
+
+import pytest
+
+from web import create_app, _DEFAULT_SECRET
+
+
+# ==============================================================================
+# Issue 1: SECRET_KEY enforcement
+# ==============================================================================
+
+
+class TestSecretKeyEnforcement:
+    """Verify SECRET_KEY is enforced in production."""
+
+    def test_production_missing_secret_key_raises(self, monkeypatch):
+        """Production mode fails fast when SECRET_KEY is missing."""
+        monkeypatch.setattr(
+            "web.services.ServiceManager._start_market_events_refresh",
+            lambda self: None,
+        )
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+
+        with pytest.raises(RuntimeError, match="SECRET_KEY must be set in production"):
+            create_app({"TESTING": False, "SECRET_KEY": ""})
+
+    def test_production_default_secret_key_raises(self, monkeypatch):
+        """Production mode fails fast when SECRET_KEY is still the default."""
+        monkeypatch.setattr(
+            "web.services.ServiceManager._start_market_events_refresh",
+            lambda self: None,
+        )
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+
+        with pytest.raises(RuntimeError, match="Default SECRET_KEY cannot be used"):
+            create_app({"TESTING": False, "SECRET_KEY": _DEFAULT_SECRET})
+
+    def test_production_with_secure_key_starts_ok(self, monkeypatch):
+        """Production mode starts fine with a secure SECRET_KEY."""
+        monkeypatch.setattr(
+            "web.services.ServiceManager._start_market_events_refresh",
+            lambda self: None,
+        )
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SECRET_KEY", "super-secure-random-key-12345")
+
+        app = create_app({"TESTING": True})
+        assert app is not None
+
+    def test_development_default_secret_key_allowed(self, monkeypatch):
+        """Development mode allows the default SECRET_KEY."""
+        monkeypatch.setattr(
+            "web.services.ServiceManager._start_market_events_refresh",
+            lambda self: None,
+        )
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+
+        app = create_app({"TESTING": True})
+        assert app is not None
+
+    def test_testing_mode_skips_enforcement(self, monkeypatch):
+        """TESTING mode always skips SECRET_KEY enforcement."""
+        monkeypatch.setattr(
+            "web.services.ServiceManager._start_market_events_refresh",
+            lambda self: None,
+        )
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+
+        # Even with ENVIRONMENT=production, TESTING=True skips enforcement
+        app = create_app({"TESTING": True})
+        assert app is not None
+
+    def test_secret_key_loaded_from_env(self, monkeypatch):
+        """SECRET_KEY is loaded from environment variable."""
+        monkeypatch.setattr(
+            "web.services.ServiceManager._start_market_events_refresh",
+            lambda self: None,
+        )
+        monkeypatch.setenv("SECRET_KEY", "my-env-secret")
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+
+        app = create_app({"TESTING": True})
+        # config_override doesn't set SECRET_KEY, so the env value is used
+        assert app.config["SECRET_KEY"] == "my-env-secret"
+
+
+# ==============================================================================
+# Issue 2: Centralized order safety gate
+# ==============================================================================
+
+
+class TestOrderSafetyGate:
+    """Verify web manual orders pass through OrderExecutor safety checks."""
+
+    @pytest.fixture
+    def app(self, monkeypatch):
+        monkeypatch.setattr(
+            "web.services.ServiceManager._start_market_events_refresh",
+            lambda self: None,
+        )
+        return create_app({
+            "TESTING": True,
+            "LOGIN_DISABLED": True,
+            "WTF_CSRF_ENABLED": False,
+        })
+
+    @pytest.fixture
+    def client(self, app):
+        return app.test_client()
+
+    @pytest.fixture
+    def services(self, app):
+        svc = app.config["services"]
+        # Enable order submission by setting trading state
+        from web.trading_state import TradingState
+        svc._trading_state = TradingState.PAPER_TRADING_ENABLED
+        return svc
+
+    def test_order_blocked_by_emergency_stop(self, client, services):
+        """Emergency stop blocks web manual orders through OrderExecutor."""
+        with patch.object(
+            services.order_executor, "_check_emergency_stop", return_value=True
+        ):
+            resp = client.post("/api/orders/", json={
+                "symbol": "AAPL",
+                "action": "BUY",
+                "quantity": 10,
+            })
+        assert resp.status_code == 403
+        data = resp.get_json()
+        assert "emergency stop" in data["error"].lower()
+
+    def test_order_blocked_by_risk_manager(self, client, services):
+        """Risk manager blocks oversized orders through centralized gate."""
+        with patch.object(
+            services.order_executor.risk_manager,
+            "check_trade_risk",
+            return_value=(False, "Max position size exceeded"),
+        ), patch.object(
+            services.order_executor, "_check_emergency_stop", return_value=False
+        ):
+            resp = client.post("/api/orders/", json={
+                "symbol": "AAPL",
+                "action": "BUY",
+                "quantity": 99999,
+            })
+        assert resp.status_code == 403
+        data = resp.get_json()
+        assert "Max position size exceeded" in data["error"]
+
+    def test_order_passes_safety_gate(self, client, services):
+        """Valid order passes all safety checks and is recorded."""
+        with patch.object(
+            services.order_executor,
+            "validate_manual_order",
+            return_value=(True, ""),
+        ):
+            resp = client.post("/api/orders/", json={
+                "symbol": "AAPL",
+                "action": "BUY",
+                "quantity": 10,
+            })
+        assert resp.status_code == 201
+        data = resp.get_json()
+        assert data["status"] == "recorded"
+        assert data["execution_mode"] == "local_only"

@@ -49,10 +49,12 @@ def record_order():
             "order_type": "MARKET",
             "limit_price": null
         }
+
+    The order passes through the same risk and emergency-stop gate as
+    strategy-generated orders (via OrderExecutor.validate_manual_order)
+    before being recorded.
     """
     svc = get_services()
-    if svc.risk_manager.emergency_stop_active:
-        return jsonify({"error": "Emergency stop is active — cannot record orders"}), 403
 
     if not svc.trading_state.allows_order_submission:
         return jsonify({
@@ -70,6 +72,27 @@ def record_order():
         return jsonify({
             "error": "symbol, action (BUY/SELL), and quantity (>0) required",
         }), 400
+
+    # --- Centralized safety gate (same checks as strategy orders) ---
+    executor = svc.order_executor
+    current_equity = svc.get_account_summary().get("NetLiquidation", 0.0)
+    try:
+        current_equity = float(current_equity)
+    except (TypeError, ValueError):
+        current_equity = 0.0
+
+    positions = svc.risk_manager.positions if hasattr(svc.risk_manager, "positions") else {}
+    approved, rejection_reason = executor.validate_manual_order(
+        symbol=symbol,
+        action=action,
+        quantity=quantity,
+        price=limit_price,
+        current_equity=current_equity,
+        positions=positions,
+    )
+    if not approved:
+        logger.warning("Manual order blocked by safety gate: %s", rejection_reason)
+        return jsonify({"error": rejection_reason}), 403
 
     order_record = {
         "id": f"WEB-{datetime.now().strftime('%Y%m%d%H%M%S%f')}",

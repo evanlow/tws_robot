@@ -233,6 +233,18 @@ class ServiceManager:
         return self._risk_manager
 
     @property
+    def order_executor(self):
+        """Return the shared OrderExecutor (created on first access)."""
+        if self._order_executor is None:
+            from execution.order_executor import OrderExecutor
+            self._order_executor = OrderExecutor(
+                tws_adapter=self._tws_bridge,
+                risk_manager=self.risk_manager,
+                is_live_mode=False,
+            )
+        return self._order_executor
+
+    @property
     def strategy_registry(self):
         """Return the shared StrategyRegistry (created on first access).
 

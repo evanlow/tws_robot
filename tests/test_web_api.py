@@ -792,7 +792,8 @@ class TestOrdersAPI:
             "quantity": 100,
         })
         assert resp.status_code == 403
-        assert "cannot record orders" in resp.get_json()["error"]
+        error_msg = resp.get_json()["error"].lower()
+        assert "not allowed" in error_msg or "emergency" in error_msg
         # Cleanup
         client.post("/api/emergency/resume", json={})
         services.set_disconnected()
