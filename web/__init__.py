@@ -67,6 +67,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
         return {
             "connected": svc.connected,
             "environment": svc.connection_env or "disconnected",
+            "account_data_ready": svc.account_data_ready,
             "risk_summary": svc.risk_manager.get_risk_summary(),
         }
 
