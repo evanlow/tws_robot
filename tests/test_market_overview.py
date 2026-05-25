@@ -31,7 +31,7 @@ def app():
     # Reset the module-level singleton so each test gets a fresh service
     import data.market_overview as mo
     mo._instance = None
-    app = create_app({"TESTING": True})
+    app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
     return app
 
 

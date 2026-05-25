@@ -7,6 +7,56 @@ document.addEventListener('DOMContentLoaded', () => {
   _enrichSymbolNames();
 });
 
+const _originalFetch = window.fetch.bind(window);
+
+function _getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  if (meta && meta.content) return meta.content;
+
+  const input = document.querySelector('input[name="csrf_token"]');
+  return input ? input.value : '';
+}
+
+function _isSafeMethod(method) {
+  return ['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes((method || 'GET').toUpperCase());
+}
+
+function _isSameOriginRequest(resource) {
+  const requestUrl = resource instanceof Request ? resource.url : String(resource || '');
+  if (!requestUrl) return true;
+
+  try {
+    return new URL(requestUrl, window.location.origin).origin === window.location.origin;
+  } catch (err) {
+    console.debug('[TWS Robot] Unable to resolve request URL for CSRF handling:', err);
+    return false;
+  }
+}
+
+window.fetch = function(resource, init) {
+  const method = init?.method || (resource instanceof Request ? resource.method : 'GET');
+  if (_isSafeMethod(method) || !_isSameOriginRequest(resource)) {
+    return _originalFetch(resource, init);
+  }
+
+  const token = _getCsrfToken();
+  if (!token) return _originalFetch(resource, init);
+
+  const headers = new Headers(resource instanceof Request ? resource.headers : undefined);
+  if (init?.headers) {
+    new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+  }
+  if (!headers.has('X-CSRFToken')) {
+    headers.set('X-CSRFToken', token);
+  }
+
+  if (resource instanceof Request) {
+    return _originalFetch(new Request(resource, { headers }));
+  }
+
+  return _originalFetch(resource, { ...init, headers });
+};
+
 /**
  * Shared utility: render a markdown-ish string as HTML.
  * Handles ## headings, **bold**, and newlines for simple LLM output.

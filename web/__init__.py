@@ -38,6 +38,14 @@ def create_app(config_override: dict | None = None) -> "Flask":
     if config_override:
         app.config.update(config_override)
 
+    # ---- CSRF protection (Flask-WTF) ----
+    from flask_wtf.csrf import CSRFProtect
+    csrf = CSRFProtect(app)
+
+    # ---- Authentication ----
+    from web.auth import init_auth
+    init_auth(app)
+
     # Singleton service manager — shared across all routes
     from web.services import ServiceManager
     if "services" not in app.config:
@@ -79,6 +87,9 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(fx_research_bp)
 
     # ---- JSON API blueprints ----
+    # Session-authenticated API requests remain CSRF-protected and the web
+    # client sends the token via the X-CSRFToken header for state-changing
+    # requests.
     from web.routes.api_connection import bp as api_connection_bp
     from web.routes.api_account import bp as api_account_bp
     from web.routes.api_emergency import bp as api_emergency_bp
@@ -94,19 +105,16 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_account_intelligence import bp as api_account_intelligence_bp
     from web.routes.api_market_events import bp as api_market_events_bp
 
-    app.register_blueprint(api_connection_bp)
-    app.register_blueprint(api_account_bp)
-    app.register_blueprint(api_emergency_bp)
-    app.register_blueprint(api_strategies_bp)
-    app.register_blueprint(api_orders_bp)
-    app.register_blueprint(api_events_bp)
-    app.register_blueprint(api_system_bp)
-    app.register_blueprint(api_backtest_bp)
-    app.register_blueprint(api_data_bp)
-    app.register_blueprint(api_market_bp)
-    app.register_blueprint(api_portfolio_analysis_bp)
+    api_blueprints = [
+        api_connection_bp, api_account_bp, api_emergency_bp,
+        api_strategies_bp, api_orders_bp, api_events_bp,
+        api_system_bp, api_backtest_bp, api_data_bp, api_market_bp,
+        api_portfolio_analysis_bp, api_account_intelligence_bp,
+        api_market_events_bp,
+    ]
+    for api_bp in api_blueprints:
+        app.register_blueprint(api_bp)
+
     app.register_blueprint(portfolio_analysis_bp)
-    app.register_blueprint(api_account_intelligence_bp)
-    app.register_blueprint(api_market_events_bp)
 
     return app

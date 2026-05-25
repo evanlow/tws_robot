@@ -35,7 +35,7 @@ def app():
     """Create a Flask test app with a ServiceManager that has test data."""
     os.environ["OPENAI_API_KEY"] = "sk-test-key"
     os.environ["AI_ENABLED"] = "true"
-    application = create_app({"TESTING": True})
+    application = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
     return application
 
 

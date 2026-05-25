@@ -87,6 +87,8 @@ From the dashboard you can:
 - ⚙️ **Configure settings** on the Settings page
 - 🚨 **Emergency stop** with one click from the top bar
 
+> **🔐 Authentication:** The dashboard requires login. Default credentials are `admin` / `changeme`. See [Authentication](#-authentication) below to configure.
+
 ### 3. Or Use the Command Line
 
 If you prefer working in a terminal:
@@ -729,6 +731,43 @@ tws_robot/
 - **Use paper trading first** - Test strategies before going live
 - **Monitor live trades** - Always supervise automated trading
 - **Market hours awareness** - System warns about after-hours trading
+
+## 🔐 Authentication
+
+The web dashboard is protected by login authentication. All routes (pages and APIs) require a valid session. CSRF protection is enabled for all state-changing requests, including cookie-authenticated API calls.
+
+### Default Credentials
+
+| Setting | Default |
+|---------|---------|
+| Username | `admin` |
+| Password | _must be configured_ |
+
+**⚠️** In normal deployments you must set `TWS_ADMIN_PASSWORD` or `TWS_ADMIN_PASSWORD_HASH`. The insecure `changeme` fallback is only allowed when `TESTING`, `DEBUG`, or `ALLOW_DEFAULT_PASSWORD=true` is enabled.
+
+### Configuration
+
+Set credentials in your `.env` file:
+
+```bash
+TWS_ADMIN_USERNAME=admin
+TWS_ADMIN_PASSWORD=your-secure-password
+```
+
+### Disable Authentication (Local Dev Only)
+
+For local-only development on `127.0.0.1`, you can disable authentication:
+
+```bash
+LOGIN_DISABLED=true
+```
+
+### Security Details
+
+- **Session-based auth** using Flask-Login with secure cookies.
+- **CSRF protection** via Flask-WTF on all POST/PUT/DELETE requests, including `/api/*`; the web client sends the token in an `X-CSRFToken` header for JavaScript requests.
+- **API routes** return `401 JSON` responses when unauthenticated.
+- **Page routes** redirect to the login page when the session is missing or expired.
 
 ## TWS Setup
 
