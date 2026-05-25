@@ -12,6 +12,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from web.services import get_services
+from web.trading_state import TradingState
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ def status():
     risk = svc.risk_manager
     return jsonify({
         "emergency_stop_active": risk.emergency_stop_active,
+        "trading_state": svc.trading_state.value,
         "risk_status": risk.risk_status.value,
         "drawdown_breached": risk.drawdown_breached,
         "daily_limit_breached": risk.daily_limit_breached,
@@ -39,6 +41,7 @@ def halt():
     reason = data.get("reason", "Manual halt from web dashboard")
 
     svc.risk_manager.trigger_emergency_stop(reason)
+    svc.set_trading_state(TradingState.EMERGENCY_STOP)
 
     # Stop all running strategies
     reg = svc.strategy_registry
@@ -90,6 +93,18 @@ def resume():
     reason = data.get("reason", "Manual resume from web dashboard")
 
     svc.risk_manager.release_emergency_stop(reason)
+
+    # Restore trading state based on current connection
+    if svc.connected:
+        env = svc.connection_env
+        if env == "paper":
+            svc.set_trading_state(TradingState.PAPER_TRADING_ENABLED)
+        elif env == "live":
+            svc.set_trading_state(TradingState.LIVE_TRADING_ARMED)
+        else:
+            svc.set_trading_state(TradingState.CONNECTED_READ_ONLY)
+    else:
+        svc.set_trading_state(TradingState.DISCONNECTED)
 
     svc.add_alert({
         "id": f"resume-{datetime.now().timestamp()}",

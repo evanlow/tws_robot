@@ -110,6 +110,42 @@ class TestServiceManager:
         assert "uptime_seconds" in health
         assert health["connected"] is False
         assert health["pending_orders"] == 2
+        assert health["trading_state"] == "DISCONNECTED"
+
+    def test_trading_state_initial(self, services):
+        from web.trading_state import TradingState
+        assert services.trading_state == TradingState.DISCONNECTED
+
+    def test_trading_state_paper_connection(self, services):
+        from web.trading_state import TradingState
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        assert services.trading_state == TradingState.PAPER_TRADING_ENABLED
+        services.set_disconnected()
+        assert services.trading_state == TradingState.DISCONNECTED
+
+    def test_trading_state_live_connection(self, services):
+        from web.trading_state import TradingState
+        services.set_connected("live", {"host": "127.0.0.1", "port": 7496})
+        assert services.trading_state == TradingState.LIVE_TRADING_ARMED
+        services.set_disconnected()
+
+    def test_trading_state_emergency_stop(self, services):
+        from web.trading_state import TradingState
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        services.set_trading_state(TradingState.EMERGENCY_STOP)
+        assert services.trading_state == TradingState.EMERGENCY_STOP
+        assert not services.trading_state.allows_order_submission
+        services.set_disconnected()
+
+    def test_trading_state_allows_order_submission(self, services):
+        from web.trading_state import TradingState
+        assert not TradingState.DISCONNECTED.allows_order_submission
+        assert not TradingState.CONNECTION_FAILED.allows_order_submission
+        assert not TradingState.CONNECTED_READ_ONLY.allows_order_submission
+        assert TradingState.PAPER_TRADING_ENABLED.allows_order_submission
+        assert TradingState.LIVE_TRADING_ARMED.allows_order_submission
+        assert TradingState.LIVE_TRADING_ACTIVE.allows_order_submission
+        assert not TradingState.EMERGENCY_STOP.allows_order_submission
 
     def test_backtest_runs(self, services):
         services.store_backtest_run("r1", {
@@ -326,6 +362,7 @@ class TestConnectionAPI:
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["connected"] is False
+        assert data["trading_state"] == "DISCONNECTED"
 
     def test_connect(self, client, services):
         def _connect_success(env, cfg, timeout=10):
@@ -350,6 +387,7 @@ class TestConnectionAPI:
         assert status_resp.status_code == 200
         assert status_data["connected"] is True
         assert status_data["environment"] == "paper"
+        assert status_data["trading_state"] == "PAPER_TRADING_ENABLED"
 
     def test_connect_failure(self, client):
         with patch.object(ServiceManager, "connect_tws", return_value=False):
@@ -645,8 +683,12 @@ class TestEmergencyAPI:
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["emergency_stop_active"] is False
+        assert data["trading_state"] == "DISCONNECTED"
 
-    def test_halt_and_resume(self, client):
+    def test_halt_and_resume(self, client, services):
+        # Connect first to have a meaningful state
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+
         # Halt
         resp = client.post("/api/emergency/halt",
                            json={"reason": "Test halt"})
@@ -654,9 +696,11 @@ class TestEmergencyAPI:
         assert resp.status_code == 200
         assert data["status"] == "halted"
 
-        # Check status
+        # Check status - should be EMERGENCY_STOP
         resp = client.get("/api/emergency/status")
-        assert resp.get_json()["emergency_stop_active"] is True
+        status_data = resp.get_json()
+        assert status_data["emergency_stop_active"] is True
+        assert status_data["trading_state"] == "EMERGENCY_STOP"
 
         # Resume
         resp = client.post("/api/emergency/resume",
@@ -664,6 +708,14 @@ class TestEmergencyAPI:
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["status"] == "resumed"
+
+        # Trading state should be restored
+        resp = client.get("/api/emergency/status")
+        status_data = resp.get_json()
+        assert status_data["trading_state"] == "PAPER_TRADING_ENABLED"
+
+        # Cleanup
+        services.set_disconnected()
 
     def test_close_all(self, client, services):
         services.update_position("AAPL", {"quantity": 100})
@@ -687,7 +739,8 @@ class TestOrdersAPI:
         assert resp.status_code == 200
         assert data["count"] == 0
 
-    def test_submit_order(self, client):
+    def test_submit_order(self, client, services):
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
             "action": "BUY",
@@ -704,16 +757,30 @@ class TestOrdersAPI:
         assert data["order"]["execution_mode"] == "local_only"
         assert "recorded_at" in data["order"]
         assert "submitted_at" not in data["order"]
+        services.set_disconnected()
 
-    def test_submit_order_validation(self, client):
+    def test_submit_order_blocked_when_disconnected(self, client):
+        """Order submission must be rejected when not in a trading-ready state."""
+        resp = client.post("/api/orders/", json={
+            "symbol": "AAPL",
+            "action": "BUY",
+            "quantity": 100,
+        })
+        assert resp.status_code == 403
+        assert "not allowed" in resp.get_json()["error"]
+
+    def test_submit_order_validation(self, client, services):
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
         resp = client.post("/api/orders/", json={
             "symbol": "",
             "action": "HOLD",
             "quantity": 0,
         })
         assert resp.status_code == 400
+        services.set_disconnected()
 
-    def test_submit_order_during_emergency(self, client):
+    def test_submit_order_during_emergency(self, client, services):
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
         client.post("/api/emergency/halt", json={})
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
@@ -724,8 +791,10 @@ class TestOrdersAPI:
         assert "cannot record orders" in resp.get_json()["error"]
         # Cleanup
         client.post("/api/emergency/resume", json={})
+        services.set_disconnected()
 
-    def test_cancel_order(self, client):
+    def test_cancel_order(self, client, services):
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
         # Submit first
         resp = client.post("/api/orders/", json={
             "symbol": "MSFT",
@@ -744,9 +813,11 @@ class TestOrdersAPI:
         assert data["execution_mode"] == "local_only"
         assert "warning" in data
         assert "broker" in data["warning"].lower()
+        services.set_disconnected()
 
-    def test_cancel_order_already_cancelled(self, client):
+    def test_cancel_order_already_cancelled(self, client, services):
         """Cancelling a CANCELLED order must return 409."""
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
             "action": "BUY",
@@ -762,6 +833,7 @@ class TestOrdersAPI:
         resp = client.delete(f"/api/orders/{order_id}")
         assert resp.status_code == 409
         assert "cannot be cancelled" in resp.get_json()["error"]
+        services.set_disconnected()
 
     def test_cancel_order_terminal_states(self, client, services):
         """FILLED and REJECTED orders cannot be cancelled."""

@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.event_bus import Event, EventBus, EventType, get_event_bus
+from web.trading_state import TradingState
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,9 @@ class ServiceManager:
         self._connected = False
         self._connection_env: Optional[str] = None  # "paper" | "live"
         self._connection_info: Dict[str, Any] = {}
+
+        # Explicit trading state
+        self._trading_state: TradingState = TradingState.DISCONNECTED
 
         # TWS bridge (actual IB API connection)
         self._tws_bridge: Any = None
@@ -109,6 +113,16 @@ class ServiceManager:
         with self._lock:
             return self._connection_info.get("account", "")
 
+    @property
+    def trading_state(self) -> TradingState:
+        """Return the current explicit trading state."""
+        return self._trading_state
+
+    def set_trading_state(self, state: TradingState) -> None:
+        """Explicitly transition to a new trading state."""
+        with self._lock:
+            self._trading_state = state
+
     def set_connected(self, env: str, info: Dict[str, Any]) -> None:
         with self._lock:
             self._connected = True
@@ -116,6 +130,13 @@ class ServiceManager:
             self._connection_info = dict(info)
             # Invalidate the registry so it is rebuilt with the new account_id
             self._strategy_registry = None
+            # Derive trading state from environment
+            if env == "paper":
+                self._trading_state = TradingState.PAPER_TRADING_ENABLED
+            elif env == "live":
+                self._trading_state = TradingState.LIVE_TRADING_ARMED
+            else:
+                self._trading_state = TradingState.CONNECTED_READ_ONLY
         self.event_bus.publish(Event(
             EventType.CONNECTION_ESTABLISHED,
             data={"environment": env, **info},
@@ -127,6 +148,7 @@ class ServiceManager:
             self._connected = False
             self._connection_env = None
             self._connection_info = {}
+            self._trading_state = TradingState.DISCONNECTED
             # Invalidate the registry — strategies from the previous account
             # must not be visible under a different (or no) account.
             self._strategy_registry = None
@@ -151,6 +173,8 @@ class ServiceManager:
 
         bridge = TWSBridge(self, config)
         if not bridge.connect(timeout=timeout):
+            with self._lock:
+                self._trading_state = TradingState.CONNECTION_FAILED
             return False
 
         with self._lock:
@@ -702,6 +726,7 @@ class ServiceManager:
             "uptime_seconds": round(uptime, 1),
             "connected": self._connected,
             "environment": self._connection_env,
+            "trading_state": self._trading_state.value,
             "event_bus_stats": event_stats,
             "strategy_count": (
                 len(self._strategy_registry) if self._strategy_registry else 0
