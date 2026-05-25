@@ -241,7 +241,7 @@ class TestRecomputeStrategyMetrics:
     @pytest.fixture
     def app(self):
         from web import create_app
-        return create_app({"TESTING": True})
+        return create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
 
     @pytest.fixture
     def svc(self, app):
@@ -404,7 +404,7 @@ class TestAPINewFields:
     @pytest.fixture
     def app(self):
         from web import create_app
-        return create_app({"TESTING": True})
+        return create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
 
     @pytest.fixture
     def client(self, app):

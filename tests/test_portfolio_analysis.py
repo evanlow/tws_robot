@@ -40,7 +40,7 @@ def reset_ai_state():
 def app():
     """Create Flask app with test configuration."""
     from web import create_app
-    return create_app({"TESTING": True})
+    return create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
 
 
 @pytest.fixture

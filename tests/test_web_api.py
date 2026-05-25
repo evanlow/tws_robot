@@ -19,7 +19,7 @@ def app(monkeypatch):
         "web.services.ServiceManager._start_market_events_refresh",
         lambda self: None,
     )
-    app = create_app({"TESTING": True})
+    app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
     return app
 
 

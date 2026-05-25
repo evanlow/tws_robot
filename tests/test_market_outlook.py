@@ -38,7 +38,7 @@ def app():
     mo._instance = None
     import data.market_overview as mkt
     mkt._instance = None
-    app = create_app({"TESTING": True})
+    app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
     return app
 
 

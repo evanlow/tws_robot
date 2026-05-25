@@ -11,7 +11,7 @@ from web.fx_signal_service import get_fx_dashboard_data
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
-    app = create_app({"TESTING": True})
+    app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
     with app.test_client() as c:
         yield c
 

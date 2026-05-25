@@ -963,7 +963,7 @@ class TestIntelligenceAPI:
     @pytest.fixture()
     def client(self):
         from web import create_app
-        app = create_app({"TESTING": True})
+        app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
         with app.test_client() as c:
             yield c
 

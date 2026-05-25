@@ -103,6 +103,14 @@
       <li class="{{ 'active' if active_page == 'settings' }}">
         <a href="{{ url_for('settings.index') }}">Settings</a>
       </li>
+      {% if current_user.is_authenticated %}
+      <li>
+        <form method="POST" action="{{ url_for('auth.logout') }}" style="display:inline; margin:0; padding:0;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <button type="submit" class="nav-link-btn" title="Log out">Logout</button>
+        </form>
+      </li>
+      {% endif %}
     </ul>
   </nav>
 
