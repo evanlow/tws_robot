@@ -49,6 +49,7 @@ def mock_risk_manager():
     """Mock risk manager that approves trades by default"""
     risk_mgr = Mock(spec=RiskManager)
     risk_mgr.check_trade_risk = Mock(return_value=(True, ""))
+    risk_mgr.emergency_stop_active = False
     return risk_mgr
 
 
@@ -173,6 +174,29 @@ def test_no_emergency_stop_allows_order(executor_paper, sample_signal, sample_po
     # Verify order was submitted (passes emergency check)
     assert result.status == OrderStatus.SUBMITTED
     assert executor_paper.orders_submitted == 1
+
+
+def test_risk_manager_emergency_stop_blocks_order(executor_paper, sample_signal, sample_positions):
+    """Test risk manager emergency_stop_active flag blocks orders even without file."""
+    # No file, but risk manager has emergency stop active
+    emergency_path = Path(executor_paper.emergency_stop_file)
+    if emergency_path.exists():
+        emergency_path.unlink()
+
+    executor_paper.risk_manager.emergency_stop_active = True
+
+    result = executor_paper.execute_signal(
+        strategy_name='TestStrategy',
+        signal=sample_signal,
+        current_equity=100000.0,
+        positions=sample_positions,
+    )
+
+    assert result.status == OrderStatus.REJECTED
+    assert RejectionReason.EMERGENCY_STOP_ACTIVE.value in result.reason
+
+    # Cleanup
+    executor_paper.risk_manager.emergency_stop_active = False
 
 
 # =============================================================================

@@ -296,9 +296,9 @@ class OrderExecutor:
         Check if emergency stop is active.
         
         Returns:
-            True if emergency stop file exists
+            True if emergency stop file exists OR risk manager flag is set
         """
-        return self.emergency_stop_file.exists()
+        return self.emergency_stop_file.exists() or self.risk_manager.emergency_stop_active
     
     def _validate_signal(self, signal: Signal) -> bool:
         """

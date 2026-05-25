@@ -146,9 +146,18 @@ class ServiceManager:
         return TradingState.CONNECTED_READ_ONLY
 
     def restore_trading_state_from_connection(self) -> None:
-        """Restore trading state based on current connection (e.g. after emergency stop resume)."""
+        """Restore trading state based on current connection (e.g. after emergency stop resume).
+
+        After an emergency stop release, live environments are restored to
+        CONNECTED_READ_ONLY rather than LIVE_TRADING_ARMED to require explicit
+        re-arming before live orders can be submitted again.
+        """
         if self.connected:
-            self.set_trading_state(self._trading_state_for_env(self._connection_env or ""))
+            desired = self._trading_state_for_env(self._connection_env or "")
+            # Never resume directly into live trading — require re-arming
+            if desired == TradingState.LIVE_TRADING_ARMED:
+                desired = TradingState.CONNECTED_READ_ONLY
+            self.set_trading_state(desired)
         else:
             self.set_trading_state(TradingState.DISCONNECTED)
 

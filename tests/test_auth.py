@@ -201,6 +201,12 @@ class TestLogout:
 class TestCSRFProtection:
     """Verify CSRF protection on state-changing requests."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_stop_file(self, tmp_path, monkeypatch):
+        """Redirect EMERGENCY_STOP_FILE to tmp_path so tests don't pollute CWD."""
+        from web.routes import api_emergency
+        monkeypatch.setattr(api_emergency, "EMERGENCY_STOP_FILE", tmp_path / "EMERGENCY_STOP")
+
     def test_post_without_csrf_token_rejected(self, csrf_client):
         # Login POSTs are CSRF-protected and should fail without a token.
         resp = csrf_client.post("/auth/login", data={

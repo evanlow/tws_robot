@@ -50,3 +50,4 @@ coverage_output.txt
 tws_robot.db
 strategy_lifecycle.db
 htmlcov/
+EMERGENCY_STOP
