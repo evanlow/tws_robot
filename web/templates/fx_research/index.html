@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>🔬 {{ title }} Dashboard</h1>
+<p style="color:#a0aec0;margin-bottom:1.5rem;">
+  <strong>⚠️ Research Only</strong> — This dashboard is for research and advisory purposes only.
+  It does not place orders or connect to live trading. All data shown is illustrative sample data.
+</p>
+
+<!-- ============================================================
+     1. FX Market Watch
+     ============================================================ -->
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">📈 FX Market Watch</h2>
+  <div style="overflow-x:auto;">
+    <table class="data-table" style="width:100%;">
+      <thead>
+        <tr>
+          <th>Pair</th>
+          <th>Last Price</th>
+          <th>Daily Change %</th>
+          <th>Signal Bias</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in market_watch %}
+        <tr>
+          <td><strong>{{ item.pair }}</strong></td>
+          <td>{{ "%.4f"|format(item.last_price) }}</td>
+          <td class="{{ 'pnl-positive' if item.daily_change_pct >= 0 else 'pnl-negative' }}">
+            {{ "%+.2f"|format(item.daily_change_pct) }}%
+          </td>
+          <td>
+            {% if item.signal_bias == 'Long SGD' %}
+              <span style="color:#48bb78;">{{ item.signal_bias }}</span>
+            {% elif item.signal_bias == 'Short SGD' %}
+              <span style="color:#fc8181;">{{ item.signal_bias }}</span>
+            {% else %}
+              <span style="color:#a0aec0;">{{ item.signal_bias }}</span>
+            {% endif %}
+          </td>
+          <td style="color:#a0aec0;font-size:0.85rem;">{{ item.notes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================
+     2. S$NEER Proxy Monitor
+     ============================================================ -->
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🏛️ S$NEER Proxy Monitor</h2>
+  <p style="color:#ed8936;font-size:0.85rem;margin-bottom:0.75rem;">
+    ⚠️ Proxy/research estimates only — not official MAS values.
+  </p>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">Estimated S$NEER Proxy</span>
+      <span class="stat-value">{{ "%.2f"|format(sneer_proxy.estimated_sneer_proxy) }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Latest Official S$NEER</span>
+      <span class="stat-value">{{ "%.2f"|format(sneer_proxy.latest_official_sneer) }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Estimated Band Zone</span>
+      <span class="stat-value">{{ sneer_proxy.estimated_band_zone }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Proxy Deviation %</span>
+      <span class="stat-value">{{ "%.2f"|format(sneer_proxy.proxy_deviation_pct) }}%</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Confidence</span>
+      <span class="stat-value">{{ sneer_proxy.confidence }}</span>
+    </div>
+  </div>
+  <p style="color:#718096;font-size:0.8rem;margin-top:0.75rem;font-style:italic;">
+    {{ sneer_proxy.disclaimer }}
+  </p>
+</section>
+
+<!-- ============================================================
+     3. MAS Policy Console
+     ============================================================ -->
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">📋 MAS Policy Console</h2>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">Last Decision Date</span>
+      <span class="stat-value">{{ mas_policy.last_decision_date }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Current Stance</span>
+      <span class="stat-value" style="font-size:0.85rem;">{{ mas_policy.current_stance }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Slope Changed?</span>
+      <span class="stat-value">{{ "Yes" if mas_policy.slope_changed else "No" }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Width Changed?</span>
+      <span class="stat-value">{{ "Yes" if mas_policy.width_changed else "No" }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Centre Changed?</span>
+      <span class="stat-value">{{ "Yes" if mas_policy.centre_changed else "No" }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Statement Tone</span>
+      <span class="stat-value">{{ mas_policy.statement_tone }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Next Policy Window</span>
+      <span class="stat-value">{{ mas_policy.next_policy_window }}</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     4. Macro Pressure Monitor
+     ============================================================ -->
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🌍 Macro Pressure Monitor</h2>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">MAS Core Inflation</span>
+      <span class="stat-value">{{ macro_pressure.mas_core_inflation }}%</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Headline CPI Inflation</span>
+      <span class="stat-value">{{ macro_pressure.headline_cpi_inflation }}%</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">GDP Growth</span>
+      <span class="stat-value">{{ macro_pressure.gdp_growth }}%</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Oil Price Pressure</span>
+      <span class="stat-value">{{ macro_pressure.oil_price_pressure }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">USD Strength</span>
+      <span class="stat-value">{{ macro_pressure.usd_strength }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">China/CNY Pressure</span>
+      <span class="stat-value">{{ macro_pressure.china_cny_pressure }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Overall Macro Pressure Score</span>
+      <span class="stat-value">{{ macro_pressure.overall_macro_pressure_score }}/100</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     5. Research Signal Summary
+     ============================================================ -->
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🧭 Research Signal Summary</h2>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">Overall FX Bias</span>
+      <span class="stat-value">{{ signal_summary.overall_fx_bias }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Confidence Score</span>
+      <span class="stat-value">{{ signal_summary.confidence_score }}%</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Suggested Action</span>
+      <span class="stat-value">{{ signal_summary.suggested_action }}</span>
+    </div>
+  </div>
+  <div style="margin-top:1rem;padding:1rem;background:#2d3748;border-radius:8px;border-left:4px solid #63b3ed;">
+    <p style="color:#e2e8f0;font-size:0.9rem;margin:0;">
+      {{ signal_summary.explanation }}
+    </p>
+  </div>
+  <p style="color:#718096;font-size:0.8rem;margin-top:0.75rem;font-style:italic;">
+    This is research output only, not trading advice. No orders are placed by this dashboard.
+  </p>
+</section>
+{% endblock %}

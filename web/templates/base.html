@@ -96,6 +96,10 @@
         </ul>
       </li>
 
+      <li class="{{ 'active' if active_page == 'fx_research' }}">
+        <a href="{{ url_for('fx_research.index') }}">FX Research</a>
+      </li>
+
       <li class="{{ 'active' if active_page == 'settings' }}">
         <a href="{{ url_for('settings.index') }}">Settings</a>
       </li>
