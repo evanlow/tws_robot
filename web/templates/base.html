@@ -23,6 +23,9 @@
       {% if not connected %}
       <span class="status-bar-disconnected">⚠ TWS NOT CONNECTED</span>
       <span class="status-divider">|</span>
+      {% elif not account_data_ready %}
+      <span class="status-bar-loading">⏳ Connected, loading account data…</span>
+      <span class="status-divider">|</span>
       {% endif %}
       <span id="haltedIndicator" class="status-bar-halted"{% if not risk_summary.emergency_stop_active %} style="display:none"{% endif %}>🚨 TRADING HALTED</span>
       <span id="haltedDivider" class="status-divider"{% if not risk_summary.emergency_stop_active %} style="display:none"{% endif %}>|</span>

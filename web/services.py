@@ -118,6 +118,19 @@ class ServiceManager:
         """Return the current explicit trading state."""
         return self._trading_state
 
+    @property
+    def account_data_ready(self) -> bool:
+        """Return True only when real account data has been received from TWS.
+
+        This requires the risk manager's equity to have been initialized from
+        a live account callback (not just the default initial_capital).
+        """
+        if not self._connected:
+            return False
+        if self._risk_manager is None:
+            return False
+        return self._risk_manager.equity_initialized
+
     def set_trading_state(self, state: TradingState) -> None:
         """Explicitly transition to a new trading state."""
         with self._lock:
@@ -759,6 +772,7 @@ class ServiceManager:
             "connected": self._connected,
             "environment": self._connection_env,
             "trading_state": self._trading_state.value,
+            "account_data_ready": self.account_data_ready,
             "event_bus_stats": event_stats,
             "strategy_count": (
                 len(self._strategy_registry) if self._strategy_registry else 0

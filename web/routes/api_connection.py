@@ -24,6 +24,7 @@ def status():
         "connected": svc.connected,
         "environment": svc.connection_env,
         "trading_state": svc.trading_state.value,
+        "account_data_ready": svc.account_data_ready,
         "info": svc.connection_info,
     })
 

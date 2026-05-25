@@ -151,6 +151,23 @@ class TestServiceManager:
         assert TradingState.LIVE_TRADING_ACTIVE.allows_order_submission
         assert not TradingState.EMERGENCY_STOP.allows_order_submission
 
+    def test_account_data_ready_disconnected(self, services):
+        """account_data_ready must be False when not connected."""
+        assert services.account_data_ready is False
+
+    def test_account_data_ready_connected_no_equity(self, services):
+        """account_data_ready must be False when connected but equity not initialized."""
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        assert services.account_data_ready is False
+        services.set_disconnected()
+
+    def test_account_data_ready_connected_with_equity(self, services):
+        """account_data_ready must be True once equity has been initialized."""
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        services.risk_manager._equity_initialized = True
+        assert services.account_data_ready is True
+        services.set_disconnected()
+
     def test_backtest_runs(self, services):
         services.store_backtest_run("r1", {
             "status": "complete",
@@ -745,6 +762,7 @@ class TestOrdersAPI:
 
     def test_submit_order(self, client, services):
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        services.risk_manager._equity_initialized = True
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
             "action": "BUY",
@@ -773,8 +791,25 @@ class TestOrdersAPI:
         assert resp.status_code == 403
         assert "not allowed" in resp.get_json()["error"]
 
+    def test_submit_order_blocked_before_account_data_ready(self, client, services):
+        """Order submission must return 503 when connected but account data not ready."""
+        services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        # Equity is NOT initialized (default state)
+        assert not services.account_data_ready
+        resp = client.post("/api/orders/", json={
+            "symbol": "AAPL",
+            "action": "BUY",
+            "quantity": 100,
+            "order_type": "MARKET",
+        })
+        assert resp.status_code == 503
+        data = resp.get_json()
+        assert "account data" in data["error"].lower()
+        services.set_disconnected()
+
     def test_submit_order_validation(self, client, services):
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        services.risk_manager._equity_initialized = True
         resp = client.post("/api/orders/", json={
             "symbol": "",
             "action": "HOLD",
@@ -785,6 +820,7 @@ class TestOrdersAPI:
 
     def test_submit_order_during_emergency(self, client, services):
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        services.risk_manager._equity_initialized = True
         client.post("/api/emergency/halt", json={})
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
@@ -800,6 +836,7 @@ class TestOrdersAPI:
 
     def test_cancel_order(self, client, services):
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        services.risk_manager._equity_initialized = True
         # Submit first
         resp = client.post("/api/orders/", json={
             "symbol": "MSFT",
@@ -823,6 +860,7 @@ class TestOrdersAPI:
     def test_cancel_order_already_cancelled(self, client, services):
         """Cancelling a CANCELLED order must return 409."""
         services.set_connected("paper", {"host": "127.0.0.1", "port": 7497})
+        services.risk_manager._equity_initialized = True
         resp = client.post("/api/orders/", json={
             "symbol": "AAPL",
             "action": "BUY",

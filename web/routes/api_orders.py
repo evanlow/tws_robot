@@ -63,6 +63,11 @@ def record_order():
             "error": f"Order recording not allowed in state: {svc.trading_state.value}",
         }), 403
 
+    if not svc.account_data_ready:
+        return jsonify({
+            "error": "Account data is not yet available. Please wait for account equity and portfolio data to load before submitting orders.",
+        }), 503
+
     data = request.get_json(silent=True) or {}
     symbol = data.get("symbol", "").upper()
     action = data.get("action", "").upper()
