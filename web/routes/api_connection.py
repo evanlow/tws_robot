@@ -23,6 +23,7 @@ def status():
     return jsonify({
         "connected": svc.connected,
         "environment": svc.connection_env,
+        "trading_state": svc.trading_state.value,
         "info": svc.connection_info,
     })
 

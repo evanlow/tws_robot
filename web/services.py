@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.event_bus import Event, EventBus, EventType, get_event_bus
+from web.trading_state import TradingState
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,9 @@ class ServiceManager:
         self._connected = False
         self._connection_env: Optional[str] = None  # "paper" | "live"
         self._connection_info: Dict[str, Any] = {}
+
+        # Explicit trading state
+        self._trading_state: TradingState = TradingState.DISCONNECTED
 
         # TWS bridge (actual IB API connection)
         self._tws_bridge: Any = None
@@ -109,6 +113,32 @@ class ServiceManager:
         with self._lock:
             return self._connection_info.get("account", "")
 
+    @property
+    def trading_state(self) -> TradingState:
+        """Return the current explicit trading state."""
+        return self._trading_state
+
+    def set_trading_state(self, state: TradingState) -> None:
+        """Explicitly transition to a new trading state."""
+        with self._lock:
+            self._trading_state = state
+
+    @staticmethod
+    def _trading_state_for_env(env: str) -> TradingState:
+        """Derive the appropriate trading state from a connection environment string."""
+        if env == "paper":
+            return TradingState.PAPER_TRADING_ENABLED
+        if env == "live":
+            return TradingState.LIVE_TRADING_ARMED
+        return TradingState.CONNECTED_READ_ONLY
+
+    def restore_trading_state_from_connection(self) -> None:
+        """Restore trading state based on current connection (e.g. after emergency stop resume)."""
+        if self.connected:
+            self.set_trading_state(self._trading_state_for_env(self._connection_env or ""))
+        else:
+            self.set_trading_state(TradingState.DISCONNECTED)
+
     def set_connected(self, env: str, info: Dict[str, Any]) -> None:
         with self._lock:
             self._connected = True
@@ -116,6 +146,13 @@ class ServiceManager:
             self._connection_info = dict(info)
             # Invalidate the registry so it is rebuilt with the new account_id
             self._strategy_registry = None
+            # Derive trading state from environment, but preserve an active
+            # emergency stop so it is not silently cleared by a reconnection.
+            if (self._risk_manager is not None
+                    and self._risk_manager.emergency_stop_active):
+                self._trading_state = TradingState.EMERGENCY_STOP
+            else:
+                self._trading_state = self._trading_state_for_env(env)
         self.event_bus.publish(Event(
             EventType.CONNECTION_ESTABLISHED,
             data={"environment": env, **info},
@@ -127,6 +164,11 @@ class ServiceManager:
             self._connected = False
             self._connection_env = None
             self._connection_info = {}
+            # Preserve EMERGENCY_STOP while an emergency stop is still active
+            # so that health/status endpoints remain accurate after a disconnect.
+            if not (self._risk_manager is not None
+                    and self._risk_manager.emergency_stop_active):
+                self._trading_state = TradingState.DISCONNECTED
             # Invalidate the registry — strategies from the previous account
             # must not be visible under a different (or no) account.
             self._strategy_registry = None
@@ -151,6 +193,8 @@ class ServiceManager:
 
         bridge = TWSBridge(self, config)
         if not bridge.connect(timeout=timeout):
+            with self._lock:
+                self._trading_state = TradingState.CONNECTION_FAILED
             return False
 
         with self._lock:
@@ -702,6 +746,7 @@ class ServiceManager:
             "uptime_seconds": round(uptime, 1),
             "connected": self._connected,
             "environment": self._connection_env,
+            "trading_state": self._trading_state.value,
             "event_bus_stats": event_stats,
             "strategy_count": (
                 len(self._strategy_registry) if self._strategy_registry else 0

@@ -54,6 +54,11 @@ def record_order():
     if svc.risk_manager.emergency_stop_active:
         return jsonify({"error": "Emergency stop is active — cannot record orders"}), 403
 
+    if not svc.trading_state.allows_order_submission:
+        return jsonify({
+            "error": f"Order recording not allowed in state: {svc.trading_state.value}",
+        }), 403
+
     data = request.get_json(silent=True) or {}
     symbol = data.get("symbol", "").upper()
     action = data.get("action", "").upper()
