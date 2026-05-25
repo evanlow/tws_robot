@@ -1,5 +1,7 @@
 """Tests for FX Research Dashboard route and service."""
 
+import re
+
 import pytest
 
 from web import create_app
@@ -7,7 +9,8 @@ from web.fx_signal_service import get_fx_dashboard_data
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
     app = create_app({"TESTING": True})
     with app.test_client() as c:
         yield c
@@ -98,9 +101,16 @@ class TestFxResearchRoute:
         resp = client.get("/fx/")
         html = resp.data.decode()
         # Ensure no order execution elements exist
-        assert '<button' not in html.lower() or 'emergency' in html.lower()
+        buttons = re.findall(r"<button[^>]*>", html, flags=re.IGNORECASE)
+        assert all(
+            "emergencyBtn" in button
+            or "btn-emergency" in button
+            or "nav-dropdown-toggle" in button
+            for button in buttons
+        )
         assert 'type="submit"' not in html.lower()
 
     def test_fx_redirect_from_no_trailing_slash(self, client):
         resp = client.get("/fx")
-        assert resp.status_code == 308  # Redirect to /fx/
+        assert resp.status_code in {301, 302, 307, 308}
+        assert resp.headers["Location"].endswith("/fx/")
