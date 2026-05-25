@@ -87,8 +87,9 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(fx_research_bp)
 
     # ---- JSON API blueprints ----
-    # API blueprints are exempt from CSRF — they use JSON payloads and are
-    # protected by session-based authentication (before_request guard).
+    # Session-authenticated API requests remain CSRF-protected and the web
+    # client sends the token via the X-CSRFToken header for state-changing
+    # requests.
     from web.routes.api_connection import bp as api_connection_bp
     from web.routes.api_account import bp as api_account_bp
     from web.routes.api_emergency import bp as api_emergency_bp
@@ -112,7 +113,6 @@ def create_app(config_override: dict | None = None) -> "Flask":
         api_market_events_bp,
     ]
     for api_bp in api_blueprints:
-        csrf.exempt(api_bp)
         app.register_blueprint(api_bp)
 
     app.register_blueprint(portfolio_analysis_bp)

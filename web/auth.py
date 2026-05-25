@@ -8,10 +8,12 @@ Provides:
 
 Configuration (via environment variables or Flask config):
     TWS_ADMIN_USERNAME  – admin username (default: "admin")
-    TWS_ADMIN_PASSWORD  – admin password (REQUIRED for non-local deployments)
+    TWS_ADMIN_PASSWORD  – admin password (required unless TESTING/DEBUG or
+                          ALLOW_DEFAULT_PASSWORD is enabled)
     LOGIN_DISABLED      – set to "1" or "true" to bypass auth (local dev only)
 """
 
+import logging
 import os
 
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
@@ -37,6 +39,7 @@ class AdminUser(UserMixin):
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
 login_manager.login_message_category = "warning"
+logger = logging.getLogger(__name__)
 
 
 @login_manager.user_loader
@@ -107,7 +110,22 @@ def init_auth(app):
         if plain:
             password_hash = generate_password_hash(plain)
         else:
-            # Default password for development — MUST be changed in production
+            allow_default_password = app.config.get("ALLOW_DEFAULT_PASSWORD")
+            if allow_default_password is None:
+                allow_default_password = os.environ.get("ALLOW_DEFAULT_PASSWORD", "").lower() in ("1", "true", "yes")
+
+            if not (app.config.get("TESTING") or app.config.get("DEBUG") or allow_default_password):
+                raise RuntimeError(
+                    "Authentication requires TWS_ADMIN_PASSWORD_HASH or "
+                    "TWS_ADMIN_PASSWORD; set ALLOW_DEFAULT_PASSWORD=true only "
+                    "to opt in to the insecure default password."
+                )
+
+            logger.warning(
+                "Using insecure default admin password because TESTING/DEBUG "
+                "or ALLOW_DEFAULT_PASSWORD enabled; set TWS_ADMIN_PASSWORD or "
+                "TWS_ADMIN_PASSWORD_HASH for real deployments."
+            )
             password_hash = generate_password_hash("changeme")
     app.config["TWS_ADMIN_PASSWORD_HASH"] = password_hash
 
@@ -142,6 +160,6 @@ def init_auth(app):
             if request.is_json or request.path.startswith("/api/"):
                 from flask import jsonify
                 return jsonify({"error": "Authentication required"}), 401
-            return redirect(url_for("auth.login", next=request.url))
+            return redirect(url_for("auth.login"))
 
         return None

@@ -734,16 +734,16 @@ tws_robot/
 
 ## 🔐 Authentication
 
-The web dashboard is protected by login authentication. All routes (pages and APIs) require a valid session. CSRF protection is enabled for all state-changing requests.
+The web dashboard is protected by login authentication. All routes (pages and APIs) require a valid session. CSRF protection is enabled for all state-changing requests, including cookie-authenticated API calls.
 
 ### Default Credentials
 
 | Setting | Default |
 |---------|---------|
 | Username | `admin` |
-| Password | `changeme` |
+| Password | _must be configured_ |
 
-**⚠️ Change the default password before exposing the app to any network.**
+**⚠️** In normal deployments you must set `TWS_ADMIN_PASSWORD` or `TWS_ADMIN_PASSWORD_HASH`. The insecure `changeme` fallback is only allowed when `TESTING`, `DEBUG`, or `ALLOW_DEFAULT_PASSWORD=true` is enabled.
 
 ### Configuration
 
@@ -765,9 +765,9 @@ LOGIN_DISABLED=true
 ### Security Details
 
 - **Session-based auth** using Flask-Login with secure cookies.
-- **CSRF protection** via Flask-WTF on all POST/PUT/DELETE requests.
+- **CSRF protection** via Flask-WTF on all POST/PUT/DELETE requests, including `/api/*`; the web client sends the token in an `X-CSRFToken` header for JavaScript requests.
 - **API routes** return `401 JSON` responses when unauthenticated.
-- **Page routes** redirect to login with a `next` parameter for post-login redirect.
+- **Page routes** redirect to the login page when the session is missing or expired.
 
 ## TWS Setup
 

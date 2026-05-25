@@ -9,11 +9,19 @@ Validates that:
 - CSRF protection rejects POST without token.
 """
 
+import re
 from unittest.mock import patch
 
 import pytest
 
 from web import create_app
+
+
+def _extract_csrf_token(response):
+    """Extract CSRF token from rendered HTML."""
+    match = re.search(rb'name="csrf_token" value="([^"]+)"', response.data)
+    assert match is not None
+    return match.group(1).decode()
 
 
 @pytest.fixture
@@ -86,7 +94,7 @@ class TestUnauthenticatedAccess:
         assert resp.status_code == 401
 
     def test_api_emergency_returns_401(self, client):
-        resp = client.post("/api/emergency/stop")
+        resp = client.post("/api/emergency/halt")
         assert resp.status_code == 401
 
     def test_api_strategies_returns_401(self, client):
@@ -194,16 +202,72 @@ class TestCSRFProtection:
     """Verify CSRF protection on state-changing requests."""
 
     def test_post_without_csrf_token_rejected(self, csrf_client):
-        # Login first (CSRF is exempted on login for usability — tested separately)
-        # Try to POST to an API route without CSRF token
-        with csrf_client.session_transaction() as sess:
-            pass  # no CSRF token set
+        # Login POSTs are CSRF-protected and should fail without a token.
         resp = csrf_client.post("/auth/login", data={
             "username": "admin",
             "password": "csrftest",
         })
         # Flask-WTF will reject the POST with a 400 due to missing CSRF
         assert resp.status_code == 400
+
+    def test_login_logout_with_csrf_token_succeeds(self, csrf_client):
+        login_page = csrf_client.get("/auth/login")
+        login_token = _extract_csrf_token(login_page)
+
+        login_resp = csrf_client.post("/auth/login", data={
+            "username": "admin",
+            "password": "csrftest",
+            "csrf_token": login_token,
+        }, follow_redirects=False)
+        assert login_resp.status_code == 302
+        assert "/auth/login" not in login_resp.headers.get("Location", "")
+
+        dashboard_resp = csrf_client.get("/")
+        assert dashboard_resp.status_code == 200
+        logout_token = _extract_csrf_token(dashboard_resp)
+
+        logout_resp = csrf_client.post("/auth/logout", data={
+            "csrf_token": logout_token,
+        }, follow_redirects=False)
+        assert logout_resp.status_code == 302
+        assert logout_resp.headers["Location"].endswith("/auth/login")
+
+    def test_authenticated_api_post_requires_and_accepts_csrf_header(self, csrf_client):
+        login_page = csrf_client.get("/auth/login")
+        login_token = _extract_csrf_token(login_page)
+        csrf_client.post("/auth/login", data={
+            "username": "admin",
+            "password": "csrftest",
+            "csrf_token": login_token,
+        })
+
+        dashboard_resp = csrf_client.get("/")
+        api_token = _extract_csrf_token(dashboard_resp)
+
+        missing_token_resp = csrf_client.post("/api/emergency/halt", json={"reason": "missing token"})
+        assert missing_token_resp.status_code == 400
+
+        api_resp = csrf_client.post(
+            "/api/emergency/halt",
+            json={"reason": "csrf ok"},
+            headers={"X-CSRFToken": api_token},
+        )
+        assert api_resp.status_code == 200
+        assert api_resp.get_json()["status"] == "halted"
+
+    def test_init_auth_requires_explicit_password_outside_debug_testing(self, monkeypatch):
+        monkeypatch.setattr(
+            "web.services.ServiceManager._start_market_events_refresh",
+            lambda self: None,
+        )
+        with pytest.raises(RuntimeError, match="Authentication requires TWS_ADMIN_PASSWORD_HASH or TWS_ADMIN_PASSWORD"):
+            create_app({
+                "SECRET_KEY": "test-secret-key",
+                "LOGIN_DISABLED": False,
+                "WTF_CSRF_ENABLED": False,
+                "DEBUG": False,
+                "TESTING": False,
+            })
 
 
 # ==============================================================================
@@ -221,6 +285,7 @@ class TestLoginDisabled:
         )
         app = create_app({
             "TESTING": True,
+            "SECRET_KEY": "test-secret-key",
             "LOGIN_DISABLED": True,
             "WTF_CSRF_ENABLED": False,
         })
