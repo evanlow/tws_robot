@@ -26,7 +26,7 @@
     {% if error %}
     <div class="error-msg">{{ error }}</div>
     {% endif %}
-    <form method="POST" action="{{ url_for('auth.login', next=request.args.get('next', '')) }}">
+    <form method="POST" action="{{ url_for('auth.login') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
       <div class="form-group">
         <label for="username">Username</label>

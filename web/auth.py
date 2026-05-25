@@ -13,9 +13,8 @@ Configuration (via environment variables or Flask config):
 """
 
 import os
-from functools import wraps
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, redirect, render_template, request, url_for
 from flask_login import LoginManager, UserMixin, current_user, login_user, logout_user
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -50,23 +49,6 @@ def load_user(user_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _is_safe_url(target: str) -> bool:
-    """Validate that redirect target is a relative URL on the same host.
-
-    Prevents open redirect attacks by rejecting absolute URLs to external sites.
-    """
-    from urllib.parse import urlparse, urljoin
-
-    ref_url = urlparse(request.host_url)
-    test_url = urlparse(urljoin(request.host_url, target))
-    return test_url.scheme in ("http", "https") and ref_url.netloc == test_url.netloc
-
-
-# ---------------------------------------------------------------------------
 # Blueprint
 # ---------------------------------------------------------------------------
 
@@ -90,17 +72,6 @@ def login():
         if username == expected_username and password_hash and check_password_hash(password_hash, password):
             user = AdminUser(username)
             login_user(user)
-            next_page = request.args.get("next")
-            # Prevent open redirect — only allow path portion of relative URLs
-            if next_page:
-                from urllib.parse import urlparse
-                parsed = urlparse(next_page)
-                # Only use path (and query) if there's no scheme/netloc (relative URL)
-                if not parsed.scheme and not parsed.netloc:
-                    safe_path = parsed.path
-                    if parsed.query:
-                        safe_path += "?" + parsed.query
-                    return redirect(safe_path)
             return redirect(url_for("dashboard.index"))
         else:
             error = "Invalid username or password."
