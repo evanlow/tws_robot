@@ -18,9 +18,11 @@ returns ``status = "cancel_requested"`` with ``execution_mode = "broker"``.
 
 import logging
 from datetime import datetime
+from typing import Dict
 
 from flask import Blueprint, jsonify, request
 
+from risk.risk_manager import Position
 from web.services import get_services
 
 logger = logging.getLogger(__name__)
@@ -64,9 +66,27 @@ def record_order():
     data = request.get_json(silent=True) or {}
     symbol = data.get("symbol", "").upper()
     action = data.get("action", "").upper()
-    quantity = data.get("quantity", 0)
+    quantity_raw = data.get("quantity", 0)
     order_type = data.get("order_type", "MARKET").upper()
-    limit_price = data.get("limit_price")
+    limit_price_raw = data.get("limit_price")
+
+    try:
+        quantity = int(quantity_raw)
+    except (TypeError, ValueError):
+        quantity = 0
+
+    limit_price = None
+    if limit_price_raw is not None:
+        try:
+            limit_price = float(limit_price_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "limit_price must be a valid number"}), 400
+
+    if order_type == "LIMIT":
+        if limit_price is None:
+            return jsonify({"error": "limit_price is required for LIMIT orders"}), 400
+        if limit_price <= 0:
+            return jsonify({"error": "limit_price must be > 0 for LIMIT orders"}), 400
 
     if not symbol or action not in ("BUY", "SELL") or quantity <= 0:
         return jsonify({
@@ -75,13 +95,40 @@ def record_order():
 
     # --- Centralized safety gate (same checks as strategy orders) ---
     executor = svc.order_executor
-    current_equity = svc.get_account_summary().get("NetLiquidation", 0.0)
+    account_summary = svc.get_account_summary()
+    current_equity = account_summary.get(
+        "equity",
+        account_summary.get(
+            "NetLiquidation",
+            account_summary.get("NetLiquidationByCurrency", 0.0),
+        ),
+    )
     try:
         current_equity = float(current_equity)
     except (TypeError, ValueError):
         current_equity = 0.0
 
-    positions = svc.risk_manager.positions if hasattr(svc.risk_manager, "positions") else {}
+    positions: Dict[str, Position] = {}
+    for pos_symbol, pos_data in svc.get_positions().items():
+        try:
+            pos_quantity = int(float(pos_data.get("quantity", 0)))
+            pos_entry = float(pos_data.get("entry_price", 0.0))
+            pos_current = float(pos_data.get("current_price", pos_entry))
+        except (TypeError, ValueError):
+            continue
+
+        pos_side = str(pos_data.get("side", "LONG")).upper()
+        if pos_side not in ("LONG", "SHORT"):
+            pos_side = "LONG"
+
+        positions[pos_symbol] = Position(
+            symbol=pos_symbol,
+            quantity=pos_quantity,
+            entry_price=pos_entry,
+            current_price=pos_current,
+            side=pos_side,
+        )
+
     approved, rejection_reason = executor.validate_manual_order(
         symbol=symbol,
         action=action,

@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from risk.risk_manager import Position
 from web import create_app, _DEFAULT_SECRET
 
 
@@ -49,7 +50,7 @@ class TestSecretKeyEnforcement:
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("SECRET_KEY", "super-secure-random-key-12345")
 
-        app = create_app({"TESTING": True})
+        app = create_app({"TESTING": False, "TWS_ADMIN_PASSWORD": "test-password"})
         assert app is not None
 
     def test_development_default_secret_key_allowed(self, monkeypatch):
@@ -171,3 +172,65 @@ class TestOrderSafetyGate:
         data = resp.get_json()
         assert data["status"] == "recorded"
         assert data["execution_mode"] == "local_only"
+
+    def test_order_uses_equity_and_position_snapshot(self, client, services):
+        """Safety gate receives equity and positions in RiskManager format."""
+        services.update_position("AAPL", {
+            "quantity": 5.0,
+            "entry_price": 180.0,
+            "current_price": 182.0,
+            "side": "LONG",
+        })
+        services.update_account_summary({"equity": "250000.5"})
+
+        with patch.object(
+            services.order_executor,
+            "validate_manual_order",
+            return_value=(True, ""),
+        ) as mock_validate:
+            resp = client.post("/api/orders/", json={
+                "symbol": "MSFT",
+                "action": "BUY",
+                "quantity": 3,
+            })
+
+        assert resp.status_code == 201
+        assert mock_validate.called
+        kwargs = mock_validate.call_args.kwargs
+        assert kwargs["current_equity"] == pytest.approx(250000.5)
+        assert isinstance(kwargs["positions"]["AAPL"], Position)
+        assert kwargs["positions"]["AAPL"].quantity == 5
+
+    @pytest.mark.parametrize(
+        "payload,error",
+        [
+            (
+                {"symbol": "AAPL", "action": "BUY", "quantity": 1, "order_type": "LIMIT"},
+                "limit_price is required",
+            ),
+            (
+                {
+                    "symbol": "AAPL",
+                    "action": "BUY",
+                    "quantity": 1,
+                    "order_type": "LIMIT",
+                    "limit_price": "abc",
+                },
+                "limit_price must be a valid number",
+            ),
+            (
+                {
+                    "symbol": "AAPL",
+                    "action": "BUY",
+                    "quantity": 1,
+                    "order_type": "LIMIT",
+                    "limit_price": 0,
+                },
+                "limit_price must be > 0",
+            ),
+        ],
+    )
+    def test_limit_order_limit_price_validation(self, client, services, payload, error):
+        resp = client.post("/api/orders/", json=payload)
+        assert resp.status_code == 400
+        assert error in resp.get_json()["error"]

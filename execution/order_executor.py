@@ -534,12 +534,16 @@ class OrderExecutor:
         if positions is None:
             positions = {}
 
+        normalized_action = action.upper() if isinstance(action, str) else ""
+        if normalized_action not in ("BUY", "SELL"):
+            return False, "Invalid action: must be BUY or SELL"
+
         # Emergency stop
         if self._check_emergency_stop():
             return False, "Emergency stop is active — all trading halted"
 
         # Risk manager validation
-        side = "LONG" if action == "BUY" else "SHORT"
+        side = "LONG" if normalized_action == "BUY" else "SHORT"
         estimated_price = price or 100.0
         can_trade, risk_reason = self.risk_manager.check_trade_risk(
             symbol=symbol,
@@ -555,7 +559,7 @@ class OrderExecutor:
         from strategies.signal import SignalStrength
         signal = Signal(
             symbol=symbol,
-            signal_type=SignalType.BUY if action == "BUY" else SignalType.SELL,
+            signal_type=SignalType.BUY if normalized_action == "BUY" else SignalType.SELL,
             strength=SignalStrength.MODERATE,
             timestamp=datetime.now(),
             quantity=quantity,
