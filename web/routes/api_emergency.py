@@ -146,7 +146,7 @@ def resume():
             logger.error("Failed to remove EMERGENCY_STOP file: %s", exc)
             return jsonify({
                 "error": "Failed to remove emergency stop file",
-                "message": str(exc),
+                "message": "I/O error removing the emergency stop marker; emergency stop remains active.",
             }), 500
 
     svc.risk_manager.release_emergency_stop(reason)
