@@ -123,6 +123,22 @@ class ServiceManager:
         with self._lock:
             self._trading_state = state
 
+    @staticmethod
+    def _trading_state_for_env(env: str) -> TradingState:
+        """Derive the appropriate trading state from a connection environment string."""
+        if env == "paper":
+            return TradingState.PAPER_TRADING_ENABLED
+        if env == "live":
+            return TradingState.LIVE_TRADING_ARMED
+        return TradingState.CONNECTED_READ_ONLY
+
+    def restore_trading_state_from_connection(self) -> None:
+        """Restore trading state based on current connection (e.g. after emergency stop resume)."""
+        if self.connected:
+            self.set_trading_state(self._trading_state_for_env(self._connection_env or ""))
+        else:
+            self.set_trading_state(TradingState.DISCONNECTED)
+
     def set_connected(self, env: str, info: Dict[str, Any]) -> None:
         with self._lock:
             self._connected = True
@@ -130,13 +146,13 @@ class ServiceManager:
             self._connection_info = dict(info)
             # Invalidate the registry so it is rebuilt with the new account_id
             self._strategy_registry = None
-            # Derive trading state from environment
-            if env == "paper":
-                self._trading_state = TradingState.PAPER_TRADING_ENABLED
-            elif env == "live":
-                self._trading_state = TradingState.LIVE_TRADING_ARMED
+            # Derive trading state from environment, but preserve an active
+            # emergency stop so it is not silently cleared by a reconnection.
+            if (self._risk_manager is not None
+                    and self._risk_manager.emergency_stop_active):
+                self._trading_state = TradingState.EMERGENCY_STOP
             else:
-                self._trading_state = TradingState.CONNECTED_READ_ONLY
+                self._trading_state = self._trading_state_for_env(env)
         self.event_bus.publish(Event(
             EventType.CONNECTION_ESTABLISHED,
             data={"environment": env, **info},
@@ -148,7 +164,11 @@ class ServiceManager:
             self._connected = False
             self._connection_env = None
             self._connection_info = {}
-            self._trading_state = TradingState.DISCONNECTED
+            # Preserve EMERGENCY_STOP while an emergency stop is still active
+            # so that health/status endpoints remain accurate after a disconnect.
+            if not (self._risk_manager is not None
+                    and self._risk_manager.emergency_stop_active):
+                self._trading_state = TradingState.DISCONNECTED
             # Invalidate the registry — strategies from the previous account
             # must not be visible under a different (or no) account.
             self._strategy_registry = None

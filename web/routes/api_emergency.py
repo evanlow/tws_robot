@@ -65,6 +65,7 @@ def close_all():
 
     # Trigger emergency stop first
     svc.risk_manager.trigger_emergency_stop("Close-all from web dashboard")
+    svc.set_trading_state(TradingState.EMERGENCY_STOP)
 
     # Clear tracked positions
     positions = svc.get_positions()
@@ -95,16 +96,7 @@ def resume():
     svc.risk_manager.release_emergency_stop(reason)
 
     # Restore trading state based on current connection
-    if svc.connected:
-        env = svc.connection_env
-        if env == "paper":
-            svc.set_trading_state(TradingState.PAPER_TRADING_ENABLED)
-        elif env == "live":
-            svc.set_trading_state(TradingState.LIVE_TRADING_ARMED)
-        else:
-            svc.set_trading_state(TradingState.CONNECTED_READ_ONLY)
-    else:
-        svc.set_trading_state(TradingState.DISCONNECTED)
+    svc.restore_trading_state_from_connection()
 
     svc.add_alert({
         "id": f"resume-{datetime.now().timestamp()}",

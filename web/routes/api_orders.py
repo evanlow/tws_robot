@@ -56,7 +56,7 @@ def record_order():
 
     if not svc.trading_state.allows_order_submission:
         return jsonify({
-            "error": f"Order submission not allowed in state: {svc.trading_state.value}",
+            "error": f"Order recording not allowed in state: {svc.trading_state.value}",
         }), 403
 
     data = request.get_json(silent=True) or {}

@@ -13,8 +13,12 @@ from web.services import ServiceManager
 
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
     """Create Flask app with test configuration."""
+    monkeypatch.setattr(
+        "web.services.ServiceManager._start_market_events_refresh",
+        lambda self: None,
+    )
     app = create_app({"TESTING": True})
     return app
 
