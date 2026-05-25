@@ -690,6 +690,20 @@ def test_statistics_tracking(executor_paper, sample_signal, sample_positions, mo
     assert stats['block_rate'] == 1/3
 
 
+def test_validate_manual_order_rejects_invalid_action(executor_paper):
+    """Manual order validation rejects unknown actions."""
+    approved, reason = executor_paper.validate_manual_order(
+        symbol="AAPL",
+        action="HOLD",
+        quantity=1,
+        price=100.0,
+        current_equity=100000.0,
+        positions={},
+    )
+    assert approved is False
+    assert "must be BUY or SELL" in reason
+
+
 # =============================================================================
 # Test 10: Audit Trail
 # =============================================================================

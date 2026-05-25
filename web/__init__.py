@@ -10,7 +10,11 @@ Usage (development)::
 Or via ``scripts/run_web.py``.
 """
 
+import os
+
 from flask import Flask  # noqa: F401 – imported by callers via ``from web import create_app``
+
+_DEFAULT_SECRET = "dev-secret-change-in-production"
 
 
 def create_app(config_override: dict | None = None) -> "Flask":
@@ -33,10 +37,15 @@ def create_app(config_override: dict | None = None) -> "Flask":
         load_dotenv()
 
     # Default configuration
-    app.config.setdefault("SECRET_KEY", "dev-secret-change-in-production")
+    secret_from_env = os.environ.get("SECRET_KEY")
+    if not app.config.get("SECRET_KEY"):
+        app.config["SECRET_KEY"] = secret_from_env or _DEFAULT_SECRET
     app.config.setdefault("DEBUG", False)
     if config_override:
         app.config.update(config_override)
+
+    # Enforce secure SECRET_KEY in production
+    _enforce_secret_key(app)
 
     # ---- CSRF protection (Flask-WTF) ----
     from flask_wtf.csrf import CSRFProtect
@@ -118,3 +127,30 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(portfolio_analysis_bp)
 
     return app
+
+
+def _is_production() -> bool:
+    """Return True if ENVIRONMENT is set to 'production'."""
+    return os.environ.get("ENVIRONMENT", "").lower() == "production"
+
+
+def _enforce_secret_key(app) -> None:
+    """Fail fast if production is running with an insecure SECRET_KEY."""
+    if app.config.get("TESTING"):
+        return
+
+    if not _is_production():
+        return
+
+    secret_key = app.config.get("SECRET_KEY")
+    if not secret_key:
+        raise RuntimeError(
+            "SECRET_KEY must be set in production. "
+            "Set the SECRET_KEY environment variable to a secure random value."
+        )
+
+    if secret_key == _DEFAULT_SECRET:
+        raise RuntimeError(
+            "Default SECRET_KEY cannot be used in production. "
+            "Set the SECRET_KEY environment variable to a secure random value."
+        )

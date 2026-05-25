@@ -504,6 +504,74 @@ class OrderExecutor:
                 f.write(f"${result.price:.2f} | ")
             f.write(f"{result.reason or 'Success'}\n")
     
+    def validate_manual_order(
+        self,
+        symbol: str,
+        action: str,
+        quantity: int,
+        price: float | None = None,
+        current_equity: float = 0.0,
+        positions: Dict[str, Position] | None = None,
+    ) -> Tuple[bool, str]:
+        """Validate a manual/web order through the same safety gate as strategies.
+
+        Performs emergency-stop, risk-manager, and sanity checks without
+        actually placing an order.  Use this from web routes or any non-strategy
+        order path to ensure uniform safety enforcement.
+
+        Args:
+            symbol: Trading symbol (e.g. "AAPL")
+            action: "BUY" or "SELL"
+            quantity: Number of shares
+            price: Limit price (None for market orders)
+            current_equity: Current account equity for sanity checks
+            positions: Current positions dict
+
+        Returns:
+            Tuple of (approved, rejection_reason).  ``approved`` is True when
+            the order may proceed; otherwise ``rejection_reason`` explains why.
+        """
+        if positions is None:
+            positions = {}
+
+        normalized_action = action.upper() if isinstance(action, str) else ""
+        if normalized_action not in ("BUY", "SELL"):
+            return False, "Invalid action: must be BUY or SELL"
+
+        # Emergency stop
+        if self._check_emergency_stop():
+            return False, "Emergency stop is active — all trading halted"
+
+        # Risk manager validation
+        side = "LONG" if normalized_action == "BUY" else "SHORT"
+        estimated_price = price or 100.0
+        can_trade, risk_reason = self.risk_manager.check_trade_risk(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            price=estimated_price,
+            positions=positions,
+        )
+        if not can_trade:
+            return False, risk_reason
+
+        # Order sanity checks (reuse existing logic via a lightweight signal)
+        from strategies.signal import SignalStrength
+        signal = Signal(
+            symbol=symbol,
+            signal_type=SignalType.BUY if normalized_action == "BUY" else SignalType.SELL,
+            strength=SignalStrength.MODERATE,
+            timestamp=datetime.now(),
+            quantity=quantity,
+            target_price=price,
+        )
+        if current_equity > 0:
+            sanity_ok, sanity_reason = self._sanity_check_order(signal, current_equity)
+            if not sanity_ok:
+                return False, sanity_reason
+
+        return True, ""
+
     def get_statistics(self) -> Dict:
         """
         Get execution statistics.
