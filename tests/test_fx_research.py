@@ -21,51 +21,46 @@ class TestFxSignalService:
 
     def test_returns_all_sections(self):
         data = get_fx_dashboard_data()
+        assert "data_status" in data
         assert "market_watch" in data
         assert "sneer_proxy" in data
         assert "mas_policy" in data
         assert "macro_pressure" in data
         assert "signal_summary" in data
 
-    def test_market_watch_has_seven_pairs(self):
+    def test_data_status_not_configured(self):
         data = get_fx_dashboard_data()
-        assert len(data["market_watch"]) == 7
-        pairs = [item["pair"] for item in data["market_watch"]]
-        assert "USD/SGD" in pairs
-        assert "EUR/SGD" in pairs
-        assert "JPY/SGD" in pairs
-        assert "CNH/SGD" in pairs
-        assert "MYR/SGD" in pairs
-        assert "AUD/SGD" in pairs
-        assert "GBP/SGD" in pairs
+        status = data["data_status"]
+        assert status["data_mode"] == "Not Configured"
+        assert status["execution_status"] == "Disabled"
+        assert status["live_trading"] == "Disabled"
+        assert status["order_placement"] == "Disabled"
 
-    def test_market_watch_item_fields(self):
+    def test_market_watch_unavailable(self):
         data = get_fx_dashboard_data()
-        item = data["market_watch"][0]
-        assert "pair" in item
-        assert "last_price" in item
-        assert "daily_change_pct" in item
-        assert "signal_bias" in item
-        assert "notes" in item
+        assert data["market_watch"]["available"] is False
+        assert "No live FX data source configured" in data["market_watch"]["message"]
+        assert data["market_watch"]["items"] == []
 
-    def test_sneer_proxy_fields(self):
+    def test_sneer_proxy_unavailable(self):
         data = get_fx_dashboard_data()
-        proxy = data["sneer_proxy"]
-        assert "estimated_sneer_proxy" in proxy
-        assert "latest_official_sneer" in proxy
-        assert "estimated_band_zone" in proxy
-        assert "proxy_deviation_pct" in proxy
-        assert "confidence" in proxy
-        assert "disclaimer" in proxy
-        assert "research estimates only" in proxy["disclaimer"]
+        assert data["sneer_proxy"]["available"] is False
+        assert "No S$NEER data source configured" in data["sneer_proxy"]["message"]
 
-    def test_signal_summary_fields(self):
+    def test_mas_policy_unavailable(self):
         data = get_fx_dashboard_data()
-        summary = data["signal_summary"]
-        assert "overall_fx_bias" in summary
-        assert "confidence_score" in summary
-        assert "suggested_action" in summary
-        assert "explanation" in summary
+        assert data["mas_policy"]["available"] is False
+        assert "No MAS policy data source configured" in data["mas_policy"]["message"]
+
+    def test_macro_pressure_unavailable(self):
+        data = get_fx_dashboard_data()
+        assert data["macro_pressure"]["available"] is False
+        assert "No macro data source configured" in data["macro_pressure"]["message"]
+
+    def test_signal_summary_unavailable(self):
+        data = get_fx_dashboard_data()
+        assert data["signal_summary"]["available"] is False
+        assert "Signal unavailable" in data["signal_summary"]["message"]
 
 
 class TestFxResearchRoute:
@@ -90,12 +85,33 @@ class TestFxResearchRoute:
         assert "Research Only" in html
         assert "does not place orders" in html
 
-    def test_fx_route_shows_fx_pairs(self, client):
+    def test_fx_route_shows_data_status_banner(self, client):
         resp = client.get("/fx/")
         html = resp.data.decode()
-        assert "USD/SGD" in html
-        assert "EUR/SGD" in html
-        assert "GBP/SGD" in html
+        assert "Data Mode:" in html
+        assert "Not Configured" in html
+        assert "Execution Status:" in html
+        assert "Disabled" in html
+
+    def test_fx_route_shows_empty_states(self, client):
+        resp = client.get("/fx/")
+        html = resp.data.decode()
+        assert "No live FX data source configured" in html
+        assert "No S$NEER data source configured" in html
+        assert "No MAS policy data source configured" in html
+        assert "No macro data source configured" in html
+        assert "Signal unavailable" in html
+
+    def test_fx_route_no_hardcoded_mock_values(self, client):
+        resp = client.get("/fx/")
+        html = resp.data.decode()
+        # Must not contain previous hardcoded mock values
+        assert "1.3245" not in html
+        assert "1.4532" not in html
+        assert "101.45" not in html
+        assert "101.20" not in html
+        assert "62%" not in html
+        assert "USD weakening on dovish Fed expectations" not in html
 
     def test_fx_route_no_order_buttons(self, client):
         resp = client.get("/fx/")
