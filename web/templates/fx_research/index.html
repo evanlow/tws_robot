@@ -37,7 +37,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for item in market_watch.items %}
+        {% for item in market_watch.get("items", []) %}
         <tr>
           <td><strong>{{ item.pair }}</strong></td>
           <td>{{ "%.4f"|format(item.last_price) }}</td>

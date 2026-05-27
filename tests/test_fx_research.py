@@ -102,6 +102,46 @@ class TestFxResearchRoute:
         assert "No macro data source configured" in html
         assert "Signal unavailable" in html
 
+    def test_fx_route_renders_market_watch_items_when_available(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.routes.fx_research.get_fx_dashboard_data",
+            lambda: {
+                "data_status": {
+                    "data_mode": "Configured",
+                    "execution_status": "Disabled",
+                    "live_trading": "Disabled",
+                    "order_placement": "Disabled",
+                },
+                "market_watch": {
+                    "available": True,
+                    "items": [
+                        {
+                            "pair": "USD/SGD",
+                            "last_price": 1.3512,
+                            "daily_change_pct": 0.12,
+                            "signal_bias": "Neutral",
+                            "notes": "Test note",
+                        }
+                    ],
+                },
+                "sneer_proxy": {"available": False, "message": "No S$NEER data source configured."},
+                "mas_policy": {"available": False, "message": "No MAS policy data source configured."},
+                "macro_pressure": {"available": False, "message": "No macro data source configured."},
+                "signal_summary": {
+                    "available": False,
+                    "message": "Signal unavailable until required data sources are configured.",
+                },
+            },
+        )
+
+        resp = client.get("/fx/")
+
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "USD/SGD" in html
+        assert "1.3512" in html
+        assert "Test note" in html
+
     def test_fx_route_no_hardcoded_mock_values(self, client):
         resp = client.get("/fx/")
         html = resp.data.decode()
