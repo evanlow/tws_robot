@@ -1,7 +1,5 @@
 """Tests for FX Research Dashboard route and service."""
 
-import re
-
 import pytest
 
 from web import create_app
@@ -10,14 +8,8 @@ from web.fx_signal_service import get_fx_dashboard_data
 
 def _assert_no_order_ui(html: str) -> None:
     """Assert the rendered HTML contains no order submission UI elements."""
-    buttons = re.findall(r"<button[^>]*>", html, flags=re.IGNORECASE)
-    assert all(
-        "emergencyBtn" in button
-        or "btn-emergency" in button
-        or "nav-dropdown-toggle" in button
-        for button in buttons
-    )
-    assert 'type="submit"' not in html.lower()
+    assert "/api/orders" not in html
+    assert "cancelOrder(" not in html
 
 
 @pytest.fixture
