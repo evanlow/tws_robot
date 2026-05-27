@@ -64,6 +64,10 @@ class TestFxConfig:
         monkeypatch.setenv("FX_DATA_MODE", "DEMO")
         assert get_fx_data_mode() == "demo"
 
+    def test_get_fx_data_mode_whitespace_strips(self, monkeypatch):
+        monkeypatch.setenv("FX_DATA_MODE", " DEMO ")
+        assert get_fx_data_mode() == "demo"
+
     def test_is_demo_mode_true(self, monkeypatch):
         monkeypatch.setenv("FX_DATA_MODE", "demo")
         assert is_demo_mode() is True
@@ -278,6 +282,10 @@ class TestFxServiceLiveResearchMode:
         assert data["mas_policy"]["available"] is False
         assert data["macro_pressure"]["available"] is False
         assert data["signal_summary"]["available"] is False
+
+    def test_data_mode_label_indicates_unavailable(self):
+        data = get_fx_dashboard_data()
+        assert data["data_status"]["data_mode"] == "Live Research (Unavailable)"
 
 
 # ---------------------------------------------------------------------------
