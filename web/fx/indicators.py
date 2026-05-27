@@ -47,8 +47,8 @@ def z_score(value: float, mean: float, std_dev: float) -> float | None:
         std_dev: Population or sample standard deviation.
 
     Returns:
-        Z-score as a float, or None if std_dev is zero.
+        Z-score as a float, or None if std_dev is zero or negative.
     """
-    if std_dev == 0:
+    if std_dev <= 0:
         return None
     return (value - mean) / std_dev

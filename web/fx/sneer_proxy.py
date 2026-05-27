@@ -32,7 +32,8 @@ def calculate_sneer_proxy_index(
             DEFAULT_SNEER_PROXY_WEIGHTS.
 
     Returns:
-        Proxy index value, or None if calculation is not possible.
+        None. This placeholder does not yet implement the proxy calculation,
+        regardless of input sufficiency.
     """
     if weights is None:
         weights = DEFAULT_SNEER_PROXY_WEIGHTS

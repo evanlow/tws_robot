@@ -16,6 +16,7 @@ from web.fx.data_sources import (
     get_live_signal_summary,
     get_live_sneer_proxy_data,
 )
+from web.fx.demo_data import get_demo_market_watch
 from web.fx.indicators import pct_change, simple_moving_average, z_score
 from web.fx.macro_sources import get_live_macro_pressure
 from web.fx.signal_engine import classify_bias, confidence_from_score
@@ -153,6 +154,9 @@ class TestZScore:
     def test_zero_std_dev_returns_none(self):
         assert z_score(100.0, 100.0, 0.0) is None
 
+    def test_negative_std_dev_returns_none(self):
+        assert z_score(100.0, 100.0, -1.0) is None
+
 
 # ---------------------------------------------------------------------------
 # web.fx.signal_engine
@@ -228,6 +232,15 @@ class TestDataSourcePlaceholders:
         result = get_live_macro_pressure()
         assert result["available"] is False
         assert "items" in result
+
+
+class TestDemoMarketWatch:
+    """Tests for demo market watch data."""
+
+    def test_signal_bias_uses_supported_labels(self):
+        market_watch = get_demo_market_watch()
+        allowed_labels = {"Long SGD", "Short SGD", "Neutral"}
+        assert all(item["signal_bias"] in allowed_labels for item in market_watch["items"])
 
 
 # ---------------------------------------------------------------------------

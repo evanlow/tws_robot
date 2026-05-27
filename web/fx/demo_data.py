@@ -23,7 +23,7 @@ def get_demo_market_watch() -> dict:
                 "last_price": 1.4600,
                 "daily_change_pct": -0.08,
                 "weekly_change_pct": 0.20,
-                "signal_bias": "Bullish",
+                "signal_bias": "Short SGD",
                 "notes": "EUR/SGD supported by euro area resilience and SGD stability",
             },
             {
@@ -39,7 +39,7 @@ def get_demo_market_watch() -> dict:
                 "last_price": 0.0089,
                 "daily_change_pct": -0.20,
                 "weekly_change_pct": -0.50,
-                "signal_bias": "Bearish",
+                "signal_bias": "Long SGD",
                 "notes": "JPY weakness persists on yield differentials; BoJ intervention risk elevated",
             },
             {
@@ -47,7 +47,7 @@ def get_demo_market_watch() -> dict:
                 "last_price": 0.8800,
                 "daily_change_pct": -0.15,
                 "weekly_change_pct": -0.25,
-                "signal_bias": "Bearish",
+                "signal_bias": "Long SGD",
                 "notes": "AUD soft on China demand concerns and commodity price softness",
             },
             {
@@ -55,7 +55,7 @@ def get_demo_market_watch() -> dict:
                 "last_price": 7.2300,
                 "daily_change_pct": 0.10,
                 "weekly_change_pct": 0.30,
-                "signal_bias": "Bearish",
+                "signal_bias": "Short SGD",
                 "notes": "CNH under mild pressure from trade uncertainty; watching PBoC fixing",
             },
             {
@@ -63,7 +63,7 @@ def get_demo_market_watch() -> dict:
                 "last_price": 151.50,
                 "daily_change_pct": 0.22,
                 "weekly_change_pct": 0.60,
-                "signal_bias": "Bearish JPY",
+                "signal_bias": "Short SGD",
                 "notes": "USD/JPY elevated; BoJ intervention risk increases above 152",
             },
             {
