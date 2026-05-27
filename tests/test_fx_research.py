@@ -300,7 +300,7 @@ class TestFxResearchRouteDemoMode:
         resp = demo_client.get("/fx/")
         html = resp.data.decode()
         assert "MAS Policy Console" in html
-        assert "October 2025" in html
+        assert "Upcoming semi-annual MAS policy statement" in html
 
     def test_demo_mode_shows_macro_factors(self, demo_client):
         resp = demo_client.get("/fx/")

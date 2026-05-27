@@ -126,12 +126,12 @@ def get_demo_mas_policy() -> dict:
     return {
         "available": True,
         "latest_stance": "Slight appreciation path maintained",
-        "next_review_window": "October 2025",
+        "next_review_window": "Upcoming semi-annual MAS policy statement",
         "inflation_assessment": "Core inflation moderating, within target band",
         "growth_assessment": "GDP growth subdued, tracking below trend",
         "sgd_policy_bias": "Neutral with mild tightening bias retained",
         "notes": (
-            "MAS held policy settings in April 2025; next review in October 2025. "
+            "MAS currently maintains a slight appreciation policy path. "
             "Watching for global growth slowdown and domestic inflation pass-through."
         ),
     }

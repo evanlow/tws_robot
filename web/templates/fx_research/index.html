@@ -159,7 +159,7 @@
           <td><strong>{{ item.name }}</strong></td>
           <td>{{ item.current_value }}</td>
           <td>{{ item.direction }}</td>
-          <td style="color:{% if 'Supports' in item.sgd_impact %}#48bb78{% elif 'Pressures' in item.sgd_impact %}#fc8181{% else %}#a0aec0{% endif %};">
+          <td style="color:{% set impact = item.sgd_impact|lower %}{% if 'supports' in impact %}#48bb78{% elif 'pressure' in impact %}#fc8181{% else %}#a0aec0{% endif %};">
             {{ item.sgd_impact }}
           </td>
           <td style="color:#a0aec0;font-size:0.85rem;">{{ item.notes }}</td>
