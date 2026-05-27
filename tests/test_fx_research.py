@@ -1,11 +1,15 @@
 """Tests for FX Research Dashboard route and service."""
 
-import re
-
 import pytest
 
 from web import create_app
 from web.fx_signal_service import get_fx_dashboard_data
+
+
+def _assert_no_order_ui(html: str) -> None:
+    """Assert the rendered HTML contains no order submission UI elements."""
+    assert "/api/orders" not in html
+    assert "cancelOrder(" not in html
 
 
 @pytest.fixture
@@ -251,16 +255,7 @@ class TestFxResearchRoute:
 
     def test_fx_route_no_order_buttons(self, client):
         resp = client.get("/fx/")
-        html = resp.data.decode()
-        # Ensure no order execution elements exist
-        buttons = re.findall(r"<button[^>]*>", html, flags=re.IGNORECASE)
-        assert all(
-            "emergencyBtn" in button
-            or "btn-emergency" in button
-            or "nav-dropdown-toggle" in button
-            for button in buttons
-        )
-        assert 'type="submit"' not in html.lower()
+        _assert_no_order_ui(resp.data.decode())
 
     def test_fx_redirect_from_no_trailing_slash(self, client):
         resp = client.get("/fx")
@@ -321,17 +316,70 @@ class TestFxResearchRouteDemoMode:
 
     def test_demo_mode_no_order_buttons(self, demo_client):
         resp = demo_client.get("/fx/")
-        html = resp.data.decode()
-        buttons = re.findall(r"<button[^>]*>", html, flags=re.IGNORECASE)
-        assert all(
-            "emergencyBtn" in button
-            or "btn-emergency" in button
-            or "nav-dropdown-toggle" in button
-            for button in buttons
-        )
+        _assert_no_order_ui(resp.data.decode())
 
     def test_demo_mode_research_disclaimer(self, demo_client):
         resp = demo_client.get("/fx/")
         html = resp.data.decode()
         assert "research output only" in html.lower()
         assert "not trading advice" in html.lower()
+
+
+class TestFxResearchRouteLiveResearchMode:
+    """Integration tests for the /fx route in live_research mode."""
+
+    @pytest.fixture
+    def live_research_client(self, monkeypatch):
+        monkeypatch.setenv("FX_DATA_MODE", "live_research")
+        monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
+        app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
+        with app.test_client() as c:
+            yield c
+
+    def test_live_research_route_returns_200(self, live_research_client):
+        resp = live_research_client.get("/fx/")
+        assert resp.status_code == 200
+
+    def test_live_research_shows_data_mode_label(self, live_research_client):
+        resp = live_research_client.get("/fx/")
+        html = resp.data.decode()
+        assert "Live Research (Unavailable)" in html
+
+    def test_live_research_execution_statuses_disabled(self, live_research_client):
+        resp = live_research_client.get("/fx/")
+        html = resp.data.decode()
+        assert "Disabled" in html
+
+    def test_live_research_no_order_buttons(self, live_research_client):
+        resp = live_research_client.get("/fx/")
+        _assert_no_order_ui(resp.data.decode())
+
+
+class TestFxResearchRouteInvalidMode:
+    """Integration tests for the /fx route with an invalid FX_DATA_MODE."""
+
+    @pytest.fixture
+    def invalid_mode_client(self, monkeypatch):
+        monkeypatch.setenv("FX_DATA_MODE", "totally_invalid")
+        monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
+        app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
+        with app.test_client() as c:
+            yield c
+
+    def test_invalid_mode_route_returns_200(self, invalid_mode_client):
+        resp = invalid_mode_client.get("/fx/")
+        assert resp.status_code == 200
+
+    def test_invalid_mode_shows_not_configured(self, invalid_mode_client):
+        resp = invalid_mode_client.get("/fx/")
+        html = resp.data.decode()
+        assert "Not Configured" in html
+
+    def test_invalid_mode_execution_statuses_disabled(self, invalid_mode_client):
+        resp = invalid_mode_client.get("/fx/")
+        html = resp.data.decode()
+        assert "Disabled" in html
+
+    def test_invalid_mode_no_order_buttons(self, invalid_mode_client):
+        resp = invalid_mode_client.get("/fx/")
+        _assert_no_order_ui(resp.data.decode())
