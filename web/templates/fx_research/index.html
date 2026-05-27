@@ -32,6 +32,7 @@
           <th>Pair</th>
           <th>Last Price</th>
           <th>Daily Change %</th>
+          <th>Weekly Change %</th>
           <th>Signal Bias</th>
           <th>Notes</th>
         </tr>
@@ -43,6 +44,9 @@
           <td>{{ "%.4f"|format(item.last_price) }}</td>
           <td class="{{ 'pnl-positive' if item.daily_change_pct >= 0 else 'pnl-negative' }}">
             {{ "%+.2f"|format(item.daily_change_pct) }}%
+          </td>
+          <td class="{{ 'pnl-positive' if item.weekly_change_pct|default(0) >= 0 else 'pnl-negative' }}">
+            {{ "%+.2f"|format(item.weekly_change_pct|default(0)) }}%
           </td>
           <td>
             {% if item.signal_bias == 'Long SGD' %}
@@ -71,30 +75,28 @@
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🏛️ S$NEER Proxy Monitor</h2>
   {% if sneer_proxy.available %}
   <p style="color:#ed8936;font-size:0.85rem;margin-bottom:0.75rem;">
-    ⚠️ Proxy/research estimates only — not official MAS values.
+    ⚠️ Proxy/research estimates only — not official MAS S$NEER values.
   </p>
   <div class="stats-grid">
     <div class="stat-card">
-      <span class="stat-label">Estimated S$NEER Proxy</span>
-      <span class="stat-value">{{ "%.2f"|format(sneer_proxy.estimated_sneer_proxy) }}</span>
+      <span class="stat-label">S$NEER Proxy Index</span>
+      <span class="stat-value">{{ "%.2f"|format(sneer_proxy.proxy_index) }}</span>
     </div>
     <div class="stat-card">
-      <span class="stat-label">Latest Official S$NEER</span>
-      <span class="stat-value">{{ "%.2f"|format(sneer_proxy.latest_official_sneer) }}</span>
+      <span class="stat-label">1-Day Change</span>
+      <span class="stat-value">{{ "%+.2f"|format(sneer_proxy.change_1d) }}</span>
     </div>
     <div class="stat-card">
-      <span class="stat-label">Estimated Band Zone</span>
-      <span class="stat-value">{{ sneer_proxy.estimated_band_zone }}</span>
+      <span class="stat-label">20-Day Change</span>
+      <span class="stat-value">{{ "%+.2f"|format(sneer_proxy.change_20d) }}</span>
     </div>
     <div class="stat-card">
-      <span class="stat-label">Proxy Deviation %</span>
-      <span class="stat-value">{{ "%.2f"|format(sneer_proxy.proxy_deviation_pct) }}%</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">Confidence</span>
-      <span class="stat-value">{{ sneer_proxy.confidence }}</span>
+      <span class="stat-label">Z-Score</span>
+      <span class="stat-value">{{ "%.2f"|format(sneer_proxy.z_score) }}</span>
     </div>
   </div>
+  <p style="color:#e2e8f0;margin-top:0.75rem;">{{ sneer_proxy.interpretation }}</p>
+  <p style="color:#718096;font-size:0.8rem;margin-top:0.25rem;font-style:italic;">{{ sneer_proxy.note }}</p>
   {% else %}
   <p style="color:#a0aec0;font-style:italic;">{{ sneer_proxy.message }}</p>
   {% endif %}
@@ -108,22 +110,27 @@
   {% if mas_policy.available %}
   <div class="stats-grid">
     <div class="stat-card">
-      <span class="stat-label">Last Decision Date</span>
-      <span class="stat-value">{{ mas_policy.last_decision_date }}</span>
+      <span class="stat-label">Latest Stance</span>
+      <span class="stat-value" style="font-size:0.85rem;">{{ mas_policy.latest_stance }}</span>
     </div>
     <div class="stat-card">
-      <span class="stat-label">Current Stance</span>
-      <span class="stat-value" style="font-size:0.85rem;">{{ mas_policy.current_stance }}</span>
+      <span class="stat-label">Next Review Window</span>
+      <span class="stat-value">{{ mas_policy.next_review_window }}</span>
     </div>
     <div class="stat-card">
-      <span class="stat-label">Statement Tone</span>
-      <span class="stat-value">{{ mas_policy.statement_tone }}</span>
+      <span class="stat-label">Inflation Assessment</span>
+      <span class="stat-value" style="font-size:0.85rem;">{{ mas_policy.inflation_assessment }}</span>
     </div>
     <div class="stat-card">
-      <span class="stat-label">Next Policy Window</span>
-      <span class="stat-value">{{ mas_policy.next_policy_window }}</span>
+      <span class="stat-label">Growth Assessment</span>
+      <span class="stat-value" style="font-size:0.85rem;">{{ mas_policy.growth_assessment }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">SGD Policy Bias</span>
+      <span class="stat-value" style="font-size:0.85rem;">{{ mas_policy.sgd_policy_bias }}</span>
     </div>
   </div>
+  <p style="color:#a0aec0;font-size:0.85rem;margin-top:0.75rem;">{{ mas_policy.notes }}</p>
   {% else %}
   <p style="color:#a0aec0;font-style:italic;">{{ mas_policy.message }}</p>
   {% endif %}
@@ -135,15 +142,31 @@
 <section style="margin-bottom:2rem;">
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🌍 Macro Pressure Monitor</h2>
   {% if macro_pressure.available %}
-  <div class="stats-grid">
-    <div class="stat-card">
-      <span class="stat-label">MAS Core Inflation</span>
-      <span class="stat-value">{{ macro_pressure.mas_core_inflation }}%</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">GDP Growth</span>
-      <span class="stat-value">{{ macro_pressure.gdp_growth }}%</span>
-    </div>
+  <div style="overflow-x:auto;">
+    <table class="data-table" style="width:100%;">
+      <thead>
+        <tr>
+          <th>Factor</th>
+          <th>Current Value</th>
+          <th>Direction</th>
+          <th>SGD Impact</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in macro_pressure.get("items", []) %}
+        <tr>
+          <td><strong>{{ item.name }}</strong></td>
+          <td>{{ item.current_value }}</td>
+          <td>{{ item.direction }}</td>
+          <td style="color:{% if 'Supports' in item.sgd_impact %}#48bb78{% elif 'Pressures' in item.sgd_impact %}#fc8181{% else %}#a0aec0{% endif %};">
+            {{ item.sgd_impact }}
+          </td>
+          <td style="color:#a0aec0;font-size:0.85rem;">{{ item.notes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
   {% else %}
   <p style="color:#a0aec0;font-style:italic;">{{ macro_pressure.message }}</p>
@@ -156,19 +179,28 @@
 <section style="margin-bottom:2rem;">
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🧭 Research Signal Summary</h2>
   {% if signal_summary.available %}
-  <div class="stats-grid">
-    <div class="stat-card">
-      <span class="stat-label">Overall FX Bias</span>
-      <span class="stat-value">{{ signal_summary.overall_fx_bias }}</span>
+  <div style="display:flex;flex-direction:column;gap:1rem;">
+    {% for opp in signal_summary.get("items", []) %}
+    <div style="background:#2d3748;border-radius:8px;padding:1rem;border-left:4px solid #63b3ed;">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.5rem;">
+        <strong style="color:#e2e8f0;font-size:1rem;">{{ opp.instrument }}</strong>
+        <span style="color:#a0aec0;font-size:0.85rem;">{{ opp.time_horizon }}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.5rem;margin-bottom:0.5rem;">
+        <div><span style="color:#718096;font-size:0.8rem;">Bias: </span><span style="color:#e2e8f0;">{{ opp.bias }}</span></div>
+        <div><span style="color:#718096;font-size:0.8rem;">Confidence: </span><span style="color:#e2e8f0;">{{ opp.confidence }}%</span></div>
+        <div><span style="color:#718096;font-size:0.8rem;">Invalidation: </span><span style="color:#fc8181;font-size:0.85rem;">{{ opp.invalidation_level }}</span></div>
+      </div>
+      <div style="margin-bottom:0.25rem;">
+        <span style="color:#718096;font-size:0.8rem;">Supporting factors: </span>
+        <span style="color:#a0aec0;font-size:0.85rem;">{{ opp.supporting_factors | join(", ") }}</span>
+      </div>
+      <div>
+        <span style="color:#718096;font-size:0.8rem;">Risk: </span>
+        <span style="color:#a0aec0;font-size:0.85rem;font-style:italic;">{{ opp.risk_notes }}</span>
+      </div>
     </div>
-    <div class="stat-card">
-      <span class="stat-label">Confidence Score</span>
-      <span class="stat-value">{{ signal_summary.confidence_score }}%</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">Suggested Action</span>
-      <span class="stat-value">{{ signal_summary.suggested_action }}</span>
-    </div>
+    {% endfor %}
   </div>
   {% else %}
   <p style="color:#a0aec0;font-style:italic;">{{ signal_summary.message }}</p>
