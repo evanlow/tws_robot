@@ -243,5 +243,95 @@
   </script>
 
   {% block extra_scripts %}{% endblock %}
+
+  <!-- ============================================================
+       Risk & Liability Disclaimer Modal
+       ============================================================ -->
+  <div id="disclaimerOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;overflow-y:auto;">
+    <div style="max-width:680px;margin:2rem auto;padding:2rem;background:#1a202c;border-radius:10px;border:2px solid #e53e3e;color:#e2e8f0;">
+      <h2 style="color:#fc8181;margin-top:0;font-size:1.35rem;">⚠️ Risk &amp; Liability Disclaimer</h2>
+      <p style="font-size:0.8rem;color:#a0aec0;margin-bottom:1rem;">Version: <span id="disclaimerVersion"></span></p>
+      <div style="font-size:0.88rem;line-height:1.65;max-height:55vh;overflow-y:auto;padding-right:0.5rem;border:1px solid #2d3748;border-radius:6px;padding:1rem;background:#0f1929;margin-bottom:1.25rem;">
+        <p><strong>BY USING THIS SOFTWARE, YOU ACKNOWLEDGE AND AGREE TO THE FOLLOWING:</strong></p>
+        <p><strong>1. No Financial Advice</strong><br>
+        TWS Robot is an open-source software tool and does not provide financial, investment, trading, tax, or legal advice. Any trading decisions are made solely by you.</p>
+        <p><strong>2. Software Provided As-Is</strong><br>
+        This software is provided "AS IS" and "AS AVAILABLE", without warranties of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, non-infringement, execution speed, connectivity, uptime, accuracy, reliability, or error-free operation.</p>
+        <p><strong>3. Trading and Technical Risk</strong><br>
+        Trading financial instruments involves substantial risk, including possible loss of capital. You acknowledge that Interactive Brokers TWS / IB Gateway, market data feeds, internet connectivity, APIs, rate limits, software bugs, stale data, delayed execution, rejected orders, duplicate orders, or erroneous order parameters may cause unexpected trading outcomes or financial loss.</p>
+        <p><strong>4. User Responsibility</strong><br>
+        You are solely responsible for configuring, testing, monitoring, approving, cancelling, and managing all orders and strategies. You should test the software in paper trading or simulation mode before using any live account.</p>
+        <p><strong>5. Limitation of Liability</strong><br>
+        To the maximum extent permitted by applicable law, the developer(s), maintainer(s), and contributor(s) shall not be liable for any direct, indirect, incidental, special, consequential, exemplary, or punitive damages, including but not limited to trading losses, loss of capital, loss of profits, loss of data, business interruption, or account liquidation arising from the use of, or inability to use, this software.</p>
+        <p><strong>6. No Guarantee of Safety or Performance</strong><br>
+        No representation is made that the software will prevent losses, operate continuously, execute orders correctly, or be suitable for any particular trading purpose.</p>
+      </div>
+      <label style="display:flex;align-items:flex-start;gap:0.75rem;cursor:pointer;margin-bottom:1.25rem;font-size:0.9rem;">
+        <input type="checkbox" id="disclaimerCheckbox" style="margin-top:0.2rem;flex-shrink:0;" />
+        <span>I have read, understood, and agree to the Risk &amp; Liability Disclaimer. I accept full responsibility for all use of this software, including any orders submitted and any losses incurred.</span>
+      </label>
+      <button id="disclaimerAgreeBtn" disabled
+              style="width:100%;padding:0.75rem;background:#2d3748;color:#718096;border:none;border-radius:6px;font-size:1rem;cursor:not-allowed;transition:background 0.2s,color 0.2s;">
+        I Agree and Continue
+      </button>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    var overlay = document.getElementById('disclaimerOverlay');
+    var checkbox = document.getElementById('disclaimerCheckbox');
+    var agreeBtn = document.getElementById('disclaimerAgreeBtn');
+    var versionEl = document.getElementById('disclaimerVersion');
+
+    // Fetch current disclaimer status from the backend.
+    fetch('/api/disclaimer/status')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (versionEl) versionEl.textContent = data.current_version || '';
+        if (!data.accepted) {
+          overlay.style.display = 'block';
+          document.body.style.overflow = 'hidden';
+        }
+      })
+      .catch(function(err) {
+        console.warn('[TWS Robot] Could not fetch disclaimer status:', err);
+      });
+
+    if (checkbox) {
+      checkbox.addEventListener('change', function() {
+        if (checkbox.checked) {
+          agreeBtn.disabled = false;
+          agreeBtn.style.background = '#2b6cb0';
+          agreeBtn.style.color = '#fff';
+          agreeBtn.style.cursor = 'pointer';
+        } else {
+          agreeBtn.disabled = true;
+          agreeBtn.style.background = '#2d3748';
+          agreeBtn.style.color = '#718096';
+          agreeBtn.style.cursor = 'not-allowed';
+        }
+      });
+    }
+
+    if (agreeBtn) {
+      agreeBtn.addEventListener('click', function() {
+        if (!checkbox || !checkbox.checked) return;
+        fetch('/api/disclaimer/accept', { method: 'POST' })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.status === 'accepted') {
+              overlay.style.display = 'none';
+              document.body.style.overflow = '';
+            }
+          })
+          .catch(function(err) {
+            console.error('[TWS Robot] Could not save disclaimer acceptance:', err);
+            alert('Error saving disclaimer acceptance. Please try again.');
+          });
+      });
+    }
+  })();
+  </script>
 </body>
 </html>

@@ -101,6 +101,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     # client sends the token via the X-CSRFToken header for state-changing
     # requests.
     from web.routes.api_connection import bp as api_connection_bp
+    from web.routes.api_disclaimer import bp as api_disclaimer_bp
     from web.routes.api_account import bp as api_account_bp
     from web.routes.api_emergency import bp as api_emergency_bp
     from web.routes.api_strategies import bp as api_strategies_bp
@@ -116,7 +117,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_market_events import bp as api_market_events_bp
 
     api_blueprints = [
-        api_connection_bp, api_account_bp, api_emergency_bp,
+        api_connection_bp, api_disclaimer_bp, api_account_bp, api_emergency_bp,
         api_strategies_bp, api_orders_bp, api_events_bp,
         api_system_bp, api_backtest_bp, api_data_bp, api_market_bp,
         api_portfolio_analysis_bp, api_account_intelligence_bp,

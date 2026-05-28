@@ -8,6 +8,12 @@ Transform your trading ideas into automated strategies. Test them on historical 
 
 ---
 
+## ⚠️ Risk Warning
+
+TWS Robot is experimental open-source software for use with Interactive Brokers TWS / IB Gateway. It is provided as-is, without warranties. Trading involves substantial risk, including loss of capital. Use paper trading first. You are solely responsible for all trading decisions, orders, and losses. See [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
+
+---
+
 ## 🎯 What Can TWS Robot Do For You?
 
 ### For New Algorithmic Traders
