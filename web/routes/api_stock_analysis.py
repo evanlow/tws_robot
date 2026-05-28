@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from flask import Blueprint, jsonify
 
+from strategies.base_strategy import StrategyState
 from web.stock_analysis_services import valuation_service, technical_levels_service, position_appraisal_service
 from web.services import get_services
 
@@ -251,6 +252,7 @@ def _get_active_bollinger_signals(ticker: str) -> List[Dict[str, Any]]:
             # Check if it's a Bollinger strategy tracking this ticker
             if (
                 hasattr(strategy, "middle_band")
+                and strategy.state == StrategyState.RUNNING
                 and ticker in strategy.config.symbols
             ):
                 indicators = strategy.get_indicator_values(ticker)

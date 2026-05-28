@@ -380,6 +380,73 @@ class TestStockAnalysisAPI:
 
     @patch("data.fundamentals.fetch_price_history")
     @patch("data.fundamentals.fetch_fundamentals")
+    def test_analysis_excludes_non_running_strategy_signals(
+        self, mock_fundamentals, mock_history, client, services
+    ):
+        """Test that only running strategies are exposed in active_strategy_signals."""
+        from datetime import datetime, timezone
+
+        from strategies.base_strategy import StrategyConfig
+        from strategies.bollinger_bands import BollingerBandsStrategy
+        from strategies.signal import Signal, SignalStrength, SignalType
+        from strategies.strategy_registry import StrategyRegistry
+
+        mock_fundamentals.return_value = _make_fundamentals(100.0)
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        registry = StrategyRegistry(event_bus=services.event_bus, account_id="")
+        registry.register_strategy_class("BollingerBands", BollingerBandsStrategy)
+        services._strategy_registry = registry
+
+        running = registry.create_strategy(
+            "BollingerBands",
+            StrategyConfig(name="BB_RUNNING", symbols=["TEST"]),
+        )
+        running.upper_band["TEST"] = 110.0
+        running.middle_band["TEST"] = 100.0
+        running.lower_band["TEST"] = 90.0
+        running.signals_to_emit.append(
+            Signal(
+                symbol="TEST",
+                signal_type=SignalType.BUY,
+                strength=SignalStrength.MODERATE,
+                timestamp=datetime.now(timezone.utc),
+                reason="Running strategy",
+                confidence=0.8,
+            )
+        )
+        registry.start_strategy("BB_RUNNING")
+
+        paused = registry.create_strategy(
+            "BollingerBands",
+            StrategyConfig(name="BB_PAUSED", symbols=["TEST"]),
+        )
+        paused.upper_band["TEST"] = 111.0
+        paused.middle_band["TEST"] = 101.0
+        paused.lower_band["TEST"] = 91.0
+        paused.signals_to_emit.append(
+            Signal(
+                symbol="TEST",
+                signal_type=SignalType.SELL,
+                strength=SignalStrength.MODERATE,
+                timestamp=datetime.now(timezone.utc),
+                reason="Paused strategy",
+                confidence=0.6,
+            )
+        )
+        registry.start_strategy("BB_PAUSED")
+        registry.pause_strategy("BB_PAUSED")
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert len(data["active_strategy_signals"]) == 1
+        assert data["active_strategy_signals"][0]["strategy_name"] == "BB_RUNNING"
+        assert data["active_strategy_signals"][0]["state"] == "RUNNING"
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
     def test_bollinger_bands_insufficient_data(self, mock_fundamentals, mock_history, client):
         """Test Bollinger Bands returns insufficient_data with few bars."""
         mock_fundamentals.return_value = _make_fundamentals(100.0)

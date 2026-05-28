@@ -86,30 +86,9 @@ def index(ticker: str):
     """Render the stock analysis drill-down page."""
     ticker = ticker.upper()
 
-    # Fetch active Bollinger strategy indicators for this ticker
-    active_strategies = []
-    try:
-        svc = get_services()
-        registry = svc.strategy_registry
-        for strategy in registry.get_all_strategies():
-            if (
-                hasattr(strategy, "middle_band")
-                and ticker in strategy.config.symbols
-            ):
-                indicators = strategy.get_indicator_values(ticker)
-                if indicators:
-                    active_strategies.append({
-                        "name": strategy.config.name,
-                        "state": strategy.state.value,
-                        "indicators": indicators,
-                    })
-    except Exception:
-        pass  # Non-critical — page still renders without strategy data
-
     context = {
         "title": f"Stock Price Context — {ticker}",
         "active_page": "stock_analysis",
         "ticker": ticker,
-        "active_strategies": active_strategies,
     }
     return render_template("stock_analysis/index.html", **context)
