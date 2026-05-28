@@ -3,7 +3,7 @@
 Data mode is controlled by the FX_DATA_MODE environment variable:
   not_configured  — safe empty-state default (default when unset)
   demo            — deterministic, realistic sample research data
-  live_research   — placeholder; fails safely (not yet implemented)
+  live_research   — connects to a configured FX data provider for live/delayed data
 """
 
 import os
@@ -16,6 +16,53 @@ RESEARCH_ONLY_STATUS = {
     "live_trading": "Disabled",
     "order_placement": "Disabled",
 }
+
+# ---------------------------------------------------------------------------
+# FX provider configuration
+# ---------------------------------------------------------------------------
+
+DEFAULT_FX_PROVIDER = "yfinance"
+VALID_FX_PROVIDERS = {"yfinance"}
+DEFAULT_FX_PROVIDER_TIMEOUT_SECONDS = 10
+
+FX_MARKET_WATCH_PAIRS = [
+    {"pair": "USD/SGD", "symbol": "USDSGD=X"},
+    {"pair": "EUR/SGD", "symbol": "EURSGD=X"},
+    {"pair": "GBP/SGD", "symbol": "GBPSGD=X"},
+    {"pair": "JPY/SGD", "symbol": "JPYSGD=X"},
+    {"pair": "AUD/SGD", "symbol": "AUDSGD=X"},
+    {"pair": "USD/CNH", "symbol": "USDCNH=X"},
+    {"pair": "USD/JPY", "symbol": "USDJPY=X"},
+    {"pair": "EUR/USD", "symbol": "EURUSD=X"},
+]
+
+
+def get_fx_provider() -> str:
+    """Return the active FX data provider from the FX_PROVIDER environment variable.
+
+    Falls back to the default provider if the value is missing or invalid.
+    """
+    raw = os.environ.get("FX_PROVIDER", DEFAULT_FX_PROVIDER).lower().strip()
+    if raw not in VALID_FX_PROVIDERS:
+        return DEFAULT_FX_PROVIDER
+    return raw
+
+
+def get_fx_provider_timeout_seconds() -> int:
+    """Return the FX provider HTTP timeout from FX_PROVIDER_TIMEOUT_SECONDS.
+
+    Falls back to the default timeout if the value is missing or invalid.
+    """
+    raw = os.environ.get(
+        "FX_PROVIDER_TIMEOUT_SECONDS", str(DEFAULT_FX_PROVIDER_TIMEOUT_SECONDS)
+    ).strip()
+    try:
+        val = int(raw)
+        if val > 0:
+            return val
+    except (ValueError, TypeError):
+        pass
+    return DEFAULT_FX_PROVIDER_TIMEOUT_SECONDS
 
 
 def get_fx_data_mode() -> str:

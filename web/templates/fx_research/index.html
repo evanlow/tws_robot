@@ -35,6 +35,10 @@
           <th>Weekly Change %</th>
           <th>Signal Bias</th>
           <th>Notes</th>
+          {% if market_watch.get("items") and market_watch["items"][0].get("data_source") %}
+          <th>Source</th>
+          <th>As Of</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -58,6 +62,10 @@
             {% endif %}
           </td>
           <td style="color:#a0aec0;font-size:0.85rem;">{{ item.notes }}</td>
+          {% if item.get("data_source") %}
+          <td style="color:#718096;font-size:0.8rem;">{{ item.data_source }}</td>
+          <td style="color:#718096;font-size:0.8rem;">{{ item.as_of|default("") }}</td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>

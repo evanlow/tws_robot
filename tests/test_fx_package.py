@@ -253,11 +253,15 @@ class TestDemoMarketWatch:
 
 
 class TestFxServiceLiveResearchMode:
-    """Tests for safe fallback when FX_DATA_MODE=live_research."""
+    """Tests for safe fallback when FX_DATA_MODE=live_research and the provider fails."""
 
     @pytest.fixture(autouse=True)
     def set_live_research_mode(self, monkeypatch):
         monkeypatch.setenv("FX_DATA_MODE", "live_research")
+        # Simulate yfinance being unavailable to keep tests deterministic
+        monkeypatch.setattr(
+            "web.fx.providers.yfinance_provider._YFINANCE_AVAILABLE", False
+        )
 
     def test_does_not_crash(self):
         data = get_fx_dashboard_data()
@@ -275,17 +279,20 @@ class TestFxServiceLiveResearchMode:
         assert status["live_trading"] == "Disabled"
         assert status["order_placement"] == "Disabled"
 
-    def test_all_sections_show_unavailable(self):
+    def test_market_watch_shows_unavailable_when_provider_fails(self):
         data = get_fx_dashboard_data()
         assert data["market_watch"]["available"] is False
+
+    def test_other_sections_show_unavailable(self):
+        data = get_fx_dashboard_data()
         assert data["sneer_proxy"]["available"] is False
         assert data["mas_policy"]["available"] is False
         assert data["macro_pressure"]["available"] is False
         assert data["signal_summary"]["available"] is False
 
-    def test_data_mode_label_indicates_unavailable(self):
+    def test_data_mode_label_is_live_research(self):
         data = get_fx_dashboard_data()
-        assert data["data_status"]["data_mode"] == "Live Research (Unavailable)"
+        assert data["data_status"]["data_mode"] == "Live Research"
 
 
 # ---------------------------------------------------------------------------
