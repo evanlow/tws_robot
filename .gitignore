@@ -52,3 +52,7 @@ strategy_lifecycle.db
 htmlcov/
 EMERGENCY_STOP
 disclaimer_acceptance.json
+
+share/
+session_log.md
+
