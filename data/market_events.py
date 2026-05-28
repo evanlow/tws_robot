@@ -158,7 +158,9 @@ def _fetch_dividend_for_symbol(symbol: str) -> Optional[Dict[str, Any]]:
 
         # exDividendDate is a Unix timestamp (int)
         try:
-            ex_div_dt = datetime.utcfromtimestamp(int(ex_div_ts))
+            ex_div_dt = datetime.fromtimestamp(
+                int(ex_div_ts), timezone.utc
+            ).replace(tzinfo=None)
         except (TypeError, ValueError):
             return None
 
