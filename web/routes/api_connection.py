@@ -9,6 +9,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from web.disclaimer import RISK_DISCLAIMER_VERSION, is_accepted
 from web.services import get_services
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,20 @@ def connect():
     Body (optional)::
 
         { "environment": "paper" | "live" }
+
+    Requires the Risk & Liability Disclaimer to have been accepted before
+    any connection (paper or live) is permitted.
     """
+    # Gate: disclaimer must be accepted before connecting.
+    if not is_accepted():
+        return jsonify(
+            {
+                "error": "Risk disclaimer not accepted",
+                "disclaimer_required": True,
+                "required_version": RISK_DISCLAIMER_VERSION,
+            }
+        ), 403
+
     svc = get_services()
     if svc.connected:
         return jsonify({"error": "Already connected", "connected": True}), 409

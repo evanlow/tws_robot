@@ -28,6 +28,9 @@ def app(monkeypatch):
         "web.services.ServiceManager._start_market_events_refresh",
         lambda self: None,
     )
+    # Treat disclaimer as already accepted in all web-API tests so that
+    # connection tests exercise connection logic, not the disclaimer gate.
+    monkeypatch.setattr("web.routes.api_connection.is_accepted", lambda: True)
     app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
     return app
 
