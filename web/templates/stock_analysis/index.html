@@ -2,6 +2,9 @@
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
 <h1>📈 {{ title }}</h1>
+<p style="color:#a0aec0;margin-bottom:0.5rem;">
+  <a href="/stocks/analysis" style="color:#63b3ed;text-decoration:none;">← Back to Stock Analysis Dashboard</a>
+</p>
 
 <!-- Loading indicator -->
 <div id="loadingIndicator" style="text-align:center;padding:2rem;">
@@ -15,6 +18,13 @@
 
 <!-- Main analysis content (hidden until loaded) -->
 <div id="analysisContent" style="display:none;">
+
+  <!-- Section 0: Summary Narrative -->
+  <section id="summarySection" style="margin-bottom:1.5rem;">
+    <div class="stat-card" style="padding:1.25rem;border-left:4px solid #63b3ed;">
+      <p id="summaryText" style="color:#e2e8f0;line-height:1.7;font-size:0.95rem;margin:0;"></p>
+    </div>
+  </section>
 
   <!-- Section 1: Price Snapshot -->
   <section id="priceSnapshot" style="margin-bottom:1.5rem;">
@@ -47,19 +57,40 @@
     </div>
   </section>
 
-  <!-- Section 2: Fair Value Estimate -->
+  <!-- Section 2: 52-Week Price Range Visual -->
+  <section id="rangeVisualSection" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">52-Week Price Range</h2>
+    <div id="rangeVisualContent" class="stat-card" style="padding:1.25rem;"></div>
+  </section>
+
+  <!-- Section 3: Price Chart with Overlays -->
+  <section id="chartSection" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Price Chart &amp; Zones</h2>
+    <div class="stat-card" style="padding:1rem;">
+      <canvas id="priceChart" width="800" height="300" style="width:100%;height:300px;"></canvas>
+      <div id="chartLegend" style="margin-top:0.75rem;display:flex;flex-wrap:wrap;gap:1rem;font-size:0.8rem;color:#a0aec0;"></div>
+    </div>
+  </section>
+
+  <!-- Section 4: Position Context Visual (conditional) -->
+  <section id="positionVisualSection" style="margin-bottom:1.5rem;display:none;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Position Context</h2>
+    <div id="positionVisualContent" class="stat-card" style="padding:1.25rem;"></div>
+  </section>
+
+  <!-- Section 5: Fair Value Estimate -->
   <section id="fairValueSection" style="margin-bottom:1.5rem;">
     <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Fair Value Estimate</h2>
     <div id="fairValueContent"></div>
   </section>
 
-  <!-- Section 3: Support & Resistance Zones -->
+  <!-- Section 6: Support & Resistance Zones -->
   <section id="technicalLevelsSection" style="margin-bottom:1.5rem;">
     <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Support &amp; Resistance Zones (Past 1 Year)</h2>
     <div id="technicalLevelsContent"></div>
   </section>
 
-  <!-- Section 4: Price Context -->
+  <!-- Section 7: Price Context Narrative -->
   <section id="priceContextSection" style="margin-bottom:1.5rem;">
     <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Current Price Context</h2>
     <div class="stat-card" style="padding:1rem;">
@@ -67,13 +98,13 @@
     </div>
   </section>
 
-  <!-- Section 5: Open Position Appraisal (conditional) -->
+  <!-- Section 8: Open Position Appraisal (conditional) -->
   <section id="positionSection" style="margin-bottom:1.5rem;display:none;">
     <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Open Position Appraisal</h2>
     <div id="positionContent"></div>
   </section>
 
-  <!-- Section 6: Disclaimer -->
+  <!-- Section 9: Disclaimer -->
   <section id="disclaimerSection" style="margin-top:2rem;padding:1rem;background:#1a202c;border:1px solid #4a5568;border-radius:8px;">
     <p style="color:#a0aec0;font-size:0.85rem;line-height:1.5;" id="disclaimerText"></p>
   </section>
@@ -109,9 +140,16 @@ function showError(msg) {
   document.getElementById('errorMessage').textContent = 'Analysis failed: ' + msg;
 }
 
+function isNil(value) {
+  return value === null || value === undefined;
+}
+
 function renderAnalysis(data) {
   document.getElementById('loadingIndicator').style.display = 'none';
   document.getElementById('analysisContent').style.display = 'block';
+
+  // Summary narrative
+  document.getElementById('summaryText').textContent = data.price_context || 'Insufficient data for summary analysis.';
 
   // Price snapshot
   document.getElementById('companyName').textContent = data.name || data.ticker;
@@ -121,6 +159,18 @@ function renderAnalysis(data) {
     document.getElementById('yearLow').textContent = formatPrice(data.range_52w.low);
     const pct = data.range_52w.position_percentile;
     document.getElementById('rangePercentile').textContent = pct !== null && pct !== undefined ? pct.toFixed(1) + '%' : '--';
+  }
+
+  // 52-week range visual
+  renderRangeVisual(data);
+
+  // Price chart with overlays
+  renderPriceChart(data);
+
+  // Position context visual
+  if (data.open_position && data.open_position.has_position) {
+    document.getElementById('positionVisualSection').style.display = 'block';
+    renderPositionVisual(data);
   }
 
   // Fair value
@@ -140,6 +190,297 @@ function renderAnalysis(data) {
 
   // Disclaimer
   document.getElementById('disclaimerText').textContent = data.disclaimer || '';
+}
+
+/* ---- 52-Week Range Visual Bar ---- */
+function renderRangeVisual(data) {
+  const el = document.getElementById('rangeVisualContent');
+  const range = data.range_52w;
+  if (!range || isNil(range.low) || isNil(range.high)) {
+    el.innerHTML = '<p style="color:#a0aec0;">52-week range data unavailable.</p>';
+    return;
+  }
+
+  const low = range.low;
+  const high = range.high;
+  const current = data.current_price;
+  const span = high - low;
+  if (span <= 0) {
+    el.innerHTML = '<p style="color:#a0aec0;">52-week range data unavailable.</p>';
+    return;
+  }
+
+  const currentPct = Math.max(0, Math.min(100, ((current - low) / span) * 100));
+
+  // Fair value band
+  const fv = data.fair_value;
+  let fvLowPct = null, fvHighPct = null;
+  if (fv && fv.status !== 'unavailable' && !isNil(fv.low) && !isNil(fv.high)) {
+    fvLowPct = Math.max(0, Math.min(100, ((fv.low - low) / span) * 100));
+    fvHighPct = Math.max(0, Math.min(100, ((fv.high - low) / span) * 100));
+  }
+
+  // Support zones
+  const supports = (data.technical_levels && data.technical_levels.support) || [];
+  const resistances = (data.technical_levels && data.technical_levels.resistance) || [];
+
+  // Entry price
+  let entryPct = null;
+  if (data.open_position && data.open_position.has_position && !isNil(data.open_position.average_entry)) {
+    entryPct = Math.max(0, Math.min(100, ((data.open_position.average_entry - low) / span) * 100));
+  }
+
+  let html = '';
+  html += '<div style="position:relative;height:60px;margin:1.5rem 0 2.5rem 0;">';
+
+  // Background bar
+  html += '<div style="position:absolute;top:24px;left:0;right:0;height:12px;background:#2d3748;border-radius:6px;"></div>';
+
+  // Support zones
+  supports.forEach(z => {
+    const zLow = Math.max(0, Math.min(100, ((z.low - low) / span) * 100));
+    const zHigh = Math.max(0, Math.min(100, ((z.high - low) / span) * 100));
+    html += `<div style="position:absolute;top:22px;left:${zLow}%;width:${zHigh-zLow}%;height:16px;background:rgba(72,187,120,0.3);border-radius:3px;" title="Support: ${formatPrice(z.low)}–${formatPrice(z.high)}"></div>`;
+  });
+
+  // Resistance zones
+  resistances.forEach(z => {
+    const zLow = Math.max(0, Math.min(100, ((z.low - low) / span) * 100));
+    const zHigh = Math.max(0, Math.min(100, ((z.high - low) / span) * 100));
+    html += `<div style="position:absolute;top:22px;left:${zLow}%;width:${zHigh-zLow}%;height:16px;background:rgba(252,129,129,0.3);border-radius:3px;" title="Resistance: ${formatPrice(z.low)}–${formatPrice(z.high)}"></div>`;
+  });
+
+  // Fair value band
+  if (fvLowPct !== null) {
+    html += `<div style="position:absolute;top:20px;left:${fvLowPct}%;width:${fvHighPct-fvLowPct}%;height:20px;background:rgba(99,179,237,0.15);border:1px dashed rgba(99,179,237,0.5);border-radius:3px;" title="Fair value: ${formatPrice(fv.low)}–${formatPrice(fv.high)}"></div>`;
+  }
+
+  // Entry price marker
+  if (entryPct !== null) {
+    html += `<div style="position:absolute;top:18px;left:${entryPct}%;width:2px;height:24px;background:#d69e2e;" title="Your entry: ${formatPrice(data.open_position.average_entry)}"></div>`;
+    html += `<div style="position:absolute;top:46px;left:${entryPct}%;transform:translateX(-50%);font-size:0.7rem;color:#d69e2e;white-space:nowrap;">Entry ${formatPrice(data.open_position.average_entry)}</div>`;
+  }
+
+  // Current price marker
+  html += `<div style="position:absolute;top:16px;left:${currentPct}%;width:3px;height:28px;background:#63b3ed;border-radius:2px;" title="Current: ${formatPrice(current)}"></div>`;
+  html += `<div style="position:absolute;top:0;left:${currentPct}%;transform:translateX(-50%);font-size:0.75rem;color:#63b3ed;font-weight:600;white-space:nowrap;">▼ ${formatPrice(current)}</div>`;
+
+  // Low / High labels
+  html += `<div style="position:absolute;top:46px;left:0;font-size:0.75rem;color:#a0aec0;">Low ${formatPrice(low)}</div>`;
+  html += `<div style="position:absolute;top:46px;right:0;font-size:0.75rem;color:#a0aec0;">High ${formatPrice(high)}</div>`;
+
+  html += '</div>';
+
+  // Legend
+  html += '<div style="display:flex;flex-wrap:wrap;gap:1rem;font-size:0.8rem;color:#a0aec0;margin-top:0.5rem;">';
+  html += '<span><span style="display:inline-block;width:12px;height:12px;background:rgba(72,187,120,0.3);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Support zone</span>';
+  html += '<span><span style="display:inline-block;width:12px;height:12px;background:rgba(252,129,129,0.3);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Resistance zone</span>';
+  if (fvLowPct !== null) {
+    html += '<span><span style="display:inline-block;width:12px;height:12px;border:1px dashed rgba(99,179,237,0.5);background:rgba(99,179,237,0.15);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Fair value band</span>';
+  }
+  if (entryPct !== null) {
+    html += '<span><span style="display:inline-block;width:12px;height:2px;background:#d69e2e;vertical-align:middle;margin-right:4px;"></span>Your entry</span>';
+  }
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+/* ---- Simple Price Chart with Overlays (Canvas) ---- */
+function renderPriceChart(data) {
+  const canvas = document.getElementById('priceChart');
+  const ctx = canvas.getContext('2d');
+  const legendEl = document.getElementById('chartLegend');
+
+  // Use range_52w and current data to draw a simplified chart
+  const range = data.range_52w;
+  if (!range || isNil(range.low) || isNil(range.high)) {
+    canvas.parentElement.innerHTML = '<p style="color:#a0aec0;padding:1rem;">Chart unavailable — insufficient price data.</p>';
+    return;
+  }
+
+  // Set canvas actual size
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width;
+  const H = rect.height;
+
+  const low = range.low;
+  const high = range.high;
+  const span = high - low;
+  if (span <= 0) {
+    canvas.parentElement.innerHTML = '<p style="color:#a0aec0;padding:1rem;">Chart unavailable — insufficient price data.</p>';
+    return;
+  }
+  const current = data.current_price;
+  const padding = {top: 20, bottom: 30, left: 60, right: 20};
+  const chartW = W - padding.left - padding.right;
+  const chartH = H - padding.top - padding.bottom;
+
+  // Helper to map price to Y
+  function priceToY(price) {
+    return padding.top + chartH - ((price - low) / span) * chartH;
+  }
+
+  // Background
+  ctx.fillStyle = '#1a202c';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw support zones
+  const supports = (data.technical_levels && data.technical_levels.support) || [];
+  supports.forEach(z => {
+    const y1 = priceToY(z.high);
+    const y2 = priceToY(z.low);
+    ctx.fillStyle = 'rgba(72, 187, 120, 0.15)';
+    ctx.fillRect(padding.left, y1, chartW, y2 - y1);
+  });
+
+  // Draw resistance zones
+  const resistances = (data.technical_levels && data.technical_levels.resistance) || [];
+  resistances.forEach(z => {
+    const y1 = priceToY(z.high);
+    const y2 = priceToY(z.low);
+    ctx.fillStyle = 'rgba(252, 129, 129, 0.15)';
+    ctx.fillRect(padding.left, y1, chartW, y2 - y1);
+  });
+
+  // Draw fair value band
+  const fv = data.fair_value;
+  if (fv && fv.status !== 'unavailable' && !isNil(fv.low) && !isNil(fv.high)) {
+    const y1 = priceToY(fv.high);
+    const y2 = priceToY(fv.low);
+    ctx.fillStyle = 'rgba(99, 179, 237, 0.1)';
+    ctx.fillRect(padding.left, y1, chartW, y2 - y1);
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = 'rgba(99, 179, 237, 0.5)';
+    ctx.strokeRect(padding.left, y1, chartW, y2 - y1);
+    ctx.setLineDash([]);
+  }
+
+  // Draw current price line
+  const currentY = priceToY(current);
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = '#63b3ed';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(padding.left, currentY);
+  ctx.lineTo(padding.left + chartW, currentY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Current price label
+  ctx.fillStyle = '#63b3ed';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('Current ' + formatPrice(current), padding.left + 4, currentY - 5);
+
+  // Draw entry price line if position exists
+  if (data.open_position && data.open_position.has_position && !isNil(data.open_position.average_entry)) {
+    const entryY = priceToY(data.open_position.average_entry);
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = '#d69e2e';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, entryY);
+    ctx.lineTo(padding.left + chartW, entryY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#d69e2e';
+    ctx.fillText('Entry ' + formatPrice(data.open_position.average_entry), padding.left + 4, entryY - 5);
+  }
+
+  // Y-axis labels
+  ctx.fillStyle = '#a0aec0';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  const steps = 5;
+  for (let i = 0; i <= steps; i++) {
+    const price = low + (span * i / steps);
+    const y = priceToY(price);
+    ctx.fillText(formatPrice(price), padding.left - 6, y + 3);
+    // Grid line
+    ctx.strokeStyle = '#2d3748';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(padding.left + chartW, y);
+    ctx.stroke();
+  }
+
+  // 52W High/Low markers
+  ctx.fillStyle = '#fc8181';
+  ctx.textAlign = 'right';
+  ctx.fillText('52W High', W - padding.right, priceToY(high) + 12);
+  ctx.fillStyle = '#48bb78';
+  ctx.fillText('52W Low', W - padding.right, priceToY(low) - 5);
+
+  // Legend
+  let legendHtml = '';
+  legendHtml += '<span><span style="display:inline-block;width:16px;height:2px;background:#63b3ed;vertical-align:middle;margin-right:4px;border-top:1px dashed #63b3ed;"></span>Current price</span>';
+  if (data.open_position && data.open_position.has_position) {
+    legendHtml += '<span><span style="display:inline-block;width:16px;height:2px;background:#d69e2e;vertical-align:middle;margin-right:4px;"></span>Your entry</span>';
+  }
+  legendHtml += '<span><span style="display:inline-block;width:12px;height:12px;background:rgba(72,187,120,0.15);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Support</span>';
+  legendHtml += '<span><span style="display:inline-block;width:12px;height:12px;background:rgba(252,129,129,0.15);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Resistance</span>';
+  if (fv && fv.status !== 'unavailable') {
+    legendHtml += '<span><span style="display:inline-block;width:12px;height:12px;background:rgba(99,179,237,0.1);border:1px dashed rgba(99,179,237,0.5);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Fair value</span>';
+  }
+  legendEl.innerHTML = legendHtml;
+}
+
+/* ---- Position Context Visual ---- */
+function renderPositionVisual(data) {
+  const el = document.getElementById('positionVisualContent');
+  const pos = data.open_position;
+  const current = data.current_price;
+  const entry = pos.average_entry;
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">';
+
+  html += `<div style="text-align:center;padding:0.75rem;border-radius:6px;background:#1a365d;border:1px solid #2b6cb0;">
+    <div style="font-size:0.8rem;color:#a0aec0;">Current Price</div>
+    <div style="font-size:1.3rem;font-weight:700;color:#63b3ed;">${formatPrice(current)}</div>
+  </div>`;
+
+  html += `<div style="text-align:center;padding:0.75rem;border-radius:6px;background:#744210;border:1px solid #d69e2e;">
+    <div style="font-size:0.8rem;color:#a0aec0;">Your Average Entry</div>
+    <div style="font-size:1.3rem;font-weight:700;color:#d69e2e;">${formatPrice(entry)}</div>
+  </div>`;
+
+  // Fair value
+  const fv = data.fair_value;
+  if (fv && fv.status !== 'unavailable' && !isNil(fv.low) && !isNil(fv.high)) {
+    html += `<div style="text-align:center;padding:0.75rem;border-radius:6px;background:#1a202c;border:1px solid #4a5568;">
+      <div style="font-size:0.8rem;color:#a0aec0;">Estimated Fair Value</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#e2e8f0;">${formatPrice(fv.low)} – ${formatPrice(fv.high)}</div>
+    </div>`;
+  }
+
+  // Nearest support
+  const supports = (data.technical_levels && data.technical_levels.support) || [];
+  if (supports.length > 0) {
+    const nearest = supports[0];
+    html += `<div style="text-align:center;padding:0.75rem;border-radius:6px;background:#1c4532;border:1px solid #48bb78;">
+      <div style="font-size:0.8rem;color:#a0aec0;">Nearest Support Zone</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#48bb78;">${formatPrice(nearest.low)} – ${formatPrice(nearest.high)}</div>
+    </div>`;
+  }
+
+  // Nearest resistance
+  const resistances = (data.technical_levels && data.technical_levels.resistance) || [];
+  if (resistances.length > 0) {
+    const nearest = resistances[0];
+    html += `<div style="text-align:center;padding:0.75rem;border-radius:6px;background:#3b1a1a;border:1px solid #fc8181;">
+      <div style="font-size:0.8rem;color:#a0aec0;">Nearest Resistance Zone</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#fc8181;">${formatPrice(nearest.low)} – ${formatPrice(nearest.high)}</div>
+    </div>`;
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
 }
 
 function renderFairValue(fv) {

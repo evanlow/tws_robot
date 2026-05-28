@@ -344,3 +344,99 @@ class TestStockAnalysisAPI:
         resp = client.get("/stocks/AAPL/analysis")
         assert resp.status_code == 200
         assert b"AAPL" in resp.data
+        assert b"Back to Stock Analysis Dashboard" in resp.data
+
+
+class TestStockAnalysisDashboard:
+    """Tests for GET /stocks/analysis — the stock analysis dashboard."""
+
+    def test_dashboard_loads(self, client):
+        """Test the dashboard page loads successfully."""
+        resp = client.get("/stocks/analysis")
+        assert resp.status_code == 200
+        assert b"Stock Analysis" in resp.data
+        assert b"Enter ticker symbol" in resp.data
+
+    def test_dashboard_empty_positions(self, client):
+        """Test dashboard shows empty state when no positions."""
+        resp = client.get("/stocks/analysis")
+        assert resp.status_code == 200
+        assert b"No open positions" in resp.data
+
+    def test_dashboard_with_positions(self, client, services):
+        """Test dashboard shows position shortcuts."""
+        services.update_position("GOOG", {
+            "quantity": 100,
+            "entry_price": 190.0,
+            "current_price": 385.0,
+            "unrealized_pnl": 19500.0,
+            "unrealized_pnl_pct": 1.026,
+            "side": "LONG",
+        })
+        resp = client.get("/stocks/analysis")
+        assert resp.status_code == 200
+        assert b"GOOG" in resp.data
+        assert b"/stocks/GOOG/analysis" in resp.data
+        assert b"Analyze" in resp.data
+
+    def test_dashboard_option_symbol_links_to_underlying(self, client, services):
+        """Test that option symbols link to underlying stock analysis."""
+        services.update_position("GOOG 260821C00415000", {
+            "quantity": -1,
+            "entry_price": 5.0,
+            "current_price": 3.0,
+            "unrealized_pnl": 200.0,
+            "unrealized_pnl_pct": 0.4,
+            "side": "SHORT",
+            "sec_type": "OPT",
+        })
+        resp = client.get("/stocks/analysis")
+        assert resp.status_code == 200
+        assert b"/stocks/GOOG/analysis" in resp.data
+
+    def test_dashboard_unparseable_symbol(self, client, services):
+        """Test that unparseable symbols show disabled state."""
+        services.update_position("???WEIRD", {
+            "quantity": 100,
+            "entry_price": 10.0,
+            "current_price": 12.0,
+            "unrealized_pnl": 200.0,
+            "unrealized_pnl_pct": 0.2,
+            "side": "LONG",
+        })
+        resp = client.get("/stocks/analysis")
+        assert resp.status_code == 200
+        assert b"Analysis unavailable" in resp.data
+
+
+class TestParseUnderlyingSymbol:
+    """Tests for parse_underlying_symbol helper."""
+
+    def test_plain_equity(self):
+        from web.routes.stock_analysis import parse_underlying_symbol
+        assert parse_underlying_symbol("GOOG") == "GOOG"
+        assert parse_underlying_symbol("AAPL") == "AAPL"
+        assert parse_underlying_symbol("BRK.B") == "BRK.B"
+
+    def test_option_call(self):
+        from web.routes.stock_analysis import parse_underlying_symbol
+        assert parse_underlying_symbol("GOOG 260821C00415000") == "GOOG"
+
+    def test_option_put(self):
+        from web.routes.stock_analysis import parse_underlying_symbol
+        assert parse_underlying_symbol("BIDU 2605P00121000") == "BIDU"
+
+    def test_option_no_space(self):
+        from web.routes.stock_analysis import parse_underlying_symbol
+        assert parse_underlying_symbol("SPX250620C05500000") == "SPX"
+
+    def test_empty_or_none(self):
+        from web.routes.stock_analysis import parse_underlying_symbol
+        assert parse_underlying_symbol("") is None
+        assert parse_underlying_symbol(None) is None
+        assert parse_underlying_symbol("   ") is None
+
+    def test_unparseable(self):
+        from web.routes.stock_analysis import parse_underlying_symbol
+        assert parse_underlying_symbol("???WEIRD") is None
+        assert parse_underlying_symbol("some random text") is None

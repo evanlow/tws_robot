@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>📊 Stock Analysis</h1>
+<p style="color:#a0aec0;margin-bottom:1.5rem;">
+  Understand estimated fair value, detected support/resistance zones, and how the current price relates to your open positions.
+</p>
+
+<!-- Ticker Search -->
+<section style="margin-bottom:2rem;">
+  <form id="tickerForm" style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+    <input type="text" id="tickerInput" placeholder="Enter ticker symbol (e.g. GOOG)"
+           style="padding:0.6rem 1rem;font-size:1rem;border-radius:6px;border:1px solid #4a5568;background:#1a202c;color:#e2e8f0;width:280px;"
+           autocomplete="off" autofocus />
+    <button type="submit" class="btn-primary" style="padding:0.6rem 1.5rem;">Analyze</button>
+  </form>
+</section>
+
+<!-- Open Positions Quick Links -->
+<section>
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Your Open Positions</h2>
+  {% if position_links %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Qty</th>
+        <th>Entry</th>
+        <th>Current</th>
+        <th>P&L %</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pos in position_links %}
+      <tr>
+        <td>
+          {% if pos.analyzable %}
+          <a href="/stocks/{{ pos.underlying }}/analysis" style="color:#63b3ed;text-decoration:none;font-weight:600;">{{ pos.symbol }}</a>
+          {% else %}
+          <strong style="color:#a0aec0;">{{ pos.symbol }}</strong>
+          {% endif %}
+        </td>
+        <td>{{ pos.quantity }}</td>
+        <td>${{ "%.2f"|format(pos.entry_price) }}</td>
+        <td>${{ "%.2f"|format(pos.current_price) }}</td>
+        <td class="{{ 'pnl-positive' if pos.unrealized_pnl_pct >= 0 else 'pnl-negative' }}">
+          {{ "%.2f"|format(pos.unrealized_pnl_pct * 100) }}%
+        </td>
+        <td>
+          {% if pos.analyzable %}
+          <a href="/stocks/{{ pos.underlying }}/analysis" class="btn-sm btn-primary">Analyze</a>
+          {% else %}
+          <span style="color:#718096;font-size:0.85rem;">Analysis unavailable</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">No open positions — connect to TWS to see portfolio shortcuts here.</p>
+  {% endif %}
+</section>
+
+<script>
+document.getElementById('tickerForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var ticker = document.getElementById('tickerInput').value.trim().toUpperCase();
+  if (ticker) {
+    window.location.href = '/stocks/' + encodeURIComponent(ticker) + '/analysis';
+  }
+});
+</script>
+{% endblock %}
