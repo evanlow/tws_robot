@@ -117,7 +117,7 @@ def stock_analysis(ticker: str):
 
     except Exception as exc:
         logger.error("Stock analysis failed for %s: %s", ticker, exc, exc_info=True)
-        return jsonify({"error": "Analysis failed", "ticker": ticker}), 500
+        return jsonify({"error": "Analysis could not be completed", "ticker": ticker}), 500
 
 
 def _calc_percentile(

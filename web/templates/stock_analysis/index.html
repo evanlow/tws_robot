@@ -115,7 +115,7 @@ function renderAnalysis(data) {
     document.getElementById('yearHigh').textContent = formatPrice(data.range_52w.high);
     document.getElementById('yearLow').textContent = formatPrice(data.range_52w.low);
     const pct = data.range_52w.position_percentile;
-    document.getElementById('rangePercentile').textContent = pct != null ? pct.toFixed(1) + '%' : '--';
+    document.getElementById('rangePercentile').textContent = pct !== null && pct !== undefined ? pct.toFixed(1) + '%' : '--';
   }
 
   // Fair value
@@ -191,7 +191,7 @@ function renderPosition(pos) {
 }
 
 function formatPrice(val) {
-  if (val == null) return '--';
+  if (val === null || val === undefined) return '--';
   return val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
