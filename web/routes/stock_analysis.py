@@ -20,7 +20,7 @@ _OPTION_RE = re.compile(
 )
 
 
-def parse_underlying_symbol(instrument_symbol: str) -> Optional[str]:
+def parse_underlying_symbol(instrument_symbol: Optional[str]) -> Optional[str]:
     """Extract the underlying stock ticker from an option or equity symbol.
 
     Examples:

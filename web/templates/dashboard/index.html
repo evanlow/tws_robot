@@ -178,7 +178,8 @@
         <tbody>
           {% for symbol, pos in positions.items() %}
           <tr>
-            <td data-symbol="{{ symbol }}"><a href="/stocks/{{ symbol }}/analysis" style="color:#63b3ed;text-decoration:none;"><strong>{{ symbol }}</strong></a></td>
+            {% set analysis_symbol = (symbol.split(' ')[0] if pos.sec_type|default('') == 'OPT' else symbol) %}
+            <td data-symbol="{{ symbol }}"><a href="/stocks/{{ analysis_symbol|urlencode }}/analysis" style="color:#63b3ed;text-decoration:none;"><strong>{{ symbol }}</strong></a></td>
             <td>{{ pos.quantity|default(0) }}</td>
             <td>${{ "%.2f"|format(pos.entry_price|default(0)) }}</td>
             <td>${{ "%.2f"|format(pos.current_price|default(0)) }}</td>
