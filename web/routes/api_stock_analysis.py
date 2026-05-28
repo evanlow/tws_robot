@@ -48,7 +48,11 @@ def stock_analysis(ticker: str):
         # Filter out bars with non-finite OHLC values
         bars = [
             b for b in raw_bars
-            if all(math.isfinite(b[k]) for k in ("open", "high", "low", "close") if b.get(k) is not None)
+            if all(
+                isinstance(b[k], (int, float)) and math.isfinite(b[k])
+                for k in ("open", "high", "low", "close")
+                if b.get(k) is not None
+            )
         ]
 
         # Current price
