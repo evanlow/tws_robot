@@ -80,7 +80,7 @@ def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
         info = ticker.info or {}
     except Exception as exc:
         logger.error("yfinance fetch failed for %s: %s", symbol, exc)
-        return {"error": str(exc), "symbol": symbol}
+        return {"error": "Failed to fetch fundamentals", "symbol": symbol}
 
     result: Dict[str, Any] = {
         "symbol": symbol,

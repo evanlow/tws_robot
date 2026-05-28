@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>📈 {{ title }}</h1>
+
+<!-- Loading indicator -->
+<div id="loadingIndicator" style="text-align:center;padding:2rem;">
+  <p style="color:#63b3ed;font-size:1.1rem;">⏳ Analyzing {{ ticker }}…</p>
+</div>
+
+<!-- Error display -->
+<div id="errorDisplay" style="display:none;padding:1.5rem;background:#2d1b1b;border:1px solid #e53e3e;border-radius:8px;margin:1rem 0;">
+  <p style="color:#fc8181;" id="errorMessage"></p>
+</div>
+
+<!-- Main analysis content (hidden until loaded) -->
+<div id="analysisContent" style="display:none;">
+
+  <!-- Section 1: Price Snapshot -->
+  <section id="priceSnapshot" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Price Snapshot</h2>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <span class="stat-label">Ticker</span>
+        <span class="stat-value" id="tickerName">{{ ticker }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Company</span>
+        <span class="stat-value" id="companyName">--</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Current Price</span>
+        <span class="stat-value" id="currentPrice">--</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">52-Week High</span>
+        <span class="stat-value" id="yearHigh">--</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">52-Week Low</span>
+        <span class="stat-value" id="yearLow">--</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Position in 52W Range</span>
+        <span class="stat-value" id="rangePercentile">--</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 2: Fair Value Estimate -->
+  <section id="fairValueSection" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Fair Value Estimate</h2>
+    <div id="fairValueContent"></div>
+  </section>
+
+  <!-- Section 3: Support & Resistance Zones -->
+  <section id="technicalLevelsSection" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Support &amp; Resistance Zones (Past 1 Year)</h2>
+    <div id="technicalLevelsContent"></div>
+  </section>
+
+  <!-- Section 4: Price Context -->
+  <section id="priceContextSection" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Current Price Context</h2>
+    <div class="stat-card" style="padding:1rem;">
+      <p id="priceContextText" style="color:#e2e8f0;line-height:1.6;"></p>
+    </div>
+  </section>
+
+  <!-- Section 5: Open Position Appraisal (conditional) -->
+  <section id="positionSection" style="margin-bottom:1.5rem;display:none;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Open Position Appraisal</h2>
+    <div id="positionContent"></div>
+  </section>
+
+  <!-- Section 6: Disclaimer -->
+  <section id="disclaimerSection" style="margin-top:2rem;padding:1rem;background:#1a202c;border:1px solid #4a5568;border-radius:8px;">
+    <p style="color:#a0aec0;font-size:0.85rem;line-height:1.5;" id="disclaimerText"></p>
+  </section>
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const ticker = {{ ticker | tojson }};
+  fetch(`/api/stocks/${encodeURIComponent(ticker)}/analysis`)
+    .then(resp => {
+      if (!resp.ok) {
+        return resp.json().catch(() => null).then(body => {
+          const msg = (body && (body.error || body.message)) || `HTTP ${resp.status}`;
+          throw new Error(msg);
+        });
+      }
+      return resp.json();
+    })
+    .then(data => {
+      if (data.error) {
+        showError(data.error);
+        return;
+      }
+      renderAnalysis(data);
+    })
+    .catch(err => showError(err.message));
+});
+
+function showError(msg) {
+  document.getElementById('loadingIndicator').style.display = 'none';
+  document.getElementById('errorDisplay').style.display = 'block';
+  document.getElementById('errorMessage').textContent = 'Analysis failed: ' + msg;
+}
+
+function renderAnalysis(data) {
+  document.getElementById('loadingIndicator').style.display = 'none';
+  document.getElementById('analysisContent').style.display = 'block';
+
+  // Price snapshot
+  document.getElementById('companyName').textContent = data.name || data.ticker;
+  document.getElementById('currentPrice').textContent = formatPrice(data.current_price);
+  if (data.range_52w) {
+    document.getElementById('yearHigh').textContent = formatPrice(data.range_52w.high);
+    document.getElementById('yearLow').textContent = formatPrice(data.range_52w.low);
+    const pct = data.range_52w.position_percentile;
+    document.getElementById('rangePercentile').textContent = pct !== null && pct !== undefined ? pct.toFixed(1) + '%' : '--';
+  }
+
+  // Fair value
+  renderFairValue(data.fair_value);
+
+  // Technical levels
+  renderTechnicalLevels(data.technical_levels);
+
+  // Price context
+  document.getElementById('priceContextText').textContent = data.price_context || 'No context available.';
+
+  // Position appraisal
+  if (data.open_position && data.open_position.has_position) {
+    document.getElementById('positionSection').style.display = 'block';
+    renderPosition(data.open_position);
+  }
+
+  // Disclaimer
+  document.getElementById('disclaimerText').textContent = data.disclaimer || '';
+}
+
+function renderFairValue(fv) {
+  const el = document.getElementById('fairValueContent');
+  if (!fv || fv.status === 'unavailable') {
+    el.innerHTML = '<div class="stat-card" style="padding:1rem;"><p style="color:#a0aec0;">Fair value estimate unavailable due to insufficient earnings/valuation data.</p></div>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card"><span class="stat-label">Estimated Range</span><span class="stat-value">${formatPrice(fv.low)} – ${formatPrice(fv.high)}</span></div>
+      <div class="stat-card"><span class="stat-label">Method</span><span class="stat-value">${fv.method || '--'}</span></div>
+      <div class="stat-card"><span class="stat-label">Status</span><span class="stat-value">${formatStatus(fv.status)}</span></div>
+      <div class="stat-card"><span class="stat-label">Confidence</span><span class="stat-value">${(fv.confidence || '--').toUpperCase()}</span></div>
+    </div>
+    <p style="color:#a0aec0;font-size:0.9rem;margin-top:0.75rem;">Based on the selected valuation assumptions, the estimated fair value range is ${formatPrice(fv.low)} – ${formatPrice(fv.high)}. This is not a guaranteed value and depends heavily on future earnings and market sentiment.</p>
+  `;
+}
+
+function renderTechnicalLevels(levels) {
+  const el = document.getElementById('technicalLevelsContent');
+  if (!levels || (!levels.support.length && !levels.resistance.length)) {
+    el.innerHTML = '<div class="stat-card" style="padding:1rem;"><p style="color:#a0aec0;">Insufficient data to detect support/resistance zones.</p></div>';
+    return;
+  }
+  let html = '<table style="width:100%;border-collapse:collapse;color:#e2e8f0;font-size:0.9rem;">';
+  html += '<tr style="border-bottom:1px solid #4a5568;"><th style="text-align:left;padding:0.5rem;">Type</th><th style="text-align:right;padding:0.5rem;">Price Zone</th><th style="text-align:center;padding:0.5rem;">Confidence</th><th style="text-align:left;padding:0.5rem;">Reason</th></tr>';
+
+  (levels.support || []).forEach(z => {
+    html += `<tr style="border-bottom:1px solid #2d3748;"><td style="padding:0.5rem;color:#48bb78;">Support</td><td style="text-align:right;padding:0.5rem;">${formatPrice(z.low)} – ${formatPrice(z.high)}</td><td style="text-align:center;padding:0.5rem;">${(z.confidence||'').toUpperCase()}</td><td style="padding:0.5rem;">${z.reason||''}</td></tr>`;
+  });
+  (levels.resistance || []).forEach(z => {
+    html += `<tr style="border-bottom:1px solid #2d3748;"><td style="padding:0.5rem;color:#fc8181;">Resistance</td><td style="text-align:right;padding:0.5rem;">${formatPrice(z.low)} – ${formatPrice(z.high)}</td><td style="text-align:center;padding:0.5rem;">${(z.confidence||'').toUpperCase()}</td><td style="padding:0.5rem;">${z.reason||''}</td></tr>`;
+  });
+
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+function renderPosition(pos) {
+  const el = document.getElementById('positionContent');
+  const pnlColor = pos.unrealised_pnl_percent >= 0 ? '#48bb78' : '#fc8181';
+  el.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card"><span class="stat-label">Quantity</span><span class="stat-value">${pos.quantity} shares</span></div>
+      <div class="stat-card"><span class="stat-label">Average Entry</span><span class="stat-value">${formatPrice(pos.average_entry)}</span></div>
+      <div class="stat-card"><span class="stat-label">Unrealised P&L</span><span class="stat-value" style="color:${pnlColor}">${pos.unrealised_pnl_percent >= 0 ? '+' : ''}${pos.unrealised_pnl_percent.toFixed(1)}%</span></div>
+      <div class="stat-card"><span class="stat-label">Entry Quality</span><span class="stat-value">${(pos.entry_quality||'--').toUpperCase()}</span></div>
+    </div>
+    <div class="stat-card" style="padding:1rem;margin-top:0.75rem;">
+      <p style="color:#e2e8f0;line-height:1.6;">${pos.summary || ''}</p>
+    </div>
+  `;
+}
+
+function formatPrice(val) {
+  if (val === null || val === undefined || !isFinite(val)) return '--';
+  return val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function formatStatus(status) {
+  if (!status) return '--';
+  return status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+</script>
+{% endblock %}
