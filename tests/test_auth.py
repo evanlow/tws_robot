@@ -256,6 +256,20 @@ class TestCSRFProtection:
         assert api_resp.get_json()["status"] == "halted"
 
     def test_init_auth_requires_explicit_password_outside_debug_testing(self, monkeypatch):
+        # Ensure the test is deterministic regardless of the developer's local
+        # .env / process environment. The production guard we're asserting on
+        # only triggers when none of these auth knobs are present.
+        for var in (
+            "TWS_ADMIN_PASSWORD",
+            "TWS_ADMIN_PASSWORD_HASH",
+            "ALLOW_DEFAULT_PASSWORD",
+            "TWS_ADMIN_USERNAME",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        # create_app calls load_dotenv() in non-TESTING mode which would
+        # repopulate the env vars from the local .env. Patch it to a no-op
+        # so the guard sees a clean environment.
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: False)
         monkeypatch.setattr(
             "web.services.ServiceManager._start_market_events_refresh",
             lambda self: None,
