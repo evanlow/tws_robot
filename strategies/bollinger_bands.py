@@ -370,6 +370,11 @@ class BollingerBandsStrategy(BaseStrategy):
         else:
             return "volatile"
 
+    # --- Constants for S/R zone confidence adjustment ---
+    _SR_ZONE_TOLERANCE = 0.02  # 2% proximity tolerance for zone matching
+    _SR_CONFIDENCE_BOOST = 0.15  # Confidence boost when near S/R zone
+    _MAX_SR_CONFIDENCE = 0.92  # Cap for boosted confidence
+
     def _confidence_with_sr_context(
         self, symbol: str, close: float, signal_type: SignalType
     ) -> float:
@@ -380,6 +385,10 @@ class BollingerBandsStrategy(BaseStrategy):
 
         Uses the strategy's own price history to detect S/R if enough bars
         are available (50+), otherwise falls back to base confidence.
+
+        Note: Since only close prices are available in the history buffer,
+        high/low values are approximated as close ± 0.5%.  This approximation
+        may reduce S/R detection precision compared to true OHLC data.
         """
         base_confidence = 0.75
         closes = self.price_history.get(symbol, [])
@@ -404,13 +413,13 @@ class BollingerBandsStrategy(BaseStrategy):
             if signal_type == SignalType.BUY:
                 # Check if price is near a support zone
                 for zone in result.get("support", []):
-                    if zone["low"] <= close <= zone["high"] * 1.02:
-                        return min(0.92, base_confidence + 0.15)
+                    if zone["low"] <= close <= zone["high"] * (1 + self._SR_ZONE_TOLERANCE):
+                        return min(self._MAX_SR_CONFIDENCE, base_confidence + self._SR_CONFIDENCE_BOOST)
             elif signal_type == SignalType.SELL:
                 # Check if price is near a resistance zone
                 for zone in result.get("resistance", []):
-                    if zone["low"] * 0.98 <= close <= zone["high"]:
-                        return min(0.92, base_confidence + 0.15)
+                    if zone["low"] * (1 - self._SR_ZONE_TOLERANCE) <= close <= zone["high"]:
+                        return min(self._MAX_SR_CONFIDENCE, base_confidence + self._SR_CONFIDENCE_BOOST)
         except Exception:
             pass
 
