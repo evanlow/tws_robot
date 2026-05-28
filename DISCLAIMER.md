@@ -1,7 +1,7 @@
 # DISCLAIMER — TWS Robot
 
 > This document supplements but does not replace the open-source license
-> distributed with this software (see `LICENSE`).
+> distributed with this software.
 
 ---
 

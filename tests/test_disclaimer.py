@@ -181,6 +181,22 @@ class TestDisclaimerAPI:
         assert data["disclaimer_version"] == RISK_DISCLAIMER_VERSION
         assert saved["app_version"] == "1.2.3"
 
+    def test_accept_sanitizes_and_caps_app_version(self, client, monkeypatch):
+        """POST /api/disclaimer/accept sanitizes control chars and caps to 64 chars."""
+        saved = {}
+
+        def _mock_save(app_version="unknown"):
+            saved["app_version"] = app_version
+
+        import web.routes.api_disclaimer as route_mod
+        monkeypatch.setattr(route_mod, "save_acceptance", _mock_save)
+
+        raw_version = "v1.0.0\x00\n\r" + ("A" * 80)
+        resp = client.post("/api/disclaimer/accept", json={"app_version": raw_version})
+        assert resp.status_code == 200
+        assert saved["app_version"] == ("v1.0.0" + ("A" * 80))[:64]
+        assert len(saved["app_version"]) == 64
+
     def test_accept_handles_save_error(self, client, monkeypatch):
         """POST /api/disclaimer/accept returns 500 when file cannot be written."""
         import web.routes.api_disclaimer as route_mod

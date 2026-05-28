@@ -51,3 +51,4 @@ tws_robot.db
 strategy_lifecycle.db
 htmlcov/
 EMERGENCY_STOP
+disclaimer_acceptance.json

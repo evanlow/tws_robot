@@ -285,6 +285,67 @@
     var checkbox = document.getElementById('disclaimerCheckbox');
     var agreeBtn = document.getElementById('disclaimerAgreeBtn');
     var versionEl = document.getElementById('disclaimerVersion');
+    var previouslyFocused = null;
+    var backgroundElements = [];
+
+    function setBackgroundInert(enabled) {
+      if (!overlay) return;
+
+      if (enabled) {
+        backgroundElements = [];
+        Array.prototype.forEach.call(document.body.children, function(el) {
+          if (el === overlay) return;
+          backgroundElements.push({ el: el, ariaHidden: el.getAttribute('aria-hidden') });
+          el.setAttribute('aria-hidden', 'true');
+          el.inert = true;
+        });
+        return;
+      }
+
+      backgroundElements.forEach(function(entry) {
+        if (entry.ariaHidden === null) {
+          entry.el.removeAttribute('aria-hidden');
+        } else {
+          entry.el.setAttribute('aria-hidden', entry.ariaHidden);
+        }
+        entry.el.inert = false;
+      });
+      backgroundElements = [];
+    }
+
+    function trapDisclaimerFocus(event) {
+      if (event.key !== 'Tab' || !overlay || overlay.style.display !== 'block') return;
+
+      var focusable = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!focusable.length) return;
+
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    function showDisclaimerModal() {
+      previouslyFocused = document.activeElement;
+      overlay.style.display = 'block';
+      document.body.style.overflow = 'hidden';
+      setBackgroundInert(true);
+      if (checkbox) checkbox.focus();
+    }
+
+    function hideDisclaimerModal() {
+      overlay.style.display = 'none';
+      document.body.style.overflow = '';
+      setBackgroundInert(false);
+    }
+
+    document.addEventListener('keydown', trapDisclaimerFocus);
 
     // Fetch current disclaimer status from the backend.
     fetch('/api/disclaimer/status')
@@ -292,10 +353,7 @@
       .then(function(data) {
         if (versionEl) versionEl.textContent = data.current_version || '';
         if (!data.accepted) {
-          overlay.style.display = 'block';
-          document.body.style.overflow = 'hidden';
-          // Move keyboard focus into the modal so keyboard users start inside.
-          if (checkbox) checkbox.focus();
+          showDisclaimerModal();
         }
       })
       .catch(function(err) {
@@ -322,20 +380,31 @@
       agreeBtn.addEventListener('click', function() {
         if (!checkbox || !checkbox.checked) return;
         fetch('/api/disclaimer/accept', { method: 'POST' })
-          .then(function(r) { return r.json(); })
+          .then(function(r) {
+            return r.json().catch(function() { return {}; }).then(function(data) {
+              if (!r.ok) {
+                throw new Error(data.error || 'Error saving disclaimer acceptance. Please try again.');
+              }
+              return data;
+            });
+          })
           .then(function(data) {
-            if (data.status === 'accepted') {
-              overlay.style.display = 'none';
-              document.body.style.overflow = '';
-              // Return focus to main content after the blocking modal is dismissed.
-              var main = document.querySelector('main') || document.body;
-              main.setAttribute('tabindex', '-1');
-              main.focus();
+            if (data.status !== 'accepted') {
+              throw new Error('Error saving disclaimer acceptance. Please try again.');
             }
+            hideDisclaimerModal();
+            // Return focus after the blocking modal is dismissed.
+            if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+              previouslyFocused.focus();
+              return;
+            }
+            var main = document.querySelector('main') || document.body;
+            main.setAttribute('tabindex', '-1');
+            main.focus();
           })
           .catch(function(err) {
             console.error('[TWS Robot] Could not save disclaimer acceptance:', err);
-            alert('Error saving disclaimer acceptance. Please try again.');
+            alert(err.message || 'Error saving disclaimer acceptance. Please try again.');
           });
       });
     }
