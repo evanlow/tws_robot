@@ -180,8 +180,9 @@ class BollingerBandsStrategy(BaseStrategy):
         self.price_history[symbol].append(close)
         self.volume_history[symbol].append(volume)
         
-        # Keep only required history (period + 1 for cross detection)
-        max_history = self.period + 10
+        # Keep only required history — extended to support S/R zone detection
+        # which benefits from 50+ bars for meaningful pivot clustering.
+        max_history = max(self.period + 10, 60)
         if len(self.price_history[symbol]) > max_history:
             self.price_history[symbol] = self.price_history[symbol][-max_history:]
             self.volume_history[symbol] = self.volume_history[symbol][-max_history:]
@@ -260,17 +261,33 @@ class BollingerBandsStrategy(BaseStrategy):
         prev_close = self.prev_close[symbol]
         prev_lower = self.prev_lower.get(symbol, lower)
         prev_upper = self.prev_upper.get(symbol, upper)
+
+        # --- Momentum filter ---
+        # Suppress BUY signals in strong downtrends and SELL signals in strong
+        # uptrends to avoid catching falling knives / shorting rockets.
+        momentum = self._assess_momentum(symbol)
         
         # Long signal: Price crosses below lower band (oversold)
         if prev_close >= prev_lower and close < lower and self.last_signal.get(symbol) != SignalType.BUY:
+            # Suppress BUY in strong downtrend
+            if momentum == "downtrend":
+                logger.info(
+                    f"{symbol}: LONG signal suppressed — momentum is downtrend "
+                    f"(close={close:.2f}, lower_band={lower:.2f})"
+                )
+                return
+
+            # Determine confidence based on S/R zone proximity
+            confidence = self._confidence_with_sr_context(symbol, close, SignalType.BUY)
+
             logger.info(
                 f"{symbol}: LONG signal at {close:.2f} "
-                f"(lower band: {lower:.2f})"
+                f"(lower band: {lower:.2f}, confidence: {confidence:.2f})"
             )
             signal = Signal(
                 symbol=symbol,
                 signal_type=SignalType.BUY,
-                strength=SignalStrength.STRONG,
+                strength=SignalStrength.STRONG if confidence >= 0.8 else SignalStrength.MODERATE,
                 timestamp=timestamp,
                 target_price=close,
                 stop_loss=close * (1 - self.stop_loss_pct),
@@ -280,10 +297,11 @@ class BollingerBandsStrategy(BaseStrategy):
                 indicators={
                     'lower_band': lower,
                     'middle_band': self.middle_band[symbol],
-                    'upper_band': upper
+                    'upper_band': upper,
+                    'momentum': momentum,
                 },
                 strategy_name=self.config.name,
-                confidence=0.85
+                confidence=confidence
             )
             self.generate_signal(signal)
             self.last_signal[symbol] = SignalType.BUY
@@ -291,14 +309,25 @@ class BollingerBandsStrategy(BaseStrategy):
         
         # Short signal: Price crosses above upper band (overbought)
         elif prev_close <= prev_upper and close > upper and self.last_signal.get(symbol) != SignalType.SELL:
+            # Suppress SELL in strong uptrend
+            if momentum == "uptrend":
+                logger.info(
+                    f"{symbol}: SHORT signal suppressed — momentum is uptrend "
+                    f"(close={close:.2f}, upper_band={upper:.2f})"
+                )
+                return
+
+            # Determine confidence based on S/R zone proximity
+            confidence = self._confidence_with_sr_context(symbol, close, SignalType.SELL)
+
             logger.info(
                 f"{symbol}: SHORT signal at {close:.2f} "
-                f"(upper band: {upper:.2f})"
+                f"(upper band: {upper:.2f}, confidence: {confidence:.2f})"
             )
             signal = Signal(
                 symbol=symbol,
                 signal_type=SignalType.SELL,
-                strength=SignalStrength.STRONG,
+                strength=SignalStrength.STRONG if confidence >= 0.8 else SignalStrength.MODERATE,
                 timestamp=timestamp,
                 target_price=close,
                 stop_loss=close * (1 + self.stop_loss_pct),
@@ -308,14 +337,84 @@ class BollingerBandsStrategy(BaseStrategy):
                 indicators={
                     'lower_band': lower,
                     'middle_band': self.middle_band[symbol],
-                    'upper_band': upper
+                    'upper_band': upper,
+                    'momentum': momentum,
                 },
                 strategy_name=self.config.name,
-                confidence=0.85
+                confidence=confidence
             )
             self.generate_signal(signal)
             self.last_signal[symbol] = SignalType.SELL
             self._pending_signal = signal
+    
+    def _assess_momentum(self, symbol: str) -> str:
+        """Assess momentum from price history using the same logic as technical_levels_service.
+
+        Returns one of: 'uptrend', 'downtrend', 'sideways', 'volatile', 'insufficient_data'.
+        """
+        closes = self.price_history.get(symbol, [])
+        if len(closes) < 20:
+            return "insufficient_data"
+
+        ma20 = sum(closes[-20:]) / 20
+        ma50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else ma20
+
+        current = closes[-1]
+
+        if current > ma20 > ma50:
+            return "uptrend"
+        elif current < ma20 < ma50:
+            return "downtrend"
+        elif ma20 > 0 and abs(current - ma20) / ma20 < 0.02:
+            return "sideways"
+        else:
+            return "volatile"
+
+    def _confidence_with_sr_context(
+        self, symbol: str, close: float, signal_type: SignalType
+    ) -> float:
+        """Adjust confidence based on proximity to support/resistance zones.
+
+        For BUY signals: boost confidence if price is near a support zone.
+        For SELL signals: boost confidence if price is near a resistance zone.
+
+        Uses the strategy's own price history to detect S/R if enough bars
+        are available (50+), otherwise falls back to base confidence.
+        """
+        base_confidence = 0.75
+        closes = self.price_history.get(symbol, [])
+
+        if len(closes) < 50:
+            return base_confidence
+
+        # Build lightweight bars for S/R detection (only need high/low/close)
+        # Since we only have closes, approximate high/low as close ± small buffer
+        bars = []
+        for c in closes:
+            bars.append({
+                "high": c * 1.005,
+                "low": c * 0.995,
+                "close": c,
+            })
+
+        try:
+            from web.stock_analysis_services import technical_levels_service
+            result = technical_levels_service.detect_support_resistance(bars, close)
+
+            if signal_type == SignalType.BUY:
+                # Check if price is near a support zone
+                for zone in result.get("support", []):
+                    if zone["low"] <= close <= zone["high"] * 1.02:
+                        return min(0.92, base_confidence + 0.15)
+            elif signal_type == SignalType.SELL:
+                # Check if price is near a resistance zone
+                for zone in result.get("resistance", []):
+                    if zone["low"] * 0.98 <= close <= zone["high"]:
+                        return min(0.92, base_confidence + 0.15)
+        except Exception:
+            pass
+
+        return base_confidence
     
     def get_indicator_values(self, symbol: str) -> Dict:
         """
