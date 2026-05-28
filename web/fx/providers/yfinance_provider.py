@@ -21,6 +21,7 @@ from web.fx.indicators import pct_change
 
 logger = logging.getLogger(__name__)
 
+# Minimum weekly % change (in percentage points, e.g. 0.25 = 0.25%) to trigger a bias signal
 _SIGNAL_THRESHOLD_PCT = 0.25
 
 

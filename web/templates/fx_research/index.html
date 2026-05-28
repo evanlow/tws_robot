@@ -35,7 +35,7 @@
           <th>Weekly Change %</th>
           <th>Signal Bias</th>
           <th>Notes</th>
-          {% if market_watch.get("items") and market_watch["items"][0].get("data_source") %}
+          {% if market_watch.get("items") and market_watch["items"]|length > 0 and market_watch["items"][0].get("data_source") %}
           <th>Source</th>
           <th>As Of</th>
           {% endif %}
