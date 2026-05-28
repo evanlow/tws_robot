@@ -44,7 +44,12 @@ def accept():
         { "app_version": "1.2.3" }
     """
     data = request.get_json(silent=True) or {}
-    app_version = str(data.get("app_version", "unknown"))
+    # Sanitise the user-supplied app_version: keep only safe printable ASCII
+    # characters and cap the length to prevent oversized values in the log.
+    raw_version = str(data.get("app_version", "unknown"))
+    app_version = "".join(
+        c for c in raw_version if c.isprintable() and c not in ("\n", "\r", "\x00")
+    )[:64] or "unknown"
 
     try:
         save_acceptance(app_version=app_version)
