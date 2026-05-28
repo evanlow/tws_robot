@@ -493,5 +493,96 @@ class TestBollingerBandsCalculation:
             assert width2 > width1
 
 
+class TestBollingerMomentumFilter:
+    """Tests for the momentum filter integration in BollingerBandsStrategy."""
+
+    def _make_strategy(self, period=5, min_volume=0):
+        strategy = BollingerBandsStrategy(
+            name="BB_MomTest",
+            symbols=["AAPL"],
+            period=period,
+            std_dev=2.0,
+            min_volume=min_volume,
+        )
+        strategy.start()
+        return strategy
+
+    def test_assess_momentum_insufficient_data(self):
+        """Momentum returns insufficient_data with <20 bars."""
+        strategy = self._make_strategy()
+        strategy.price_history["AAPL"] = [100.0] * 10
+        assert strategy._assess_momentum("AAPL") == "insufficient_data"
+
+    def test_assess_momentum_uptrend(self):
+        """Momentum detects uptrend when price > MA20 > MA50."""
+        strategy = self._make_strategy()
+        # Steadily rising prices
+        strategy.price_history["AAPL"] = [50 + i for i in range(60)]
+        assert strategy._assess_momentum("AAPL") == "uptrend"
+
+    def test_assess_momentum_downtrend(self):
+        """Momentum detects downtrend when price < MA20 < MA50."""
+        strategy = self._make_strategy()
+        # Steadily falling prices
+        strategy.price_history["AAPL"] = [200 - i for i in range(60)]
+        assert strategy._assess_momentum("AAPL") == "downtrend"
+
+    def test_buy_signal_suppressed_in_downtrend(self):
+        """BUY signal is suppressed when momentum is downtrend."""
+        strategy = self._make_strategy(period=5, min_volume=0)
+
+        # Feed 60 declining prices to establish downtrend
+        prices = [200 - i * 2 for i in range(60)]
+        for i, price in enumerate(prices):
+            bar = {'close': price, 'volume': 1000000, 'timestamp': datetime.now()}
+            strategy.on_bar("AAPL", bar)
+
+        # Now create a band cross scenario: price drops below lower band
+        # After 60 bars in a downtrend, force a cross below
+        # The last few bars establish the band; drive price far below
+        last_price = prices[-1]
+        extreme_low = last_price - 50  # way below lower band
+        bar = {'close': extreme_low, 'volume': 1000000, 'timestamp': datetime.now()}
+        strategy.on_bar("AAPL", bar)
+
+        # No BUY signal should have been generated due to downtrend filter
+        buy_signals = [s for s in strategy.signals_to_emit if s.signal_type == SignalType.BUY]
+        assert len(buy_signals) == 0
+
+    def test_sell_signal_suppressed_in_uptrend(self):
+        """SELL signal is suppressed when momentum is uptrend."""
+        strategy = self._make_strategy(period=5, min_volume=0)
+
+        # Feed 60 rising prices to establish uptrend
+        prices = [50 + i * 2 for i in range(60)]
+        for price in prices:
+            bar = {'close': price, 'volume': 1000000, 'timestamp': datetime.now()}
+            strategy.on_bar("AAPL", bar)
+
+        # Drive price far above upper band
+        last_price = prices[-1]
+        extreme_high = last_price + 50
+        bar = {'close': extreme_high, 'volume': 1000000, 'timestamp': datetime.now()}
+        strategy.on_bar("AAPL", bar)
+
+        # No SELL signal should have been generated due to uptrend filter
+        sell_signals = [s for s in strategy.signals_to_emit if s.signal_type == SignalType.SELL]
+        assert len(sell_signals) == 0
+
+    def test_confidence_with_sr_context_insufficient_data(self):
+        """Falls back to base confidence with <50 bars."""
+        strategy = self._make_strategy()
+        strategy.price_history["AAPL"] = [100.0] * 30
+        confidence = strategy._confidence_with_sr_context("AAPL", 100.0, SignalType.BUY)
+        assert confidence == 0.75
+
+    def test_confidence_with_sr_context_with_enough_data(self):
+        """Returns a valid confidence value with 50+ bars."""
+        strategy = self._make_strategy()
+        strategy.price_history["AAPL"] = [100.0 + (i % 5) for i in range(60)]
+        confidence = strategy._confidence_with_sr_context("AAPL", 100.0, SignalType.BUY)
+        assert 0.5 <= confidence <= 1.0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

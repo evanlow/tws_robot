@@ -85,6 +85,7 @@ def dashboard():
 def index(ticker: str):
     """Render the stock analysis drill-down page."""
     ticker = ticker.upper()
+
     context = {
         "title": f"Stock Price Context — {ticker}",
         "active_page": "stock_analysis",

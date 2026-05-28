@@ -339,6 +339,127 @@ class TestStockAnalysisAPI:
         assert data["fair_value"]["status"] == "unavailable"
         assert data["fair_value"]["unavailable_reason"] is not None
 
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_analysis_includes_bollinger_bands(self, mock_fundamentals, mock_history, client):
+        """Test that the API response includes Bollinger Bands data."""
+        mock_fundamentals.return_value = _make_fundamentals(100.0)
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert "bollinger_bands" in data
+        bb = data["bollinger_bands"]
+        assert bb["upper"] is not None
+        assert bb["middle"] is not None
+        assert bb["lower"] is not None
+        assert bb["upper"] > bb["middle"] > bb["lower"]
+        assert bb["bandwidth"] is not None
+        assert bb["percent_b"] is not None
+        assert bb["status"] in (
+            "below_lower_band", "near_lower_band",
+            "within_bands",
+            "near_upper_band", "above_upper_band",
+        )
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_analysis_includes_active_strategy_signals(self, mock_fundamentals, mock_history, client):
+        """Test that active_strategy_signals key is present (may be empty)."""
+        mock_fundamentals.return_value = _make_fundamentals(100.0)
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert "active_strategy_signals" in data
+        assert isinstance(data["active_strategy_signals"], list)
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_analysis_excludes_non_running_strategy_signals(
+        self, mock_fundamentals, mock_history, client, services
+    ):
+        """Test that only running strategies are exposed in active_strategy_signals."""
+        from datetime import datetime, timezone
+
+        from strategies.base_strategy import StrategyConfig
+        from strategies.bollinger_bands import BollingerBandsStrategy
+        from strategies.signal import Signal, SignalStrength, SignalType
+        from strategies.strategy_registry import StrategyRegistry
+
+        mock_fundamentals.return_value = _make_fundamentals(100.0)
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        registry = StrategyRegistry(event_bus=services.event_bus, account_id="")
+        registry.register_strategy_class("BollingerBands", BollingerBandsStrategy)
+        services._strategy_registry = registry
+
+        running = registry.create_strategy(
+            "BollingerBands",
+            StrategyConfig(name="BB_RUNNING", symbols=["TEST"]),
+        )
+        running.upper_band["TEST"] = 110.0
+        running.middle_band["TEST"] = 100.0
+        running.lower_band["TEST"] = 90.0
+        running.signals_to_emit.append(
+            Signal(
+                symbol="TEST",
+                signal_type=SignalType.BUY,
+                strength=SignalStrength.MODERATE,
+                timestamp=datetime.now(timezone.utc),
+                reason="Running strategy",
+                confidence=0.8,
+            )
+        )
+        registry.start_strategy("BB_RUNNING")
+
+        paused = registry.create_strategy(
+            "BollingerBands",
+            StrategyConfig(name="BB_PAUSED", symbols=["TEST"]),
+        )
+        paused.upper_band["TEST"] = 111.0
+        paused.middle_band["TEST"] = 101.0
+        paused.lower_band["TEST"] = 91.0
+        paused.signals_to_emit.append(
+            Signal(
+                symbol="TEST",
+                signal_type=SignalType.SELL,
+                strength=SignalStrength.MODERATE,
+                timestamp=datetime.now(timezone.utc),
+                reason="Paused strategy",
+                confidence=0.6,
+            )
+        )
+        registry.start_strategy("BB_PAUSED")
+        registry.pause_strategy("BB_PAUSED")
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert len(data["active_strategy_signals"]) == 1
+        assert data["active_strategy_signals"][0]["strategy_name"] == "BB_RUNNING"
+        assert data["active_strategy_signals"][0]["state"] == "RUNNING"
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_bollinger_bands_insufficient_data(self, mock_fundamentals, mock_history, client):
+        """Test Bollinger Bands returns insufficient_data with few bars."""
+        mock_fundamentals.return_value = _make_fundamentals(100.0)
+        # Only 10 bars — not enough for 20-period BB
+        mock_history.return_value = _make_bars(10, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        # May get 200 or 404 depending on price availability
+        if resp.status_code == 200:
+            data = resp.get_json()
+            bb = data["bollinger_bands"]
+            assert bb["status"] == "insufficient_data"
+
     def test_stock_analysis_page_renders(self, client):
         """Test the HTML page route renders without error."""
         resp = client.get("/stocks/AAPL/analysis")
@@ -407,6 +528,82 @@ class TestStockAnalysisDashboard:
         resp = client.get("/stocks/analysis")
         assert resp.status_code == 200
         assert b"Analysis unavailable" in resp.data
+
+
+# ==============================================================================
+# Unit Tests: Bollinger Bands Computation
+# ==============================================================================
+
+
+class TestBollingerBandsComputation:
+    """Tests for the _compute_bollinger_bands helper in the API."""
+
+    def test_compute_bollinger_bands_basic(self):
+        from web.routes.api_stock_analysis import _compute_bollinger_bands
+        bars = _make_bars(60, 100.0)
+        result = _compute_bollinger_bands(bars, 100.0)
+
+        assert result["upper"] is not None
+        assert result["middle"] is not None
+        assert result["lower"] is not None
+        assert result["upper"] > result["middle"] > result["lower"]
+        assert result["bandwidth"] > 0
+        assert result["percent_b"] is not None
+        assert result["status"] != "insufficient_data"
+
+    def test_compute_bollinger_bands_insufficient_bars(self):
+        from web.routes.api_stock_analysis import _compute_bollinger_bands
+        bars = _make_bars(5, 100.0)
+        result = _compute_bollinger_bands(bars, 100.0)
+
+        assert result["status"] == "insufficient_data"
+        assert result["upper"] is None
+
+    def test_compute_bollinger_bands_percent_b_extremes(self):
+        from web.routes.api_stock_analysis import _compute_bollinger_bands
+        # Bars with some variance so bands are non-zero width
+        bars = [
+            {"open": 100, "high": 102, "low": 98, "close": 100 + (i % 3) - 1, "volume": 1000}
+            for i in range(25)
+        ]
+        # Price far above should give %B > 1
+        result = _compute_bollinger_bands(bars, 200.0)
+        assert result["percent_b"] is not None
+        assert result["percent_b"] > 1
+        assert result["status"] == "above_upper_band"
+
+        # Price far below should give %B < 0
+        result = _compute_bollinger_bands(bars, 50.0)
+        assert result["percent_b"] is not None
+        assert result["percent_b"] < 0
+        assert result["status"] == "below_lower_band"
+
+    def test_price_context_includes_bollinger_narrative(self):
+        from web.routes.api_stock_analysis import _build_price_context
+        bb_below = {"status": "below_lower_band", "percent_b": -0.1}
+        context = _build_price_context(
+            current_price=90.0,
+            fair_value={"status": "unavailable"},
+            technical_levels={"technical_position": "", "momentum_status": ""},
+            range_52w={"position_percentile": 10},
+            bollinger_bands=bb_below,
+        )
+        assert "oversold" in context.lower()
+
+        bb_above = {"status": "above_upper_band", "percent_b": 1.1}
+        context = _build_price_context(
+            current_price=130.0,
+            fair_value={"status": "unavailable"},
+            technical_levels={"technical_position": "", "momentum_status": ""},
+            range_52w={"position_percentile": 90},
+            bollinger_bands=bb_above,
+        )
+        assert "overbought" in context.lower()
+
+
+# ==============================================================================
+# Unit Tests: parse_underlying_symbol
+# ==============================================================================
 
 
 class TestParseUnderlyingSymbol:

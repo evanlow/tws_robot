@@ -2,16 +2,18 @@
 
 GET /api/stocks/<ticker>/analysis
     Returns comprehensive stock analysis including fair value estimate,
-    support/resistance zones, and open position appraisal.
+    support/resistance zones, Bollinger Bands context, and open position appraisal.
 """
 
 import logging
 import math
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+import numpy as np
 from flask import Blueprint, jsonify
 
+from strategies.base_strategy import StrategyState
 from web.stock_analysis_services import valuation_service, technical_levels_service, position_appraisal_service
 from web.services import get_services
 
@@ -101,13 +103,20 @@ def stock_analysis(ticker: str):
             technical_levels=technical_levels,
         )
 
+        # --- Bollinger Bands ---
+        bollinger_bands = _compute_bollinger_bands(bars, current_price)
+
         # --- Price Context Narrative ---
         price_context = _build_price_context(
             current_price=current_price,
             fair_value=fair_value,
             technical_levels=technical_levels,
             range_52w=range_52w,
+            bollinger_bands=bollinger_bands,
         )
+
+        # --- Active strategy signals ---
+        active_strategy_signals = _get_active_bollinger_signals(ticker)
 
         # --- Build response ---
         response = {
@@ -120,9 +129,11 @@ def stock_analysis(ticker: str):
                 "support": technical_levels.get("support", []),
                 "resistance": technical_levels.get("resistance", []),
             },
+            "bollinger_bands": bollinger_bands,
             "momentum_status": technical_levels.get("momentum_status"),
             "technical_position": technical_levels.get("technical_position"),
             "price_context": price_context,
+            "active_strategy_signals": active_strategy_signals,
             "open_position": open_position,
             "disclaimer": (
                 "This analysis is for educational and decision-support purposes only. "
@@ -149,11 +160,137 @@ def _calc_percentile(
     return round(((price - low) / (high - low)) * 100, 1)
 
 
+def _compute_bollinger_bands(
+    bars: List[Dict[str, Any]],
+    current_price: float,
+    period: int = 20,
+    std_dev: float = 2.0,
+) -> Dict[str, Any]:
+    """Compute Bollinger Bands from OHLCV bars.
+
+    Parameters
+    ----------
+    bars : list[dict]
+        OHLCV bars sorted oldest→newest.
+    current_price : float
+        Current price for %B calculation.
+    period : int
+        Moving average period (default 20).
+    std_dev : float
+        Standard deviation multiplier (default 2.0).
+
+    Returns
+    -------
+    dict
+        Keys: upper, middle, lower, bandwidth, percent_b, status
+    """
+    if len(bars) < period:
+        return {
+            "upper": None,
+            "middle": None,
+            "lower": None,
+            "bandwidth": None,
+            "percent_b": None,
+            "status": "insufficient_data",
+        }
+
+    closes = np.array([b["close"] for b in bars[-period:]], dtype=float)
+    sma = float(np.mean(closes))
+    std = float(np.std(closes))
+
+    upper = round(sma + std_dev * std, 2)
+    lower = round(sma - std_dev * std, 2)
+    middle = round(sma, 2)
+
+    # Bandwidth: (upper - lower) / middle — measures volatility
+    bandwidth = round((upper - lower) / middle, 4) if middle > 0 else None
+
+    # %B: where price sits within the bands (0 = lower, 1 = upper)
+    band_width_abs = upper - lower
+    percent_b = (
+        round((current_price - lower) / band_width_abs, 4)
+        if band_width_abs > 0 else None
+    )
+
+    # Determine status
+    if percent_b is not None:
+        if percent_b <= 0:
+            status = "below_lower_band"
+        elif percent_b >= 1:
+            status = "above_upper_band"
+        elif percent_b <= 0.2:
+            status = "near_lower_band"
+        elif percent_b >= 0.8:
+            status = "near_upper_band"
+        else:
+            status = "within_bands"
+    else:
+        status = "insufficient_data"
+
+    return {
+        "upper": upper,
+        "middle": middle,
+        "lower": lower,
+        "bandwidth": bandwidth,
+        "percent_b": percent_b,
+        "status": status,
+    }
+
+
+def _get_active_bollinger_signals(ticker: str) -> List[Dict[str, Any]]:
+    """Retrieve active Bollinger strategy signals for a given ticker.
+
+    Queries the StrategyRegistry for any Bollinger strategies tracking the
+    ticker and returns their current indicator values and recent signals.
+    """
+    try:
+        svc = get_services()
+        registry = svc.strategy_registry
+        results = []
+
+        for strategy in registry.get_all_strategies():
+            # Check if it's a Bollinger strategy tracking this ticker
+            if (
+                hasattr(strategy, "middle_band")
+                and strategy.state == StrategyState.RUNNING
+                and ticker in strategy.config.symbols
+            ):
+                indicators = strategy.get_indicator_values(ticker)
+                if not indicators:
+                    continue
+
+                # Find most recent signal for this ticker
+                last_signal = None
+                for sig in reversed(strategy.signals_to_emit):
+                    if sig.symbol == ticker:
+                        last_signal = {
+                            "type": sig.signal_type.value,
+                            "strength": sig.strength.name,
+                            "confidence": sig.confidence,
+                            "reason": sig.reason,
+                            "timestamp": sig.timestamp.isoformat() if sig.timestamp else None,
+                        }
+                        break
+
+                results.append({
+                    "strategy_name": strategy.config.name,
+                    "state": strategy.state.value,
+                    "indicators": indicators,
+                    "last_signal": last_signal,
+                })
+
+        return results
+    except Exception as exc:
+        logger.debug("Could not fetch active strategy signals: %s", exc)
+        return []
+
+
 def _build_price_context(
     current_price: float,
     fair_value: Dict[str, Any],
     technical_levels: Dict[str, Any],
     range_52w: Dict[str, Any],
+    bollinger_bands: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build a plain-English price context narrative."""
     parts = []
@@ -193,5 +330,25 @@ def _build_price_context(
         parts.append("Technical momentum remains weak.")
     elif momentum == "uptrend":
         parts.append("Technical momentum appears positive.")
+
+    # Bollinger Bands position
+    if bollinger_bands and bollinger_bands.get("status") != "insufficient_data":
+        bb_status = bollinger_bands["status"]
+        if bb_status == "below_lower_band":
+            parts.append(
+                "Price is below the Bollinger lower band — statistically oversold."
+            )
+        elif bb_status == "near_lower_band":
+            parts.append(
+                "Price is near the Bollinger lower band — approaching oversold territory."
+            )
+        elif bb_status == "above_upper_band":
+            parts.append(
+                "Price is above the Bollinger upper band — statistically overbought."
+            )
+        elif bb_status == "near_upper_band":
+            parts.append(
+                "Price is near the Bollinger upper band — approaching overbought territory."
+            )
 
     return " ".join(parts) if parts else "Insufficient data for price context analysis."
