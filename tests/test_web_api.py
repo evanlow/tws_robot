@@ -1436,6 +1436,44 @@ class TestStrategyAPI:
         assert "insight" in data
         assert "Strategy is performing well" in data["insight"]
 
+    @patch("ai.client.get_client")
+    def test_insight_registered_includes_option_legs(self, mock_get_client, client, services):
+        """Insight prompt must include option contracts whose underlying matches
+        the strategy's symbols (e.g. the short call leg of a covered call), not
+        only positions keyed directly by the underlying ticker."""
+        import uuid
+        mock_client = mock_get_client.return_value
+        mock_client.chat.return_value = "ok"
+
+        strategy_name = f"CC_GOOG_insight_{uuid.uuid4().hex[:8]}"
+        create_resp = client.post("/api/strategies/create", json={
+            "strategy_type": "LongEquity",
+            "name": strategy_name,
+            "symbols": ["GOOG"],
+        })
+        assert create_resp.status_code == 200
+
+        services.update_position("GOOG", {
+            "quantity": 100, "entry_price": 190.0, "current_price": 385.07,
+            "side": "LONG", "sec_type": "STK", "unrealized_pnl": 19507.0,
+        })
+        option_sym = "GOOG  260515C00400000"
+        services.update_position(option_sym, {
+            "quantity": -1, "entry_price": 5.0, "current_price": 3.0,
+            "side": "SHORT", "sec_type": "OPT", "unrealized_pnl": 200.0,
+        })
+
+        resp = client.post(f"/api/strategies/{strategy_name}/insight")
+        assert resp.status_code == 200
+        mock_client.chat.assert_called_once()
+        messages = mock_client.chat.call_args[0][0]
+        system_prompt = next(m["content"] for m in messages if m["role"] == "system")
+        assert option_sym in system_prompt, (
+            "Short call leg missing from strategy insight prompt; AI cannot "
+            "reason about covered-call option positions."
+        )
+        assert "option_contract" in system_prompt
+
 
 class TestEventAPI:
     """Tests for /api/events/* endpoints."""

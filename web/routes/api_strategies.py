@@ -198,6 +198,7 @@ def strategy_insight(name: str):
     """
     from ai.client import get_client
     from ai.prompts import Prompts
+    from web.position_analyzer import _parse_option_symbol, _underlying_for
 
     client = get_client()
     if client is None:
@@ -213,18 +214,27 @@ def strategy_insight(name: str):
 
     perf = strategy.get_performance_summary()
 
-    # Enrich with live positions for this strategy's symbols
+    # Enrich with live positions for this strategy's symbols. Include both
+    # direct matches (stock tickers) and option contracts whose underlying
+    # resolves to one of the strategy's symbols, so the AI sees the full
+    # leg structure (e.g. covered-call short calls) and doesn't hallucinate
+    # missing legs.
     try:
         all_positions = svc.get_positions()
     except Exception as exc:
         logger.error("Failed to fetch positions for strategy insight: %s", exc)
         return jsonify({"error": "Failed to fetch live positions."}), 500
     symbols = strategy.config.symbols or []
-    live_positions = [
-        {"symbol": s, **all_positions[s]}
-        for s in symbols
-        if s in all_positions
-    ]
+    symbol_set = set(symbols)
+    live_positions = []
+    for sym, pos in all_positions.items():
+        underlying = _underlying_for(sym, pos)
+        if sym in symbol_set or underlying in symbol_set:
+            entry = {"symbol": sym, **pos}
+            parsed = _parse_option_symbol(sym)
+            if parsed:
+                entry["option_contract"] = parsed
+            live_positions.append(entry)
 
     strategy_data = {
         **perf,

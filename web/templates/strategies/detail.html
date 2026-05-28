@@ -58,7 +58,12 @@
     {% set side = pos.side|default('LONG') %}
     <div style="background:#1a1a2e;border:1px solid #2d2d44;border-radius:6px;padding:0.75rem;display:flex;flex-wrap:wrap;align-items:center;gap:1rem;">
       <div>
+        {% if pos.option_contract %}
+        {% set oc = pos.option_contract %}
+        <span style="font-size:0.85rem;font-weight:700;color:#e2e8f0;">{{ oc.underlying }} {{ oc.expiry }} {{ "Call" if oc.right == "C" else "Put" }} ${{ "%.2f"|format(oc.strike|float) }}</span>
+        {% else %}
         <span style="font-size:0.85rem;font-weight:700;color:#e2e8f0;">{{ sym }}</span>
+        {% endif %}
         <span style="font-size:0.75rem;color:#a0aec0;margin-left:0.4rem;">{{ side }} {{ pos.quantity|default(0)|abs }}</span>
       </div>
       {% if cur > 0 %}
