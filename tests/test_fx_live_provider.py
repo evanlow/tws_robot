@@ -336,6 +336,35 @@ class TestFetchFxMarketWatchItems:
         assert len(result["items"]) == 1
         assert result["items"][0]["pair"] == "USD/SGD"
 
+    def test_fetches_pairs_concurrently(self, monkeypatch):
+        import time
+
+        def slow_fetch_pair_data(symbol, pair, timeout):
+            time.sleep(0.2)
+            return {
+                "pair": pair,
+                "last_price": 1.0,
+                "daily_change_pct": 0.0,
+                "weekly_change_pct": 0.0,
+                "signal_bias": "Neutral",
+                "notes": "Live/delayed research data from yfinance",
+                "data_source": "yfinance",
+                "as_of": "2026-01-10T00:00:00+00:00",
+            }
+
+        monkeypatch.setattr(
+            "web.fx.providers.yfinance_provider._fetch_pair_data",
+            slow_fetch_pair_data,
+        )
+
+        start = time.perf_counter()
+        result = fetch_fx_market_watch_items(self.PAIRS)
+        elapsed = time.perf_counter() - start
+
+        assert result["available"] is True
+        assert len(result["items"]) == 2
+        assert elapsed < 0.35
+
 
 # ---------------------------------------------------------------------------
 # Service integration: FX_DATA_MODE=live_research with mocked provider

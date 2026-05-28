@@ -7,6 +7,7 @@ to any broker or order execution system.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from datetime import timezone
 
@@ -121,15 +122,25 @@ def fetch_fx_market_watch_items(pairs: list[dict], timeout: int = 10) -> dict:
             "items": [],
         }
 
-    items = []
-    for pair_info in pairs:
-        result = _fetch_pair_data(
-            symbol=pair_info["symbol"],
-            pair=pair_info["pair"],
-            timeout=timeout,
-        )
-        if result is not None:
-            items.append(result)
+    max_workers = min(len(pairs), 8) if pairs else 1
+    indexed_items: dict[int, dict] = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(
+                _fetch_pair_data,
+                symbol=pair_info["symbol"],
+                pair=pair_info["pair"],
+                timeout=timeout,
+            ): idx
+            for idx, pair_info in enumerate(pairs)
+        }
+        for future in as_completed(future_to_index):
+            result = future.result()
+            if result is not None:
+                indexed_items[future_to_index[future]] = result
+
+    items = [indexed_items[idx] for idx in sorted(indexed_items)]
 
     if not items:
         return {
