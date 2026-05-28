@@ -196,7 +196,7 @@ function renderPosition(pos) {
 }
 
 function formatPrice(val) {
-  if (val === null || val === undefined) return '--';
+  if (val === null || val === undefined || !isFinite(val)) return '--';
   return val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 

@@ -60,7 +60,8 @@ def stock_analysis(ticker: str):
         if current_price is not None and not math.isfinite(current_price):
             current_price = None
         if not current_price and bars:
-            current_price = bars[-1]["close"]
+            close = bars[-1]["close"]
+            current_price = close if isinstance(close, (int, float)) and math.isfinite(close) else None
 
         if not current_price:
             return jsonify({

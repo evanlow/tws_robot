@@ -48,10 +48,7 @@ def appraise_position(
         return {"has_position": False}
 
     # P&L calculations
-    unrealized_pnl_pct = (
-        round(((current_price - entry_price) / entry_price) * 100, 2)
-        if entry_price > 0 else 0
-    )
+    unrealized_pnl_pct = round(((current_price - entry_price) / entry_price) * 100, 2)
 
     # Entry vs fair value
     entry_vs_fair_value = _entry_vs_fair_value(entry_price, fair_value)

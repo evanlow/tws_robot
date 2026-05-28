@@ -144,7 +144,7 @@ def _cluster_pivots(
         for j in range(i + 1, len(sorted_pivots)):
             if used[j]:
                 continue
-            if abs(sorted_pivots[j] - pivot) / pivot <= _CLUSTER_TOLERANCE:
+            if pivot > 0 and abs(sorted_pivots[j] - pivot) / pivot <= _CLUSTER_TOLERANCE:
                 cluster.append(sorted_pivots[j])
                 used[j] = True
 
@@ -175,7 +175,7 @@ def _ensure_extreme_zone(
 ) -> None:
     """Ensure the 52-week extreme appears as a zone."""
     for zone in zones:
-        if abs(zone["low"] - extreme_price) / extreme_price <= _CLUSTER_TOLERANCE:
+        if extreme_price > 0 and abs(zone["low"] - extreme_price) / extreme_price <= _CLUSTER_TOLERANCE:
             zone["reason"] = f"{label} and {zone['reason']}"
             zone["touches"] = max(zone["touches"], 2)
             return
@@ -194,7 +194,7 @@ def _zone_reason(cluster: List[float], extreme: float, is_resistance: bool) -> s
     avg = sum(cluster) / len(cluster)
     touches = len(cluster)
 
-    if abs(avg - extreme) / extreme <= _CLUSTER_TOLERANCE:
+    if extreme > 0 and abs(avg - extreme) / extreme <= _CLUSTER_TOLERANCE:
         prefix = "52-week high area" if is_resistance else "52-week low area"
     else:
         prefix = "prior swing high area" if is_resistance else "prior swing low area"
@@ -231,7 +231,7 @@ def _assess_momentum(closes: List[float]) -> str:
         return "uptrend"
     elif current < ma20 < ma50:
         return "downtrend"
-    elif abs(current - ma20) / ma20 < 0.02:
+    elif ma20 > 0 and abs(current - ma20) / ma20 < 0.02:
         return "sideways"
     else:
         return "volatile"
