@@ -332,6 +332,8 @@ class TestFxResearchRouteLiveResearchMode:
     def live_research_client(self, monkeypatch):
         monkeypatch.setenv("FX_DATA_MODE", "live_research")
         monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
+        # Disable yfinance so tests remain deterministic and do not require internet
+        monkeypatch.setattr("web.fx.providers.yfinance_provider._YFINANCE_AVAILABLE", False)
         app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
         with app.test_client() as c:
             yield c
@@ -343,7 +345,7 @@ class TestFxResearchRouteLiveResearchMode:
     def test_live_research_shows_data_mode_label(self, live_research_client):
         resp = live_research_client.get("/fx/")
         html = resp.data.decode()
-        assert "Live Research (Unavailable)" in html
+        assert "Live Research" in html
 
     def test_live_research_execution_statuses_disabled(self, live_research_client):
         resp = live_research_client.get("/fx/")

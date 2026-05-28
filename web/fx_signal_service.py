@@ -7,7 +7,7 @@ live market data, or order execution unless explicitly configured.
 Data mode is controlled by the FX_DATA_MODE environment variable:
   not_configured  — safe empty-state default (default when unset)
   demo            — deterministic, realistic sample research data
-  live_research   — placeholder; fails safely (not yet implemented)
+  live_research   — connects to a configured FX provider for live/delayed data
 """
 
 from web.fx.config import RESEARCH_ONLY_STATUS, get_fx_data_mode, is_demo_mode, is_live_research_mode
@@ -38,7 +38,7 @@ def get_data_status() -> dict:
     if mode == "demo":
         data_mode_label = "Demo Research Data"
     elif mode == "live_research":
-        data_mode_label = "Live Research (Unavailable)"
+        data_mode_label = "Live Research"
     else:
         data_mode_label = "Not Configured"
     return {
