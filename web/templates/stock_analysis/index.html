@@ -140,6 +140,10 @@ function showError(msg) {
   document.getElementById('errorMessage').textContent = 'Analysis failed: ' + msg;
 }
 
+function isNil(value) {
+  return value === null || value === undefined;
+}
+
 function renderAnalysis(data) {
   document.getElementById('loadingIndicator').style.display = 'none';
   document.getElementById('analysisContent').style.display = 'block';
@@ -192,7 +196,7 @@ function renderAnalysis(data) {
 function renderRangeVisual(data) {
   const el = document.getElementById('rangeVisualContent');
   const range = data.range_52w;
-  if (!range || range.low == null || range.high == null) {
+  if (!range || isNil(range.low) || isNil(range.high)) {
     el.innerHTML = '<p style="color:#a0aec0;">52-week range data unavailable.</p>';
     return;
   }
@@ -211,7 +215,7 @@ function renderRangeVisual(data) {
   // Fair value band
   const fv = data.fair_value;
   let fvLowPct = null, fvHighPct = null;
-  if (fv && fv.status !== 'unavailable' && fv.low != null && fv.high != null) {
+  if (fv && fv.status !== 'unavailable' && !isNil(fv.low) && !isNil(fv.high)) {
     fvLowPct = Math.max(0, Math.min(100, ((fv.low - low) / span) * 100));
     fvHighPct = Math.max(0, Math.min(100, ((fv.high - low) / span) * 100));
   }
@@ -222,7 +226,7 @@ function renderRangeVisual(data) {
 
   // Entry price
   let entryPct = null;
-  if (data.open_position && data.open_position.has_position && data.open_position.average_entry != null) {
+  if (data.open_position && data.open_position.has_position && !isNil(data.open_position.average_entry)) {
     entryPct = Math.max(0, Math.min(100, ((data.open_position.average_entry - low) / span) * 100));
   }
 
@@ -290,7 +294,7 @@ function renderPriceChart(data) {
 
   // Use range_52w and current data to draw a simplified chart
   const range = data.range_52w;
-  if (!range || range.low == null || range.high == null) {
+  if (!range || isNil(range.low) || isNil(range.high)) {
     canvas.parentElement.innerHTML = '<p style="color:#a0aec0;padding:1rem;">Chart unavailable — insufficient price data.</p>';
     return;
   }
@@ -345,7 +349,7 @@ function renderPriceChart(data) {
 
   // Draw fair value band
   const fv = data.fair_value;
-  if (fv && fv.status !== 'unavailable' && fv.low != null && fv.high != null) {
+  if (fv && fv.status !== 'unavailable' && !isNil(fv.low) && !isNil(fv.high)) {
     const y1 = priceToY(fv.high);
     const y2 = priceToY(fv.low);
     ctx.fillStyle = 'rgba(99, 179, 237, 0.1)';
@@ -374,7 +378,7 @@ function renderPriceChart(data) {
   ctx.fillText('Current ' + formatPrice(current), padding.left + 4, currentY - 5);
 
   // Draw entry price line if position exists
-  if (data.open_position && data.open_position.has_position && data.open_position.average_entry != null) {
+  if (data.open_position && data.open_position.has_position && !isNil(data.open_position.average_entry)) {
     const entryY = priceToY(data.open_position.average_entry);
     ctx.setLineDash([3, 3]);
     ctx.strokeStyle = '#d69e2e';
@@ -448,7 +452,7 @@ function renderPositionVisual(data) {
 
   // Fair value
   const fv = data.fair_value;
-  if (fv && fv.status !== 'unavailable' && fv.low != null && fv.high != null) {
+  if (fv && fv.status !== 'unavailable' && !isNil(fv.low) && !isNil(fv.high)) {
     html += `<div style="text-align:center;padding:0.75rem;border-radius:6px;background:#1a202c;border:1px solid #4a5568;">
       <div style="font-size:0.8rem;color:#a0aec0;">Estimated Fair Value</div>
       <div style="font-size:1.3rem;font-weight:700;color:#e2e8f0;">${formatPrice(fv.low)} – ${formatPrice(fv.high)}</div>
