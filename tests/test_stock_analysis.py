@@ -3,13 +3,11 @@
 Covers both cases: user with open position and user without open position.
 """
 
-from datetime import datetime
 from unittest.mock import patch
 
 import pytest
 
 from web import create_app
-from web.services import ServiceManager
 from web.stock_analysis_services import (
     valuation_service,
     technical_levels_service,

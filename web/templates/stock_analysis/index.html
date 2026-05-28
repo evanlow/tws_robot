@@ -82,10 +82,15 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-  const ticker = '{{ ticker }}';
-  fetch(`/api/stocks/${ticker}/analysis`)
+  const ticker = {{ ticker | tojson }};
+  fetch(`/api/stocks/${encodeURIComponent(ticker)}/analysis`)
     .then(resp => {
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        return resp.json().catch(() => null).then(body => {
+          const msg = (body && (body.error || body.message)) || `HTTP ${resp.status}`;
+          throw new Error(msg);
+        });
+      }
       return resp.json();
     })
     .then(data => {

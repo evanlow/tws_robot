@@ -6,6 +6,8 @@ GET /api/stocks/<ticker>/analysis
 """
 
 import logging
+import math
+import re
 from typing import Any, Dict, Optional
 
 from flask import Blueprint, jsonify
@@ -17,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("api_stock_analysis", __name__, url_prefix="/api/stocks")
 
+_TICKER_RE = re.compile(r"^[A-Z0-9]{1,10}(\.[A-Z]{1,5})?$")
+
 
 @bp.route("/<ticker>/analysis", methods=["GET"])
 def stock_analysis(ticker: str):
@@ -27,6 +31,9 @@ def stock_analysis(ticker: str):
     """
     ticker = ticker.upper()
 
+    if not _TICKER_RE.match(ticker):
+        return jsonify({"error": "Invalid ticker symbol.", "ticker": ticker}), 400
+
     try:
         from data.fundamentals import fetch_fundamentals, fetch_price_history
 
@@ -36,10 +43,18 @@ def stock_analysis(ticker: str):
             logger.warning("Fundamentals fetch issue for %s: %s", ticker, fundamentals.get("error"))
 
         # Fetch 1-year OHLCV
-        bars = fetch_price_history(ticker, period="1y", interval="1d")
+        raw_bars = fetch_price_history(ticker, period="1y", interval="1d")
+
+        # Filter out bars with non-finite OHLC values
+        bars = [
+            b for b in raw_bars
+            if all(math.isfinite(b[k]) for k in ("open", "high", "low", "close") if b.get(k) is not None)
+        ]
 
         # Current price
         current_price = fundamentals.get("current_price")
+        if current_price is not None and not math.isfinite(current_price):
+            current_price = None
         if not current_price and bars:
             current_price = bars[-1]["close"]
 
