@@ -1,0 +1,31 @@
+symbol,display_symbol,security,sector,sub_industry
+D05.SI,D05,DBS Group Holdings,Financials,Banks
+O39.SI,O39,OCBC Bank,Financials,Banks
+U11.SI,U11,United Overseas Bank,Financials,Banks
+S68.SI,S68,Singapore Exchange,Financials,Financial Exchanges & Data
+Z74.SI,Z74,Singtel,Communication Services,Telecommunications
+C6L.SI,C6L,Singapore Airlines,Industrials,Airlines
+S63.SI,S63,Singapore Technologies Engineering,Industrials,Aerospace & Defense
+C52.SI,C52,ComfortDelGro,Industrials,Ground Transportation
+BS6.SI,BS6,Yangzijiang Shipbuilding,Industrials,Ship Building & Repairing
+S58.SI,S58,SATS,Industrials,Airport Services
+BN4.SI,BN4,Keppel,Industrials,Industrial Conglomerates
+J36.SI,J36,Jardine Matheson Holdings,Industrials,Industrial Conglomerates
+C07.SI,C07,Jardine Cycle & Carriage,Consumer Discretionary,Automotive Dealers
+G13.SI,G13,Genting Singapore,Consumer Discretionary,Casinos & Gaming
+F34.SI,F34,Wilmar International,Consumer Staples,Agricultural Products & Services
+Y92.SI,Y92,Thai Beverage,Consumer Staples,Beverages
+V03.SI,V03,Venture Corporation,Information Technology,Electronic Manufacturing Services
+U96.SI,U96,Sembcorp Industries,Utilities,Electric Utilities
+T39.SI,T39,Seatrium,Industrials,Ship Building & Repairing
+C31.SI,C31,CapitaLand Investment,Real Estate,Diversified Real Estate Activities
+H78.SI,H78,Hongkong Land Holdings,Real Estate,Diversified Real Estate Activities
+U14.SI,U14,UOL Group,Real Estate,Hotels & Motels
+C09.SI,C09,City Developments,Real Estate,Homebuilding
+A17U.SI,A17U,CapitaLand Ascendas REIT,Real Estate,Industrial REITs
+C38U.SI,C38U,CapitaLand Integrated Commercial Trust,Real Estate,Retail REITs
+ME8U.SI,ME8U,Mapletree Industrial Trust,Real Estate,Industrial REITs
+M44U.SI,M44U,Mapletree Logistics Trust,Real Estate,Industrial REITs
+N2IU.SI,N2IU,Mapletree Pan Asia Commercial Trust,Real Estate,Diversified REITs
+BUOU.SI,BUOU,Frasers Logistics & Commercial Trust,Real Estate,Industrial REITs
+K71U.SI,K71U,Keppel REIT,Real Estate,Office REITs
