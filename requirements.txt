@@ -42,6 +42,7 @@ openai>=1.0
 
 # Market data
 yfinance==1.2.2
+lxml>=5.0
 
 # Visualization
 matplotlib>=3.8.0  # For plotting equity curves and performance charts
