@@ -10,12 +10,12 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 from flask import Blueprint, jsonify
 
 from strategies.base_strategy import StrategyState
 from web.stock_analysis_services import valuation_service, technical_levels_service, position_appraisal_service
 from web.services import get_services
+from web.technical_analysis import compute_bollinger_bands
 
 logger = logging.getLogger(__name__)
 
@@ -166,75 +166,11 @@ def _compute_bollinger_bands(
     period: int = 20,
     std_dev: float = 2.0,
 ) -> Dict[str, Any]:
-    """Compute Bollinger Bands from OHLCV bars.
+    """Thin wrapper around the shared ``compute_bollinger_bands`` helper.
 
-    Parameters
-    ----------
-    bars : list[dict]
-        OHLCV bars sorted oldest→newest.
-    current_price : float
-        Current price for %B calculation.
-    period : int
-        Moving average period (default 20).
-    std_dev : float
-        Standard deviation multiplier (default 2.0).
-
-    Returns
-    -------
-    dict
-        Keys: upper, middle, lower, bandwidth, percent_b, status
+    Kept for backward compatibility with existing tests and internal callers.
     """
-    if len(bars) < period:
-        return {
-            "upper": None,
-            "middle": None,
-            "lower": None,
-            "bandwidth": None,
-            "percent_b": None,
-            "status": "insufficient_data",
-        }
-
-    closes = np.array([b["close"] for b in bars[-period:]], dtype=float)
-    sma = float(np.mean(closes))
-    std = float(np.std(closes))
-
-    upper = round(sma + std_dev * std, 2)
-    lower = round(sma - std_dev * std, 2)
-    middle = round(sma, 2)
-
-    # Bandwidth: (upper - lower) / middle — measures volatility
-    bandwidth = round((upper - lower) / middle, 4) if middle > 0 else None
-
-    # %B: where price sits within the bands (0 = lower, 1 = upper)
-    band_width_abs = upper - lower
-    percent_b = (
-        round((current_price - lower) / band_width_abs, 4)
-        if band_width_abs > 0 else None
-    )
-
-    # Determine status
-    if percent_b is not None:
-        if percent_b <= 0:
-            status = "below_lower_band"
-        elif percent_b >= 1:
-            status = "above_upper_band"
-        elif percent_b <= 0.2:
-            status = "near_lower_band"
-        elif percent_b >= 0.8:
-            status = "near_upper_band"
-        else:
-            status = "within_bands"
-    else:
-        status = "insufficient_data"
-
-    return {
-        "upper": upper,
-        "middle": middle,
-        "lower": lower,
-        "bandwidth": bandwidth,
-        "percent_b": percent_b,
-        "status": status,
-    }
+    return compute_bollinger_bands(bars, current_price, period=period, std_dev=std_dev)
 
 
 def _get_active_bollinger_signals(ticker: str) -> List[Dict[str, Any]]:

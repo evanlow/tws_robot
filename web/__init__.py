@@ -84,6 +84,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.account_intelligence import bp as account_intelligence_bp
     from web.routes.fx_research import bp as fx_research_bp
     from web.routes.stock_analysis import bp as stock_analysis_bp
+    from web.routes.sp500_screener import bp as sp500_screener_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(strategies_bp)
@@ -97,6 +98,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(account_intelligence_bp)
     app.register_blueprint(fx_research_bp)
     app.register_blueprint(stock_analysis_bp)
+    app.register_blueprint(sp500_screener_bp)
 
     # ---- JSON API blueprints ----
     # Session-authenticated API requests remain CSRF-protected and the web
@@ -118,13 +120,14 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_account_intelligence import bp as api_account_intelligence_bp
     from web.routes.api_market_events import bp as api_market_events_bp
     from web.routes.api_stock_analysis import bp as api_stock_analysis_bp
+    from web.routes.api_sp500_screener import bp as api_sp500_screener_bp
 
     api_blueprints = [
         api_connection_bp, api_disclaimer_bp, api_account_bp, api_emergency_bp,
         api_strategies_bp, api_orders_bp, api_events_bp,
         api_system_bp, api_backtest_bp, api_data_bp, api_market_bp,
         api_portfolio_analysis_bp, api_account_intelligence_bp,
-        api_market_events_bp, api_stock_analysis_bp,
+        api_market_events_bp, api_stock_analysis_bp, api_sp500_screener_bp,
     ]
     for api_bp in api_blueprints:
         app.register_blueprint(api_bp)
