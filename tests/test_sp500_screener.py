@@ -206,7 +206,7 @@ class TestSP500ScreenerService:
 
         bars = _make_bars(60, 150.0)
         with patch("data.fundamentals.fetch_price_history", return_value=bars):
-            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
                 row = svc._scan_ticker(constituent)
 
         required_keys = [
@@ -225,7 +225,7 @@ class TestSP500ScreenerService:
         constituent = {"symbol": "BADFETCH", "security": "Bad Co", "sector": "X", "sub_industry": ""}
 
         with patch("data.fundamentals.fetch_price_history", side_effect=RuntimeError("network error")):
-            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
                 row = svc._scan_ticker(constituent)
 
         assert row["bollinger_status"] == "insufficient_data"
@@ -237,7 +237,7 @@ class TestSP500ScreenerService:
         constituent = {"symbol": "EMPTY", "security": "Empty Co", "sector": "X", "sub_industry": ""}
 
         with patch("data.fundamentals.fetch_price_history", return_value=[]):
-            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
                 row = svc._scan_ticker(constituent)
 
         assert row["bollinger_status"] == "insufficient_data"
@@ -249,7 +249,7 @@ class TestSP500ScreenerService:
         few_bars = _make_bars(5, 100.0)
 
         with patch("data.fundamentals.fetch_price_history", return_value=few_bars):
-            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
                 row = svc._scan_ticker(constituent)
 
         assert row["bollinger_status"] == "insufficient_data"
@@ -261,7 +261,7 @@ class TestSP500ScreenerService:
         bars = _make_bars(60, 100.0, variance=0.1)
         # Price far above → overbought
         with patch("data.fundamentals.fetch_price_history", return_value=bars):
-            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
                 row = svc._scan_ticker(constituent)
                 # Override with forced overbought via patching compute_bollinger_bands
                 pass
@@ -317,7 +317,7 @@ class TestSP500ScreenerService:
 
         with patch.object(svc, "_load_constituents", return_value=constituents):
             with patch("data.fundamentals.fetch_price_history", return_value=bars):
-                with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                with patch("data.fundamentals.get_fundamentals", return_value={}):
                     result = svc._scan()
 
         assert result["count"] == 20
@@ -341,7 +341,7 @@ class TestSP500ScreenerService:
 
         with patch.object(svc, "_load_constituents", return_value=constituents):
             with patch("data.fundamentals.fetch_price_history", side_effect=side_effect):
-                with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                with patch("data.fundamentals.get_fundamentals", return_value={}):
                     result = svc._scan()
 
         assert result["count"] == 2

@@ -164,7 +164,7 @@ class SP500ScreenerService:
         insufficient, ``bollinger_status`` is set to ``"insufficient_data"``.
         Always returns a valid dict — never raises.
         """
-        from data.fundamentals import fetch_fundamentals, fetch_price_history
+        from data.fundamentals import fetch_price_history, get_fundamentals
 
         symbol = constituent["symbol"]
         base_row = _insufficient_data_row(constituent)
@@ -205,7 +205,7 @@ class SP500ScreenerService:
 
         # Fundamentals / quality score — failures are non-fatal
         try:
-            fundamentals = fetch_fundamentals(symbol)
+            fundamentals = get_fundamentals(symbol)
         except Exception as exc:
             logger.warning("Fundamentals fetch failed for %s: %s", symbol, exc)
             fundamentals = {}
@@ -354,7 +354,7 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
     Parameters
     ----------
     fundamentals:
-        Dict as returned by ``data.fundamentals.fetch_fundamentals``.
+        Dict as returned by ``data.fundamentals.get_fundamentals``.
         May be empty or contain an ``"error"`` key; both are handled
         gracefully.
 
