@@ -160,9 +160,12 @@
     sectorFilter.innerHTML = options;
   }
 
+  // Sentinel placed after all real strings so null values sort last.
+  var SORT_NULL_STRING = '\uffff';
+
   function sortValue(row, col) {
     var v = row[col];
-    if (v == null) return col === 'symbol' || col === 'company' || col === 'sector' ? '\uffff' : Infinity;
+    if (v == null) return col === 'symbol' || col === 'company' || col === 'sector' ? SORT_NULL_STRING : Infinity;
     return v;
   }
 
