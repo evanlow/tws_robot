@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>🇸🇬 Singapore STI Screener</h1>
+<p style="color:#a0aec0;margin-bottom:0.5rem;">
+  <a href="/stocks/analysis" style="color:#63b3ed;text-decoration:none;">← Back to Stock Analysis</a>
+</p>
+
+<!-- Disclaimer -->
+<div style="background:#1e2a1e;border:1px solid #48bb78;border-radius:8px;padding:0.85rem 1.1rem;margin-bottom:1.25rem;">
+  <p style="color:#9ae6b4;font-size:0.82rem;margin:0;">
+    ⚠️ <strong>Educational use only — not financial advice.</strong>
+    This screener is for educational and decision-support purposes only.  It is not financial advice and
+    does not account for your financial situation, risk tolerance, investment objective, tax position,
+    currency risk, or dividend/REIT characteristics.  Bollinger Bands signals are statistical indicators
+    based on historical price data; they do not constitute buy or sell recommendations.
+    Past technical patterns do not guarantee future results.
+    This screener does <strong>not</strong> trigger any trading orders.
+  </p>
+  <p style="color:#9ae6b4;font-size:0.82rem;margin:0.5rem 0 0;">
+    📊 <strong>Quality</strong> is a simplified fundamental screen based on
+    available financial metrics (revenue growth, margins, ROE, debt, current
+    ratio).  It is <strong>not</strong> a complete business valuation and may be
+    inaccurate when data is missing, stale, or sector-specific.  REIT-specific
+    metrics (e.g. distribution yield, NAV) are not included.
+  </p>
+</div>
+
+<!-- Controls -->
+<section style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin-bottom:1.25rem;">
+  <div>
+    <label for="statusFilter" style="color:#a0aec0;font-size:0.85rem;margin-right:0.4rem;">Status:</label>
+    <select id="statusFilter" style="background:#1a202c;color:#e2e8f0;border:1px solid #4a5568;border-radius:6px;padding:0.4rem 0.75rem;">
+      <option value="all">All</option>
+      <option value="oversold">Oversold</option>
+      <option value="near_oversold">Near Oversold</option>
+      <option value="neutral">Neutral</option>
+      <option value="near_overbought">Near Overbought</option>
+      <option value="overbought">Overbought</option>
+      <option value="insufficient_data">Insufficient Data</option>
+    </select>
+  </div>
+  <div>
+    <label for="sectorFilter" style="color:#a0aec0;font-size:0.85rem;margin-right:0.4rem;">Sector:</label>
+    <select id="sectorFilter" style="background:#1a202c;color:#e2e8f0;border:1px solid #4a5568;border-radius:6px;padding:0.4rem 0.75rem;">
+      <option value="all">All Sectors</option>
+    </select>
+  </div>
+  <button id="refreshBtn" class="btn-primary" style="padding:0.45rem 1.1rem;">↺ Refresh</button>
+  <span id="asOfLabel" style="color:#718096;font-size:0.8rem;"></span>
+</section>
+
+<!-- Summary bar -->
+<div id="summaryBar" style="display:none;gap:0.6rem;flex-wrap:wrap;margin-bottom:1.25rem;"></div>
+
+<!-- Loading / error -->
+<div id="loadingIndicator" style="text-align:center;padding:2rem;">
+  <p style="color:#63b3ed;font-size:1.1rem;">⏳ Loading STI screener data…</p>
+  <p style="color:#718096;font-size:0.85rem;margin-top:0.5rem;">
+    On first load, data is fetched for all STI constituents in parallel (typically 10–30 seconds).
+    Subsequent loads within 15 minutes use the cached result and are instant.
+  </p>
+</div>
+<div id="errorDisplay" style="display:none;padding:1.25rem;background:#2d1b1b;border:1px solid #e53e3e;border-radius:8px;margin:1rem 0;">
+  <p style="color:#fc8181;" id="errorMessage"></p>
+</div>
+
+<!-- Table -->
+<div id="tableWrapper" style="display:none;overflow-x:auto;">
+  <p id="rowCount" style="color:#718096;font-size:0.85rem;margin-bottom:0.5rem;"></p>
+  <table class="data-table" id="screenerTable">
+    <thead>
+      <tr>
+        <th data-col="display_symbol" style="cursor:pointer;user-select:none;">Symbol <span class="sort-indicator"></span></th>
+        <th data-col="company" style="cursor:pointer;user-select:none;">Company <span class="sort-indicator"></span></th>
+        <th data-col="sector" style="cursor:pointer;user-select:none;">Sector <span class="sort-indicator"></span></th>
+        <th data-col="current_price" style="cursor:pointer;user-select:none;">Price (S$) <span class="sort-indicator"></span></th>
+        <th data-col="range_52w_position_percentile" style="cursor:pointer;user-select:none;">52W Position <span class="sort-indicator"></span></th>
+        <th data-col="bollinger_percent_b" style="cursor:pointer;user-select:none;">Bollinger %B <span class="sort-indicator"></span></th>
+        <th data-col="status_rank" style="cursor:pointer;user-select:none;">Status <span class="sort-indicator"></span></th>
+        <th data-col="quality_label" style="cursor:pointer;user-select:none;">Quality <span class="sort-indicator"></span></th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody id="screenerBody">
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var allRows = [];
+  var sectors = new Set();
+  var sortCol = 'status_rank';
+  var sortAsc = true;
+
+  var statusFilter = document.getElementById('statusFilter');
+  var sectorFilter = document.getElementById('sectorFilter');
+  var refreshBtn   = document.getElementById('refreshBtn');
+  var asOfLabel    = document.getElementById('asOfLabel');
+  var summaryBar   = document.getElementById('summaryBar');
+  var loadingEl    = document.getElementById('loadingIndicator');
+  var errorEl      = document.getElementById('errorDisplay');
+  var errorMsg     = document.getElementById('errorMessage');
+  var tableWrapper = document.getElementById('tableWrapper');
+  var tbody        = document.getElementById('screenerBody');
+  var rowCount     = document.getElementById('rowCount');
+
+  var STATUS_COLORS = {
+    'Oversold':         { bg: '#1a3652', text: '#63b3ed', border: '#3182ce' },
+    'Near Oversold':    { bg: '#1a2e47', text: '#90cdf4', border: '#2b6cb0' },
+    'Neutral':          { bg: '#1a202c', text: '#a0aec0', border: '#4a5568' },
+    'Near Overbought':  { bg: '#3d1f1f', text: '#fbd38d', border: '#c05621' },
+    'Overbought':       { bg: '#2d1010', text: '#fc8181', border: '#e53e3e' },
+    'Insufficient Data':{ bg: '#1a202c', text: '#718096', border: '#4a5568' },
+  };
+
+  var QUALITY_COLORS = {
+    'Strong':            { bg: '#1a2e1a', text: '#68d391', border: '#38a169' },
+    'Moderate':          { bg: '#2d2a14', text: '#f6e05e', border: '#d69e2e' },
+    'Weak':              { bg: '#2d1b1b', text: '#fc8181', border: '#e53e3e' },
+    'Insufficient Data': { bg: '#1a202c', text: '#718096', border: '#4a5568' },
+  };
+
+  function statusBadge(label) {
+    var s = STATUS_COLORS[label] || STATUS_COLORS['Neutral'];
+    return '<span style="background:' + s.bg + ';color:' + s.text +
+           ';border:1px solid ' + s.border +
+           ';border-radius:4px;padding:0.2rem 0.5rem;font-size:0.8rem;white-space:nowrap;">' +
+           escapeHtml(label) + '</span>';
+  }
+
+  function qualityBadge(row) {
+    var label = row.quality_label || 'Insufficient Data';
+    var q = QUALITY_COLORS[label] || QUALITY_COLORS['Insufficient Data'];
+    var scoreStr = row.quality_score != null ? ' (' + row.quality_score + ')' : '';
+    var tooltip = '';
+    if (row.quality_reasons && row.quality_reasons.length) {
+      tooltip += row.quality_reasons.join(', ');
+    }
+    if (row.quality_warnings && row.quality_warnings.length) {
+      if (tooltip) tooltip += ' | ';
+      tooltip += 'Warnings: ' + row.quality_warnings.join(', ');
+    }
+    return '<span title="' + escapeHtml(tooltip) +
+           '" style="background:' + q.bg + ';color:' + q.text +
+           ';border:1px solid ' + q.border +
+           ';border-radius:4px;padding:0.2rem 0.5rem;font-size:0.8rem;white-space:nowrap;cursor:default;">' +
+           escapeHtml(label) + escapeHtml(scoreStr) + '</span>';
+  }
+
+  function escapeHtml(str) {
+    if (str == null) return '--';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fmt(val, decimals, suffix) {
+    if (val == null) return '--';
+    return Number(val).toFixed(decimals != null ? decimals : 2) + (suffix || '');
+  }
+
+  function renderSummary(summary) {
+    var items = [
+      { key: 'oversold',          label: 'Oversold',          color: '#63b3ed' },
+      { key: 'near_oversold',     label: 'Near Oversold',     color: '#90cdf4' },
+      { key: 'neutral',           label: 'Neutral',           color: '#a0aec0' },
+      { key: 'near_overbought',   label: 'Near Overbought',   color: '#fbd38d' },
+      { key: 'overbought',        label: 'Overbought',        color: '#fc8181' },
+      { key: 'insufficient_data', label: 'N/A',               color: '#718096' },
+    ];
+    var html = '';
+    items.forEach(function (item) {
+      var count = summary[item.key] || 0;
+      html += '<span style="background:#1a202c;border:1px solid #4a5568;border-radius:6px;' +
+              'padding:0.3rem 0.65rem;font-size:0.82rem;">' +
+              '<span style="color:' + item.color + ';font-weight:600;">' + count + '</span>' +
+              '<span style="color:#718096;margin-left:0.3rem;">' + item.label + '</span>' +
+              '</span>';
+    });
+    summaryBar.innerHTML = html;
+    summaryBar.style.display = 'flex';
+  }
+
+  function populateSectorFilter() {
+    var options = '<option value="all">All Sectors</option>';
+    Array.from(sectors).sort().forEach(function (sec) {
+      options += '<option value="' + escapeHtml(sec) + '">' + escapeHtml(sec) + '</option>';
+    });
+    sectorFilter.innerHTML = options;
+  }
+
+  // Sentinel placed after all real strings so null values sort last.
+  var SORT_NULL_STRING = '\uffff';
+
+  function sortValue(row, col) {
+    var v = row[col];
+    if (v == null) return col === 'display_symbol' || col === 'company' || col === 'sector' || col === 'quality_label' ? SORT_NULL_STRING : Infinity;
+    return v;
+  }
+
+  function sortRows(rows) {
+    var col = sortCol;
+    var asc = sortAsc;
+    return rows.slice().sort(function (a, b) {
+      var va = sortValue(a, col);
+      var vb = sortValue(b, col);
+      if (typeof va === 'string' && typeof vb === 'string') {
+        va = va.toLowerCase(); vb = vb.toLowerCase();
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      return 0;
+    });
+  }
+
+  function updateSortIndicators() {
+    var ths = document.querySelectorAll('#screenerTable thead th[data-col]');
+    ths.forEach(function (th) {
+      var ind = th.querySelector('.sort-indicator');
+      if (!ind) return;
+      if (th.dataset.col === sortCol) {
+        ind.textContent = sortAsc ? ' ▲' : ' ▼';
+        th.style.color = '#63b3ed';
+      } else {
+        ind.textContent = ' ⇅';
+        th.style.color = '';
+      }
+    });
+  }
+
+  function applyFilters() {
+    var sv = statusFilter.value;
+    var sec = sectorFilter.value.toLowerCase();
+
+    var STATUS_TO_BOLLINGER = {
+      'oversold':          'below_lower_band',
+      'near_oversold':     'near_lower_band',
+      'neutral':           'within_bands',
+      'near_overbought':   'near_upper_band',
+      'overbought':        'above_upper_band',
+      'insufficient_data': 'insufficient_data',
+    };
+
+    var filtered = allRows.filter(function (r) {
+      var statusOk = sv === 'all' || r.bollinger_status === STATUS_TO_BOLLINGER[sv];
+      var sectorOk = sec === 'all' || (r.sector || '').toLowerCase().indexOf(sec) !== -1;
+      return statusOk && sectorOk;
+    });
+
+    renderRows(sortRows(filtered));
+  }
+
+  function renderRows(rows) {
+    var html = '';
+    rows.forEach(function (r) {
+      var updatedStr = '--';
+      if (r.last_updated) {
+        try { updatedStr = new Date(r.last_updated).toLocaleTimeString(); } catch (e) {}
+      }
+      // Use display_symbol for the link text; use symbol (e.g. D05.SI) for the href
+      var displaySym = r.display_symbol || r.symbol;
+      html += '<tr>' +
+        '<td><a href="/stocks/' + encodeURIComponent(r.symbol) + '/analysis" ' +
+             'style="color:#63b3ed;text-decoration:none;font-weight:600;" ' +
+             'title="' + escapeHtml(r.symbol) + '">' + escapeHtml(displaySym) + '</a></td>' +
+        '<td style="color:#e2e8f0;">' + escapeHtml(r.company) + '</td>' +
+        '<td style="color:#a0aec0;font-size:0.85rem;">' + escapeHtml(r.sector) + '</td>' +
+        '<td>' + (r.current_price != null ? fmt(r.current_price, 3) : '--') + '</td>' +
+        '<td>' + (r.range_52w_position_percentile != null ? fmt(r.range_52w_position_percentile, 1) + '%' : '--') + '</td>' +
+        '<td>' + (r.bollinger_percent_b != null ? fmt(r.bollinger_percent_b, 3) : '--') + '</td>' +
+        '<td>' + statusBadge(r.status_label || 'Insufficient Data') + '</td>' +
+        '<td>' + qualityBadge(r) + '</td>' +
+        '<td style="color:#718096;font-size:0.8rem;">' + updatedStr + '</td>' +
+        '</tr>';
+    });
+    tbody.innerHTML = html;
+    rowCount.textContent = 'Showing ' + rows.length + ' of ' + allRows.length + ' stocks';
+    tableWrapper.style.display = 'block';
+  }
+
+  function fetchData(forceRefresh) {
+    loadingEl.style.display = 'block';
+    errorEl.style.display = 'none';
+    tableWrapper.style.display = 'none';
+    summaryBar.style.display = 'none';
+    refreshBtn.disabled = true;
+
+    var url = '/api/stocks/sti/screener' + (forceRefresh ? '?refresh=true' : '');
+    fetch(url)
+      .then(function (resp) {
+        if (!resp.ok) {
+          return resp.json().then(function (e) { throw new Error(e.error || 'HTTP ' + resp.status); });
+        }
+        return resp.json();
+      })
+      .then(function (data) {
+        loadingEl.style.display = 'none';
+        refreshBtn.disabled = false;
+
+        if (data.error && (!data.rows || data.rows.length === 0)) {
+          errorMsg.textContent = data.error;
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (data.as_of) {
+          try {
+            var durationStr = data.scan_duration_seconds != null
+              ? ' (scan: ' + data.scan_duration_seconds + 's)' : '';
+            asOfLabel.textContent = 'Data as of: ' + new Date(data.as_of).toLocaleString() + durationStr;
+          } catch (e) {
+            console.error('Failed to parse as_of timestamp:', e);
+            asOfLabel.textContent = 'Data as of: ' + data.as_of;
+          }
+        }
+
+        allRows = data.rows || [];
+        sectors = new Set(allRows.map(function (r) { return r.sector; }).filter(Boolean));
+        populateSectorFilter();
+        renderSummary(data.summary || {});
+        updateSortIndicators();
+        applyFilters();
+      })
+      .catch(function (err) {
+        loadingEl.style.display = 'none';
+        refreshBtn.disabled = false;
+        errorMsg.textContent = 'Failed to load screener data: ' + err.message;
+        errorEl.style.display = 'block';
+      });
+  }
+
+  statusFilter.addEventListener('change', applyFilters);
+  sectorFilter.addEventListener('change', applyFilters);
+  refreshBtn.addEventListener('click', function () { fetchData(true); });
+
+  // Column sort click handlers
+  document.querySelectorAll('#screenerTable thead th[data-col]').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var col = th.dataset.col;
+      if (sortCol === col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col;
+        sortAsc = true;
+      }
+      updateSortIndicators();
+      applyFilters();
+    });
+  });
+
+  // Initial load
+  fetchData(false);
+})();
+</script>
+{% endblock %}
