@@ -60,6 +60,18 @@ _MAX_SCAN_WORKERS = 10
 # Brief sleep between batches (seconds) to reduce pressure on yfinance.
 _BATCH_SLEEP_SECONDS = 0.05
 
+# Quality score thresholds and limits.
+# Debt-to-equity above this level is considered a quality fail.
+_MAX_DEBT_TO_EQUITY = 150
+# Current ratio below this level is considered a quality fail.
+_MIN_CURRENT_RATIO = 1.0
+# Minimum number of available checks required before assigning a quality label.
+# Fewer available checks produce "Insufficient Data".
+_MIN_QUALITY_CHECKS = 3
+# Quality score (0-100) boundaries for label assignment.
+_STRONG_QUALITY_THRESHOLD = 75
+_MODERATE_QUALITY_THRESHOLD = 50
+
 
 class SP500ScreenerService:
     """Thread-safe S&P 500 Bollinger Bands screener with in-memory cache."""
@@ -376,41 +388,25 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
             if condition:
                 reasons.append(pass_reason)
 
-    _check(
-        fundamentals.get("revenue_growth"),
-        (fundamentals.get("revenue_growth") or 0) > 0,
-        "Positive revenue growth",
-        "Revenue growth",
-    )
-    _check(
-        fundamentals.get("earnings_growth"),
-        (fundamentals.get("earnings_growth") or 0) > 0,
-        "Positive earnings growth",
-        "Earnings growth",
-    )
-    _check(
-        fundamentals.get("profit_margin"),
-        (fundamentals.get("profit_margin") or 0) > 0,
-        "Positive profit margin",
-        "Profit margin",
-    )
-    _check(
-        fundamentals.get("operating_margin"),
-        (fundamentals.get("operating_margin") or 0) > 0,
-        "Positive operating margin",
-        "Operating margin",
-    )
-    _check(
-        fundamentals.get("roe"),
-        (fundamentals.get("roe") or 0) > 0,
-        "Positive return on equity",
-        "Return on equity",
-    )
+    revenue_growth = fundamentals.get("revenue_growth")
+    _check(revenue_growth, (revenue_growth or 0) > 0, "Positive revenue growth", "Revenue growth")
+
+    earnings_growth = fundamentals.get("earnings_growth")
+    _check(earnings_growth, (earnings_growth or 0) > 0, "Positive earnings growth", "Earnings growth")
+
+    profit_margin = fundamentals.get("profit_margin")
+    _check(profit_margin, (profit_margin or 0) > 0, "Positive profit margin", "Profit margin")
+
+    operating_margin = fundamentals.get("operating_margin")
+    _check(operating_margin, (operating_margin or 0) > 0, "Positive operating margin", "Operating margin")
+
+    roe = fundamentals.get("roe")
+    _check(roe, (roe or 0) > 0, "Positive return on equity", "Return on equity")
 
     debt_to_equity = fundamentals.get("debt_to_equity")
     _check(
         debt_to_equity,
-        (debt_to_equity or 0) < 150,
+        (debt_to_equity or 0) < _MAX_DEBT_TO_EQUITY,
         "Debt-to-equity within threshold",
         "Debt-to-equity",
     )
@@ -418,13 +414,13 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
     current_ratio = fundamentals.get("current_ratio")
     _check(
         current_ratio,
-        (current_ratio or 0) >= 1,
+        (current_ratio or 0) >= _MIN_CURRENT_RATIO,
         "Current ratio above 1",
         "Current ratio",
     )
 
     available = len(checks)
-    if available < 3:
+    if available < _MIN_QUALITY_CHECKS:
         result = dict(_insufficient)
         result["quality_reasons"] = reasons
         result["quality_warnings"] = warnings
@@ -433,9 +429,9 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
     passed = sum(checks)
     quality_score = round(passed / available * 100)
 
-    if quality_score >= 75:
+    if quality_score >= _STRONG_QUALITY_THRESHOLD:
         quality_label = "Strong"
-    elif quality_score >= 50:
+    elif quality_score >= _MODERATE_QUALITY_THRESHOLD:
         quality_label = "Moderate"
     else:
         quality_label = "Weak"
