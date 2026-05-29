@@ -348,13 +348,14 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
 
     Uses a points-based model that tolerates missing data.  Each available
     metric contributes one pass/fail vote; the score is the percentage of
-    votes that passed.  If fewer than 3 data points are available the label
-    is ``"Insufficient Data"`` regardless of the score.
+    votes that passed.  If fewer than 3 checks have available (non-``None``)
+    fundamentals, the label is ``"Insufficient Data"`` regardless of the
+    score.
 
     Parameters
     ----------
     fundamentals:
-        Dict as returned by ``data.fundamentals.get_fundamentals``.
+        Dict as returned by ``get_fundamentals(...)`` in ``data.fundamentals``.
         May be empty or contain an ``"error"`` key; both are handled
         gracefully.
 
