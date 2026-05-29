@@ -213,7 +213,23 @@ class TestClassifyBias:
 class TestDataSourcePlaceholders:
     """Tests for placeholder live data sources."""
 
-    def test_live_fx_market_data_unavailable(self):
+    def test_live_fx_market_data_unavailable_on_unsupported_provider(self, monkeypatch):
+        """When the configured provider is unsupported, returns available=False."""
+        from web.fx import data_sources
+        monkeypatch.setattr(data_sources, "get_fx_provider", lambda: "unsupported_provider")
+        result = get_live_fx_market_data()
+        assert result["available"] is False
+        assert "items" in result
+        assert isinstance(result["items"], list)
+
+    def test_live_fx_market_data_unavailable_on_provider_exception(self, monkeypatch):
+        """When the provider raises, the exception is caught and available=False."""
+        from web.fx import data_sources
+
+        def _explode(*args, **kwargs):
+            raise RuntimeError("network unavailable")
+
+        monkeypatch.setattr(data_sources, "fetch_fx_market_watch_items", _explode)
         result = get_live_fx_market_data()
         assert result["available"] is False
         assert "items" in result
