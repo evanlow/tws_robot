@@ -28,6 +28,7 @@
 11. [System API](#system-api)
 12. [Account Intelligence API](#account-intelligence-api)
 13. [AI Assistant APIs](#ai-assistant-apis)
+14. [S&P 500 Screener API](#sp500-screener-api)
 
 ---
 
@@ -2802,6 +2803,144 @@ Get AI explanation of a trading signal.
   ]
 }
 ```
+
+---
+
+## S&P 500 Screener API
+
+**NEW in PR #99** — Server-side Bollinger Bands screener for all S&P 500 constituents.
+
+Scans all ~501 S&P 500 tickers concurrently (10 worker threads), computes Bollinger
+Bands and 52-week range data, and returns a ranked screener payload.  Results are
+cached in-memory for 15 minutes so repeated page loads cost no network I/O.
+
+### `GET /api/stocks/sp500/screener`
+
+Return the S&P 500 Bollinger Bands screener payload.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `status` | string | `all` | Filter by Bollinger status.  One of: `all`, `overbought`, `near_overbought`, `neutral`, `near_oversold`, `oversold`, `insufficient_data`. |
+| `sector` | string | `all` | Filter by sector (case-insensitive, partial match).  E.g. `energy`, `technology`. |
+| `refresh` | string | `false` | Pass `true` to bypass the cache and force a fresh scan (takes ~30–60 s). |
+
+**Response:**
+```json
+{
+  "as_of": "2026-01-15T14:30:00+00:00",
+  "source": "sp500_constituents.csv",
+  "count": 501,
+  "summary": {
+    "overbought": 42,
+    "near_overbought": 78,
+    "neutral": 215,
+    "near_oversold": 91,
+    "oversold": 38,
+    "insufficient_data": 37
+  },
+  "rows": [
+    {
+      "symbol": "XOM",
+      "company": "Exxon Mobil Corporation",
+      "sector": "Energy",
+      "sub_industry": "Integrated Oil & Gas",
+      "current_price": 112.34,
+      "range_52w_position_percentile": 18.5,
+      "bollinger_percent_b": -0.08,
+      "bollinger_status": "below_lower_band",
+      "status_label": "Oversold",
+      "status_rank": 0,
+      "last_updated": "2026-01-15T14:30:00+00:00"
+    }
+  ],
+  "scan_duration_seconds": 28.4,
+  "error": null
+}
+```
+
+**Response Fields:**
+
+- `as_of` — ISO timestamp of when the scan completed (or cache was last populated).
+- `source` — Name of the S&P 500 constituents CSV file used.
+- `count` — Number of rows returned (after filtering).
+- `summary` — Count of tickers in each Bollinger status bucket for the **entire** unfiltered scan.  Not affected by `status`/`sector` filters.
+- `rows` — Array of ticker rows (see below), sorted by `status_rank` ascending (oversold first), then by sector, then by symbol.
+- `scan_duration_seconds` — Wall-clock time of the last fresh scan, `null` when served from cache.
+- `error` — Non-null string when the constituent list could not be loaded; all other fields will still be present.
+
+**Row Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | string | Ticker symbol (hyphens used for BRK-B, BF-B, etc.) |
+| `company` | string | Full company name |
+| `sector` | string | GICS sector |
+| `sub_industry` | string | GICS sub-industry |
+| `current_price` | float\|null | Latest closing price (`null` = data unavailable) |
+| `range_52w_position_percentile` | float\|null | Where price sits in the 52-week range (0–100%) |
+| `bollinger_percent_b` | float\|null | %B: 0 = lower band, 1 = upper band |
+| `bollinger_status` | string | Status code (see below) |
+| `status_label` | string | Human-readable label |
+| `status_rank` | int | Sort key: 0 (oversold) → 5 (insufficient data) |
+| `last_updated` | string\|null | ISO timestamp of this row's data |
+
+**Bollinger Status Values:**
+
+| `bollinger_status` | `status_label` | `status_rank` | Condition |
+|--------------------|---------------|---------------|----------|
+| `below_lower_band` | Oversold | 0 | %B ≤ 0 |
+| `near_lower_band` | Near Oversold | 1 | 0 < %B ≤ 0.2 |
+| `within_bands` | Neutral | 2 | 0.2 < %B < 0.8 |
+| `near_upper_band` | Near Overbought | 3 | 0.8 ≤ %B < 1 |
+| `above_upper_band` | Overbought | 4 | %B ≥ 1 |
+| `insufficient_data` | Insufficient Data | 5 | < 20 bars or zero bandwidth |
+
+**Error Responses:**
+
+- `500 Internal Server Error` — Unexpected scan failure:
+  ```json
+  {"error": "Screener scan could not be completed."}
+  ```
+
+**Caching Behaviour:**
+- Default TTL: 15 minutes (`_CACHE_TTL_SECONDS = 900`).
+- Concurrent requests during a running scan wait for the first scan to finish, then all receive the same result — only one scan runs at a time.
+- `scan_duration_seconds` is `null` when the response comes from cache.
+
+**Page Route:**
+`GET /stocks/sp500` — Renders the S&P 500 Screener HTML page which loads data from this API.
+
+**Example Usage:**
+```javascript
+// Get full screener (cached)
+fetch('/api/stocks/sp500/screener')
+  .then(r => r.json())
+  .then(data => {
+    console.log(`${data.count} tickers, as of ${data.as_of}`);
+    data.rows.forEach(row => {
+      if (row.bollinger_status === 'below_lower_band') {
+        console.log(`Oversold: ${row.symbol} @ $${row.current_price}`);
+      }
+    });
+  });
+
+// Filter to oversold Energy stocks
+fetch('/api/stocks/sp500/screener?status=oversold&sector=energy')
+  .then(r => r.json())
+  .then(data => console.log(data.rows));
+
+// Force a fresh scan
+fetch('/api/stocks/sp500/screener?refresh=true')
+  .then(r => r.json())
+  .then(data => console.log(`Scan took ${data.scan_duration_seconds}s`));
+```
+
+**Data Source:**
+- Constituent list: `data/sp500_constituents.csv` (~501 tickers, header: `symbol,security,sector,sub_industry`).
+- Price data: fetched from Yahoo Finance via `data.fundamentals.fetch_price_history` (1-year daily bars).
+- To refresh the constituent list: `python scripts/refresh_sp500_constituents.py`.
 
 ---
 

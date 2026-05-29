@@ -786,3 +786,159 @@ class TestTickerNormalisation:
         assert len(rows) > 0
         for row in rows:
             assert row["symbol"].strip(), f"Empty symbol in row: {row}"
+
+
+# ==============================================================================
+# Additional coverage tests
+# ==============================================================================
+
+
+class TestComputeBollingerBandsBranchCoverage:
+    """Cover branches in technical_analysis.compute_bollinger_bands not hit elsewhere."""
+
+    def _make_bars(self, count, price):
+        return [{"close": price, "open": price, "high": price + 1, "low": price - 1} for _ in range(count)]
+
+    def test_near_upper_band_status(self):
+        """Price at 85% of the band → near_upper_band."""
+        # 20 bars cycling through 5 values → sma≈101, std≈0.707, upper≈102.41, lower≈99.59
+        # price ≈ 101.99 gives percent_b ≈ 0.851 → near_upper_band
+        bars = [{"close": 100.0 + (i % 5) * 0.5, "open": 100.0, "high": 101.0, "low": 99.0}
+                for i in range(20)]
+        result = compute_bollinger_bands(bars, current_price=101.99)
+        assert result["status"] == "near_upper_band"
+
+    def test_zero_bandwidth_gives_insufficient_data(self):
+        """All bars at same price → std=0 → band_width=0 → percent_b=None → insufficient_data."""
+        bars = self._make_bars(20, 100.0)
+        # Override all closes to the same value to force std=0
+        for b in bars:
+            b["close"] = 100.0
+        result = compute_bollinger_bands(bars, current_price=100.0)
+        assert result["status"] == "insufficient_data"
+        assert result["percent_b"] is None
+
+
+class TestSP500ScreenerServiceAdditional:
+    """Cover remaining branches in SP500ScreenerService."""
+
+    def _make_service(self):
+        from web.sp500_screener_service import SP500ScreenerService
+        return SP500ScreenerService()
+
+    def test_scan_ticker_none_close_returns_insufficient(self):
+        """Last bar with close=None → current_price_raw is None → return base_row (line 178).
+
+        The OHLC filter skips None values, so a bar with close=None passes
+        the filter.  The subsequent None-check (line 178) then triggers the
+        early return.
+        """
+        svc = self._make_service()
+        constituent = {"symbol": "NONECL", "security": "None Close Corp", "sector": "X", "sub_industry": ""}
+        bars = [{"close": 100.0 + i, "open": 100.0, "high": 101.0, "low": 99.0} for i in range(30)]
+        bars[-1]["close"] = None  # last bar close is None — passes OHLC filter
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            row = svc._scan_ticker(constituent)
+
+        assert row["bollinger_status"] == "insufficient_data"
+        assert row["current_price"] is None
+
+    def test_scan_with_empty_constituents_returns_error_payload(self, tmp_path, monkeypatch):
+        """_scan() when _load_constituents returns [] → error key in result (line 210)."""
+        import web.sp500_screener_service as mod
+        monkeypatch.setattr(mod, "_CONSTITUENTS_PATH", tmp_path / "nonexistent.csv")
+        svc = self._make_service()
+        result = svc._scan()
+        assert result["count"] == 0
+        assert "error" in result
+
+    def test_future_unexpected_exception_is_handled(self):
+        """future.result() raising in as_completed loop → insufficient_data row (lines 241-245)."""
+        svc = self._make_service()
+        constituents = [
+            {"symbol": "BOOM", "security": "Boom Corp", "sector": "X", "sub_industry": ""},
+        ]
+
+        original_scan_ticker = svc._scan_ticker
+
+        def patched_scan_ticker(c):
+            # Return normally from scan_ticker — we'll raise in future.result() instead
+            return original_scan_ticker(c)
+
+        # Patch the executor to make future.result() raise
+        from concurrent.futures import Future
+        boom_future = Future()
+        boom_future.set_exception(RuntimeError("unexpected executor failure"))
+
+        with patch.object(svc, "_load_constituents", return_value=constituents):
+            with patch("web.sp500_screener_service.ThreadPoolExecutor") as mock_executor_cls:
+                mock_executor = MagicMock()
+                mock_executor_cls.return_value.__enter__ = lambda s: mock_executor
+                mock_executor_cls.return_value.__exit__ = MagicMock(return_value=False)
+                mock_executor.submit.return_value = boom_future
+
+                with patch("web.sp500_screener_service.as_completed", return_value=[boom_future]):
+                    result = svc._scan()
+
+        assert result["count"] == 1
+        assert result["rows"][0]["bollinger_status"] == "insufficient_data"
+
+    def test_concurrent_wait_while_scanning(self):
+        """Second call during a running scan waits and then uses the cache result (line 93)."""
+        import time
+        svc = self._make_service()
+        scan_calls = [0]
+        barrier = threading.Event()
+        scan_started = threading.Event()
+
+        def slow_scan():
+            scan_calls[0] += 1
+            scan_started.set()
+            barrier.wait(timeout=5)
+            return {"as_of": "x", "source": "x", "count": 1, "summary": {}, "rows": [{"status_rank": 0}]}
+
+        svc._scan = slow_scan
+
+        results = {}
+
+        def call_screener(key):
+            results[key] = svc.get_screener_data(refresh=False)
+
+        t1 = threading.Thread(target=call_screener, args=("first",))
+        t2 = threading.Thread(target=call_screener, args=("second",))
+        t1.start()
+        scan_started.wait(timeout=5)  # ensure first scan is in progress
+        t2.start()
+        barrier.set()  # release the slow scan
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        # Only one scan should have run; both calls should have a result
+        assert scan_calls[0] == 1
+        assert "first" in results and "second" in results
+
+
+class TestSP500ScreenerAPIErrorKey:
+    """Cover the error-key propagation path (line 83 of api_sp500_screener.py)."""
+
+    def test_error_key_passed_through_in_response(self, client):
+        """When screener data contains an 'error' key it is forwarded to the response."""
+        data_with_error = {
+            "as_of": "2026-01-01T00:00:00+00:00",
+            "source": "sp500_constituents.csv",
+            "count": 0,
+            "summary": {},
+            "rows": [],
+            "error": "Constituent list could not be loaded.",
+        }
+        with patch(
+            "web.routes.api_sp500_screener.sp500_screener_service.get_screener_data",
+            return_value=data_with_error,
+        ):
+            resp = client.get("/api/stocks/sp500/screener")
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert "error" in body
+        assert body["error"] == "Constituent list could not be loaded."
