@@ -92,7 +92,7 @@ class TestBollingerBandsStrategy:
         strategy.stop()
         assert strategy.state == StrategyState.STOPPED
         assert strategy.stop_time is not None
-    
+
     def test_strategy_lifecycle_pause_resume(self):
         """Test pausing and resuming the strategy"""
         strategy = BollingerBandsStrategy(
@@ -582,6 +582,220 @@ class TestBollingerMomentumFilter:
         strategy.price_history["AAPL"] = [100.0 + (i % 5) for i in range(60)]
         confidence = strategy._confidence_with_sr_context("AAPL", 100.0, SignalType.BUY)
         assert 0.5 <= confidence <= 1.0
+
+
+class TestBollingerBandsSignalPaths:
+    """Coverage for signal generation, suppression, cooldown, and validation."""
+
+    def _make_strategy(self, period=20, min_volume=0):
+        s = BollingerBandsStrategy(
+            name="BB_SigTest",
+            symbols=["TEST"],
+            period=period,
+            std_dev=2.0,
+            min_volume=min_volume,
+        )
+        s.start()
+        return s
+
+    def _feed_bar(self, strategy, close, volume=1_000_000, symbol="TEST"):
+        strategy.on_bar(
+            symbol,
+            {"close": close, "volume": volume, "timestamp": datetime(2024, 1, 1)},
+        )
+
+    def _establish_history(self, strategy, count=20, price=100.0, symbol="TEST"):
+        """Feed `count` bars at `price` to build up price history and prev_close."""
+        for _ in range(count):
+            self._feed_bar(strategy, price, symbol=symbol)
+
+    # --- Not RUNNING guard (line 167) ---
+    def test_on_bar_skipped_when_not_running(self):
+        """Strategy in READY state ignores bars entirely."""
+        s = BollingerBandsStrategy(name="BB_T", symbols=["TEST"])
+        # state is READY, not started
+        s.on_bar("TEST", {"close": 100.0, "volume": 1_000_000, "timestamp": datetime(2024, 1, 1)})
+        assert "TEST" not in s.price_history
+
+    # --- Volume threshold (lines 212-213) ---
+    def test_volume_below_threshold_prevents_signal(self):
+        """Bars whose volume falls below min_volume are rejected after band calc."""
+        s = self._make_strategy(period=20, min_volume=1_000_000)
+        self._establish_history(s, 20, 100.0)  # build prev_close=100
+        # Feed below-threshold volume; crossing conditions would otherwise fire
+        s.on_bar("TEST", {"close": 99.0, "volume": 100_000, "timestamp": datetime(2024, 1, 1)})
+        assert len(s.signals_to_emit) == 0
+
+    # --- BUY cooldown reset (lines 222-223) ---
+    def test_buy_cooldown_resets_when_price_at_or_above_sma(self):
+        """last_signal BUY is cleared once close >= sma (mean-reversion complete)."""
+        s = self._make_strategy(period=20)
+        s.price_history["TEST"] = [100.0] * 20
+        s.volume_history["TEST"] = [1_000_000] * 20
+        s.last_signal["TEST"] = SignalType.BUY
+        # close=101 >= sma≈100.05 → reset
+        self._feed_bar(s, 101.0)
+        assert s.last_signal.get("TEST") is None
+
+    # --- SELL cooldown reset (lines 225-226) ---
+    def test_sell_cooldown_resets_when_price_at_or_below_sma(self):
+        """last_signal SELL is cleared once close <= sma."""
+        s = self._make_strategy(period=20)
+        s.price_history["TEST"] = [100.0] * 20
+        s.volume_history["TEST"] = [1_000_000] * 20
+        s.last_signal["TEST"] = SignalType.SELL
+        # close=99 <= sma≈99.95 → reset
+        self._feed_bar(s, 99.0)
+        assert s.last_signal.get("TEST") is None
+
+    # --- BUY signal generated (lines 279-308) ---
+    def test_buy_signal_generated_on_lower_band_cross(self):
+        """BUY signal is emitted when price drops below lower Bollinger band."""
+        s = self._make_strategy(period=20)
+        self._establish_history(s, 20, 100.0)  # prev_close=100, prev_lower=100
+        # 99 < new_lower≈99.51 with 20 bars → BUY crossing
+        self._feed_bar(s, 99.0)
+        buy_signals = [sig for sig in s.signals_to_emit if sig.signal_type == SignalType.BUY]
+        assert len(buy_signals) == 1
+        assert buy_signals[0].confidence >= 0.75
+
+    # --- SELL signal generated (lines 313-348) ---
+    def test_sell_signal_generated_on_upper_band_cross(self):
+        """SELL signal is emitted when price rises above upper Bollinger band."""
+        s = self._make_strategy(period=20)
+        self._establish_history(s, 20, 100.0)  # prev_close=100, prev_upper=100
+        # 101 > new_upper≈100.49 → SELL crossing
+        self._feed_bar(s, 101.0)
+        sell_signals = [sig for sig in s.signals_to_emit if sig.signal_type == SignalType.SELL]
+        assert len(sell_signals) == 1
+        assert sell_signals[0].confidence >= 0.75
+
+    # --- BUY suppression when downtrend (lines 273-278) ---
+    def test_buy_signal_suppressed_when_momentum_is_downtrend(self, monkeypatch):
+        """BUY crossing is suppressed by the downtrend momentum filter."""
+        s = self._make_strategy(period=20)
+        self._establish_history(s, 20, 100.0)
+        monkeypatch.setattr(s, "_assess_momentum", lambda sym: "downtrend")
+        self._feed_bar(s, 99.0)  # triggers crossing but momentum blocks it
+        buy_signals = [sig for sig in s.signals_to_emit if sig.signal_type == SignalType.BUY]
+        assert len(buy_signals) == 0
+
+    # --- SELL suppression when uptrend (lines 313-318) ---
+    def test_sell_signal_suppressed_when_momentum_is_uptrend(self, monkeypatch):
+        """SELL crossing is suppressed by the uptrend momentum filter."""
+        s = self._make_strategy(period=20)
+        self._establish_history(s, 20, 100.0)
+        monkeypatch.setattr(s, "_assess_momentum", lambda sym: "uptrend")
+        self._feed_bar(s, 101.0)  # triggers crossing but momentum blocks it
+        sell_signals = [sig for sig in s.signals_to_emit if sig.signal_type == SignalType.SELL]
+        assert len(sell_signals) == 0
+
+    # --- _assess_momentum sideways branch (line 369) ---
+    def test_assess_momentum_returns_sideways_for_flat_history(self):
+        """Momentum is 'sideways' when price hovers near MA20 (< 2% difference)."""
+        s = self._make_strategy()
+        s.price_history["TEST"] = [100.0] * 25  # flat → abs diff / ma20 = 0 < 0.02
+        assert s._assess_momentum("TEST") == "sideways"
+
+    # --- S/R confidence boost for BUY (lines 418-426) ---
+    def test_sr_confidence_boost_when_buy_near_support(self, monkeypatch):
+        """Confidence boosted by +0.15 when BUY price is inside a support zone."""
+        from web.stock_analysis_services import technical_levels_service
+        s = self._make_strategy()
+        s.price_history["TEST"] = list(range(50, 101))  # 51 bars ≥ 50 threshold
+        monkeypatch.setattr(
+            technical_levels_service,
+            "detect_support_resistance",
+            lambda bars, price: {
+                "support": [{"low": 94.0, "high": 96.0, "confidence": "high", "reason": "t"}],
+                "resistance": [],
+            },
+        )
+        confidence = s._confidence_with_sr_context("TEST", 95.0, SignalType.BUY)
+        assert confidence == pytest.approx(0.75 + 0.15)
+
+    # --- S/R confidence boost for SELL (line 465) ---
+    def test_sr_confidence_boost_when_sell_near_resistance(self, monkeypatch):
+        """Confidence boosted by +0.15 when SELL price is inside a resistance zone."""
+        from web.stock_analysis_services import technical_levels_service
+        s = self._make_strategy()
+        s.price_history["TEST"] = list(range(50, 101))  # 51 bars
+        monkeypatch.setattr(
+            technical_levels_service,
+            "detect_support_resistance",
+            lambda bars, price: {
+                "support": [],
+                "resistance": [{"low": 104.0, "high": 106.0, "confidence": "high", "reason": "t"}],
+            },
+        )
+        confidence = s._confidence_with_sr_context("TEST", 105.0, SignalType.SELL)
+        assert confidence == pytest.approx(0.75 + 0.15)
+
+    # --- validate_signal: target_price <= 0 (line 480) ---
+    def test_validate_signal_rejects_zero_target_price(self):
+        """validate_signal returns False when target_price is zero."""
+        s = self._make_strategy()
+        s.middle_band["TEST"] = 100.0
+        signal = Signal(
+            symbol="TEST",
+            signal_type=SignalType.BUY,
+            strength=SignalStrength.MODERATE,
+            timestamp=datetime(2024, 1, 1),
+            target_price=0,
+            reason="test",
+            confidence=0.75,
+        )
+        assert s.validate_signal(signal) is False
+
+    # --- generate_signal rejects invalid signal (lines 484-494) ---
+    def test_generate_signal_does_not_emit_invalid_signal(self):
+        """generate_signal silently drops a signal that fails validation."""
+        s = self._make_strategy()
+        # Symbol not in middle_band → validate_signal returns False
+        signal = Signal(
+            symbol="UNKNOWN",
+            signal_type=SignalType.BUY,
+            strength=SignalStrength.MODERATE,
+            timestamp=datetime(2024, 1, 1),
+            target_price=100.0,
+            reason="test",
+            confidence=0.75,
+        )
+        s.generate_signal(signal)
+        assert len(s.signals_to_emit) == 0
+
+    # --- reset() clears all state (lines 484-494) ---
+    def test_reset_clears_all_strategy_state(self):
+        """reset() empties every internal dict/list."""
+        s = self._make_strategy()
+        self._establish_history(s, count=20, price=100.0)
+        assert "TEST" in s.price_history
+        s.reset()
+        assert len(s.price_history) == 0
+        assert len(s.volume_history) == 0
+        assert len(s.upper_band) == 0
+        assert len(s.middle_band) == 0
+        assert len(s.lower_band) == 0
+        assert len(s.prev_close) == 0
+        assert len(s.prev_upper) == 0
+        assert len(s.prev_lower) == 0
+        assert len(s.last_signal) == 0
+        assert len(s.signals_to_emit) == 0
+
+    # --- _confidence_with_sr_context: exception path (lines 423-426) ---
+    def test_confidence_with_sr_context_exception_returns_base_confidence(self, monkeypatch):
+        """When detect_support_resistance raises, base_confidence is returned unchanged."""
+        from web.stock_analysis_services import technical_levels_service
+
+        def _exploding_detect(bars, close, **kwargs):
+            raise RuntimeError("data error")
+
+        monkeypatch.setattr(technical_levels_service, "detect_support_resistance", _exploding_detect)
+        s = self._make_strategy()
+        s.price_history["TEST"] = [100.0 + (i % 3) for i in range(60)]
+        result = s._confidence_with_sr_context("TEST", 100.0, SignalType.BUY)
+        # Exception is caught silently; base_confidence is returned
+        assert 0.0 <= result <= 1.0
 
 
 if __name__ == '__main__':

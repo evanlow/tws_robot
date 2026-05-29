@@ -177,6 +177,84 @@ class TestTechnicalLevelsService:
             assert "low" in zone and "high" in zone
 
 
+class TestTechnicalLevelsServiceInternals:
+    """Tests for internal helpers in technical_levels_service."""
+
+    # --- _cluster_pivots: empty pivots → return [] (line 133) ---
+    def test_cluster_pivots_empty_returns_empty(self):
+        result = technical_levels_service._cluster_pivots([], 100.0, False)
+        assert result == []
+
+    # --- _cluster_pivots: tight two-pivot zone gets widened (lines 156-157) ---
+    def test_cluster_pivots_tight_zone_is_widened(self):
+        # 100.0 and 100.1 → spread=0.1 < 100*0.005=0.5 → widening applied
+        result = technical_levels_service._cluster_pivots([100.0, 100.1], 100.0, False)
+        assert len(result) == 1
+        assert result[0]["low"] < 100.0   # widened below
+        assert result[0]["high"] > 100.1  # widened above
+
+    # --- _ensure_extreme_zone: new zone appended when no match (lines 183-184) ---
+    def test_ensure_extreme_zone_appends_when_no_match(self):
+        zones = []
+        technical_levels_service._ensure_extreme_zone(zones, 100.0, "52-week low", False)
+        assert len(zones) == 1
+        assert zones[0]["reason"] == "52-week low"
+        assert zones[0]["touches"] == 2
+
+    # --- _ensure_extreme_zone: also works for is_resistance=True ---
+    def test_ensure_extreme_zone_resistance_appended(self):
+        zones = []
+        technical_levels_service._ensure_extreme_zone(zones, 200.0, "52-week high", True)
+        assert len(zones) == 1
+        assert zones[0]["low"] < 200.0   # spread applied
+
+    # --- _confidence_label: touches < 2 → "low" (line 216) ---
+    def test_confidence_label_one_touch_is_low(self):
+        assert technical_levels_service._confidence_label(1) == "low"
+
+    # --- _assess_momentum: < 20 closes → "insufficient_data" (line 222) ---
+    def test_assess_momentum_insufficient_data(self):
+        result = technical_levels_service._assess_momentum([100.0] * 15)
+        assert result == "insufficient_data"
+
+    # --- _assess_momentum: downtrend (line 233) ---
+    def test_assess_momentum_downtrend(self):
+        # Monotonically declining: current < ma20 < ma50
+        closes = [100.0 - i * 0.5 for i in range(60)]
+        assert technical_levels_service._assess_momentum(closes) == "downtrend"
+
+    # --- _assess_momentum: volatile (line 237) ---
+    def test_assess_momentum_volatile(self):
+        # current far above ma20, but ma20 == ma50 (no clear trend)
+        # [100]*40 + [90]*10 + [110]*10 → current=110, ma20=100, ma50=100 → volatile
+        closes = [100.0] * 40 + [90.0] * 10 + [110.0] * 10
+        assert technical_levels_service._assess_momentum(closes) == "volatile"
+
+    # --- _technical_position: near_support (line 249) ---
+    def test_technical_position_near_support(self):
+        support = [{"low": 99.0, "high": 101.0}]
+        result = technical_levels_service._technical_position(100.0, support, [])
+        assert result == "near_support"
+
+    # --- _technical_position: below_support (line 251) ---
+    def test_technical_position_below_support(self):
+        support = [{"low": 99.0, "high": 101.0}]
+        result = technical_levels_service._technical_position(95.0, support, [])
+        assert result == "below_support"
+
+    # --- _technical_position: near_resistance (line 256) ---
+    def test_technical_position_near_resistance(self):
+        resistance = [{"low": 199.0, "high": 201.0}]
+        result = technical_levels_service._technical_position(200.0, [], resistance)
+        assert result == "near_resistance"
+
+    # --- _technical_position: breakout (line 258) ---
+    def test_technical_position_breakout(self):
+        resistance = [{"low": 199.0, "high": 201.0}]
+        result = technical_levels_service._technical_position(205.0, [], resistance)
+        assert result == "breakout"
+
+
 # ==============================================================================
 # Unit Tests: Position Appraisal Service
 # ==============================================================================
@@ -578,6 +656,30 @@ class TestBollingerBandsComputation:
         assert result["percent_b"] < 0
         assert result["status"] == "below_lower_band"
 
+    def test_near_upper_band_status(self):
+        """Price near (but below) the upper band gives near_upper_band status."""
+        from web.routes.api_stock_analysis import _compute_bollinger_bands
+        # 10 bars at 98, 10 bars at 102 → sma=100, std=2, upper=104, lower=96
+        bars = [
+            {"open": v, "high": v + 1, "low": v - 1, "close": v, "volume": 1_000_000}
+            for v in ([98] * 10 + [102] * 10)
+        ]
+        # percent_b = (103.5 - 96) / 8 = 0.9375 → near_upper_band
+        result = _compute_bollinger_bands(bars, 103.5)
+        assert result["status"] == "near_upper_band"
+        assert 0.8 <= result["percent_b"] < 1.0
+
+    def test_zero_bandwidth_gives_insufficient_data_status(self):
+        """All-equal closes produce std=0, band_width_abs=0, percent_b=None."""
+        from web.routes.api_stock_analysis import _compute_bollinger_bands
+        bars = [
+            {"open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}
+            for _ in range(25)
+        ]
+        result = _compute_bollinger_bands(bars, 100.0)
+        assert result["percent_b"] is None
+        assert result["status"] == "insufficient_data"
+
     def test_price_context_includes_bollinger_narrative(self):
         from web.routes.api_stock_analysis import _build_price_context
         bb_below = {"status": "below_lower_band", "percent_b": -0.1}
@@ -637,3 +739,413 @@ class TestParseUnderlyingSymbol:
         from web.routes.stock_analysis import parse_underlying_symbol
         assert parse_underlying_symbol("???WEIRD") is None
         assert parse_underlying_symbol("some random text") is None
+
+
+# ==============================================================================
+# Unit Tests: _build_price_context branches
+# ==============================================================================
+
+
+class TestBuildPriceContextBranches:
+    """Covers _build_price_context paths not hit by existing tests."""
+
+    def _call(self, **kwargs):
+        from web.routes.api_stock_analysis import _build_price_context
+        base = dict(
+            current_price=100.0,
+            fair_value={"status": "fairly_valued"},
+            technical_levels={"technical_position": "", "momentum_status": ""},
+            range_52w={"position_percentile": 50},
+            bollinger_bands=None,
+        )
+        base.update(kwargs)
+        return _build_price_context(**base)
+
+    def test_potentially_undervalued_narrative(self):
+        result = self._call(fair_value={"status": "potentially_undervalued"})
+        assert "reasonable relative to estimated fair value" in result
+
+    def test_potentially_overvalued_narrative(self):
+        result = self._call(fair_value={"status": "potentially_overvalued"})
+        assert "elevated relative to estimated fair value" in result
+
+    def test_near_support_narrative(self):
+        result = self._call(
+            technical_levels={"technical_position": "near_support", "momentum_status": ""}
+        )
+        assert "near a detected support zone" in result
+
+    def test_below_support_narrative(self):
+        result = self._call(
+            technical_levels={"technical_position": "below_support", "momentum_status": ""}
+        )
+        assert "below the nearest support zone" in result
+
+    def test_near_resistance_narrative(self):
+        result = self._call(
+            technical_levels={"technical_position": "near_resistance", "momentum_status": ""}
+        )
+        assert "approaching a resistance zone" in result
+
+    def test_downtrend_momentum_narrative(self):
+        result = self._call(
+            technical_levels={"technical_position": "", "momentum_status": "downtrend"}
+        )
+        assert "momentum remains weak" in result
+
+    def test_uptrend_momentum_narrative(self):
+        result = self._call(
+            technical_levels={"technical_position": "", "momentum_status": "uptrend"}
+        )
+        assert "momentum appears positive" in result
+
+    def test_near_upper_band_narrative(self):
+        result = self._call(
+            bollinger_bands={"status": "near_upper_band", "upper": 105.0, "middle": 100.0, "lower": 95.0}
+        )
+        assert "approaching overbought territory" in result
+
+
+# ==============================================================================
+# Unit Tests: position_appraisal_service edge cases
+# ==============================================================================
+
+
+class TestPositionAppraisalEdgeCases:
+    """Covers paths in position_appraisal_service not hit by existing tests."""
+
+    # --- zero entry_price → has_position: False (line 48) ---
+    def test_zero_entry_price_returns_no_position(self):
+        result = position_appraisal_service.appraise_position(
+            position={"quantity": 100, "entry_price": 0, "unrealized_pnl": 0},
+            current_price=100.0,
+            fair_value={"status": "fairly_valued", "low": 90.0, "high": 110.0},
+            technical_levels={"support": [], "resistance": []},
+        )
+        assert result["has_position"] is False
+
+    # --- _entry_vs_fair_value: fv_low or fv_high is None → "unavailable" ---
+    def test_entry_vs_fair_value_null_bounds_returns_unavailable(self):
+        result = position_appraisal_service._entry_vs_fair_value(
+            100.0, {"status": "fairly_valued", "low": None, "high": 120.0}
+        )
+        assert result == "unavailable"
+
+    # --- _entry_vs_fair_value: entry > fv_high → "above_fair_value" (line 100) ---
+    def test_entry_vs_fair_value_above_range(self):
+        result = position_appraisal_service._entry_vs_fair_value(
+            150.0, {"status": "fairly_valued", "low": 90.0, "high": 120.0}
+        )
+        assert result == "above_fair_value"
+
+    # --- _entry_vs_support: entry <= nearest.high → "near_support" (line 113) ---
+    def test_entry_vs_support_near_support(self):
+        support = [{"low": 88.0, "high": 92.0, "confidence": "high", "reason": "t"}]
+        result = position_appraisal_service._entry_vs_support(
+            91.0, {"support": support, "resistance": []}
+        )
+        assert result == "near_support"
+
+    # --- _entry_vs_support: entry > nearest.high*1.05 → "well_above_support" (line 116) ---
+    def test_entry_vs_support_well_above(self):
+        support = [{"low": 88.0, "high": 90.0, "confidence": "high", "reason": "t"}]
+        # 100 > 90 * 1.05 = 94.5 → well_above_support
+        result = position_appraisal_service._entry_vs_support(
+            100.0, {"support": support, "resistance": []}
+        )
+        assert result == "well_above_support"
+
+    # --- _assess_entry_quality: "good" valuation score (line 138) ---
+    def test_assess_entry_quality_good_when_entry_below_fv_low(self):
+        # entry=85 <= fv_low=90 → "good" valuation; no support → no technical dim
+        result = position_appraisal_service._assess_entry_quality(
+            entry_price=85.0,
+            current_price=95.0,
+            fair_value={"status": "fairly_valued", "low": 90.0, "high": 120.0},
+            technical_levels={"support": [], "resistance": []},
+        )
+        assert result == "good"
+
+    # --- _assess_entry_quality: "weak" valuation score (line 145) ---
+    def test_assess_entry_quality_weak_when_entry_above_fv_high(self):
+        # entry=130 > fv_high=120 → "weak" valuation; no support → scores=["weak"]
+        result = position_appraisal_service._assess_entry_quality(
+            entry_price=130.0,
+            current_price=125.0,
+            fair_value={"status": "fairly_valued", "low": 90.0, "high": 120.0},
+            technical_levels={"support": [], "resistance": []},
+        )
+        assert result == "weak"
+
+    # --- _assess_entry_quality: "good" technical score (line 147) ---
+    def test_assess_entry_quality_good_technical_when_entry_near_support(self):
+        # entry=91 <= support_high*1.02=91.8 → "good" technical; unavailable fv
+        support = [{"low": 88.0, "high": 90.0, "confidence": "high", "reason": "t"}]
+        result = position_appraisal_service._assess_entry_quality(
+            entry_price=91.0,
+            current_price=95.0,
+            fair_value={"status": "unavailable"},
+            technical_levels={"support": support, "resistance": []},
+        )
+        assert result == "good"
+
+    # --- _assess_entry_quality: "weak" technical score (line 152) ---
+    def test_assess_entry_quality_weak_technical_when_entry_well_above_support(self):
+        # entry=100 > support_high*1.10=99 → "weak" technical; unavailable fv
+        support = [{"low": 85.0, "high": 90.0, "confidence": "high", "reason": "t"}]
+        result = position_appraisal_service._assess_entry_quality(
+            entry_price=100.0,
+            current_price=95.0,
+            fair_value={"status": "unavailable"},
+            technical_levels={"support": support, "resistance": []},
+        )
+        assert result == "weak"
+
+    # --- _assess_entry_quality: no data → "unclear" (lines 159-161) ---
+    def test_assess_entry_quality_unclear_without_any_data(self):
+        result = position_appraisal_service._assess_entry_quality(
+            entry_price=100.0,
+            current_price=100.0,
+            fair_value={"status": "unavailable"},
+            technical_levels={"support": [], "resistance": []},
+        )
+        assert result == "unclear"
+
+    # --- _build_summary: below_support tech position (line 192) ---
+    def test_build_summary_includes_below_support_narrative(self):
+        result = position_appraisal_service._build_summary(
+            entry_price=100.0,
+            current_price=80.0,
+            quantity=100,
+            unrealized_pnl_pct=-20.0,
+            entry_vs_fair_value="within_fair_value",
+            entry_vs_support="near_support",
+            entry_quality="reasonable",
+            technical_levels={"technical_position": "below_support"},
+        )
+        assert "below the nearest detected support zone" in result
+
+    # --- _build_summary: near_resistance tech position (line 194) ---
+    def test_build_summary_includes_near_resistance_narrative(self):
+        result = position_appraisal_service._build_summary(
+            entry_price=100.0,
+            current_price=108.0,
+            quantity=100,
+            unrealized_pnl_pct=8.0,
+            entry_vs_fair_value="within_fair_value",
+            entry_vs_support="above_support",
+            entry_quality="reasonable",
+            technical_levels={"technical_position": "near_resistance"},
+        )
+        assert "near a detected resistance zone" in result
+
+    # --- _build_summary: above_fair_value entry context (lines 205-206) ---
+    def test_build_summary_includes_above_fair_value_narrative(self):
+        result = position_appraisal_service._build_summary(
+            entry_price=150.0,
+            current_price=145.0,
+            quantity=100,
+            unrealized_pnl_pct=-3.3,
+            entry_vs_fair_value="above_fair_value",
+            entry_vs_support="well_above_support",
+            entry_quality="weak",
+            technical_levels={"technical_position": ""},
+        )
+        assert "above the estimated fair value range" in result
+
+    # --- _entry_vs_fair_value: status == "unavailable" → return "unavailable" (line 92) ---
+    def test_entry_vs_fair_value_unavailable_status_returns_unavailable(self):
+        result = position_appraisal_service._entry_vs_fair_value(
+            100.0, {"status": "unavailable"}
+        )
+        assert result == "unavailable"
+
+    # --- _entry_vs_support: above support but < 1.05x → "above_support" (line 116) ---
+    def test_entry_vs_support_above_but_not_well_above(self):
+        # entry=93 > high=90 but 93 < 90*1.05=94.5 → "above_support"
+        support = [{"low": 88.0, "high": 90.0, "confidence": "high", "reason": "t"}]
+        result = position_appraisal_service._entry_vs_support(
+            93.0, {"support": support, "resistance": []}
+        )
+        assert result == "above_support"
+
+    # --- _assess_entry_quality: "reasonable" technical score (line 147) ---
+    def test_assess_entry_quality_reasonable_technical(self):
+        # entry=95 in range (90*1.02=91.8, 90*1.10=99] → "reasonable" technical; unavail fv
+        support = [{"low": 88.0, "high": 90.0, "confidence": "high", "reason": "t"}]
+        result = position_appraisal_service._assess_entry_quality(
+            entry_price=95.0,
+            current_price=95.0,
+            fair_value={"status": "unavailable"},
+            technical_levels={"support": support, "resistance": []},
+        )
+        assert result == "reasonable"
+
+    # --- _assess_entry_quality: mixed good+weak → "reasonable" (lines 159-160) ---
+    def test_assess_entry_quality_mixed_good_weak_returns_reasonable(self):
+        # entry=95: fv_low=100 → 95 <= 100 → "good" valuation
+        # support_high=85: 95 > 85*1.10=93.5 → "weak" technical
+        # scores=["good","weak"] → weak in scores AND good in scores → line 159 elif → "reasonable"
+        support = [{"low": 82.0, "high": 85.0, "confidence": "high", "reason": "t"}]
+        result = position_appraisal_service._assess_entry_quality(
+            entry_price=95.0,
+            current_price=100.0,
+            fair_value={"status": "fairly_valued", "low": 100.0, "high": 120.0},
+            technical_levels={"support": support, "resistance": []},
+        )
+        assert result == "reasonable"
+
+    # --- _assess_entry_quality: all "reasonable" scores → fallback return (line 161) ---
+    def test_assess_entry_quality_all_reasonable_returns_reasonable(self):
+        # fv_low=90, fv_high=120; entry=100 → 90 < 100 <= 120 → "reasonable" valuation
+        # support_high=90; entry=94 → 90*1.02=91.8 < 94 <= 90*1.10=99 → "reasonable" technical
+        support = [{"low": 85.0, "high": 90.0, "confidence": "high", "reason": "t"}]
+        result = position_appraisal_service._assess_entry_quality(
+            entry_price=94.0,
+            current_price=100.0,
+            fair_value={"status": "fairly_valued", "low": 90.0, "high": 120.0},
+            technical_levels={"support": support, "resistance": []},
+        )
+        assert result == "reasonable"
+
+
+# ==============================================================================
+# API edge cases: invalid ticker, price fallback, exception paths
+# ==============================================================================
+
+
+class TestStockAnalysisAPIEdgeCases:
+    """Covers API route branches not exercised by existing TestStockAnalysisAPI."""
+
+    # --- invalid ticker → 400 (line 37) ---
+    def test_invalid_ticker_returns_400(self, client):
+        resp = client.get("/api/stocks/inv@lid!/analysis")
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "Invalid ticker symbol" in data["error"]
+
+    # --- current_price from bars when fundamentals has none (lines 63-65) ---
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_price_falls_back_to_latest_bar_close(self, mock_fundamentals, mock_history, client):
+        """When fundamentals has no current_price, the last bar's close is used."""
+        mock_fundamentals.return_value = {"symbol": "TEST", "name": "Test Corp"}
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["current_price"] > 0
+
+    # --- route-level exception → 500 (line 159) ---
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_unexpected_exception_returns_500(self, mock_fundamentals, client):
+        """An unhandled exception in the route returns 500 with a safe message."""
+        mock_fundamentals.side_effect = RuntimeError("unexpected boom")
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 500
+        data = resp.get_json()
+        assert "could not be completed" in data["error"].lower()
+
+    # --- 52-week range fallback to fundamentals (lines 149-151) ---
+    @patch("web.stock_analysis_services.technical_levels_service.detect_support_resistance")
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_range_52w_falls_back_to_fundamentals_when_missing(
+        self, mock_fundamentals, mock_history, mock_levels, client
+    ):
+        """When technical_levels returns no range_52w.low, fundamentals values are used."""
+        mock_fundamentals.return_value = _make_fundamentals(100.0)
+        mock_history.return_value = _make_bars(60, 100.0)
+        mock_levels.return_value = {
+            "support": [],
+            "resistance": [],
+            "technical_position": "",
+            "momentum_status": "",
+            "range_52w": {},  # no low/high
+        }
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        # Fallback uses fifty_two_week_low / high from _make_fundamentals
+        assert data["range_52w"]["low"] == 80.0
+        assert data["range_52w"]["high"] == 130.0
+
+    # --- active signals exception → empty list (lines 283-285) ---
+    @patch("web.routes.api_stock_analysis.get_services")
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_active_signals_exception_returns_empty_list(
+        self, mock_fundamentals, mock_history, mock_get_services, client
+    ):
+        """If strategy_registry raises, active_strategy_signals is empty list."""
+        from unittest.mock import Mock
+        mock_fundamentals.return_value = _make_fundamentals(100.0)
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        mock_svc = Mock()
+        mock_svc.get_positions.return_value = {}
+        mock_svc.strategy_registry.get_all_strategies.side_effect = RuntimeError("registry boom")
+        mock_get_services.return_value = mock_svc
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["active_strategy_signals"] == []
+
+    # --- strategy with no indicators is skipped (line 260) ---
+    @patch("web.routes.api_stock_analysis.get_services")
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_strategy_with_no_indicators_is_skipped(
+        self, mock_fundamentals, mock_history, mock_get_services, client
+    ):
+        """Strategies whose get_indicator_values returns falsy are not included."""
+        from unittest.mock import Mock
+        from strategies.base_strategy import StrategyState
+
+        mock_fundamentals.return_value = _make_fundamentals(100.0)
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        mock_strategy = Mock()
+        mock_strategy.middle_band = {"TEST": 100.0}
+        mock_strategy.state = StrategyState.RUNNING
+        mock_strategy.config.symbols = ["TEST"]
+        mock_strategy.get_indicator_values.return_value = None  # triggers the continue
+
+        mock_svc = Mock()
+        mock_svc.get_positions.return_value = {}
+        mock_svc.strategy_registry.get_all_strategies.return_value = [mock_strategy]
+        mock_get_services.return_value = mock_svc
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["active_strategy_signals"] == []
+
+    # --- _calc_percentile: return None for invalid inputs (line 159) ---
+    def test_calc_percentile_returns_none_for_invalid_inputs(self):
+        """_calc_percentile returns None when price, low, or high are missing/equal."""
+        from web.routes.api_stock_analysis import _calc_percentile
+        assert _calc_percentile(None, 80.0, 130.0) is None
+        assert _calc_percentile(100.0, None, 130.0) is None
+        assert _calc_percentile(100.0, 100.0, 100.0) is None  # high == low
+
+    # --- non-finite current_price from fundamentals → bar fallback (line 63) ---
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_nonfinite_current_price_falls_back_to_bars(
+        self, mock_fundamentals, mock_history, client
+    ):
+        """A NaN/inf current_price from fundamentals is discarded; bar close is used."""
+        import math
+        fdata = _make_fundamentals(float("nan"))
+        mock_fundamentals.return_value = fdata
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert math.isfinite(data["current_price"])
+        assert data["current_price"] > 0
