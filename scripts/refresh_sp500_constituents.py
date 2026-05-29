@@ -8,7 +8,7 @@ Usage::
 
     python scripts/refresh_sp500_constituents.py
 
-Requires ``pandas`` and ``lxml`` (both in requirements.txt / pip installable).
+Requires ``pandas`` and ``lxml`` (both listed in requirements.txt).
 Tickers are normalised for yfinance compatibility: dots replaced with hyphens
 (e.g. ``BRK.B`` → ``BRK-B``).
 """

@@ -63,13 +63,13 @@
   <table class="data-table" id="screenerTable">
     <thead>
       <tr>
-        <th>Symbol</th>
-        <th>Company</th>
-        <th>Sector</th>
-        <th>Price</th>
-        <th>52W Position</th>
-        <th>Bollinger %B</th>
-        <th>Status</th>
+        <th data-col="symbol" style="cursor:pointer;user-select:none;">Symbol <span class="sort-indicator"></span></th>
+        <th data-col="company" style="cursor:pointer;user-select:none;">Company <span class="sort-indicator"></span></th>
+        <th data-col="sector" style="cursor:pointer;user-select:none;">Sector <span class="sort-indicator"></span></th>
+        <th data-col="current_price" style="cursor:pointer;user-select:none;">Price <span class="sort-indicator"></span></th>
+        <th data-col="range_52w_position_percentile" style="cursor:pointer;user-select:none;">52W Position <span class="sort-indicator"></span></th>
+        <th data-col="bollinger_percent_b" style="cursor:pointer;user-select:none;">Bollinger %B <span class="sort-indicator"></span></th>
+        <th data-col="status_rank" style="cursor:pointer;user-select:none;">Status <span class="sort-indicator"></span></th>
         <th>Updated</th>
       </tr>
     </thead>
@@ -84,6 +84,8 @@
 
   var allRows = [];
   var sectors = new Set();
+  var sortCol = 'status_rank';
+  var sortAsc = true;
 
   var statusFilter = document.getElementById('statusFilter');
   var sectorFilter = document.getElementById('sectorFilter');
@@ -158,6 +160,42 @@
     sectorFilter.innerHTML = options;
   }
 
+  function sortValue(row, col) {
+    var v = row[col];
+    if (v == null) return col === 'symbol' || col === 'company' || col === 'sector' ? '\uffff' : Infinity;
+    return v;
+  }
+
+  function sortRows(rows) {
+    var col = sortCol;
+    var asc = sortAsc;
+    return rows.slice().sort(function (a, b) {
+      var va = sortValue(a, col);
+      var vb = sortValue(b, col);
+      if (typeof va === 'string' && typeof vb === 'string') {
+        va = va.toLowerCase(); vb = vb.toLowerCase();
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      return 0;
+    });
+  }
+
+  function updateSortIndicators() {
+    var ths = document.querySelectorAll('#screenerTable thead th[data-col]');
+    ths.forEach(function (th) {
+      var ind = th.querySelector('.sort-indicator');
+      if (!ind) return;
+      if (th.dataset.col === sortCol) {
+        ind.textContent = sortAsc ? ' ▲' : ' ▼';
+        th.style.color = '#63b3ed';
+      } else {
+        ind.textContent = ' ⇅';
+        th.style.color = '';
+      }
+    });
+  }
+
   function applyFilters() {
     var sv = statusFilter.value;
     var sec = sectorFilter.value.toLowerCase();
@@ -177,7 +215,7 @@
       return statusOk && sectorOk;
     });
 
-    renderRows(filtered);
+    renderRows(sortRows(filtered));
   }
 
   function renderRows(rows) {
@@ -244,6 +282,7 @@
         sectors = new Set(allRows.map(function (r) { return r.sector; }).filter(Boolean));
         populateSectorFilter();
         renderSummary(data.summary || {});
+        updateSortIndicators();
         applyFilters();
       })
       .catch(function (err) {
@@ -257,6 +296,21 @@
   statusFilter.addEventListener('change', applyFilters);
   sectorFilter.addEventListener('change', applyFilters);
   refreshBtn.addEventListener('click', function () { fetchData(true); });
+
+  // Column sort click handlers
+  document.querySelectorAll('#screenerTable thead th[data-col]').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var col = th.dataset.col;
+      if (sortCol === col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col;
+        sortAsc = true;
+      }
+      updateSortIndicators();
+      applyFilters();
+    });
+  });
 
   // Initial load
   fetchData(false);

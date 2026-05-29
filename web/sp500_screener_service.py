@@ -62,7 +62,8 @@ class SP500ScreenerService:
     """Thread-safe S&P 500 Bollinger Bands screener with in-memory cache."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.Condition(threading.Lock())
+        self._scanning: bool = False
         self._cache: Optional[Dict[str, Any]] = None
         self._cache_ts: float = 0.0
 
@@ -84,18 +85,33 @@ class SP500ScreenerService:
             Keys: ``as_of``, ``source``, ``count``, ``summary``, ``rows``.
         """
         with self._lock:
+            # Wait for any in-flight scan started by another thread to complete
+            # before deciding whether the cache is warm or a new scan is needed.
+            # This prevents concurrent cold-cache requests from each launching
+            # their own full ThreadPoolExecutor scan.
+            while self._scanning:
+                self._lock.wait()
+
             cache_age = time.time() - self._cache_ts
             if not refresh and self._cache is not None and cache_age < _CACHE_TTL_SECONDS:
                 logger.debug("Returning cached screener data (age=%.0fs)", cache_age)
                 return self._cache
 
-        result = self._scan()
+            # Claim the scan slot before releasing the lock so no other thread
+            # can start a second scan while this one is running.
+            self._scanning = True
 
-        with self._lock:
-            self._cache = result
-            self._cache_ts = time.time()
-
-        return result
+        result: Optional[Dict[str, Any]] = None
+        try:
+            result = self._scan()
+            return result
+        finally:
+            with self._lock:
+                if result is not None:
+                    self._cache = result
+                    self._cache_ts = time.time()
+                self._scanning = False
+                self._lock.notify_all()
 
     def invalidate_cache(self) -> None:
         """Force the next call to ``get_screener_data`` to re-scan."""
