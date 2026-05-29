@@ -16,6 +16,9 @@ Performance design
   the TTL are served instantly with no network I/O.
 * Failures for individual tickers are isolated: the worker logs the error
   and returns an ``insufficient_data`` row so the rest of the scan continues.
+* Quality scores use fundamental data (revenue growth, margins, ROE, debt,
+  current ratio) fetched alongside price data.  Missing fundamentals degrade
+  gracefully to ``"Insufficient Data"`` rather than breaking the page.
 
 Usage::
 
@@ -143,13 +146,13 @@ class SP500ScreenerService:
         return rows
 
     def _scan_ticker(self, constituent: Dict[str, str]) -> Dict[str, Any]:
-        """Fetch price data for a single ticker and compute its Bollinger status.
+        """Fetch price and fundamental data for a single ticker.
 
         Returns a screener row dict.  If data cannot be retrieved or is
         insufficient, ``bollinger_status`` is set to ``"insufficient_data"``.
         Always returns a valid dict — never raises.
         """
-        from data.fundamentals import fetch_price_history
+        from data.fundamentals import fetch_fundamentals, fetch_price_history
 
         symbol = constituent["symbol"]
         base_row = _insufficient_data_row(constituent)
@@ -188,6 +191,14 @@ class SP500ScreenerService:
         # Bollinger Bands
         bb = compute_bollinger_bands(bars, current_price)
 
+        # Fundamentals / quality score — failures are non-fatal
+        try:
+            fundamentals = fetch_fundamentals(symbol)
+        except Exception as exc:
+            logger.warning("Fundamentals fetch failed for %s: %s", symbol, exc)
+            fundamentals = {}
+        quality = compute_quality_score(fundamentals)
+
         import datetime
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -198,6 +209,10 @@ class SP500ScreenerService:
         row["bollinger_status"] = bb["status"]
         row["status_label"] = BOLLINGER_STATUS_LABELS.get(bb["status"], bb["status"])
         row["status_rank"] = BOLLINGER_STATUS_RANK.get(bb["status"], 5)
+        row["quality_score"] = quality["quality_score"]
+        row["quality_label"] = quality["quality_label"]
+        row["quality_reasons"] = quality["quality_reasons"]
+        row["quality_warnings"] = quality["quality_warnings"]
         row["last_updated"] = now_iso
         return row
 
@@ -281,6 +296,10 @@ def _insufficient_data_row(constituent: Dict[str, str]) -> Dict[str, Any]:
         "bollinger_status": "insufficient_data",
         "status_label": BOLLINGER_STATUS_LABELS["insufficient_data"],
         "status_rank": BOLLINGER_STATUS_RANK["insufficient_data"],
+        "quality_score": None,
+        "quality_label": "Insufficient Data",
+        "quality_reasons": [],
+        "quality_warnings": [],
         "last_updated": None,
     }
 
@@ -310,6 +329,123 @@ def _build_summary(rows: List[Dict[str, Any]]) -> Dict[str, int]:
         key = status_to_key.get(row["bollinger_status"], "insufficient_data")
         summary[key] += 1
     return summary
+
+
+def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute a simplified fundamental quality indicator.
+
+    Uses a points-based model that tolerates missing data.  Each available
+    metric contributes one pass/fail vote; the score is the percentage of
+    votes that passed.  If fewer than 3 data points are available the label
+    is ``"Insufficient Data"`` regardless of the score.
+
+    Parameters
+    ----------
+    fundamentals:
+        Dict as returned by ``data.fundamentals.fetch_fundamentals``.
+        May be empty or contain an ``"error"`` key; both are handled
+        gracefully.
+
+    Returns
+    -------
+    dict
+        Keys: ``quality_score`` (int | None), ``quality_label`` (str),
+        ``quality_reasons`` (list[str]), ``quality_warnings`` (list[str]).
+    """
+    _insufficient: Dict[str, Any] = {
+        "quality_score": None,
+        "quality_label": "Insufficient Data",
+        "quality_reasons": [],
+        "quality_warnings": [],
+    }
+
+    if not fundamentals or "error" in fundamentals:
+        result = dict(_insufficient)
+        result["quality_warnings"] = ["Fundamental data unavailable"]
+        return result
+
+    checks: List[bool] = []
+    reasons: List[str] = []
+    warnings: List[str] = []
+
+    def _check(value: Any, condition: bool, pass_reason: str, warn_label: str) -> None:
+        if value is None:
+            warnings.append(f"{warn_label} unavailable")
+        else:
+            checks.append(condition)
+            if condition:
+                reasons.append(pass_reason)
+
+    _check(
+        fundamentals.get("revenue_growth"),
+        (fundamentals.get("revenue_growth") or 0) > 0,
+        "Positive revenue growth",
+        "Revenue growth",
+    )
+    _check(
+        fundamentals.get("earnings_growth"),
+        (fundamentals.get("earnings_growth") or 0) > 0,
+        "Positive earnings growth",
+        "Earnings growth",
+    )
+    _check(
+        fundamentals.get("profit_margin"),
+        (fundamentals.get("profit_margin") or 0) > 0,
+        "Positive profit margin",
+        "Profit margin",
+    )
+    _check(
+        fundamentals.get("operating_margin"),
+        (fundamentals.get("operating_margin") or 0) > 0,
+        "Positive operating margin",
+        "Operating margin",
+    )
+    _check(
+        fundamentals.get("roe"),
+        (fundamentals.get("roe") or 0) > 0,
+        "Positive return on equity",
+        "Return on equity",
+    )
+
+    debt_to_equity = fundamentals.get("debt_to_equity")
+    _check(
+        debt_to_equity,
+        (debt_to_equity or 0) < 150,
+        "Debt-to-equity within threshold",
+        "Debt-to-equity",
+    )
+
+    current_ratio = fundamentals.get("current_ratio")
+    _check(
+        current_ratio,
+        (current_ratio or 0) >= 1,
+        "Current ratio above 1",
+        "Current ratio",
+    )
+
+    available = len(checks)
+    if available < 3:
+        result = dict(_insufficient)
+        result["quality_reasons"] = reasons
+        result["quality_warnings"] = warnings
+        return result
+
+    passed = sum(checks)
+    quality_score = round(passed / available * 100)
+
+    if quality_score >= 75:
+        quality_label = "Strong"
+    elif quality_score >= 50:
+        quality_label = "Moderate"
+    else:
+        quality_label = "Weak"
+
+    return {
+        "quality_score": quality_score,
+        "quality_label": quality_label,
+        "quality_reasons": reasons,
+        "quality_warnings": warnings,
+    }
 
 
 # Module-level singleton used by the route layer.

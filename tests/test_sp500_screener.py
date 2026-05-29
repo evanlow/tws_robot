@@ -206,12 +206,15 @@ class TestSP500ScreenerService:
 
         bars = _make_bars(60, 150.0)
         with patch("data.fundamentals.fetch_price_history", return_value=bars):
-            row = svc._scan_ticker(constituent)
+            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
 
         required_keys = [
             "symbol", "company", "sector", "current_price",
             "range_52w_position_percentile", "bollinger_percent_b",
-            "bollinger_status", "status_label", "status_rank", "last_updated",
+            "bollinger_status", "status_label", "status_rank",
+            "quality_score", "quality_label", "quality_reasons", "quality_warnings",
+            "last_updated",
         ]
         for key in required_keys:
             assert key in row, f"Missing key: {key}"
@@ -222,7 +225,8 @@ class TestSP500ScreenerService:
         constituent = {"symbol": "BADFETCH", "security": "Bad Co", "sector": "X", "sub_industry": ""}
 
         with patch("data.fundamentals.fetch_price_history", side_effect=RuntimeError("network error")):
-            row = svc._scan_ticker(constituent)
+            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
 
         assert row["bollinger_status"] == "insufficient_data"
         assert row["current_price"] is None
@@ -233,7 +237,8 @@ class TestSP500ScreenerService:
         constituent = {"symbol": "EMPTY", "security": "Empty Co", "sector": "X", "sub_industry": ""}
 
         with patch("data.fundamentals.fetch_price_history", return_value=[]):
-            row = svc._scan_ticker(constituent)
+            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
 
         assert row["bollinger_status"] == "insufficient_data"
 
@@ -244,7 +249,8 @@ class TestSP500ScreenerService:
         few_bars = _make_bars(5, 100.0)
 
         with patch("data.fundamentals.fetch_price_history", return_value=few_bars):
-            row = svc._scan_ticker(constituent)
+            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
 
         assert row["bollinger_status"] == "insufficient_data"
 
@@ -255,9 +261,10 @@ class TestSP500ScreenerService:
         bars = _make_bars(60, 100.0, variance=0.1)
         # Price far above → overbought
         with patch("data.fundamentals.fetch_price_history", return_value=bars):
-            row = svc._scan_ticker(constituent)
-            # Override with forced overbought via patching compute_bollinger_bands
-            pass
+            with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
+                # Override with forced overbought via patching compute_bollinger_bands
+                pass
 
         # Just check that whatever status came out is consistent
         status = row["bollinger_status"]
@@ -310,7 +317,8 @@ class TestSP500ScreenerService:
 
         with patch.object(svc, "_load_constituents", return_value=constituents):
             with patch("data.fundamentals.fetch_price_history", return_value=bars):
-                result = svc._scan()
+                with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                    result = svc._scan()
 
         assert result["count"] == 20
         symbols_in_result = {r["symbol"] for r in result["rows"]}
@@ -333,7 +341,8 @@ class TestSP500ScreenerService:
 
         with patch.object(svc, "_load_constituents", return_value=constituents):
             with patch("data.fundamentals.fetch_price_history", side_effect=side_effect):
-                result = svc._scan()
+                with patch("data.fundamentals.fetch_fundamentals", return_value={}):
+                    result = svc._scan()
 
         assert result["count"] == 2
         fail_row = next(r for r in result["rows"] if r["symbol"] == "FAIL")
@@ -388,6 +397,140 @@ class TestSP500SummaryBuilding:
 
 
 # ==============================================================================
+# Unit tests: compute_quality_score
+# ==============================================================================
+
+
+class TestComputeQualityScore:
+    """Unit tests for web.sp500_screener_service.compute_quality_score."""
+
+    def _call(self, fundamentals):
+        from web.sp500_screener_service import compute_quality_score
+        return compute_quality_score(fundamentals)
+
+    # -- Label boundary tests --------------------------------------------------
+
+    def test_strong_quality_all_checks_pass(self):
+        """All positive fundamentals → Strong label and score ≥ 75."""
+        result = self._call({
+            "revenue_growth": 0.12,
+            "earnings_growth": 0.08,
+            "profit_margin": 0.20,
+            "operating_margin": 0.25,
+            "roe": 0.30,
+            "debt_to_equity": 40.0,
+            "current_ratio": 2.5,
+        })
+        assert result["quality_label"] == "Strong"
+        assert result["quality_score"] is not None
+        assert result["quality_score"] >= 75
+        assert len(result["quality_reasons"]) > 0
+
+    def test_moderate_quality_about_half_pass(self):
+        """Roughly half the checks pass → Moderate label (50 ≤ score < 75)."""
+        result = self._call({
+            "revenue_growth": -0.05,   # fail
+            "earnings_growth": -0.10,  # fail
+            "profit_margin": 0.15,     # pass
+            "operating_margin": 0.10,  # pass
+            "roe": 0.05,               # pass
+            "debt_to_equity": 80.0,    # pass
+            "current_ratio": 0.7,      # fail
+        })
+        assert result["quality_label"] == "Moderate"
+        assert 50 <= result["quality_score"] < 75
+
+    def test_weak_quality_most_checks_fail(self):
+        """Mostly negative fundamentals → Weak label (score < 50)."""
+        result = self._call({
+            "revenue_growth": -0.20,
+            "earnings_growth": -0.15,
+            "profit_margin": -0.05,
+            "operating_margin": -0.10,
+            "roe": -0.08,
+            "debt_to_equity": 200.0,
+            "current_ratio": 0.5,
+        })
+        assert result["quality_label"] == "Weak"
+        assert result["quality_score"] is not None
+        assert result["quality_score"] < 50
+
+    def test_insufficient_data_empty_dict(self):
+        """Empty fundamentals dict → Insufficient Data."""
+        result = self._call({})
+        assert result["quality_label"] == "Insufficient Data"
+        assert result["quality_score"] is None
+
+    def test_insufficient_data_error_key(self):
+        """Fundamentals dict with error key → Insufficient Data."""
+        result = self._call({"error": "yfinance failed", "symbol": "TEST"})
+        assert result["quality_label"] == "Insufficient Data"
+        assert result["quality_score"] is None
+
+    def test_insufficient_data_fewer_than_3_metrics(self):
+        """Only 2 available data points → Insufficient Data (not enough)."""
+        result = self._call({
+            "revenue_growth": 0.10,
+            "earnings_growth": 0.05,
+            # all other fields absent
+        })
+        assert result["quality_label"] == "Insufficient Data"
+        assert result["quality_score"] is None
+
+    # -- Missing / null field handling -----------------------------------------
+
+    def test_none_fields_produce_warnings_not_errors(self):
+        """None fields should add warnings, not crash or fail checks."""
+        result = self._call({
+            "revenue_growth": None,
+            "earnings_growth": None,
+            "profit_margin": 0.20,
+            "operating_margin": 0.15,
+            "roe": 0.10,
+            "debt_to_equity": 50.0,
+            "current_ratio": 1.5,
+        })
+        assert result["quality_label"] in ("Strong", "Moderate", "Weak", "Insufficient Data")
+        # Warnings should mention the missing fields
+        assert any("Revenue growth" in w for w in result["quality_warnings"])
+        assert any("Earnings growth" in w for w in result["quality_warnings"])
+
+    def test_null_fundamentals_argument(self):
+        """None or empty fundamentals argument is handled gracefully."""
+        result_none = self._call(None)
+        assert result_none["quality_label"] == "Insufficient Data"
+
+        result_empty = self._call({})
+        assert result_empty["quality_label"] == "Insufficient Data"
+
+    def test_returned_dict_always_has_required_keys(self):
+        """compute_quality_score always returns all required keys."""
+        for fundamentals in [{}, {"error": "x"}, {"revenue_growth": 0.1}, {
+            "revenue_growth": 0.1, "earnings_growth": 0.2,
+            "profit_margin": 0.1, "operating_margin": 0.1,
+            "roe": 0.1, "debt_to_equity": 30.0, "current_ratio": 2.0,
+        }]:
+            result = self._call(fundamentals)
+            for key in ("quality_score", "quality_label", "quality_reasons", "quality_warnings"):
+                assert key in result, f"Missing key '{key}' for input {fundamentals}"
+
+    def test_debt_to_equity_threshold(self):
+        """Debt-to-equity ≥ 150 is treated as a fail."""
+        below = self._call({"profit_margin": 0.1, "operating_margin": 0.1, "roe": 0.1, "debt_to_equity": 149.9})
+        above = self._call({"profit_margin": 0.1, "operating_margin": 0.1, "roe": 0.1, "debt_to_equity": 150.1})
+        # 149.9 should pass the debt check; 150.1 should not
+        assert any("Debt-to-equity" in r for r in below["quality_reasons"])
+        assert not any("Debt-to-equity" in r for r in above["quality_reasons"])
+
+    def test_current_ratio_threshold(self):
+        """Current ratio < 1 is a fail; ≥ 1 is a pass."""
+        pass_case = self._call({"profit_margin": 0.1, "operating_margin": 0.1, "roe": 0.1, "current_ratio": 1.0})
+        fail_case = self._call({"profit_margin": 0.1, "operating_margin": 0.1, "roe": 0.1, "current_ratio": 0.99})
+        assert any("Current ratio" in r for r in pass_case["quality_reasons"])
+        assert not any("Current ratio" in r for r in fail_case["quality_reasons"])
+
+
+# ==============================================================================
 # Integration tests: API endpoint
 # ==============================================================================
 
@@ -420,6 +563,10 @@ class TestSP500ScreenerAPI:
                     "bollinger_status": "near_upper_band",
                     "status_label": "Near Overbought",
                     "status_rank": 3,
+                    "quality_score": 86,
+                    "quality_label": "Strong",
+                    "quality_reasons": ["Positive revenue growth", "Positive profit margin"],
+                    "quality_warnings": [],
                     "last_updated": "2026-01-01T00:00:00+00:00",
                 },
                 {
@@ -432,6 +579,10 @@ class TestSP500ScreenerAPI:
                     "bollinger_status": "below_lower_band",
                     "status_label": "Oversold",
                     "status_rank": 0,
+                    "quality_score": 43,
+                    "quality_label": "Weak",
+                    "quality_reasons": ["Positive profit margin"],
+                    "quality_warnings": ["Revenue growth unavailable"],
                     "last_updated": "2026-01-01T00:00:00+00:00",
                 },
                 {
@@ -444,6 +595,10 @@ class TestSP500ScreenerAPI:
                     "bollinger_status": "within_bands",
                     "status_label": "Neutral",
                     "status_rank": 2,
+                    "quality_score": 57,
+                    "quality_label": "Moderate",
+                    "quality_reasons": ["Positive profit margin", "Positive operating margin"],
+                    "quality_warnings": ["Earnings growth unavailable"],
                     "last_updated": "2026-01-01T00:00:00+00:00",
                 },
             ],
@@ -479,7 +634,8 @@ class TestSP500ScreenerAPI:
         assert len(data["rows"]) > 0
         row = data["rows"][0]
         for key in ("symbol", "company", "sector", "current_price",
-                    "bollinger_status", "status_label"):
+                    "bollinger_status", "status_label",
+                    "quality_score", "quality_label", "quality_reasons", "quality_warnings"):
             assert key in row, f"Row missing key: {key}"
 
     def test_screener_status_filter_oversold(self, client):

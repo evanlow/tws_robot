@@ -16,6 +16,12 @@
     be wrong.  Past technical patterns do not guarantee future results.
     This screener does <strong>not</strong> trigger any trading orders.
   </p>
+  <p style="color:#9ae6b4;font-size:0.82rem;margin:0.5rem 0 0;">
+    📊 <strong>Quality</strong> is a simplified fundamental screen based on
+    available financial metrics (revenue growth, margins, ROE, debt, current
+    ratio).  It is <strong>not</strong> a complete business valuation and may be
+    inaccurate when data is missing, stale, or sector-specific.
+  </p>
 </div>
 
 <!-- Controls -->
@@ -70,6 +76,7 @@
         <th data-col="range_52w_position_percentile" style="cursor:pointer;user-select:none;">52W Position <span class="sort-indicator"></span></th>
         <th data-col="bollinger_percent_b" style="cursor:pointer;user-select:none;">Bollinger %B <span class="sort-indicator"></span></th>
         <th data-col="status_rank" style="cursor:pointer;user-select:none;">Status <span class="sort-indicator"></span></th>
+        <th data-col="quality_label" style="cursor:pointer;user-select:none;">Quality <span class="sort-indicator"></span></th>
         <th>Updated</th>
       </tr>
     </thead>
@@ -108,12 +115,38 @@
     'Insufficient Data':{ bg: '#1a202c', text: '#718096', border: '#4a5568' },
   };
 
+  var QUALITY_COLORS = {
+    'Strong':            { bg: '#1a2e1a', text: '#68d391', border: '#38a169' },
+    'Moderate':          { bg: '#2d2a14', text: '#f6e05e', border: '#d69e2e' },
+    'Weak':              { bg: '#2d1b1b', text: '#fc8181', border: '#e53e3e' },
+    'Insufficient Data': { bg: '#1a202c', text: '#718096', border: '#4a5568' },
+  };
+
   function statusBadge(label) {
     var s = STATUS_COLORS[label] || STATUS_COLORS['Neutral'];
     return '<span style="background:' + s.bg + ';color:' + s.text +
            ';border:1px solid ' + s.border +
            ';border-radius:4px;padding:0.2rem 0.5rem;font-size:0.8rem;white-space:nowrap;">' +
            escapeHtml(label) + '</span>';
+  }
+
+  function qualityBadge(row) {
+    var label = row.quality_label || 'Insufficient Data';
+    var q = QUALITY_COLORS[label] || QUALITY_COLORS['Insufficient Data'];
+    var scoreStr = row.quality_score != null ? ' (' + row.quality_score + ')' : '';
+    var tooltip = '';
+    if (row.quality_reasons && row.quality_reasons.length) {
+      tooltip += row.quality_reasons.join(', ');
+    }
+    if (row.quality_warnings && row.quality_warnings.length) {
+      if (tooltip) tooltip += ' | ';
+      tooltip += 'Warnings: ' + row.quality_warnings.join(', ');
+    }
+    return '<span title="' + escapeHtml(tooltip) +
+           '" style="background:' + q.bg + ';color:' + q.text +
+           ';border:1px solid ' + q.border +
+           ';border-radius:4px;padding:0.2rem 0.5rem;font-size:0.8rem;white-space:nowrap;cursor:default;">' +
+           escapeHtml(label) + escapeHtml(scoreStr) + '</span>';
   }
 
   function escapeHtml(str) {
@@ -165,7 +198,7 @@
 
   function sortValue(row, col) {
     var v = row[col];
-    if (v == null) return col === 'symbol' || col === 'company' || col === 'sector' ? SORT_NULL_STRING : Infinity;
+    if (v == null) return col === 'symbol' || col === 'company' || col === 'sector' || col === 'quality_label' ? SORT_NULL_STRING : Infinity;
     return v;
   }
 
@@ -237,6 +270,7 @@
         '<td>' + (r.range_52w_position_percentile != null ? fmt(r.range_52w_position_percentile, 1) + '%' : '--') + '</td>' +
         '<td>' + (r.bollinger_percent_b != null ? fmt(r.bollinger_percent_b, 3) : '--') + '</td>' +
         '<td>' + statusBadge(r.status_label || 'Insufficient Data') + '</td>' +
+        '<td>' + qualityBadge(r) + '</td>' +
         '<td style="color:#718096;font-size:0.8rem;">' + updatedStr + '</td>' +
         '</tr>';
     });
