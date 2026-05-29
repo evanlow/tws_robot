@@ -264,7 +264,7 @@
         try { updatedStr = new Date(r.last_updated).toLocaleTimeString(); } catch (e) {}
       }
       // Use display_symbol for the link text; use symbol (e.g. D05.SI) for the href
-      var displaySym = r.display_symbol || r.symbol;
+      var displaySym = r.display_symbol || r.symbol.replace(/\.SI$/i, '');
       html += '<tr>' +
         '<td><a href="/stocks/' + encodeURIComponent(r.symbol) + '/analysis" ' +
              'style="color:#63b3ed;text-decoration:none;font-weight:600;" ' +
