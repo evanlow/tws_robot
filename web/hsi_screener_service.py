@@ -27,6 +27,7 @@ Usage::
 """
 
 import csv
+import datetime
 import logging
 import math
 import threading
@@ -214,7 +215,6 @@ class HSIScreenerService:
         annual_dividend = fundamentals.get("dividend_rate")
         dividend_yield = fundamentals.get("dividend_yield")
 
-        import datetime
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         row = base_row.copy()
@@ -238,8 +238,6 @@ class HSIScreenerService:
 
     def _scan(self) -> Dict[str, Any]:
         """Run a full scan of all constituents concurrently and build the response payload."""
-        import datetime
-
         constituents = self._load_constituents()
         if not constituents:
             return {

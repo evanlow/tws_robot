@@ -301,7 +301,7 @@
         try { updatedStr = new Date(r.last_updated).toLocaleTimeString(); } catch (e) {}
       }
       // Use display_symbol for the link text; use symbol (e.g. 0700.HK) for the href
-      var displaySym = r.display_symbol || r.symbol.replace(/\.HK$/i, '');
+      var displaySym = r.display_symbol;
       html += '<tr>' +
         '<td><a href="/stocks/' + encodeURIComponent(r.symbol) + '/analysis" ' +
              'style="color:#63b3ed;text-decoration:none;font-weight:600;" ' +
