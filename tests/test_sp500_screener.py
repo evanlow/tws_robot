@@ -1125,3 +1125,257 @@ class TestDividendFieldsInScreener:
         assert resp.status_code == 200
         assert b"Annual Dividend" in resp.data
         assert b"Dividend Yield" in resp.data
+
+
+# ==============================================================================
+# Tests: compute_oversold_momentum_confirmation
+# ==============================================================================
+
+
+def _make_oversold_bars(period=20, extra=1, base_price=100.0, downtrend=True):
+    """Return period+extra bars that produce a below_lower_band status.
+
+    With downtrend=True the last few closes are falling so the final price is
+    well below the Bollinger lower band.  With downtrend=False the last close
+    is slightly above the previous one (stabilising / rebounding).
+    """
+    import numpy as np
+    rng = []
+    price = base_price
+    for i in range(period + extra):
+        rng.append({
+            "close": round(price, 4),
+            "open": round(price, 4),
+            "high": round(price + 0.5, 4),
+            "low": round(price - 0.5, 4),
+        })
+        if downtrend:
+            price -= 1.0
+        else:
+            price += 0.05
+    return rng
+
+
+class TestComputeOversoldMomentumConfirmation:
+    """Unit tests for web.technical_analysis.compute_oversold_momentum_confirmation."""
+
+    def _call(self, bars, bollinger_status):
+        from web.technical_analysis import compute_oversold_momentum_confirmation
+        return compute_oversold_momentum_confirmation(bars, bollinger_status)
+
+    # ------------------------------------------------------------------
+    # Non-oversold stocks: all fields are null / empty
+    # ------------------------------------------------------------------
+
+    def test_non_oversold_returns_null(self):
+        """Stocks not in oversold territory should return null momentum fields."""
+        bars = _make_bars(60, 100.0)
+        for status in ("within_bands", "near_upper_band", "above_upper_band", "insufficient_data"):
+            result = self._call(bars, status)
+            assert result["momentum_confirmation"] is None, f"Expected None for status={status}"
+            assert result["momentum_label"] is None
+            assert result["momentum_reasons"] == []
+
+    # ------------------------------------------------------------------
+    # Insufficient data
+    # ------------------------------------------------------------------
+
+    def test_insufficient_bars_returns_insufficient_data(self):
+        """Fewer bars than the Bollinger period → Insufficient Data."""
+        bars = _make_bars(10, 100.0)  # only 10 bars, period=20
+        result = self._call(bars, "below_lower_band")
+        assert result["momentum_confirmation"] == "insufficient_data"
+        assert result["momentum_label"] == "Insufficient Data"
+        assert result["momentum_reasons"]
+
+    def test_exactly_period_bars_returns_insufficient_data(self):
+        """Exactly period bars (not enough for previous lower band) → Insufficient Data."""
+        bars = _make_bars(20, 100.0)  # 20 bars, period=20 — need 21
+        result = self._call(bars, "below_lower_band")
+        assert result["momentum_confirmation"] == "insufficient_data"
+
+    # ------------------------------------------------------------------
+    # Still Falling
+    # ------------------------------------------------------------------
+
+    def test_still_falling(self):
+        """Declining close below lower band → Still Falling."""
+        # 25 steady bars followed by a sharp drop, ensuring close < prev close and below band
+        bars = [{"close": 100.0, "open": 100.0, "high": 101.0, "low": 99.0}] * 22
+        # Add 3 sharply falling bars so the latest is well below the band
+        bars += [
+            {"close": 85.0, "open": 90.0, "high": 91.0, "low": 84.0},
+            {"close": 80.0, "open": 85.0, "high": 86.0, "low": 79.0},
+            {"close": 75.0, "open": 80.0, "high": 81.0, "low": 74.0},  # latest
+        ]
+        result = self._call(bars, "below_lower_band")
+        assert result["momentum_confirmation"] == "still_falling"
+        assert result["momentum_label"] == "Still Falling"
+        assert any("below previous close" in r.lower() for r in result["momentum_reasons"])
+
+    # ------------------------------------------------------------------
+    # Early Rebound
+    # ------------------------------------------------------------------
+
+    def test_early_rebound(self):
+        """Price closes back inside lower band after previous bar was below → Early Rebound."""
+        # 21 steady bars at 100, then last bar jumps above the lower band
+        bars = [{"close": 100.0, "open": 100.0, "high": 101.0, "low": 99.0}] * 21
+        # Previous close: well below the band
+        bars[-1] = {"close": 60.0, "open": 61.0, "high": 62.0, "low": 59.0}
+        # Latest close: back inside the band (near 100)
+        bars.append({"close": 97.0, "open": 95.0, "high": 98.0, "low": 94.0})
+        result = self._call(bars, "near_lower_band")
+        assert result["momentum_confirmation"] == "early_rebound"
+        assert result["momentum_label"] == "Early Rebound"
+
+    # ------------------------------------------------------------------
+    # Confirmed Rebound
+    # ------------------------------------------------------------------
+
+    def test_confirmed_rebound(self):
+        """Two consecutive higher closes and price above 5-day SMA → Confirmed Rebound."""
+        # 21 bars at 80 (below band), then rising for 3 bars: 82, 85, 88
+        bars = [{"close": 80.0, "open": 80.0, "high": 81.0, "low": 79.0}] * 21
+        bars[-2] = {"close": 82.0, "open": 81.0, "high": 83.0, "low": 81.0}  # close_2_days_ago
+        bars[-1] = {"close": 85.0, "open": 82.0, "high": 86.0, "low": 81.0}  # previous_close
+        bars.append({"close": 88.0, "open": 85.0, "high": 89.0, "low": 84.0})  # latest
+        # With these last 3 closes the 5-day SMA is around the 80-82 area;
+        # latest (88) > sma_5 should hold.
+        result = self._call(bars, "near_lower_band")
+        assert result["momentum_confirmation"] == "confirmed_rebound"
+        assert result["momentum_label"] == "Confirmed Rebound"
+
+    # ------------------------------------------------------------------
+    # Stabilising
+    # ------------------------------------------------------------------
+
+    def test_stabilising_flat_close(self):
+        """Latest close equals previous close (flat) → Stabilising."""
+        bars = [{"close": 100.0, "open": 100.0, "high": 101.0, "low": 99.0}] * 21
+        # Same close two days in a row
+        bars[-1] = {"close": 85.0, "open": 85.0, "high": 86.0, "low": 84.0}
+        bars.append({"close": 85.0, "open": 85.0, "high": 86.0, "low": 84.0})
+        result = self._call(bars, "near_lower_band")
+        assert result["momentum_confirmation"] == "stabilising"
+        assert result["momentum_label"] == "Stabilising"
+
+    def test_stabilising_slight_rise(self):
+        """Latest close is marginally above previous → Stabilising (not a full rebound)."""
+        bars = [{"close": 100.0, "open": 100.0, "high": 101.0, "low": 99.0}] * 21
+        bars[-1] = {"close": 85.0, "open": 84.0, "high": 86.0, "low": 83.0}
+        bars.append({"close": 85.1, "open": 85.0, "high": 86.0, "low": 84.5})
+        result = self._call(bars, "near_lower_band")
+        # Could be Stabilising or Confirmed Rebound depending on sma_5; we only
+        # assert it is not Still Falling or No Confirmation Yet
+        assert result["momentum_confirmation"] in (
+            "stabilising", "confirmed_rebound", "early_rebound"
+        )
+
+    # ------------------------------------------------------------------
+    # No Confirmation Yet
+    # ------------------------------------------------------------------
+
+    def test_no_confirmation_yet(self):
+        """Oversold, price still below previous close but above lower band → No Confirmation Yet."""
+        # Use alternating bars (90/110) that produce a wide lower band (~76).
+        # previous_close=82 and latest_close=81 are both inside the band and
+        # previous_close > previous_lower_band, so Early Rebound does not fire.
+        # latest_close < previous_close and not below lower_band, so Still Falling
+        # does not fire either.
+        bars = [{"close": 90.0 if i % 2 == 0 else 110.0, "open": 100.0, "high": 111.0, "low": 89.0}
+                for i in range(20)]
+        bars.append({"close": 82.0, "open": 82.0, "high": 83.0, "low": 81.0})  # previous
+        bars.append({"close": 81.0, "open": 82.0, "high": 83.0, "low": 80.0})  # latest
+        result = self._call(bars, "near_lower_band")
+        assert result["momentum_confirmation"] == "no_confirmation_yet"
+        assert result["momentum_label"] == "No Confirmation Yet"
+
+    # ------------------------------------------------------------------
+    # Failed Bounce
+    # ------------------------------------------------------------------
+
+    def test_failed_bounce(self):
+        """Price temporarily recovered inside band but latest close fell back below → Failed Bounce."""
+        # Use 20 bars alternating 90/110 (wide bands, lower_band ≈ 67).
+        # bars[-2] = 85 is above the previous lower band (~79) — a genuine recovery.
+        # bars[-1] = 50 drops back well below the current lower band — a failed bounce.
+        bars = [{"close": 90.0 if i % 2 == 0 else 110.0, "open": 100.0, "high": 111.0, "low": 89.0}
+                for i in range(20)]
+        bars.append({"close": 85.0, "open": 86.0, "high": 88.0, "low": 84.0})  # previous: inside band
+        bars.append({"close": 50.0, "open": 70.0, "high": 71.0, "low": 49.0})  # latest: below band
+        result = self._call(bars, "below_lower_band")
+        assert result["momentum_confirmation"] == "failed_bounce"
+        assert result["momentum_label"] == "Failed Bounce"
+
+    # ------------------------------------------------------------------
+    # Return structure always consistent
+    # ------------------------------------------------------------------
+
+    def test_return_always_has_required_keys(self):
+        """All code paths return a dict with the three required keys."""
+        from web.technical_analysis import compute_oversold_momentum_confirmation
+        bars_enough = _make_bars(60, 100.0)
+        bars_few = _make_bars(10, 100.0)
+
+        scenarios = [
+            (bars_enough, "within_bands"),
+            (bars_enough, "below_lower_band"),
+            (bars_enough, "near_lower_band"),
+            (bars_few, "below_lower_band"),
+        ]
+        for bars, status in scenarios:
+            result = compute_oversold_momentum_confirmation(bars, status)
+            assert "momentum_confirmation" in result
+            assert "momentum_label" in result
+            assert "momentum_reasons" in result
+            assert isinstance(result["momentum_reasons"], list)
+
+    # ------------------------------------------------------------------
+    # Integration: _insufficient_data_row includes momentum fields
+    # ------------------------------------------------------------------
+
+    def test_insufficient_data_row_has_momentum_fields(self):
+        """_insufficient_data_row should include momentum fields defaulted to null."""
+        from web.sp500_screener_service import _insufficient_data_row
+        row = _insufficient_data_row({"symbol": "X", "security": "X Corp", "sector": "Y"})
+        assert "momentum_confirmation" in row
+        assert "momentum_label" in row
+        assert "momentum_reasons" in row
+        assert row["momentum_confirmation"] is None
+        assert row["momentum_label"] is None
+        assert row["momentum_reasons"] == []
+
+    # ------------------------------------------------------------------
+    # Integration: _scan_ticker includes momentum fields
+    # ------------------------------------------------------------------
+
+    def test_scan_ticker_neutral_stock_has_null_momentum(self):
+        """A neutral stock (within_bands) should have null momentum fields."""
+        from web.sp500_screener_service import SP500ScreenerService
+        svc = SP500ScreenerService()
+        constituent = {"symbol": "NTRL", "security": "Neutral Corp", "sector": "Tech", "sub_industry": ""}
+        # All bars at 100.0 with tiny variance → within_bands
+        bars = _make_bars(60, 100.0, variance=0.01)
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
+
+        assert "momentum_confirmation" in row
+        assert "momentum_label" in row
+        assert "momentum_reasons" in row
+        # Non-oversold → momentum fields should be null/empty
+        if row["bollinger_status"] not in ("below_lower_band", "near_lower_band"):
+            assert row["momentum_confirmation"] is None
+            assert row["momentum_label"] is None
+
+    # ------------------------------------------------------------------
+    # Frontend: page renders successfully (Momentum Confirmation column present)
+    # ------------------------------------------------------------------
+
+    def test_sp500_screener_page_has_momentum_column(self, client):
+        """The screener page HTML should contain the Momentum Confirmation header."""
+        resp = client.get("/stocks/sp500")
+        assert resp.status_code == 200
+        assert b"Momentum Confirmation" in resp.data

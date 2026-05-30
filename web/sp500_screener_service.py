@@ -41,6 +41,7 @@ from web.technical_analysis import (
     BOLLINGER_STATUS_RANK,
     calc_52w_percentile,
     compute_bollinger_bands,
+    compute_oversold_momentum_confirmation,
 )
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,9 @@ class SP500ScreenerService:
         # Bollinger Bands
         bb = compute_bollinger_bands(bars, current_price)
 
+        # Momentum confirmation — only populated for oversold / near-oversold
+        momentum = compute_oversold_momentum_confirmation(bars, bb["status"])
+
         # Fundamentals / quality score — failures are non-fatal
         try:
             fundamentals = get_fundamentals(symbol)
@@ -231,6 +235,9 @@ class SP500ScreenerService:
         row["quality_warnings"] = quality["quality_warnings"]
         row["annual_dividend"] = annual_dividend
         row["dividend_yield"] = dividend_yield
+        row["momentum_confirmation"] = momentum["momentum_confirmation"]
+        row["momentum_label"] = momentum["momentum_label"]
+        row["momentum_reasons"] = momentum["momentum_reasons"]
         row["last_updated"] = now_iso
         return row
 
@@ -320,6 +327,9 @@ def _insufficient_data_row(constituent: Dict[str, str]) -> Dict[str, Any]:
         "quality_warnings": [],
         "annual_dividend": None,
         "dividend_yield": None,
+        "momentum_confirmation": None,
+        "momentum_label": None,
+        "momentum_reasons": [],
         "last_updated": None,
     }
 

@@ -78,6 +78,7 @@
         <th data-col="range_52w_position_percentile" style="cursor:pointer;user-select:none;">52W Position <span class="sort-indicator"></span></th>
         <th data-col="bollinger_percent_b" style="cursor:pointer;user-select:none;">Bollinger %B <span class="sort-indicator"></span></th>
         <th data-col="status_rank" style="cursor:pointer;user-select:none;">Status <span class="sort-indicator"></span></th>
+        <th>Momentum Confirmation</th>
         <th data-col="quality_label" style="cursor:pointer;user-select:none;">Quality <span class="sort-indicator"></span></th>
         <th>Updated</th>
       </tr>
@@ -124,6 +125,16 @@
     'Insufficient Data': { bg: '#1a202c', text: '#718096', border: '#4a5568' },
   };
 
+  var MOMENTUM_COLORS = {
+    'Still Falling':       { bg: '#2d1010', text: '#fc8181',  border: '#e53e3e' },
+    'Failed Bounce':       { bg: '#3d1f1f', text: '#fc8181',  border: '#e53e3e' },
+    'No Confirmation Yet': { bg: '#1a202c', text: '#718096',  border: '#4a5568' },
+    'Stabilising':         { bg: '#1a2e47', text: '#90cdf4',  border: '#2b6cb0' },
+    'Early Rebound':       { bg: '#1a3652', text: '#63b3ed',  border: '#3182ce' },
+    'Confirmed Rebound':   { bg: '#1a2e1a', text: '#68d391',  border: '#38a169' },
+    'Insufficient Data':   { bg: '#1a202c', text: '#718096',  border: '#4a5568' },
+  };
+
   function statusBadge(label) {
     var s = STATUS_COLORS[label] || STATUS_COLORS['Neutral'];
     return '<span style="background:' + s.bg + ';color:' + s.text +
@@ -149,6 +160,22 @@
            ';border:1px solid ' + q.border +
            ';border-radius:4px;padding:0.2rem 0.5rem;font-size:0.8rem;white-space:nowrap;cursor:default;">' +
            escapeHtml(label) + escapeHtml(scoreStr) + '</span>';
+  }
+
+  function momentumBadge(row) {
+    if (row.momentum_label == null) {
+      return '<span style="color:#4a5568;">--</span>';
+    }
+    var label = row.momentum_label;
+    var m = MOMENTUM_COLORS[label] || MOMENTUM_COLORS['No Confirmation Yet'];
+    var tooltip = row.momentum_reasons && row.momentum_reasons.length
+      ? row.momentum_reasons.join('; ')
+      : '';
+    return '<span title="' + escapeHtml(tooltip) +
+           '" style="background:' + m.bg + ';color:' + m.text +
+           ';border:1px solid ' + m.border +
+           ';border-radius:4px;padding:0.2rem 0.5rem;font-size:0.8rem;white-space:nowrap;cursor:default;">' +
+           escapeHtml(label) + '</span>';
   }
 
   function escapeHtml(str) {
@@ -275,6 +302,7 @@
         '<td>' + (r.range_52w_position_percentile != null ? fmt(r.range_52w_position_percentile, 1) + '%' : '--') + '</td>' +
         '<td>' + (r.bollinger_percent_b != null ? fmt(r.bollinger_percent_b, 3) : '--') + '</td>' +
         '<td>' + statusBadge(r.status_label || 'Insufficient Data') + '</td>' +
+        '<td>' + momentumBadge(r) + '</td>' +
         '<td>' + qualityBadge(r) + '</td>' +
         '<td style="color:#718096;font-size:0.8rem;">' + updatedStr + '</td>' +
         '</tr>';
