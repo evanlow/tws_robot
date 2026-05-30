@@ -30,7 +30,8 @@
 13. [AI Assistant APIs](#ai-assistant-apis)
 14. [S&P 500 Screener API](#sp500-screener-api)
 15. [STI Screener API](#sti-screener-api)
-16. [Stock Analysis API](#stock-analysis-api)
+16. [HSI Screener API](#hsi-screener-api)
+17. [Stock Analysis API](#stock-analysis-api)
 
 ---
 
@@ -3144,6 +3145,167 @@ fetch('/api/stocks/sti/screener?refresh=true')
 - Constituent list: `data/sti_constituents.csv` (~30 tickers, header: `symbol,display_symbol,security,sector,sub_industry`).
 - Price data: fetched from Yahoo Finance via `data.fundamentals.fetch_price_history` (1-year daily bars).
 - Fundamental data: fetched via `data.fundamentals.get_fundamentals`; failures are non-fatal (quality score shows `"Insufficient Data"`).
+
+---
+
+## HSI Screener API
+
+**NEW in PR #110** — Server-side Bollinger Bands screener for all Hang Seng Index (HSI) constituents.
+
+Scans all ~50 HKEX-listed HSI tickers concurrently (5 worker threads), computes Bollinger
+Bands and 52-week range data, and returns a ranked screener payload.  Results are
+cached in-memory for 15 minutes so repeated page loads cost no network I/O.
+
+All symbols use the yfinance `.HK` suffix (e.g. `0700.HK` for Tencent).  Each row also
+includes a `display_symbol` field with the zero-padded 4-digit HKEX code (e.g. `0700`)
+for display purposes.  Leading zeros are significant and must be preserved — `0005` (HSBC)
+is not the same as `5`.
+
+### `GET /api/stocks/hsi/screener`
+
+Return the HSI Bollinger Bands screener payload.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `status` | string | `all` | Filter by Bollinger status.  One of: `all`, `overbought`, `near_overbought`, `neutral`, `near_oversold`, `oversold`, `insufficient_data`. |
+| `sector` | string | `all` | Filter by sector (case-insensitive, partial match).  E.g. `financials`, `technology`. |
+| `refresh` | string | `false` | Pass `true` to bypass the cache and force a fresh scan. |
+
+**Response:**
+```json
+{
+  "as_of": "2026-01-15T14:30:00+00:00",
+  "source": "hsi_constituents.csv",
+  "count": 50,
+  "summary": {
+    "overbought": 3,
+    "near_overbought": 6,
+    "neutral": 22,
+    "near_oversold": 8,
+    "oversold": 5,
+    "insufficient_data": 6
+  },
+  "rows": [
+    {
+      "symbol": "0700.HK",
+      "display_symbol": "0700",
+      "company": "Tencent",
+      "sector": "Communication Services",
+      "current_price": 380.200,
+      "range_52w_position_percentile": 18.5,
+      "bollinger_percent_b": -0.08,
+      "bollinger_status": "below_lower_band",
+      "status_label": "Oversold",
+      "status_rank": 0,
+      "quality_score": 61,
+      "quality_label": "Moderate",
+      "quality_reasons": ["Positive earnings growth"],
+      "quality_warnings": [],
+      "annual_dividend": 3.40,
+      "dividend_yield": 0.009,
+      "momentum_confirmation": "stabilising",
+      "momentum_label": "Stabilising",
+      "momentum_reasons": ["Latest close at or above previous close"],
+      "last_updated": "2026-01-15T14:30:00+00:00"
+    }
+  ],
+  "scan_duration_seconds": 5.1
+}
+```
+
+**Response Fields:**
+
+- `as_of` — ISO timestamp of when the scan completed (or cache was last populated).
+- `source` — Name of the HSI constituents CSV file used (`hsi_constituents.csv`).
+- `count` — Number of rows returned (after filtering).
+- `summary` — Count of tickers in each Bollinger status bucket for the **entire** unfiltered scan.  Not affected by `status`/`sector` filters.
+- `rows` — Array of ticker rows (see below), sorted by `status_rank` ascending (oversold first), then by sector, then by symbol.
+- `scan_duration_seconds` — Wall-clock time of the last fresh scan, `null` when served from cache.
+
+**Row Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | string | Full yfinance ticker with `.HK` suffix (e.g. `0700.HK`). Use for API drill-down URLs. |
+| `display_symbol` | string | Zero-padded 4-digit HKEX code without `.HK` suffix (e.g. `0700`). Use for display. Leading zeros are preserved. |
+| `company` | string | Company name from the constituents CSV. |
+| `sector` | string | GICS sector. |
+| `current_price` | number\|null | Last closing price in HKD, `null` if data unavailable. Formatted to 3 decimal places. |
+| `range_52w_position_percentile` | number\|null | Position within the 52-week high/low range as a percentage (0 = at 52w low, 100 = at 52w high). |
+| `bollinger_percent_b` | number\|null | Bollinger %B indicator.  Values below 0 indicate below the lower band; above 1 indicate above the upper band. |
+| `bollinger_status` | string | One of: `above_upper_band`, `near_upper_band`, `within_bands`, `near_lower_band`, `below_lower_band`, `insufficient_data`. |
+| `status_label` | string | Human-readable Bollinger status (e.g. `"Oversold"`, `"Near Overbought"`). |
+| `status_rank` | integer | Sort rank: 0 (oversold) → 5 (insufficient data). |
+| `quality_score` | integer\|null | Composite fundamental quality score (0–100), `null` if fundamentals unavailable. |
+| `quality_label` | string | One of: `"Strong"`, `"Moderate"`, `"Weak"`, `"Insufficient Data"`. |
+| `quality_reasons` | array | List of positive fundamental signals contributing to the quality score. |
+| `quality_warnings` | array | List of negative signals or missing data items that reduce the quality score. |
+| `annual_dividend` | float\|null | Annual dividend per share in HKD, `null` if not a dividend payer or data unavailable. |
+| `dividend_yield` | float\|null | Dividend yield as a decimal (e.g. `0.054` = 5.4%), `null` if unavailable. |
+| `momentum_confirmation` | string\|null | Momentum confirmation code for oversold stocks (see below), `null` when not oversold. |
+| `momentum_label` | string\|null | Human-readable momentum label, `null` when not oversold. |
+| `momentum_reasons` | array | Plain-English reasons explaining the momentum assessment. |
+| `last_updated` | string\|null | ISO timestamp of when this row was last refreshed, `null` if scan failed. |
+
+**Bollinger Status Values:**
+
+| `bollinger_status` | `status_label` | `status_rank` | Description |
+|--------------------|----------------|---------------|-------------|
+| `below_lower_band` | Oversold | 0 | Price is below the lower Bollinger Band |
+| `near_lower_band` | Near Oversold | 1 | Price is within 5% of the lower band |
+| `within_bands` | Neutral | 2 | Price is comfortably within the bands |
+| `near_upper_band` | Near Overbought | 3 | Price is within 5% of the upper band |
+| `above_upper_band` | Overbought | 4 | Price is above the upper Bollinger Band |
+| `insufficient_data` | Insufficient Data | 5 | Fewer than 20 bars available or data fetch failed |
+
+**Momentum Confirmation Values** (only populated when `bollinger_status` is `below_lower_band` or `near_lower_band`; `null` for all other statuses):
+
+| `momentum_confirmation` | `momentum_label` | Description |
+|-------------------------|-----------------|-------------|
+| `still_falling` | Still Falling | Latest close below previous close and below the lower band |
+| `failed_bounce` | Failed Bounce | Price briefly recovered into the band but dropped back below it |
+| `early_rebound` | Early Rebound | Closed back inside the lower band after previous bar was at or below it |
+| `confirmed_rebound` | Confirmed Rebound | Price above 5-day SMA with two consecutive higher closes |
+| `stabilising` | Stabilising | Selling pressure easing — latest close at or above previous close |
+| `no_confirmation_yet` | No Confirmation Yet | Oversold but no clear rebound signal yet |
+
+**Page Route:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/stocks/hsi` | Renders the interactive HSI screener page with status/sector filters, summary bar, and sortable table. |
+
+**JavaScript Examples:**
+```javascript
+// Fetch all HSI constituents
+fetch('/api/stocks/hsi/screener')
+  .then(r => r.json())
+  .then(data => console.log(`${data.count} of ${data.summary.total} constituents returned`));
+
+// Filter to oversold Financials stocks
+fetch('/api/stocks/hsi/screener?status=oversold&sector=financials')
+  .then(r => r.json())
+  .then(data => console.log(data.rows));
+
+// Force a fresh scan
+fetch('/api/stocks/hsi/screener?refresh=true')
+  .then(r => r.json())
+  .then(data => console.log(`Scan took ${data.scan_duration_seconds}s`));
+```
+
+**Data Source:**
+- Constituent list: `data/hsi_constituents.csv` (~50 tickers, header: `symbol,display_symbol,security,sector,sub_industry`).
+- Price data: fetched from Yahoo Finance via `data.fundamentals.fetch_price_history` (1-year daily bars).
+- Fundamental data: fetched via `data.fundamentals.get_fundamentals`; failures are non-fatal (quality score shows `"Insufficient Data"`).
+
+**HK Market Notes:**
+- All prices are in Hong Kong Dollars (HKD).
+- HKEX stock codes are 4-digit zero-padded integers.  `display_symbol` always preserves leading zeros (e.g. `0005` for HSBC, `0941` for China Mobile).
+- Key permanent constituents: Tencent `0700.HK`, Alibaba `9988.HK`, HSBC `0005.HK`, China Mobile `0941.HK`, AIA Group `1299.HK`.
+- Some constituents are REIT or infrastructure trusts (e.g. Link REIT `0823.HK`).
+- The cache TTL is 15 minutes, matching the SP500 and STI screeners.
 
 ---
 

@@ -724,6 +724,25 @@ class TestSTIScreenerAPI:
         result = resp.get_json()
         assert result["count"] == 4
 
+    def test_screener_error_payload_propagated_to_response(self, client):
+        """When get_screener_data returns a dict with 'error' key, the API
+        includes it in the JSON response (covers the 'if error in data' branch)."""
+        error_data = {
+            "rows": [],
+            "count": 0,
+            "summary": {},
+            "scan_duration_seconds": None,
+            "error": "No constituents loaded",
+        }
+        with patch(
+            "web.routes.api_sti_screener.sti_screener_service.get_screener_data",
+            return_value=error_data,
+        ):
+            resp = client.get("/api/stocks/sti/screener")
+        assert resp.status_code == 200
+        result = resp.get_json()
+        assert result["error"] == "No constituents loaded"
+
 
 # ==============================================================================
 # Integration tests: page route
