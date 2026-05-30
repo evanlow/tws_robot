@@ -917,3 +917,184 @@ class TestSTIScreenerServiceAdditional:
         # Only one scan should have run; both calls should have a result
         assert scan_calls[0] == 1
         assert "first" in results and "second" in results
+
+
+# ==============================================================================
+# Dividend field tests
+# ==============================================================================
+
+
+class TestDividendFieldsInSTIScreener:
+    """Tests that STI screener rows include annual_dividend and dividend_yield."""
+
+    def _mock_screener_data_with_dividends(self):
+        """Return STI screener payload that includes dividend fields."""
+        return {
+            "as_of": "2026-01-01T00:00:00+00:00",
+            "source": "sti_constituents.csv",
+            "count": 2,
+            "summary": {
+                "overbought": 0,
+                "near_overbought": 0,
+                "neutral": 2,
+                "near_oversold": 0,
+                "oversold": 0,
+                "insufficient_data": 0,
+            },
+            "scan_duration_seconds": 1.0,
+            "rows": [
+                {
+                    "symbol": "D05.SI",
+                    "display_symbol": "D05",
+                    "company": "DBS Group Holdings",
+                    "sector": "Financials",
+                    "current_price": 35.50,
+                    "range_52w_position_percentile": 72.1,
+                    "bollinger_percent_b": 0.5,
+                    "bollinger_status": "within_bands",
+                    "status_label": "Neutral",
+                    "status_rank": 2,
+                    "quality_score": 86,
+                    "quality_label": "Strong",
+                    "quality_reasons": [],
+                    "quality_warnings": [],
+                    "annual_dividend": 1.92,
+                    "dividend_yield": 0.054,
+                    "momentum_confirmation": None,
+                    "momentum_label": None,
+                    "momentum_reasons": [],
+                    "last_updated": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "symbol": "Z74.SI",
+                    "display_symbol": "Z74",
+                    "company": "Singtel",
+                    "sector": "Communication Services",
+                    "current_price": 2.45,
+                    "range_52w_position_percentile": 40.0,
+                    "bollinger_percent_b": 0.5,
+                    "bollinger_status": "within_bands",
+                    "status_label": "Neutral",
+                    "status_rank": 2,
+                    "quality_score": 57,
+                    "quality_label": "Moderate",
+                    "quality_reasons": [],
+                    "quality_warnings": [],
+                    "annual_dividend": None,
+                    "dividend_yield": None,
+                    "momentum_confirmation": None,
+                    "momentum_label": None,
+                    "momentum_reasons": [],
+                    "last_updated": "2026-01-01T00:00:00+00:00",
+                },
+            ],
+        }
+
+    def test_screener_row_includes_dividend_fields(self, client):
+        """Each STI screener row should include annual_dividend and dividend_yield keys."""
+        with patch(
+            "web.routes.api_sti_screener.sti_screener_service.get_screener_data",
+            return_value=self._mock_screener_data_with_dividends(),
+        ):
+            resp = client.get("/api/stocks/sti/screener")
+        data = resp.get_json()
+        assert len(data["rows"]) > 0
+        for row in data["rows"]:
+            assert "annual_dividend" in row, f"Row {row['symbol']} missing annual_dividend"
+            assert "dividend_yield" in row, f"Row {row['symbol']} missing dividend_yield"
+
+    def test_screener_row_dividend_values_present(self, client):
+        """Rows with dividend data return non-null values."""
+        with patch(
+            "web.routes.api_sti_screener.sti_screener_service.get_screener_data",
+            return_value=self._mock_screener_data_with_dividends(),
+        ):
+            resp = client.get("/api/stocks/sti/screener")
+        data = resp.get_json()
+        dbs = next(r for r in data["rows"] if r["symbol"] == "D05.SI")
+        assert dbs["annual_dividend"] == pytest.approx(1.92)
+        assert dbs["dividend_yield"] == pytest.approx(0.054)
+
+    def test_screener_row_missing_dividend_is_null(self, client):
+        """Rows with no dividend data should have None for both fields."""
+        with patch(
+            "web.routes.api_sti_screener.sti_screener_service.get_screener_data",
+            return_value=self._mock_screener_data_with_dividends(),
+        ):
+            resp = client.get("/api/stocks/sti/screener")
+        data = resp.get_json()
+        singtel = next(r for r in data["rows"] if r["symbol"] == "Z74.SI")
+        assert singtel["annual_dividend"] is None
+        assert singtel["dividend_yield"] is None
+
+    def test_scan_ticker_includes_dividend_fields(self):
+        """_scan_ticker should populate annual_dividend and dividend_yield from fundamentals."""
+        from web.sti_screener_service import STIScreenerService
+
+        svc = STIScreenerService()
+        constituent = {
+            "symbol": "D05.SI",
+            "display_symbol": "D05",
+            "security": "DBS Group Holdings",
+            "sector": "Financials",
+            "sub_industry": "",
+        }
+        bars = _make_bars(30, 35.0)
+
+        mock_fundamentals = {
+            "dividend_rate": 1.92,
+            "dividend_yield": 0.054,
+            "payout_ratio": 0.50,
+        }
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            with patch("data.fundamentals.get_fundamentals", return_value=mock_fundamentals):
+                row = svc._scan_ticker(constituent)
+
+        assert row["annual_dividend"] == pytest.approx(1.92)
+        assert row["dividend_yield"] == pytest.approx(0.054)
+
+    def test_scan_ticker_missing_dividend_stays_none(self):
+        """_scan_ticker should set dividend fields to None when fundamentals lack dividend data."""
+        from web.sti_screener_service import STIScreenerService
+
+        svc = STIScreenerService()
+        constituent = {
+            "symbol": "Z74.SI",
+            "display_symbol": "Z74",
+            "security": "Singtel",
+            "sector": "Communication Services",
+            "sub_industry": "",
+        }
+        bars = _make_bars(30, 2.5)
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
+
+        assert row["annual_dividend"] is None
+        assert row["dividend_yield"] is None
+
+    def test_insufficient_data_row_has_dividend_fields(self):
+        """_sti_insufficient_data_row should include annual_dividend and dividend_yield as None."""
+        from web.sti_screener_service import _sti_insufficient_data_row
+
+        constituent = {
+            "symbol": "TEST.SI",
+            "display_symbol": "TEST",
+            "security": "Test Corp",
+            "sector": "Financials",
+            "sub_industry": "",
+        }
+        row = _sti_insufficient_data_row(constituent)
+        assert "annual_dividend" in row
+        assert "dividend_yield" in row
+        assert row["annual_dividend"] is None
+        assert row["dividend_yield"] is None
+
+    def test_sti_screener_page_has_dividend_columns(self, client):
+        """The STI screener page HTML should contain Annual Dividend and Dividend Yield column headers."""
+        resp = client.get("/stocks/sti")
+        assert resp.status_code == 200
+        assert b"Annual Dividend" in resp.data
+        assert b"Dividend Yield" in resp.data

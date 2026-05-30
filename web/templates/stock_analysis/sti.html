@@ -24,6 +24,13 @@
     inaccurate when data is missing, stale, or sector-specific.  REIT-specific
     metrics (e.g. distribution yield, NAV) are not included.
   </p>
+  <p style="color:#9ae6b4;font-size:0.82rem;margin:0.5rem 0 0;">
+  💰 <strong>Annual Dividend</strong> and <strong>Dividend Yield</strong> are sourced
+  from public data and may be stale, incomplete, or inaccurate.  SGX-listed stocks,
+  REITs, and trusts may pay semi-annual, quarterly, or irregular distributions.
+  Verify against company filings.  A high yield may reflect price weakness rather
+  than dividend safety.  These figures are <strong>not</strong> buy/sell recommendations.
+  </p>
 </div>
 
 <!-- Controls -->
@@ -80,6 +87,8 @@
         <th data-col="status_rank" style="cursor:pointer;user-select:none;">Status <span class="sort-indicator"></span></th>
         <th>Momentum Confirmation</th>
         <th data-col="quality_label" style="cursor:pointer;user-select:none;">Quality <span class="sort-indicator"></span></th>
+        <th data-col="annual_dividend" style="cursor:pointer;user-select:none;">Annual Dividend <span class="sort-indicator"></span></th>
+        <th data-col="dividend_yield" style="cursor:pointer;user-select:none;">Dividend Yield <span class="sort-indicator"></span></th>
         <th>Updated</th>
       </tr>
     </thead>
@@ -304,6 +313,8 @@
         '<td>' + statusBadge(r.status_label || 'Insufficient Data') + '</td>' +
         '<td>' + momentumBadge(r) + '</td>' +
         '<td>' + qualityBadge(r) + '</td>' +
+        '<td style="color:#e2e8f0;">' + (r.annual_dividend != null ? r.annual_dividend.toFixed(2) : '--') + '</td>' +
+        '<td style="color:#e2e8f0;">' + (r.dividend_yield != null ? (r.dividend_yield * 100).toFixed(2) + '%' : '--') + '</td>' +
         '<td style="color:#718096;font-size:0.8rem;">' + updatedStr + '</td>' +
         '</tr>';
     });

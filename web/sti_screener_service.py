@@ -207,6 +207,10 @@ class STIScreenerService:
             fundamentals = {}
         quality = compute_quality_score(fundamentals)
 
+        # Dividend fields — missing values stay None
+        annual_dividend = fundamentals.get("dividend_rate")
+        dividend_yield = fundamentals.get("dividend_yield")
+
         import datetime
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -221,6 +225,8 @@ class STIScreenerService:
         row["quality_label"] = quality["quality_label"]
         row["quality_reasons"] = quality["quality_reasons"]
         row["quality_warnings"] = quality["quality_warnings"]
+        row["annual_dividend"] = annual_dividend
+        row["dividend_yield"] = dividend_yield
         row["momentum_confirmation"] = momentum["momentum_confirmation"]
         row["momentum_label"] = momentum["momentum_label"]
         row["momentum_reasons"] = momentum["momentum_reasons"]
@@ -311,6 +317,8 @@ def _sti_insufficient_data_row(constituent: Dict[str, str]) -> Dict[str, Any]:
         "quality_label": "Insufficient Data",
         "quality_reasons": [],
         "quality_warnings": [],
+        "annual_dividend": None,
+        "dividend_yield": None,
         "momentum_confirmation": None,
         "momentum_label": None,
         "momentum_reasons": [],
