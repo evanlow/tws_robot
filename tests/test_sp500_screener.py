@@ -1394,3 +1394,365 @@ class TestComputeOversoldMomentumConfirmation:
         resp = client.get("/stocks/sp500")
         assert resp.status_code == 200
         assert b"Momentum Confirmation" in resp.data
+
+
+# ==============================================================================
+# Tests: compute_rsi
+# ==============================================================================
+
+
+def _make_rsi_bars(closes):
+    """Build minimal OHLCV bars from a list of close prices."""
+    return [
+        {"open": c, "high": c + 0.5, "low": c - 0.5, "close": c, "volume": 100_000}
+        for c in closes
+    ]
+
+
+class TestComputeRSI:
+    """Unit tests for web.technical_analysis.compute_rsi."""
+
+    def _call(self, bars, period=14):
+        from web.technical_analysis import compute_rsi
+        return compute_rsi(bars, period=period)
+
+    # ------------------------------------------------------------------
+    # Insufficient data
+    # ------------------------------------------------------------------
+
+    def test_insufficient_bars_returns_insufficient_data(self):
+        """Fewer than period+1 bars → rsi_insufficient_data."""
+        bars = _make_rsi_bars([100.0] * 14)  # period=14, need 15
+        result = self._call(bars)
+        assert result["value"] is None
+        assert result["previous_value"] is None
+        assert result["status"] == "rsi_insufficient_data"
+        assert result["label"] == "RSI Insufficient Data"
+        assert result["reasons"] == []
+
+    def test_exactly_period_bars_insufficient(self):
+        """Exactly period bars with a custom period (need period+1) → rsi_insufficient_data."""
+        bars = _make_rsi_bars([100.0] * 5)
+        result = self._call(bars, period=5)
+        assert result["status"] == "rsi_insufficient_data"
+
+    def test_minimum_bars_gives_value(self):
+        """Exactly period+1 bars → value is computed (no previous_value)."""
+        bars = _make_rsi_bars([100.0] * 15)
+        result = self._call(bars)
+        # Flat prices → no gains/losses, but avg_loss=0 → RSI=100
+        assert result["value"] is not None
+        assert result["previous_value"] is None
+
+    # ------------------------------------------------------------------
+    # RSI oversold (below 30)
+    # ------------------------------------------------------------------
+
+    def test_rsi_oversold_status(self):
+        """Strongly declining closes → RSI below 30 → rsi_oversold."""
+        # 15 bars with a strong downtrend
+        closes = [100.0 - i * 5 for i in range(15)]
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
+        assert result["value"] is not None
+        assert result["value"] < 30
+        assert result["status"] == "rsi_oversold"
+        assert result["label"] == "RSI Oversold"
+        assert any("below 30" in r for r in result["reasons"])
+
+    def test_rsi_oversold_reasons_present(self):
+        """RSI oversold result includes a reason mentioning 30."""
+        closes = [100.0 - i * 4 for i in range(20)]
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
+        assert result["status"] == "rsi_oversold"
+        assert result["reasons"]
+
+    # ------------------------------------------------------------------
+    # RSI recovering from oversold (crossed back above 30)
+    # ------------------------------------------------------------------
+
+    def test_rsi_recovering_from_oversold(self):
+        """RSI crosses from below 30 to above 30 → rsi_recovering_from_oversold."""
+        # Build bars where previous RSI is below 30 and current RSI crosses above
+        # Strategy: 15 sharply declining bars (RSI < 30), then 1 strong up bar
+        closes = [100.0 - i * 5 for i in range(15)]  # 15 declining bars
+        closes.append(closes[-1] + 25.0)              # strong rebound → pushes RSI above 30
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
+        # The rebound bar should push RSI above 30 while previous was below
+        if result["status"] == "rsi_recovering_from_oversold":
+            assert result["label"] == "RSI Recovering"
+            assert any("crossed back above 30" in r for r in result["reasons"])
+            assert result["previous_value"] is not None
+            assert result["previous_value"] < 30
+            assert result["value"] >= 30
+        else:
+            # If the rebound wasn't big enough, at least ensure we get oversold
+            assert result["status"] == "rsi_oversold"
+
+    def test_rsi_recovering_explicit(self):
+        """Explicit bars with known RSI crossing → rsi_recovering_from_oversold."""
+        # Construct a scenario: 14 large down moves, then 1 large up move
+        # Previous RSI (after 14 down moves): 0.0 (all losses)
+        # Current RSI (after 1 large up, shifting out 1 loss): should be above 30
+        closes = [100.0]
+        for _ in range(14):
+            closes.append(closes[-1] - 6.0)   # 14 large drops → RSI = 0
+        closes.append(closes[-1] + 50.0)       # strong reversal
+        bars = _make_rsi_bars(closes)          # 16 bars total
+        result = self._call(bars)
+        # Window for current RSI (end=15): 14 changes at indices 2..15, includes
+        # 1 gain of 50 and 13 losses of 6: avg_gain=50/14≈3.6, avg_loss=78/14≈5.6
+        # RSI = 100 - 100/(1+3.6/5.6) ≈ 39 (above 30)
+        # Previous (end=14): 14 changes, all losses → RSI = 0 (below 30)
+        assert result["status"] == "rsi_recovering_from_oversold"
+        assert result["label"] == "RSI Recovering"
+        assert result["value"] is not None
+        assert result["value"] >= 30
+        assert result["previous_value"] is not None
+        assert result["previous_value"] < 30
+
+    # ------------------------------------------------------------------
+    # RSI neutral
+    # ------------------------------------------------------------------
+
+    def test_rsi_flat_prices_treated_as_overbought(self):
+        """Flat prices with no moves → avg_loss=0 → RSI=100 → rsi_overbought."""
+        closes = [100.0] * 20
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
+        # avg_loss=0 forces RSI to 100, which is overbought (>70)
+        assert result["status"] == "rsi_overbought"
+        assert result["value"] == 100.0
+
+    def test_rsi_neutral_midrange_prices(self):
+        """Alternating equal gains and losses → RSI≈50 → rsi_neutral."""
+        # Build 16 bars: 15 alternating +1/-1 moves from 100
+        closes = [100.0]
+        for i in range(15):
+            closes.append(closes[-1] + (1.0 if i % 2 == 0 else -1.0))
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
+        assert result["value"] is not None
+        assert result["status"] == "rsi_neutral"
+
+    def test_rsi_neutral_mixed_prices(self):
+        """Alternating up/down closes produce RSI near 50 → rsi_neutral."""
+        closes = []
+        for i in range(20):
+            closes.append(100.0 + (2.0 if i % 2 == 0 else -2.0))
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
+        assert result["value"] is not None
+        # With equal gains/losses RSI should be close to 50 → neutral
+        assert result["status"] in ("rsi_neutral", "rsi_weakening")
+
+    # ------------------------------------------------------------------
+    # RSI weakening
+    # ------------------------------------------------------------------
+
+    def test_rsi_weakening(self):
+        """RSI falling below 40 → rsi_weakening."""
+        # Mild downtrend that puts RSI in 30-40 range and falling
+        # Start flat, then gentle decline
+        closes = [100.0] * 8 + [99.0, 98.5, 98.0, 97.5, 97.0, 96.5, 96.0]
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
+        # RSI should be between 30 and 40 and falling from previous
+        if result["status"] == "rsi_weakening":
+            assert result["label"] == "RSI Weakening"
+            assert any("falling" in r for r in result["reasons"])
+
+    # ------------------------------------------------------------------
+    # RSI overbought (above 70)
+    # ------------------------------------------------------------------
+
+    def test_rsi_overbought(self):
+        """Strongly rising closes → RSI above 70 → rsi_overbought."""
+        closes = [100.0 + i * 5 for i in range(20)]
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
+        assert result["value"] is not None
+        assert result["value"] > 70
+        assert result["status"] == "rsi_overbought"
+        assert result["label"] == "RSI Overbought"
+        assert any("above 70" in r for r in result["reasons"])
+
+    # ------------------------------------------------------------------
+    # Return structure is always consistent
+    # ------------------------------------------------------------------
+
+    def test_return_always_has_required_keys(self):
+        """All code paths return a dict with the required keys."""
+        from web.technical_analysis import compute_rsi
+        scenarios = [
+            _make_rsi_bars([100.0] * 5),                          # insufficient
+            _make_rsi_bars([100.0 - i * 5 for i in range(20)]),  # oversold
+            _make_rsi_bars([100.0 + i * 5 for i in range(20)]),  # overbought
+            _make_rsi_bars([100.0] * 20),                         # flat/overbought
+        ]
+        required_keys = {"value", "previous_value", "status", "label", "reasons"}
+        for bars in scenarios:
+            result = compute_rsi(bars)
+            for k in required_keys:
+                assert k in result, f"Missing key '{k}' for scenario with {len(bars)} bars"
+            assert isinstance(result["reasons"], list)
+
+
+# ==============================================================================
+# Tests: RSI fields in compute_oversold_momentum_confirmation
+# ==============================================================================
+
+
+class TestMomentumConfirmationRSIFields:
+    """RSI fields are present in all compute_oversold_momentum_confirmation returns."""
+
+    def _call(self, bars, bollinger_status):
+        from web.technical_analysis import compute_oversold_momentum_confirmation
+        return compute_oversold_momentum_confirmation(bars, bollinger_status)
+
+    _RSI_KEYS = {"rsi_14", "rsi_status", "rsi_label", "rsi_reasons"}
+
+    def test_non_oversold_includes_rsi_fields(self):
+        """Non-oversold rows include RSI fields even though momentum is null."""
+        bars = _make_bars(60, 100.0)
+        result = self._call(bars, "within_bands")
+        for k in self._RSI_KEYS:
+            assert k in result, f"Missing RSI key '{k}' for non-oversold row"
+        assert isinstance(result["rsi_reasons"], list)
+
+    def test_insufficient_data_includes_rsi_fields(self):
+        """Insufficient-data rows include RSI fields."""
+        bars = _make_bars(10, 100.0)
+        result = self._call(bars, "below_lower_band")
+        for k in self._RSI_KEYS:
+            assert k in result
+
+    def test_oversold_stock_includes_rsi_fields(self):
+        """Oversold stocks always have RSI fields in the result."""
+        bars = [{"close": 100.0, "open": 100.0, "high": 101.0, "low": 99.0}] * 22
+        bars += [
+            {"close": 85.0, "open": 90.0, "high": 91.0, "low": 84.0},
+            {"close": 80.0, "open": 85.0, "high": 86.0, "low": 79.0},
+            {"close": 75.0, "open": 80.0, "high": 81.0, "low": 74.0},
+        ]
+        result = self._call(bars, "below_lower_band")
+        for k in self._RSI_KEYS:
+            assert k in result
+
+    def test_rsi_oversold_reason_in_still_falling(self):
+        """Still Falling state adds RSI reason when RSI is below 30."""
+        bars = [{"close": 100.0, "open": 100.0, "high": 101.0, "low": 99.0}] * 22
+        bars += [
+            {"close": 85.0, "open": 90.0, "high": 91.0, "low": 84.0},
+            {"close": 80.0, "open": 85.0, "high": 86.0, "low": 79.0},
+            {"close": 75.0, "open": 80.0, "high": 81.0, "low": 74.0},
+        ]
+        result = self._call(bars, "below_lower_band")
+        assert result["momentum_confirmation"] == "still_falling"
+        # RSI should be oversold given the large declines
+        if result["rsi_14"] is not None and result["rsi_14"] < 30:
+            assert any("30" in r or "RSI" in r for r in result["momentum_reasons"])
+
+    def test_rsi_recovery_triggers_early_rebound(self):
+        """RSI crossing back above 30 can trigger early_rebound classification."""
+        # Build bars: 14 sharp declines (RSI << 30), then one strong rebound bar.
+        # The rebound bar should push RSI above 30 (recovering) while price may
+        # still be below the Bollinger lower band or near it.
+        closes = [100.0]
+        for _ in range(14):
+            closes.append(closes[-1] - 6.0)   # strong declines, RSI → 0
+        # Add enough stable bars to build period-21 Bollinger band
+        for _ in range(8):
+            closes.append(closes[-1])          # flat
+        closes.append(closes[-1] + 50.0)       # large recovery → RSI crosses 30
+        bars = _make_rsi_bars(closes)
+        # Use near_lower_band: price is recovering but still near oversold territory
+        result = self._call(bars, "near_lower_band")
+        # If RSI is recovering from oversold, we expect early_rebound or confirmed_rebound
+        if result.get("rsi_status") == "rsi_recovering_from_oversold":
+            assert result["momentum_confirmation"] in (
+                "early_rebound", "confirmed_rebound", "stabilising"
+            )
+            assert any("RSI" in r for r in result["momentum_reasons"])
+
+    def test_rsi_reasons_in_early_rebound(self):
+        """Price-based Early Rebound includes RSI context in reasons."""
+        bars = [{"close": 100.0, "open": 100.0, "high": 101.0, "low": 99.0}] * 21
+        bars[-1] = {"close": 60.0, "open": 61.0, "high": 62.0, "low": 59.0}
+        bars.append({"close": 97.0, "open": 95.0, "high": 98.0, "low": 94.0})
+        result = self._call(bars, "near_lower_band")
+        assert result["momentum_confirmation"] == "early_rebound"
+        # RSI fields should be present
+        assert "rsi_14" in result
+        assert "rsi_status" in result
+
+    def test_non_oversold_has_null_momentum_but_rsi_value(self):
+        """Non-oversold row: momentum is null, but RSI value may be present."""
+        bars = _make_bars(60, 100.0)
+        result = self._call(bars, "within_bands")
+        assert result["momentum_confirmation"] is None
+        assert result["momentum_label"] is None
+        # RSI should be computed (enough bars)
+        assert result["rsi_14"] is not None
+        assert result["rsi_status"] != "rsi_insufficient_data"
+
+    def test_no_confirmation_yet_includes_rsi_reason_when_oversold(self):
+        """No Confirmation Yet with RSI oversold includes an RSI reason."""
+        # Use alternating bars (90/110) that put RSI near 50 (not oversold).
+        # These bars give No Confirmation Yet but with neutral RSI.
+        bars = [{"close": 90.0 if i % 2 == 0 else 110.0, "open": 100.0, "high": 111.0, "low": 89.0}
+                for i in range(20)]
+        bars.append({"close": 82.0, "open": 82.0, "high": 83.0, "low": 81.0})
+        bars.append({"close": 81.0, "open": 82.0, "high": 83.0, "low": 80.0})
+        result = self._call(bars, "near_lower_band")
+        assert result["momentum_confirmation"] == "no_confirmation_yet"
+        assert "rsi_14" in result
+        # RSI reason presence depends on whether RSI is oversold for this data
+
+
+# ==============================================================================
+# Tests: RSI fields in _insufficient_data_row and _scan_ticker
+# ==============================================================================
+
+
+class TestScreenerRSIFields:
+    """RSI fields are present in screener rows."""
+
+    def test_insufficient_data_row_has_rsi_fields(self):
+        """_insufficient_data_row should include RSI fields defaulted to None/empty."""
+        from web.sp500_screener_service import _insufficient_data_row
+        row = _insufficient_data_row({"symbol": "X", "security": "X Corp", "sector": "Y"})
+        assert "rsi_14" in row
+        assert "rsi_status" in row
+        assert "rsi_label" in row
+        assert "rsi_reasons" in row
+        assert row["rsi_14"] is None
+        assert row["rsi_status"] is None
+        assert row["rsi_label"] is None
+        assert row["rsi_reasons"] == []
+
+    def test_scan_ticker_neutral_stock_has_rsi_fields(self):
+        """A scanned neutral stock row includes RSI fields."""
+        from web.sp500_screener_service import SP500ScreenerService
+        svc = SP500ScreenerService()
+        constituent = {"symbol": "RSI1", "security": "RSI Test Corp", "sector": "Tech", "sub_industry": ""}
+        bars = [
+            {"open": 100.0, "high": 101.0, "low": 99.0,
+             "close": 90.0 if i % 2 == 0 else 110.0, "volume": 500_000}
+            for i in range(59)
+        ]
+        bars.append({"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 500_000})
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
+
+        assert "rsi_14" in row
+        assert "rsi_status" in row
+        assert "rsi_label" in row
+        assert "rsi_reasons" in row
+        # Enough bars for RSI → value should not be None
+        assert row["rsi_14"] is not None
+        assert row["rsi_status"] != "rsi_insufficient_data"

@@ -238,6 +238,10 @@ class SP500ScreenerService:
         row["momentum_confirmation"] = momentum["momentum_confirmation"]
         row["momentum_label"] = momentum["momentum_label"]
         row["momentum_reasons"] = momentum["momentum_reasons"]
+        row["rsi_14"] = momentum["rsi_14"]
+        row["rsi_status"] = momentum["rsi_status"]
+        row["rsi_label"] = momentum["rsi_label"]
+        row["rsi_reasons"] = momentum["rsi_reasons"]
         row["last_updated"] = now_iso
         return row
 
@@ -330,6 +334,10 @@ def _insufficient_data_row(constituent: Dict[str, str]) -> Dict[str, Any]:
         "momentum_confirmation": None,
         "momentum_label": None,
         "momentum_reasons": [],
+        "rsi_14": None,
+        "rsi_status": None,
+        "rsi_label": None,
+        "rsi_reasons": [],
         "last_updated": None,
     }
 
