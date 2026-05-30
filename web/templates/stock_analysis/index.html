@@ -555,6 +555,16 @@ function formatStatus(status) {
   return status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+}
+
 /* ---- Valuation Metrics ---- */
 function formatRatio(val) {
   if (val === null || val === undefined || !isFinite(val)) return '--';
@@ -593,7 +603,7 @@ function renderValuationMetrics(vm) {
 
   const badgeColor = peLabelColor(vm.pe_label);
   const badge = vm.pe_label
-    ? `<span style="display:inline-block;padding:0.2rem 0.6rem;border-radius:12px;font-size:0.75rem;font-weight:600;background:${badgeColor}20;color:${badgeColor};border:1px solid ${badgeColor}40;">${vm.pe_label}</span>`
+    ? `<span style="display:inline-block;padding:0.2rem 0.6rem;border-radius:12px;font-size:0.75rem;font-weight:600;background:${badgeColor}20;color:${badgeColor};border:1px solid ${badgeColor}40;">${escapeHtml(vm.pe_label)}</span>`
     : '';
 
   const rows = [
@@ -613,12 +623,12 @@ function renderValuationMetrics(vm) {
 
   let html = '<div class="stats-grid">';
   rows.forEach(r => {
-    html += `<div class="stat-card"><span class="stat-label">${r.label}</span><span class="stat-value">${r.value}${r.extra ? ' ' + r.extra : ''}</span></div>`;
+    html += `<div class="stat-card"><span class="stat-label">${r.label}</span><span class="stat-value">${escapeHtml(r.value)}${r.extra ? ' ' + r.extra : ''}</span></div>`;
   });
   html += '</div>';
 
   if (vm.valuation_note) {
-    html += `<p style="color:#a0aec0;font-size:0.85rem;margin-top:0.75rem;line-height:1.5;">${vm.valuation_note}</p>`;
+    html += `<p style="color:#a0aec0;font-size:0.85rem;margin-top:0.75rem;line-height:1.5;">${escapeHtml(vm.valuation_note)}</p>`;
   }
 
   el.innerHTML = html;
