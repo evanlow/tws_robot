@@ -651,7 +651,7 @@ function dividendTagColor(tag) {
   if (tag === 'Moderate Yield') return '#63b3ed';
   if (tag === 'Income Quality') return '#48bb78';
   if (tag === 'High Yield') return '#fbd38d';
-  if (tag.indexOf('Sustainability') !== -1) return '#fc8181';
+  if (tag.includes('Sustainability')) return '#fc8181';
   return '#a0aec0';
 }
 

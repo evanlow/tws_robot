@@ -208,8 +208,7 @@
     var v = row[col];
     if (v == null) return col === 'symbol' || col === 'company' || col === 'sector' || col === 'quality_label' ? SORT_NULL_STRING : Infinity;
     return v;
-  }
-  function sortRows(rows) {
+  }  function sortRows(rows) {
     var col = sortCol;
     var asc = sortAsc;
     return rows.slice().sort(function (a, b) {
