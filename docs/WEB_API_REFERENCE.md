@@ -3031,6 +3031,8 @@ Return the STI Bollinger Bands screener payload.
       "quality_label": "Weak",
       "quality_reasons": [],
       "quality_warnings": ["Earnings growth unavailable"],
+      "annual_dividend": 0.20,
+      "dividend_yield": 0.029,
       "momentum_confirmation": "still_falling",
       "momentum_label": "Still Falling",
       "momentum_reasons": ["Latest close below previous close", "Latest close below lower Bollinger Band"],
@@ -3068,6 +3070,8 @@ Return the STI Bollinger Bands screener payload.
 | `quality_label` | string | One of: `"Strong"`, `"Moderate"`, `"Weak"`, `"Insufficient Data"`. |
 | `quality_reasons` | array | List of positive fundamental signals contributing to the quality score. |
 | `quality_warnings` | array | List of negative signals or missing data items that reduce the quality score. |
+| `annual_dividend` | float\|null | Annual dividend per share in SGD, `null` if not a dividend payer or data unavailable. |
+| `dividend_yield` | float\|null | Dividend yield as a decimal (e.g. `0.054` = 5.4%), `null` if unavailable. |
 | `momentum_confirmation` | string\|null | Momentum confirmation code for oversold stocks (see below), `null` when not oversold. |
 | `momentum_label` | string\|null | Human-readable momentum label, `null` when not oversold. |
 | `momentum_reasons` | array | Plain-English reasons explaining the momentum assessment. |
