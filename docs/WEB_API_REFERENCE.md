@@ -30,6 +30,7 @@
 13. [AI Assistant APIs](#ai-assistant-apis)
 14. [S&P 500 Screener API](#sp500-screener-api)
 15. [STI Screener API](#sti-screener-api)
+16. [Stock Analysis API](#stock-analysis-api)
 
 ---
 
@@ -2853,6 +2854,15 @@ Return the S&P 500 Bollinger Bands screener payload.
       "bollinger_status": "below_lower_band",
       "status_label": "Oversold",
       "status_rank": 0,
+      "quality_score": 62,
+      "quality_label": "Moderate",
+      "quality_reasons": ["Profitable", "Dividend payer"],
+      "quality_warnings": [],
+      "annual_dividend": 3.80,
+      "dividend_yield": 0.034,
+      "momentum_confirmation": "still_falling",
+      "momentum_label": "Still Falling",
+      "momentum_reasons": ["Latest close below previous close", "Latest close below lower Bollinger Band"],
       "last_updated": "2026-01-15T14:30:00+00:00"
     }
   ],
@@ -2885,6 +2895,15 @@ Return the S&P 500 Bollinger Bands screener payload.
 | `bollinger_status` | string | Status code (see below) |
 | `status_label` | string | Human-readable label |
 | `status_rank` | int | Sort key: 0 (oversold) → 5 (insufficient data) |
+| `quality_score` | int\|null | Composite fundamental quality score (0–100), `null` if fundamentals unavailable. |
+| `quality_label` | string | One of: `"Strong"`, `"Moderate"`, `"Weak"`, `"Insufficient Data"`. |
+| `quality_reasons` | array | List of positive fundamental signals contributing to the quality score. |
+| `quality_warnings` | array | List of negative signals or missing data items that reduce the quality score. |
+| `annual_dividend` | float\|null | Annual dividend per share in USD, `null` if not a dividend payer or data unavailable. |
+| `dividend_yield` | float\|null | Dividend yield as a decimal (e.g. `0.034` = 3.4%), `null` if unavailable. |
+| `momentum_confirmation` | string\|null | Momentum confirmation code for oversold stocks (see below), `null` when not oversold. |
+| `momentum_label` | string\|null | Human-readable momentum label, `null` when not oversold. |
+| `momentum_reasons` | array | Plain-English reasons explaining the momentum assessment. |
 | `last_updated` | string\|null | ISO timestamp of this row's data |
 
 **Bollinger Status Values:**
@@ -2897,6 +2916,19 @@ Return the S&P 500 Bollinger Bands screener payload.
 | `near_upper_band` | Near Overbought | 3 | 0.8 ≤ %B < 1 |
 | `above_upper_band` | Overbought | 4 | %B ≥ 1 |
 | `insufficient_data` | Insufficient Data | 5 | < 20 bars or zero bandwidth |
+
+**Momentum Confirmation Values** (only populated when `bollinger_status` is `below_lower_band` or `near_lower_band`; `null` for all other statuses):
+
+| `momentum_confirmation` | `momentum_label` | Description |
+|-------------------------|-----------------|-------------|
+| `still_falling` | Still Falling | Latest close below previous close and below the lower band |
+| `failed_bounce` | Failed Bounce | Price briefly recovered into the band but dropped back below it |
+| `early_rebound` | Early Rebound | Closed back inside the lower band after previous bar was at or below it |
+| `confirmed_rebound` | Confirmed Rebound | Price above 5-day SMA with two consecutive higher closes |
+| `stabilising` | Stabilising | Selling pressure easing — latest close at or above previous close |
+| `no_confirmation_yet` | No Confirmation Yet | Oversold but no clear rebound signal yet |
+| `insufficient_data` | Insufficient Data | Fewer than 21 bars available to assess momentum |
+| `null` | — | Stock is not in oversold territory |
 
 **Error Responses:**
 
@@ -2999,6 +3031,9 @@ Return the STI Bollinger Bands screener payload.
       "quality_label": "Weak",
       "quality_reasons": [],
       "quality_warnings": ["Earnings growth unavailable"],
+      "momentum_confirmation": "still_falling",
+      "momentum_label": "Still Falling",
+      "momentum_reasons": ["Latest close below previous close", "Latest close below lower Bollinger Band"],
       "last_updated": "2026-01-15T14:30:00+00:00"
     }
   ],
@@ -3033,6 +3068,9 @@ Return the STI Bollinger Bands screener payload.
 | `quality_label` | string | One of: `"Strong"`, `"Moderate"`, `"Weak"`, `"Insufficient Data"`. |
 | `quality_reasons` | array | List of positive fundamental signals contributing to the quality score. |
 | `quality_warnings` | array | List of negative signals or missing data items that reduce the quality score. |
+| `momentum_confirmation` | string\|null | Momentum confirmation code for oversold stocks (see below), `null` when not oversold. |
+| `momentum_label` | string\|null | Human-readable momentum label, `null` when not oversold. |
+| `momentum_reasons` | array | Plain-English reasons explaining the momentum assessment. |
 | `last_updated` | string\|null | ISO timestamp of when this row was last refreshed, `null` if scan failed. |
 
 **Bollinger Status Values:**
@@ -3045,6 +3083,19 @@ Return the STI Bollinger Bands screener payload.
 | `near_upper_band` | Near Overbought | 3 | Price is within 5% of the upper band |
 | `above_upper_band` | Overbought | 4 | Price is above the upper Bollinger Band |
 | `insufficient_data` | Insufficient Data | 5 | Fewer than 20 bars available or data fetch failed |
+
+**Momentum Confirmation Values** (only populated when `bollinger_status` is `below_lower_band` or `near_lower_band`; `null` for all other statuses):
+
+| `momentum_confirmation` | `momentum_label` | Description |
+|-------------------------|-----------------|-------------|
+| `still_falling` | Still Falling | Latest close below previous close and below the lower band |
+| `failed_bounce` | Failed Bounce | Price briefly recovered into the band but dropped back below it |
+| `early_rebound` | Early Rebound | Closed back inside the lower band after previous bar was at or below it |
+| `confirmed_rebound` | Confirmed Rebound | Price above 5-day SMA with two consecutive higher closes |
+| `stabilising` | Stabilising | Selling pressure easing — latest close at or above previous close |
+| `no_confirmation_yet` | No Confirmation Yet | Oversold but no clear rebound signal yet |
+| `insufficient_data` | Insufficient Data | Fewer than 21 bars available to assess momentum |
+| `null` | — | Stock is not in oversold territory |
 
 **Caching Behaviour:**
 - Default TTL: 15 minutes (`_CACHE_TTL_SECONDS = 900`).
@@ -3089,6 +3140,222 @@ fetch('/api/stocks/sti/screener?refresh=true')
 - Constituent list: `data/sti_constituents.csv` (~30 tickers, header: `symbol,display_symbol,security,sector,sub_industry`).
 - Price data: fetched from Yahoo Finance via `data.fundamentals.fetch_price_history` (1-year daily bars).
 - Fundamental data: fetched via `data.fundamentals.get_fundamentals`; failures are non-fatal (quality score shows `"Insufficient Data"`).
+
+---
+
+## Stock Analysis API
+
+**NEW in PR #108** — Per-ticker drill-down combining fair value estimation, support/resistance detection, Bollinger Bands context, open position appraisal, valuation metrics, and dividend profile.
+
+### `GET /api/stocks/<ticker>/analysis`
+
+Return comprehensive stock analysis for a given ticker.
+
+**URL Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `ticker` | Uppercase ticker symbol, 1–10 characters (e.g. `AAPL`, `D05.SI`).  Regex: `^[A-Z0-9]{1,10}(\.[A-Z]{1,5})?$` |
+
+**Response:**
+```json
+{
+  "ticker": "AAPL",
+  "name": "Apple Inc.",
+  "current_price": 185.23,
+  "range_52w": {
+    "low": 124.17,
+    "high": 199.62,
+    "position_percentile": 72.5
+  },
+  "fair_value": {
+    "low": 170.00,
+    "high": 200.00,
+    "method": "blended_pe",
+    "status": "fairly_valued",
+    "confidence": "high",
+    "methods_used": ["historical_pe", "forward_pe", "analyst_targets"],
+    "unavailable_reason": null
+  },
+  "technical_levels": {
+    "support": [
+      {"low": 178.00, "high": 180.50, "confidence": "high", "reason": "prior swing low area with repeated touches"}
+    ],
+    "resistance": [
+      {"low": 192.00, "high": 194.00, "confidence": "medium", "reason": "prior swing high area with repeated touches"}
+    ]
+  },
+  "bollinger_bands": {
+    "upper": 192.50,
+    "middle": 180.00,
+    "lower": 167.50,
+    "bandwidth": 0.1389,
+    "percent_b": 0.752,
+    "status": "within_bands"
+  },
+  "momentum_status": "uptrend",
+  "technical_position": "middle_of_range",
+  "price_context": "Current price is in the middle of the 1-year range. Price appears within the estimated fair value range. Technical momentum appears positive.",
+  "active_strategy_signals": [],
+  "open_position": {
+    "has_position": false
+  },
+  "valuation_metrics": {
+    "pe_trailing": 29.5,
+    "pe_forward": 27.2,
+    "peg_ratio": 1.8,
+    "price_to_book": 44.5,
+    "price_to_sales": 7.2,
+    "ev_to_ebitda": 22.5,
+    "eps_trailing": 6.28,
+    "eps_forward": 6.81,
+    "market_cap": 2890000000000,
+    "enterprise_value": 2950000000000,
+    "sector": "Technology",
+    "industry": "Consumer Electronics",
+    "pe_label": "Elevated PE",
+    "valuation_note": "PE ratios should be compared against the company's sector, growth rate, margins, and business quality."
+  },
+  "dividend_profile": {
+    "annual_dividend": 0.96,
+    "dividend_yield": 0.0052,
+    "payout_ratio": 0.15,
+    "dividend_tag": "Low Yield",
+    "dividend_note": "Dividend data may be stale, incomplete, adjusted, or unavailable."
+  },
+  "disclaimer": "This analysis is for educational and decision-support purposes only..."
+}
+```
+
+**Response Fields:**
+
+- `ticker` — Normalised uppercase ticker symbol.
+- `name` — Company name from fundamentals data.
+- `current_price` — Latest price (rounded to 2 d.p.).
+- `range_52w` — 52-week price range:
+  - `low` / `high` — 52-week low and high.
+  - `position_percentile` — Where price sits within the range (0 = at 52w low, 100 = at 52w high).
+- `fair_value` — Blended fair value estimate:
+  - `low` / `high` — Estimated fair value range.
+  - `method` — `"historical_pe"`, `"forward_pe"`, `"analyst_targets"`, or `"blended_pe"` when multiple methods are available.
+  - `status` — `"potentially_undervalued"`, `"fairly_valued"`, `"potentially_overvalued"`, or `"unavailable"`.
+  - `confidence` — `"low"` (1 method), `"medium"` (2 methods), `"high"` (3 methods).
+  - `methods_used` — Array of method names that contributed.
+  - `unavailable_reason` — Non-null string explaining why estimation failed (e.g. missing EPS data).
+- `technical_levels` — Support and resistance zones detected from 1-year OHLCV bars:
+  - `support` — Array of up to 5 zones below current price, sorted nearest-first.
+  - `resistance` — Array of up to 5 zones above current price, sorted nearest-first.
+  - Each zone: `low`, `high` (price boundaries), `confidence` (`"low"` / `"medium"` / `"high"`), `reason` (plain-English explanation).
+- `bollinger_bands` — 20-period Bollinger Bands (2σ):
+  - `upper` / `middle` / `lower` — Band values rounded to 2 d.p.
+  - `bandwidth` — `(upper - lower) / middle`, measures volatility.
+  - `percent_b` — Where price sits within the bands (0 = lower band, 1 = upper band).
+  - `status` — Same values as the screener (see Bollinger Status table in SP500 section).
+- `momentum_status` — Price momentum relative to moving averages: `"uptrend"`, `"downtrend"`, `"sideways"`, `"volatile"`, `"insufficient_data"`.
+- `technical_position` — Relative position: `"near_support"`, `"below_support"`, `"near_resistance"`, `"breakout"`, `"middle_of_range"`.
+- `price_context` — Plain-English narrative combining all the above signals.
+- `active_strategy_signals` — Array of live Bollinger Bands strategy signals from the StrategyRegistry for this ticker (empty if no running strategies cover it).
+- `open_position` — Position appraisal (see below).
+- `valuation_metrics` — Key valuation ratios (see below).
+- `dividend_profile` — Dividend data and classification (see below).
+- `disclaimer` — Standard educational disclaimer; always present.
+
+**`open_position` Fields:**
+
+| Field | When no position | When position held |
+|-------|-----------------|--------------------|
+| `has_position` | `false` | `true` |
+| `quantity` | absent | Number of shares held |
+| `average_entry` | absent | Average cost basis per share |
+| `unrealised_pnl_percent` | absent | Unrealised P&L as a percentage |
+| `entry_vs_fair_value` | absent | `"below_fair_value"`, `"within_fair_value"`, `"above_fair_value"`, or `"unavailable"` |
+| `entry_quality` | absent | `"good"`, `"reasonable"`, `"weak"`, or `"unclear"` |
+| `summary` | absent | Array of plain-English assessment strings |
+
+**`valuation_metrics` Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pe_trailing` | float\|null | Trailing 12-month P/E ratio |
+| `pe_forward` | float\|null | Forward (next 12-month) P/E ratio |
+| `peg_ratio` | float\|null | PEG ratio (P/E ÷ earnings growth rate) |
+| `price_to_book` | float\|null | Price-to-book ratio |
+| `price_to_sales` | float\|null | Price-to-sales ratio |
+| `ev_to_ebitda` | float\|null | Enterprise value / EBITDA |
+| `eps_trailing` | float\|null | Earnings per share (trailing) |
+| `eps_forward` | float\|null | Earnings per share (forward estimate) |
+| `market_cap` | int\|null | Market capitalisation in USD |
+| `enterprise_value` | int\|null | Enterprise value in USD |
+| `sector` | string\|null | GICS sector |
+| `industry` | string\|null | GICS industry |
+| `pe_label` | string | Contextual label: `"PE unavailable"`, `"PE not meaningful"`, `"Low PE"`, `"Moderate PE"`, `"Elevated PE"`, `"Very High PE"` |
+| `valuation_note` | string | Disclaimer reminding that PE context varies by sector and growth |
+
+**`dividend_profile` Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `annual_dividend` | float\|null | Annual dividend per share, `null` if no dividend |
+| `dividend_yield` | float\|null | Dividend yield as a decimal (e.g. `0.034` = 3.4%) |
+| `payout_ratio` | float\|null | Proportion of earnings paid as dividends |
+| `dividend_tag` | string | Classification label (see below) |
+| `dividend_note` | string | Data quality reminder |
+
+**Dividend Tag Values:**
+
+| `dividend_tag` | Condition |
+|----------------|-----------|
+| `No Dividend` | `dividend_yield` ≤ 0 |
+| `Low Yield` | yield < 2% |
+| `Moderate Yield` | 2% ≤ yield < 4% |
+| `Income Quality` | 4% ≤ yield < 7% and `payout_ratio` ≤ 75% |
+| `High Yield` | 4% ≤ yield < 7% and `payout_ratio` > 75% or unavailable |
+| `High Yield — Check Sustainability` | yield ≥ 7% |
+| `Insufficient Data` | `dividend_yield` is `null` |
+
+**Error Responses:**
+
+- `400 Bad Request` — Invalid ticker format:
+  ```json
+  {"error": "Invalid ticker symbol.", "ticker": "!!!"}
+  ```
+- `404 Not Found` — Price data could not be retrieved:
+  ```json
+  {"error": "Unable to retrieve price data for this ticker.", "ticker": "UNKNOWN"}
+  ```
+- `500 Internal Server Error` — Unexpected analysis failure:
+  ```json
+  {"error": "Analysis could not be completed", "ticker": "AAPL"}
+  ```
+
+**Page Routes:**
+- `GET /stocks/analysis` — Stock Analysis dashboard (ticker search + portfolio shortcuts).
+- `GET /stocks/<ticker>/analysis` — Per-ticker price context page.
+
+**Example Usage:**
+```javascript
+// Full analysis for a ticker
+fetch('/api/stocks/AAPL/analysis')
+  .then(r => r.json())
+  .then(data => {
+    console.log(`Fair value: $${data.fair_value.low}–$${data.fair_value.high} (${data.fair_value.status})`);
+    console.log(`Bollinger: ${data.bollinger_bands.status}`);
+    console.log(`Dividend: ${data.dividend_profile.dividend_tag}`);
+    if (data.open_position.has_position) {
+      console.log(`Entry quality: ${data.open_position.entry_quality}`);
+    }
+  });
+
+// SGX ticker with .SI suffix
+fetch('/api/stocks/D05.SI/analysis')
+  .then(r => r.json())
+  .then(data => console.log(data.price_context));
+```
+
+**Data Sources:**
+- Fundamental data: `data.fundamentals.fetch_fundamentals` (Yahoo Finance).
+- Price history: `data.fundamentals.fetch_price_history` (1-year daily bars, Yahoo Finance).
+- Open positions: live from the StrategyRegistry / account state.
 
 ---
 
