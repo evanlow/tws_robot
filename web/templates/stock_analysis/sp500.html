@@ -201,19 +201,21 @@
     sectorFilter.innerHTML = options;
   }
 
-  // Sentinel placed after all real strings so null values sort last.
-  var SORT_NULL_STRING = '\uffff';
-
   function sortValue(row, col) {
-    var v = row[col];
-    if (v == null) return col === 'symbol' || col === 'company' || col === 'sector' || col === 'quality_label' ? SORT_NULL_STRING : Infinity;
-    return v;
-  }  function sortRows(rows) {
+    return row[col];
+  }
+
+  function sortRows(rows) {
     var col = sortCol;
     var asc = sortAsc;
     return rows.slice().sort(function (a, b) {
       var va = sortValue(a, col);
       var vb = sortValue(b, col);
+      var aNull = va == null;
+      var bNull = vb == null;
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
       if (typeof va === 'string' && typeof vb === 'string') {
         va = va.toLowerCase(); vb = vb.toLowerCase();
       }
