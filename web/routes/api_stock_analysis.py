@@ -121,6 +121,9 @@ def stock_analysis(ticker: str):
         # --- Valuation Metrics ---
         valuation_metrics = _build_valuation_metrics(fundamentals)
 
+        # --- Dividend Profile ---
+        dividend_profile = _build_dividend_profile(fundamentals)
+
         # --- Build response ---
         response = {
             "ticker": ticker,
@@ -139,6 +142,7 @@ def stock_analysis(ticker: str):
             "active_strategy_signals": active_strategy_signals,
             "open_position": open_position,
             "valuation_metrics": valuation_metrics,
+            "dividend_profile": dividend_profile,
             "disclaimer": (
                 "This analysis is for educational and decision-support purposes only. "
                 "It is not financial advice, not a buy/sell recommendation, and does not "
@@ -223,6 +227,55 @@ def _get_active_bollinger_signals(ticker: str) -> List[Dict[str, Any]]:
     except Exception as exc:
         logger.debug("Could not fetch active strategy signals: %s", exc)
         return []
+
+
+def classify_dividend_profile(
+    dividend_yield: Optional[float], payout_ratio: Optional[float]
+) -> str:
+    """Return a simple explainable label for a dividend profile.
+
+    Labels are informational only — they do not constitute a buy/sell
+    recommendation.  A high yield may reflect price weakness or
+    dividend-cut risk rather than an attractive income opportunity.
+    """
+    if dividend_yield is None:
+        return "Insufficient Data"
+    if dividend_yield <= 0:
+        return "No Dividend"
+    if dividend_yield < 0.02:
+        return "Low Yield"
+    if dividend_yield < 0.04:
+        return "Moderate Yield"
+    if dividend_yield < 0.07:
+        if payout_ratio is not None and payout_ratio <= 0.75:
+            return "Income Quality"
+        return "High Yield"
+    return "High Yield — Check Sustainability"
+
+
+def _build_dividend_profile(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract dividend fields from fundamentals and classify the profile.
+
+    Always returns a dict (never ``None``).  Missing fields are ``None``
+    so the frontend can render ``--`` gracefully.
+    """
+    dividend_yield = fundamentals.get("dividend_yield")
+    payout_ratio = fundamentals.get("payout_ratio")
+    annual_dividend = fundamentals.get("dividend_rate")
+
+    dividend_tag = classify_dividend_profile(dividend_yield, payout_ratio)
+
+    return {
+        "annual_dividend": annual_dividend,
+        "dividend_yield": dividend_yield,
+        "payout_ratio": payout_ratio,
+        "dividend_tag": dividend_tag,
+        "dividend_note": (
+            "Dividend data may be stale, incomplete, adjusted, or unavailable depending "
+            "on the data source. Verify against company filings before making investment "
+            "decisions."
+        ),
+    }
 
 
 def classify_pe(pe: Optional[float]) -> str:

@@ -90,6 +90,12 @@
     <div id="valuationMetricsContent"></div>
   </section>
 
+  <!-- Section 5c: Dividend Profile -->
+  <section id="dividendProfileSection" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Dividend Profile</h2>
+    <div id="dividendProfileContent"></div>
+  </section>
+
   <!-- Section 6: Support & Resistance Zones -->
   <section id="technicalLevelsSection" style="margin-bottom:1.5rem;">
     <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Support &amp; Resistance Zones (Past 1 Year)</h2>
@@ -184,6 +190,9 @@ function renderAnalysis(data) {
 
   // Valuation metrics
   renderValuationMetrics(data.valuation_metrics);
+
+  // Dividend profile
+  renderDividendProfile(data.dividend_profile);
 
   // Technical levels
   renderTechnicalLevels(data.technical_levels);
@@ -629,6 +638,47 @@ function renderValuationMetrics(vm) {
 
   if (vm.valuation_note) {
     html += `<p style="color:#a0aec0;font-size:0.85rem;margin-top:0.75rem;line-height:1.5;">${escapeHtml(vm.valuation_note)}</p>`;
+  }
+
+  el.innerHTML = html;
+}
+
+/* ---- Dividend Profile ---- */
+function dividendTagColor(tag) {
+  if (!tag) return '#a0aec0';
+  if (tag === 'No Dividend') return '#718096';
+  if (tag === 'Low Yield') return '#a0aec0';
+  if (tag === 'Moderate Yield') return '#63b3ed';
+  if (tag === 'Income Quality') return '#48bb78';
+  if (tag === 'High Yield') return '#fbd38d';
+  if (tag.includes('Sustainability')) return '#fc8181';
+  return '#a0aec0';
+}
+
+function renderDividendProfile(dp) {
+  const el = document.getElementById('dividendProfileContent');
+  if (!dp) {
+    el.innerHTML = '<div class="stat-card" style="padding:1rem;"><p style="color:#a0aec0;">Dividend data unavailable.</p></div>';
+    return;
+  }
+
+  const tag = dp.dividend_tag || 'Insufficient Data';
+  const tagColor = dividendTagColor(tag);
+  const tagBadge = `<span style="display:inline-block;padding:0.2rem 0.6rem;border-radius:12px;font-size:0.75rem;font-weight:600;background:${tagColor}20;color:${tagColor};border:1px solid ${tagColor}40;">${escapeHtml(tag)}</span>`;
+
+  const annualDiv = dp.annual_dividend != null ? dp.annual_dividend.toFixed(2) : '--';
+  const yieldStr = dp.dividend_yield != null ? (dp.dividend_yield * 100).toFixed(2) + '%' : '--';
+  const payoutStr = dp.payout_ratio != null ? (dp.payout_ratio * 100).toFixed(1) + '%' : '--';
+
+  let html = '<div class="stats-grid">';
+  html += `<div class="stat-card"><span class="stat-label">Annual Dividend</span><span class="stat-value">${escapeHtml(annualDiv)}</span></div>`;
+  html += `<div class="stat-card"><span class="stat-label">Dividend Yield</span><span class="stat-value">${escapeHtml(yieldStr)}</span></div>`;
+  html += `<div class="stat-card"><span class="stat-label">Payout Ratio</span><span class="stat-value">${escapeHtml(payoutStr)}</span></div>`;
+  html += `<div class="stat-card"><span class="stat-label">Dividend Tag</span><span class="stat-value">${tagBadge}</span></div>`;
+  html += '</div>';
+
+  if (dp.dividend_note) {
+    html += `<p style="color:#a0aec0;font-size:0.85rem;margin-top:0.75rem;line-height:1.5;">${escapeHtml(dp.dividend_note)}</p>`;
   }
 
   el.innerHTML = html;

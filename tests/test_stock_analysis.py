@@ -1346,3 +1346,206 @@ class TestStockAnalysisValuationMetricsAPI:
         assert resp.status_code == 200
         assert b"Valuation Metrics" in resp.data
         assert b"valuationMetricsContent" in resp.data
+
+
+# ==============================================================================
+# Unit Tests: classify_dividend_profile
+# ==============================================================================
+
+
+class TestClassifyDividendProfile:
+    """Tests for classify_dividend_profile helper."""
+
+    def test_none_yield_returns_insufficient_data(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(None, None) == "Insufficient Data"
+
+    def test_zero_yield_returns_no_dividend(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.0, None) == "No Dividend"
+
+    def test_negative_yield_returns_no_dividend(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(-0.01, None) == "No Dividend"
+
+    def test_low_yield_below_2pct(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.01, None) == "Low Yield"
+
+    def test_moderate_yield_between_2_and_4pct(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.03, None) == "Moderate Yield"
+
+    def test_high_yield_between_4_and_7pct_no_payout(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.05, None) == "High Yield"
+
+    def test_income_quality_between_4_and_7pct_low_payout(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.05, 0.50) == "Income Quality"
+
+    def test_high_yield_between_4_and_7pct_high_payout(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.05, 0.80) == "High Yield"
+
+    def test_very_high_yield_check_sustainability(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.08, None) == "High Yield — Check Sustainability"
+
+    def test_exact_boundary_4pct_no_payout(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.04, None) == "High Yield"
+
+    def test_exact_boundary_4pct_low_payout(self):
+        from web.routes.api_stock_analysis import classify_dividend_profile
+        assert classify_dividend_profile(0.04, 0.5) == "Income Quality"
+
+
+# ==============================================================================
+# Unit Tests: _build_dividend_profile
+# ==============================================================================
+
+
+class TestBuildDividendProfile:
+    """Tests for _build_dividend_profile helper."""
+
+    def test_returns_all_keys(self):
+        from web.routes.api_stock_analysis import _build_dividend_profile
+        result = _build_dividend_profile({
+            "dividend_yield": 0.03,
+            "dividend_rate": 1.50,
+            "payout_ratio": 0.40,
+        })
+        assert "annual_dividend" in result
+        assert "dividend_yield" in result
+        assert "payout_ratio" in result
+        assert "dividend_tag" in result
+        assert "dividend_note" in result
+
+    def test_missing_dividend_data_returns_none_fields(self):
+        from web.routes.api_stock_analysis import _build_dividend_profile
+        result = _build_dividend_profile({})
+        assert result["annual_dividend"] is None
+        assert result["dividend_yield"] is None
+        assert result["payout_ratio"] is None
+        assert result["dividend_tag"] == "Insufficient Data"
+        assert result["dividend_note"] is not None
+
+    def test_correct_tag_assigned(self):
+        from web.routes.api_stock_analysis import _build_dividend_profile
+        result = _build_dividend_profile({
+            "dividend_yield": 0.06,
+            "dividend_rate": 3.00,
+            "payout_ratio": 0.60,
+        })
+        assert result["dividend_tag"] == "Income Quality"
+
+    def test_high_yield_sustainability_warning_tag(self):
+        from web.routes.api_stock_analysis import _build_dividend_profile
+        result = _build_dividend_profile({
+            "dividend_yield": 0.10,
+            "dividend_rate": 5.00,
+            "payout_ratio": 0.95,
+        })
+        assert result["dividend_tag"] == "High Yield — Check Sustainability"
+
+
+# ==============================================================================
+# Integration Tests: dividend_profile in API response
+# ==============================================================================
+
+
+class TestDividendProfileAPI:
+    """Tests that GET /api/stocks/<ticker>/analysis includes dividend_profile."""
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_api_includes_dividend_profile_key(self, mock_fundamentals, mock_history, client):
+        """API response contains a dividend_profile object."""
+        fundamentals = _make_fundamentals(100.0)
+        fundamentals.update({
+            "dividend_yield": 0.0052,
+            "dividend_rate": 1.04,
+            "payout_ratio": 0.152,
+        })
+        mock_fundamentals.return_value = fundamentals
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert "dividend_profile" in data
+        dp = data["dividend_profile"]
+        assert dp["annual_dividend"] == 1.04
+        assert dp["dividend_yield"] == 0.0052
+        assert dp["payout_ratio"] == 0.152
+        assert dp["dividend_tag"] == "Low Yield"
+        assert dp["dividend_note"] is not None
+        assert "stale" in dp["dividend_note"].lower()
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_api_dividend_profile_missing_data(self, mock_fundamentals, mock_history, client):
+        """When dividend data is missing, profile has null fields and Insufficient Data tag."""
+        fundamentals = _make_fundamentals(100.0)
+        # No dividend fields
+        mock_fundamentals.return_value = fundamentals
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        dp = data["dividend_profile"]
+        assert dp["annual_dividend"] is None
+        assert dp["dividend_yield"] is None
+        assert dp["dividend_tag"] == "Insufficient Data"
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_api_dividend_profile_zero_dividend(self, mock_fundamentals, mock_history, client):
+        """A dividend_yield of 0 produces No Dividend tag."""
+        fundamentals = _make_fundamentals(100.0)
+        fundamentals.update({
+            "dividend_yield": 0.0,
+            "dividend_rate": 0.0,
+            "payout_ratio": None,
+        })
+        mock_fundamentals.return_value = fundamentals
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        dp = data["dividend_profile"]
+        assert dp["dividend_tag"] == "No Dividend"
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_api_dividend_profile_high_yield_sustainability(self, mock_fundamentals, mock_history, client):
+        """A high dividend yield above 7% triggers the sustainability warning tag."""
+        fundamentals = _make_fundamentals(100.0)
+        fundamentals.update({
+            "dividend_yield": 0.09,
+            "dividend_rate": 9.00,
+            "payout_ratio": 0.95,
+        })
+        mock_fundamentals.return_value = fundamentals
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        dp = data["dividend_profile"]
+        assert dp["dividend_tag"] == "High Yield — Check Sustainability"
+
+    def test_stock_analysis_page_renders_dividend_profile_section(self, client):
+        """The individual stock analysis page HTML contains the Dividend Profile section."""
+        resp = client.get("/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        assert b"Dividend Profile" in resp.data
+        assert b"dividendProfileContent" in resp.data
+        assert b"stale" in resp.data or b"Dividend data" in resp.data

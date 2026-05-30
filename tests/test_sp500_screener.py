@@ -955,3 +955,173 @@ class TestSP500ScreenerAPIErrorKey:
         body = resp.get_json()
         assert "error" in body
         assert body["error"] == "Constituent list could not be loaded."
+
+
+# ==============================================================================
+# Tests: dividend fields in screener service and API
+# ==============================================================================
+
+
+class TestDividendFieldsInScreener:
+    """Tests that screener rows include annual_dividend and dividend_yield."""
+
+    def _mock_screener_data_with_dividends(self):
+        """Return screener payload that includes dividend fields."""
+        return {
+            "as_of": "2026-01-01T00:00:00+00:00",
+            "source": "sp500_constituents.csv",
+            "count": 3,
+            "summary": {
+                "overbought": 0,
+                "near_overbought": 0,
+                "neutral": 3,
+                "near_oversold": 0,
+                "oversold": 0,
+                "insufficient_data": 0,
+            },
+            "rows": [
+                {
+                    "symbol": "JNJ",
+                    "company": "Johnson & Johnson",
+                    "sector": "Health Care",
+                    "current_price": 160.0,
+                    "range_52w_position_percentile": 55.0,
+                    "bollinger_percent_b": 0.5,
+                    "bollinger_status": "within_bands",
+                    "status_label": "Neutral",
+                    "status_rank": 2,
+                    "quality_score": 80,
+                    "quality_label": "Strong",
+                    "quality_reasons": [],
+                    "quality_warnings": [],
+                    "annual_dividend": 4.52,
+                    "dividend_yield": 0.0283,
+                    "last_updated": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "symbol": "MSFT",
+                    "company": "Microsoft Corp",
+                    "sector": "Information Technology",
+                    "current_price": 380.0,
+                    "range_52w_position_percentile": 70.0,
+                    "bollinger_percent_b": 0.6,
+                    "bollinger_status": "within_bands",
+                    "status_label": "Neutral",
+                    "status_rank": 2,
+                    "quality_score": 95,
+                    "quality_label": "Strong",
+                    "quality_reasons": [],
+                    "quality_warnings": [],
+                    "annual_dividend": None,
+                    "dividend_yield": None,
+                    "last_updated": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "symbol": "BRK-B",
+                    "company": "Berkshire Hathaway",
+                    "sector": "Financials",
+                    "current_price": 350.0,
+                    "range_52w_position_percentile": 60.0,
+                    "bollinger_percent_b": 0.4,
+                    "bollinger_status": "within_bands",
+                    "status_label": "Neutral",
+                    "status_rank": 2,
+                    "quality_score": 70,
+                    "quality_label": "Strong",
+                    "quality_reasons": [],
+                    "quality_warnings": [],
+                    "annual_dividend": 0.0,
+                    "dividend_yield": 0.0,
+                    "last_updated": "2026-01-01T00:00:00+00:00",
+                },
+            ],
+        }
+
+    def test_screener_row_includes_dividend_fields(self, client):
+        """Each screener row should include annual_dividend and dividend_yield keys."""
+        with patch(
+            "web.routes.api_sp500_screener.sp500_screener_service.get_screener_data",
+            return_value=self._mock_screener_data_with_dividends(),
+        ):
+            resp = client.get("/api/stocks/sp500/screener")
+        data = resp.get_json()
+        assert len(data["rows"]) > 0
+        for row in data["rows"]:
+            assert "annual_dividend" in row, f"Row {row['symbol']} missing annual_dividend"
+            assert "dividend_yield" in row, f"Row {row['symbol']} missing dividend_yield"
+
+    def test_screener_row_dividend_values_present(self, client):
+        """Rows with dividend data return non-null values."""
+        with patch(
+            "web.routes.api_sp500_screener.sp500_screener_service.get_screener_data",
+            return_value=self._mock_screener_data_with_dividends(),
+        ):
+            resp = client.get("/api/stocks/sp500/screener")
+        data = resp.get_json()
+        jnj = next(r for r in data["rows"] if r["symbol"] == "JNJ")
+        assert jnj["annual_dividend"] == 4.52
+        assert jnj["dividend_yield"] == pytest.approx(0.0283)
+
+    def test_screener_row_dividend_null_when_unavailable(self, client):
+        """Rows without dividend data return null for dividend fields."""
+        with patch(
+            "web.routes.api_sp500_screener.sp500_screener_service.get_screener_data",
+            return_value=self._mock_screener_data_with_dividends(),
+        ):
+            resp = client.get("/api/stocks/sp500/screener")
+        data = resp.get_json()
+        msft = next(r for r in data["rows"] if r["symbol"] == "MSFT")
+        assert msft["annual_dividend"] is None
+        assert msft["dividend_yield"] is None
+
+    def test_insufficient_data_row_has_dividend_fields(self):
+        """_insufficient_data_row should include annual_dividend and dividend_yield as None."""
+        from web.sp500_screener_service import _insufficient_data_row
+        row = _insufficient_data_row({"symbol": "X", "security": "X Corp", "sector": "Y"})
+        assert "annual_dividend" in row
+        assert "dividend_yield" in row
+        assert row["annual_dividend"] is None
+        assert row["dividend_yield"] is None
+
+    def test_scan_ticker_includes_dividend_fields(self):
+        """_scan_ticker should populate annual_dividend and dividend_yield from fundamentals."""
+        from web.sp500_screener_service import SP500ScreenerService
+
+        svc = SP500ScreenerService()
+        constituent = {"symbol": "DIV", "security": "Dividend Corp", "sector": "Utilities", "sub_industry": ""}
+        bars = _make_bars(30, 50.0)
+
+        mock_fundamentals = {
+            "dividend_rate": 2.50,
+            "dividend_yield": 0.05,
+            "payout_ratio": 0.60,
+        }
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            with patch("data.fundamentals.get_fundamentals", return_value=mock_fundamentals):
+                row = svc._scan_ticker(constituent)
+
+        assert row["annual_dividend"] == 2.50
+        assert row["dividend_yield"] == pytest.approx(0.05)
+
+    def test_scan_ticker_dividend_none_when_fundamentals_missing(self):
+        """_scan_ticker returns None for dividend fields when fundamentals has no dividend data."""
+        from web.sp500_screener_service import SP500ScreenerService
+
+        svc = SP500ScreenerService()
+        constituent = {"symbol": "NODIV", "security": "No Div Corp", "sector": "Tech", "sub_industry": ""}
+        bars = _make_bars(30, 100.0)
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            with patch("data.fundamentals.get_fundamentals", return_value={}):
+                row = svc._scan_ticker(constituent)
+
+        assert row["annual_dividend"] is None
+        assert row["dividend_yield"] is None
+
+    def test_sp500_screener_page_has_dividend_columns(self, client):
+        """The screener page HTML should contain Annual Dividend and Dividend Yield column headers."""
+        resp = client.get("/stocks/sp500")
+        assert resp.status_code == 200
+        assert b"Annual Dividend" in resp.data
+        assert b"Dividend Yield" in resp.data

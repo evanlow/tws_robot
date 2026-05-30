@@ -211,6 +211,10 @@ class SP500ScreenerService:
             fundamentals = {}
         quality = compute_quality_score(fundamentals)
 
+        # Dividend fields — missing values stay None
+        annual_dividend = fundamentals.get("dividend_rate") or None
+        dividend_yield = fundamentals.get("dividend_yield") or None
+
         import datetime
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -225,6 +229,8 @@ class SP500ScreenerService:
         row["quality_label"] = quality["quality_label"]
         row["quality_reasons"] = quality["quality_reasons"]
         row["quality_warnings"] = quality["quality_warnings"]
+        row["annual_dividend"] = annual_dividend
+        row["dividend_yield"] = dividend_yield
         row["last_updated"] = now_iso
         return row
 
@@ -312,6 +318,8 @@ def _insufficient_data_row(constituent: Dict[str, str]) -> Dict[str, Any]:
         "quality_label": "Insufficient Data",
         "quality_reasons": [],
         "quality_warnings": [],
+        "annual_dividend": None,
+        "dividend_yield": None,
         "last_updated": None,
     }
 
