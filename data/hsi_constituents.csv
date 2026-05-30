@@ -1,13 +1,13 @@
 symbol,display_symbol,security,sector,sub_industry
 0700.HK,0700,Tencent Holdings,Communication Services,Internet Content & Information
-9988.HK,9988,Alibaba Group,Consumer Cyclical,Internet Retail
+9988.HK,9988,Alibaba Group,Consumer Discretionary,Internet Retail
 0005.HK,0005,HSBC Holdings,Financials,Banks
 0941.HK,0941,China Mobile,Communication Services,Telecom Services
 1299.HK,1299,AIA Group,Financials,Insurance
 2318.HK,2318,Ping An Insurance,Financials,Insurance
 0388.HK,0388,Hong Kong Exchanges & Clearing,Financials,Financial Exchanges & Data
 1398.HK,1398,Industrial & Commercial Bank of China,Financials,Banks
-3690.HK,3690,Meituan,Consumer Cyclical,Internet Retail
+3690.HK,3690,Meituan,Consumer Discretionary,Internet Retail
 0939.HK,0939,China Construction Bank,Financials,Banks
 0883.HK,0883,CNOOC,Energy,Oil & Gas Exploration & Production
 3988.HK,3988,Bank of China,Financials,Banks
@@ -27,7 +27,7 @@ symbol,display_symbol,security,sector,sub_industry
 1113.HK,1113,CK Asset Holdings,Real Estate,Diversified Real Estate Activities
 0001.HK,0001,CK Hutchison Holdings,Industrials,Industrial Conglomerates
 2020.HK,2020,ANTA Sports Products,Consumer Discretionary,Apparel & Footwear
-1211.HK,1211,BYD,Consumer Cyclical,Automobiles
+1211.HK,1211,BYD,Consumer Discretionary,Automobiles
 1093.HK,1093,CSPC Pharmaceutical,Healthcare,Pharmaceuticals
 2269.HK,2269,WuXi Biologics,Healthcare,Biotechnology
 0288.HK,0288,WH Group,Consumer Staples,Packaged Foods
