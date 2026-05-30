@@ -118,6 +118,9 @@ def stock_analysis(ticker: str):
         # --- Active strategy signals ---
         active_strategy_signals = _get_active_bollinger_signals(ticker)
 
+        # --- Valuation Metrics ---
+        valuation_metrics = _build_valuation_metrics(fundamentals)
+
         # --- Build response ---
         response = {
             "ticker": ticker,
@@ -135,6 +138,7 @@ def stock_analysis(ticker: str):
             "price_context": price_context,
             "active_strategy_signals": active_strategy_signals,
             "open_position": open_position,
+            "valuation_metrics": valuation_metrics,
             "disclaimer": (
                 "This analysis is for educational and decision-support purposes only. "
                 "It is not financial advice, not a buy/sell recommendation, and does not "
@@ -219,6 +223,54 @@ def _get_active_bollinger_signals(ticker: str) -> List[Dict[str, Any]]:
     except Exception as exc:
         logger.debug("Could not fetch active strategy signals: %s", exc)
         return []
+
+
+def classify_pe(pe: Optional[float]) -> str:
+    """Return a simple contextual label for a PE ratio.
+
+    Labels are informational only — they do not constitute a buy/sell
+    recommendation.  PE expectations vary significantly by sector.
+    """
+    if pe is None:
+        return "PE unavailable"
+    if pe <= 0:
+        return "PE not meaningful"
+    if pe < 15:
+        return "Low PE"
+    if pe < 25:
+        return "Moderate PE"
+    if pe < 40:
+        return "Elevated PE"
+    return "Very High PE"
+
+
+def _build_valuation_metrics(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract and label valuation metrics from a fundamentals dict.
+
+    Always returns a dict (never ``None``).  Missing fields are ``None``
+    so the frontend can render ``--`` gracefully.
+    """
+    pe_trailing = fundamentals.get("pe_trailing")
+    return {
+        "pe_trailing": pe_trailing,
+        "pe_forward": fundamentals.get("pe_forward"),
+        "peg_ratio": fundamentals.get("peg_ratio"),
+        "price_to_book": fundamentals.get("price_to_book"),
+        "price_to_sales": fundamentals.get("price_to_sales"),
+        "ev_to_ebitda": fundamentals.get("ev_to_ebitda"),
+        "eps_trailing": fundamentals.get("eps_trailing"),
+        "eps_forward": fundamentals.get("eps_forward"),
+        "market_cap": fundamentals.get("market_cap"),
+        "enterprise_value": fundamentals.get("enterprise_value"),
+        "sector": fundamentals.get("sector"),
+        "industry": fundamentals.get("industry"),
+        "pe_label": classify_pe(pe_trailing),
+        "valuation_note": (
+            "PE ratios should be compared against the company's sector, growth rate, "
+            "margins, and business quality. A high PE may be justified for a high-growth "
+            "company, while a low PE may indicate either value or business risk."
+        ),
+    }
 
 
 def _build_price_context(

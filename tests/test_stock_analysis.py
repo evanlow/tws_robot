@@ -1149,3 +1149,200 @@ class TestStockAnalysisAPIEdgeCases:
         data = resp.get_json()
         assert math.isfinite(data["current_price"])
         assert data["current_price"] > 0
+
+
+# ==============================================================================
+# Unit Tests: classify_pe
+# ==============================================================================
+
+
+class TestClassifyPE:
+    """Tests for the classify_pe helper."""
+
+    def test_none_returns_unavailable(self):
+        from web.routes.api_stock_analysis import classify_pe
+        assert classify_pe(None) == "PE unavailable"
+
+    def test_zero_returns_not_meaningful(self):
+        from web.routes.api_stock_analysis import classify_pe
+        assert classify_pe(0) == "PE not meaningful"
+
+    def test_negative_returns_not_meaningful(self):
+        from web.routes.api_stock_analysis import classify_pe
+        assert classify_pe(-5.0) == "PE not meaningful"
+
+    def test_low_pe(self):
+        from web.routes.api_stock_analysis import classify_pe
+        assert classify_pe(10.0) == "Low PE"
+        assert classify_pe(14.9) == "Low PE"
+
+    def test_moderate_pe(self):
+        from web.routes.api_stock_analysis import classify_pe
+        assert classify_pe(15.0) == "Moderate PE"
+        assert classify_pe(24.9) == "Moderate PE"
+
+    def test_elevated_pe(self):
+        from web.routes.api_stock_analysis import classify_pe
+        assert classify_pe(25.0) == "Elevated PE"
+        assert classify_pe(39.9) == "Elevated PE"
+
+    def test_very_high_pe(self):
+        from web.routes.api_stock_analysis import classify_pe
+        assert classify_pe(40.0) == "Very High PE"
+        assert classify_pe(100.0) == "Very High PE"
+
+
+# ==============================================================================
+# Unit Tests: _build_valuation_metrics
+# ==============================================================================
+
+
+class TestBuildValuationMetrics:
+    """Tests for the _build_valuation_metrics helper."""
+
+    def test_full_fundamentals_populates_all_fields(self):
+        from web.routes.api_stock_analysis import _build_valuation_metrics
+        fundamentals = {
+            "pe_trailing": 28.4,
+            "pe_forward": 22.1,
+            "peg_ratio": 1.8,
+            "price_to_book": 7.3,
+            "price_to_sales": 9.5,
+            "ev_to_ebitda": 18.2,
+            "eps_trailing": 6.21,
+            "eps_forward": 7.10,
+            "market_cap": 3_500_000_000_000,
+            "enterprise_value": 3_600_000_000_000,
+            "sector": "Technology",
+            "industry": "Consumer Electronics",
+        }
+        vm = _build_valuation_metrics(fundamentals)
+
+        assert vm["pe_trailing"] == 28.4
+        assert vm["pe_forward"] == 22.1
+        assert vm["peg_ratio"] == 1.8
+        assert vm["price_to_book"] == 7.3
+        assert vm["price_to_sales"] == 9.5
+        assert vm["ev_to_ebitda"] == 18.2
+        assert vm["eps_trailing"] == 6.21
+        assert vm["eps_forward"] == 7.10
+        assert vm["market_cap"] == 3_500_000_000_000
+        assert vm["enterprise_value"] == 3_600_000_000_000
+        assert vm["sector"] == "Technology"
+        assert vm["industry"] == "Consumer Electronics"
+        assert vm["pe_label"] == "Elevated PE"
+        assert vm["valuation_note"] is not None
+
+    def test_empty_fundamentals_returns_none_values(self):
+        from web.routes.api_stock_analysis import _build_valuation_metrics
+        vm = _build_valuation_metrics({})
+        assert vm["pe_trailing"] is None
+        assert vm["pe_forward"] is None
+        assert vm["pe_label"] == "PE unavailable"
+        assert vm["sector"] is None
+        assert vm["industry"] is None
+
+    def test_negative_pe_label(self):
+        from web.routes.api_stock_analysis import _build_valuation_metrics
+        vm = _build_valuation_metrics({"pe_trailing": -3.0})
+        assert vm["pe_label"] == "PE not meaningful"
+
+    def test_zero_pe_label(self):
+        from web.routes.api_stock_analysis import _build_valuation_metrics
+        vm = _build_valuation_metrics({"pe_trailing": 0})
+        assert vm["pe_label"] == "PE not meaningful"
+
+    def test_valuation_note_does_not_recommend(self):
+        from web.routes.api_stock_analysis import _build_valuation_metrics
+        vm = _build_valuation_metrics({"pe_trailing": 20.0})
+        note_lower = vm["valuation_note"].lower()
+        assert "buy" not in note_lower
+        assert "sell" not in note_lower
+
+
+# ==============================================================================
+# Integration Tests: valuation_metrics in API response
+# ==============================================================================
+
+
+class TestStockAnalysisValuationMetricsAPI:
+    """Tests that GET /api/stocks/<ticker>/analysis includes valuation_metrics."""
+
+    def _make_full_fundamentals(self, current_price=100.0):
+        base = _make_fundamentals(current_price)
+        base.update({
+            "peg_ratio": 1.5,
+            "price_to_book": 5.0,
+            "price_to_sales": 4.0,
+            "ev_to_ebitda": 15.0,
+            "market_cap": 500_000_000_000,
+            "enterprise_value": 520_000_000_000,
+        })
+        return base
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_api_includes_valuation_metrics_key(self, mock_fundamentals, mock_history, client):
+        """API response contains a valuation_metrics object."""
+        mock_fundamentals.return_value = self._make_full_fundamentals(100.0)
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert "valuation_metrics" in data
+        vm = data["valuation_metrics"]
+        assert vm["pe_trailing"] == 20.0
+        assert vm["pe_forward"] == 18.0
+        assert vm["pe_label"] == "Moderate PE"
+        assert vm["sector"] == "Technology"
+        assert vm["industry"] == "Software"
+        assert vm["valuation_note"] is not None
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_valuation_metrics_null_when_pe_missing(self, mock_fundamentals, mock_history, client):
+        """Missing PE values are null (not missing) in the valuation_metrics response."""
+        fundamentals = {
+            "symbol": "NOPE",
+            "name": "No PE Corp",
+            "current_price": 50.0,
+            "fifty_two_week_high": 60.0,
+            "fifty_two_week_low": 40.0,
+        }
+        mock_fundamentals.return_value = fundamentals
+        mock_history.return_value = _make_bars(60, 50.0)
+
+        resp = client.get("/api/stocks/NOPE/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        vm = data["valuation_metrics"]
+        assert vm["pe_trailing"] is None
+        assert vm["pe_forward"] is None
+        assert vm["pe_label"] == "PE unavailable"
+
+    @patch("data.fundamentals.fetch_price_history")
+    @patch("data.fundamentals.fetch_fundamentals")
+    def test_valuation_metrics_negative_pe_label(self, mock_fundamentals, mock_history, client):
+        """Negative PE is labelled as not meaningful."""
+        fundamentals = _make_fundamentals(100.0)
+        fundamentals["pe_trailing"] = -8.0
+        mock_fundamentals.return_value = fundamentals
+        mock_history.return_value = _make_bars(60, 100.0)
+
+        resp = client.get("/api/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        vm = data["valuation_metrics"]
+        assert vm["pe_trailing"] == -8.0
+        assert vm["pe_label"] == "PE not meaningful"
+
+    def test_stock_analysis_page_renders_with_valuation_section(self, client):
+        """The individual stock analysis page HTML contains the Valuation Metrics section."""
+        resp = client.get("/stocks/TEST/analysis")
+        assert resp.status_code == 200
+        assert b"Valuation Metrics" in resp.data
+        assert b"valuationMetricsContent" in resp.data
