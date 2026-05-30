@@ -11,8 +11,10 @@ Covers:
 
 import csv
 import io
+import threading
+from concurrent.futures import Future
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -757,3 +759,101 @@ class TestDashboardSTILink:
         """Adding the STI link should not remove the existing S&P 500 link."""
         resp = client.get("/stocks/analysis")
         assert b"/stocks/sp500" in resp.data
+
+
+# ==============================================================================
+# Additional branch coverage tests
+# ==============================================================================
+
+
+class TestSTIScreenerServiceAdditional:
+    """Cover remaining branches in STIScreenerService."""
+
+    def _make_service(self):
+        from web.sti_screener_service import STIScreenerService
+        return STIScreenerService()
+
+    def test_scan_ticker_none_close_returns_insufficient(self):
+        """Last bar with close=None passes the OHLC filter but triggers the
+        None-check (line 185), returning an insufficient_data row."""
+        svc = self._make_service()
+        constituent = {
+            "symbol": "D05.SI",
+            "display_symbol": "D05",
+            "security": "DBS Group Holdings",
+            "sector": "Financials",
+            "sub_industry": "",
+        }
+        bars = [{"close": 30.0 + i, "open": 30.0, "high": 30.5, "low": 29.5} for i in range(30)]
+        bars[-1]["close"] = None  # passes OHLC filter (None skipped), fails None-check
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            row = svc._scan_ticker(constituent)
+
+        assert row["bollinger_status"] == "insufficient_data"
+        assert row["current_price"] is None
+
+    def test_scan_with_empty_constituents_returns_error_payload(self, tmp_path, monkeypatch):
+        """_scan() when _load_constituents returns [] → error key in result (line 229)."""
+        import web.sti_screener_service as mod
+        monkeypatch.setattr(mod, "_CONSTITUENTS_PATH", tmp_path / "nonexistent.csv")
+        svc = self._make_service()
+        result = svc._scan()
+        assert result["count"] == 0
+        assert "error" in result
+
+    def test_future_unexpected_exception_is_handled(self):
+        """future.result() raising in as_completed loop → insufficient_data row (lines 260-263)."""
+        svc = self._make_service()
+        constituents = [
+            {"symbol": "D05.SI", "display_symbol": "D05", "security": "DBS", "sector": "Financials", "sub_industry": ""},
+        ]
+
+        boom_future = Future()
+        boom_future.set_exception(RuntimeError("unexpected executor failure"))
+
+        with patch.object(svc, "_load_constituents", return_value=constituents):
+            with patch("web.sti_screener_service.ThreadPoolExecutor") as mock_executor_cls:
+                mock_executor = MagicMock()
+                mock_executor_cls.return_value.__enter__ = lambda s: mock_executor
+                mock_executor_cls.return_value.__exit__ = MagicMock(return_value=False)
+                mock_executor.submit.return_value = boom_future
+
+                with patch("web.sti_screener_service.as_completed", return_value=[boom_future]):
+                    result = svc._scan()
+
+        assert result["count"] == 1
+        assert result["rows"][0]["bollinger_status"] == "insufficient_data"
+
+    def test_concurrent_wait_while_scanning(self):
+        """Second call during a running scan waits and then uses the cache result (line 101)."""
+        svc = self._make_service()
+        scan_calls = [0]
+        barrier = threading.Event()
+        scan_started = threading.Event()
+
+        def slow_scan():
+            scan_calls[0] += 1
+            scan_started.set()
+            barrier.wait(timeout=5)
+            return {"as_of": "x", "source": "x", "count": 1, "summary": {}, "rows": [{"status_rank": 0}]}
+
+        svc._scan = slow_scan
+
+        results = {}
+
+        def call_screener(key):
+            results[key] = svc.get_screener_data(refresh=False)
+
+        t1 = threading.Thread(target=call_screener, args=("first",))
+        t2 = threading.Thread(target=call_screener, args=("second",))
+        t1.start()
+        scan_started.wait(timeout=5)  # ensure first scan is in progress
+        t2.start()
+        barrier.set()  # release the slow scan
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        # Only one scan should have run; both calls should have a result
+        assert scan_calls[0] == 1
+        assert "first" in results and "second" in results

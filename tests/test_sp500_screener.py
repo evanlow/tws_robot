@@ -918,6 +918,19 @@ class TestSP500ScreenerServiceAdditional:
         assert scan_calls[0] == 1
         assert "first" in results and "second" in results
 
+    def test_scan_ticker_missing_fundamentals_is_graceful(self):
+        """Fundamentals failure does not break the scan; quality shows Insufficient Data (lines 209-211)."""
+        svc = self._make_service()
+        constituent = {"symbol": "AAPL", "security": "Apple Inc", "sector": "Technology", "sub_industry": ""}
+        bars = [{"close": 100.0 + i, "open": 100.0, "high": 101.0, "low": 99.0} for i in range(30)]
+
+        with patch("data.fundamentals.fetch_price_history", return_value=bars):
+            with patch("data.fundamentals.get_fundamentals", side_effect=RuntimeError("no data")):
+                row = svc._scan_ticker(constituent)
+
+        assert row["current_price"] is not None
+        assert row["quality_label"] == "Insufficient Data"
+
 
 class TestSP500ScreenerAPIErrorKey:
     """Cover the error-key propagation path (line 83 of api_sp500_screener.py)."""

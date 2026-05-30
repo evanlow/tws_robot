@@ -29,6 +29,7 @@
 12. [Account Intelligence API](#account-intelligence-api)
 13. [AI Assistant APIs](#ai-assistant-apis)
 14. [S&P 500 Screener API](#sp500-screener-api)
+15. [STI Screener API](#sti-screener-api)
 
 ---
 
@@ -2941,6 +2942,153 @@ fetch('/api/stocks/sp500/screener?refresh=true')
 - Constituent list: `data/sp500_constituents.csv` (~501 tickers, header: `symbol,security,sector,sub_industry`).
 - Price data: fetched from Yahoo Finance via `data.fundamentals.fetch_price_history` (1-year daily bars).
 - To refresh the constituent list: `python scripts/refresh_sp500_constituents.py`.
+
+---
+
+## STI Screener API
+
+**NEW in PR #102** — Server-side Bollinger Bands screener for all Straits Times Index (STI) constituents.
+
+Scans all ~30 SGX-listed STI tickers concurrently (5 worker threads), computes Bollinger
+Bands and 52-week range data, and returns a ranked screener payload.  Results are
+cached in-memory for 15 minutes so repeated page loads cost no network I/O.
+
+All symbols use the yfinance `.SI` suffix (e.g. `D05.SI` for DBS Group Holdings).  Each
+row also includes a `display_symbol` field with the short SGX code (e.g. `D05`) for display
+purposes.
+
+### `GET /api/stocks/sti/screener`
+
+Return the STI Bollinger Bands screener payload.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `status` | string | `all` | Filter by Bollinger status.  One of: `all`, `overbought`, `near_overbought`, `neutral`, `near_oversold`, `oversold`, `insufficient_data`. |
+| `sector` | string | `all` | Filter by sector (case-insensitive, partial match).  E.g. `financials`, `industrials`. |
+| `refresh` | string | `false` | Pass `true` to bypass the cache and force a fresh scan. |
+
+**Response:**
+```json
+{
+  "as_of": "2026-01-15T14:30:00+00:00",
+  "source": "sti_constituents.csv",
+  "count": 30,
+  "summary": {
+    "overbought": 2,
+    "near_overbought": 5,
+    "neutral": 14,
+    "near_oversold": 4,
+    "oversold": 3,
+    "insufficient_data": 2
+  },
+  "rows": [
+    {
+      "symbol": "C6L.SI",
+      "display_symbol": "C6L",
+      "company": "Singapore Airlines",
+      "sector": "Industrials",
+      "current_price": 6.80,
+      "range_52w_position_percentile": 20.0,
+      "bollinger_percent_b": -0.05,
+      "bollinger_status": "below_lower_band",
+      "status_label": "Oversold",
+      "status_rank": 0,
+      "quality_score": 43,
+      "quality_label": "Weak",
+      "quality_reasons": [],
+      "quality_warnings": ["Earnings growth unavailable"],
+      "last_updated": "2026-01-15T14:30:00+00:00"
+    }
+  ],
+  "scan_duration_seconds": 4.2
+}
+```
+
+**Response Fields:**
+
+- `as_of` — ISO timestamp of when the scan completed (or cache was last populated).
+- `source` — Name of the STI constituents CSV file used (`sti_constituents.csv`).
+- `count` — Number of rows returned (after filtering).
+- `summary` — Count of tickers in each Bollinger status bucket for the **entire** unfiltered scan.  Not affected by `status`/`sector` filters.
+- `rows` — Array of ticker rows (see below), sorted by `status_rank` ascending (oversold first), then by sector, then by symbol.
+- `scan_duration_seconds` — Wall-clock time of the last fresh scan, `null` when served from cache.
+
+**Row Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | string | Full yfinance ticker with `.SI` suffix (e.g. `D05.SI`). Use for API drill-down URLs. |
+| `display_symbol` | string | Short SGX code without `.SI` suffix (e.g. `D05`). Use for display. |
+| `company` | string | Company name from the constituents CSV. |
+| `sector` | string | GICS sector. |
+| `current_price` | number\|null | Last closing price in SGD, `null` if data unavailable. |
+| `range_52w_position_percentile` | number\|null | Position within the 52-week high/low range as a percentage (0 = at 52w low, 100 = at 52w high). |
+| `bollinger_percent_b` | number\|null | Bollinger %B indicator.  Values below 0 indicate below the lower band; above 1 indicate above the upper band. |
+| `bollinger_status` | string | One of: `above_upper_band`, `near_upper_band`, `within_bands`, `near_lower_band`, `below_lower_band`, `insufficient_data`. |
+| `status_label` | string | Human-readable Bollinger status (e.g. `"Oversold"`, `"Near Overbought"`). |
+| `status_rank` | integer | Sort rank: 0 (oversold) → 5 (insufficient data). |
+| `quality_score` | integer\|null | Composite fundamental quality score (0–100), `null` if fundamentals unavailable. |
+| `quality_label` | string | One of: `"Strong"`, `"Moderate"`, `"Weak"`, `"Insufficient Data"`. |
+| `quality_reasons` | array | List of positive fundamental signals contributing to the quality score. |
+| `quality_warnings` | array | List of negative signals or missing data items that reduce the quality score. |
+| `last_updated` | string\|null | ISO timestamp of when this row was last refreshed, `null` if scan failed. |
+
+**Bollinger Status Values:**
+
+| `bollinger_status` | `status_label` | `status_rank` | Description |
+|--------------------|----------------|---------------|-------------|
+| `below_lower_band` | Oversold | 0 | Price is below the lower Bollinger Band |
+| `near_lower_band` | Near Oversold | 1 | Price is within 5% of the lower band |
+| `within_bands` | Neutral | 2 | Price is comfortably within the bands |
+| `near_upper_band` | Near Overbought | 3 | Price is within 5% of the upper band |
+| `above_upper_band` | Overbought | 4 | Price is above the upper Bollinger Band |
+| `insufficient_data` | Insufficient Data | 5 | Fewer than 20 bars available or data fetch failed |
+
+**Caching Behaviour:**
+- Default TTL: 15 minutes (`_CACHE_TTL_SECONDS = 900`).
+- Concurrent requests during a running scan wait for the first scan to finish, then all receive the same result — only one scan runs at a time.
+- `scan_duration_seconds` is `null` when the response comes from cache.
+
+**Singapore Market Notes:**
+- All prices are in **Singapore Dollars (SGD)**.
+- Tickers use the yfinance `.SI` suffix to identify SGX-listed stocks.
+- The constituent list includes banks, REITs, telecoms, and industrials.  REIT tickers may have 4-character codes (e.g. `A17U.SI` for CapitaLand Integrated Commercial Trust).
+- The three major local banks (DBS `D05.SI`, OCBC `O39.SI`, UOB `U11.SI`) are always included.
+
+**Page Route:**
+`GET /stocks/sti` — Renders the STI Screener HTML page which loads data from this API.
+
+**Example Usage:**
+```javascript
+// Get full screener (cached)
+fetch('/api/stocks/sti/screener')
+  .then(r => r.json())
+  .then(data => {
+    console.log(`${data.count} tickers, as of ${data.as_of}`);
+    data.rows.forEach(row => {
+      if (row.bollinger_status === 'below_lower_band') {
+        console.log(`Oversold: ${row.display_symbol} @ SGD ${row.current_price}`);
+      }
+    });
+  });
+
+// Filter to oversold Financials
+fetch('/api/stocks/sti/screener?status=oversold&sector=financials')
+  .then(r => r.json())
+  .then(data => console.log(data.rows));
+
+// Force a fresh scan
+fetch('/api/stocks/sti/screener?refresh=true')
+  .then(r => r.json())
+  .then(data => console.log(`Scan took ${data.scan_duration_seconds}s`));
+```
+
+**Data Source:**
+- Constituent list: `data/sti_constituents.csv` (~30 tickers, header: `symbol,display_symbol,security,sector,sub_industry`).
+- Price data: fetched from Yahoo Finance via `data.fundamentals.fetch_price_history` (1-year daily bars).
+- Fundamental data: fetched via `data.fundamentals.get_fundamentals`; failures are non-fatal (quality score shows `"Insufficient Data"`).
 
 ---
 
