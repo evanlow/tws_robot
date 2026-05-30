@@ -134,6 +134,19 @@ class TestValuationService:
         result = valuation_service.estimate_fair_value(fundamentals, 200.0)
         assert result["status"] == "potentially_overvalued"
 
+    def test_inverted_analyst_targets_are_normalised(self):
+        # target_low > target_high (bad data) triggers the blended_low > blended_high swap
+        fundamentals = {
+            "current_price": 100.0,
+            "target_mean_price": 100.0,
+            "target_low_price": 120.0,
+            "target_high_price": 80.0,
+        }
+        result = valuation_service.estimate_fair_value(fundamentals, 100.0)
+        assert result["low"] is not None
+        assert result["high"] is not None
+        assert result["low"] <= result["high"]
+
 
 # ==============================================================================
 # Unit Tests: Technical Levels Service

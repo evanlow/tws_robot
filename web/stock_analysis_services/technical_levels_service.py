@@ -142,8 +142,6 @@ def _cluster_pivots(
         cluster = [pivot]
         used[i] = True
         for j in range(i + 1, len(sorted_pivots)):
-            if used[j]:
-                continue
             if pivot > 0 and abs(sorted_pivots[j] - pivot) / pivot <= _CLUSTER_TOLERANCE:
                 cluster.append(sorted_pivots[j])
                 used[j] = True
