@@ -84,6 +84,12 @@
     <div id="fairValueContent"></div>
   </section>
 
+  <!-- Section 5b: Valuation Metrics -->
+  <section id="valuationMetricsSection" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Valuation Metrics</h2>
+    <div id="valuationMetricsContent"></div>
+  </section>
+
   <!-- Section 6: Support & Resistance Zones -->
   <section id="technicalLevelsSection" style="margin-bottom:1.5rem;">
     <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Support &amp; Resistance Zones (Past 1 Year)</h2>
@@ -175,6 +181,9 @@ function renderAnalysis(data) {
 
   // Fair value
   renderFairValue(data.fair_value);
+
+  // Valuation metrics
+  renderValuationMetrics(data.valuation_metrics);
 
   // Technical levels
   renderTechnicalLevels(data.technical_levels);
@@ -545,5 +554,73 @@ function formatStatus(status) {
   if (!status) return '--';
   return status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
-</script>
+
+/* ---- Valuation Metrics ---- */
+function formatRatio(val) {
+  if (val === null || val === undefined || !isFinite(val)) return '--';
+  return Number(val).toFixed(1) + 'x';
+}
+
+function formatEps(val) {
+  if (val === null || val === undefined || !isFinite(val)) return '--';
+  return '$' + Number(val).toFixed(2);
+}
+
+function formatMarketCap(val) {
+  if (val === null || val === undefined || !isFinite(val)) return '--';
+  const n = Number(val);
+  if (n >= 1e12) return '$' + (n / 1e12).toFixed(1) + 'T';
+  if (n >= 1e9)  return '$' + (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6)  return '$' + (n / 1e6).toFixed(1) + 'M';
+  return '$' + n.toLocaleString();
+}
+
+function peLabelColor(label) {
+  if (!label) return '#a0aec0';
+  if (label === 'Low PE') return '#48bb78';
+  if (label === 'Moderate PE') return '#63b3ed';
+  if (label === 'Elevated PE') return '#fbd38d';
+  if (label === 'Very High PE') return '#fc8181';
+  return '#a0aec0';
+}
+
+function renderValuationMetrics(vm) {
+  const el = document.getElementById('valuationMetricsContent');
+  if (!vm) {
+    el.innerHTML = '<div class="stat-card" style="padding:1rem;"><p style="color:#a0aec0;">Valuation metrics unavailable.</p></div>';
+    return;
+  }
+
+  const badgeColor = peLabelColor(vm.pe_label);
+  const badge = vm.pe_label
+    ? `<span style="display:inline-block;padding:0.2rem 0.6rem;border-radius:12px;font-size:0.75rem;font-weight:600;background:${badgeColor}20;color:${badgeColor};border:1px solid ${badgeColor}40;">${vm.pe_label}</span>`
+    : '';
+
+  const rows = [
+    { label: 'Trailing PE',      value: formatRatio(vm.pe_trailing),      extra: badge },
+    { label: 'Forward PE',       value: formatRatio(vm.pe_forward),       extra: '' },
+    { label: 'PEG Ratio',        value: isNil(vm.peg_ratio) ? '--' : Number(vm.peg_ratio).toFixed(2), extra: '' },
+    { label: 'Price-to-Book',    value: formatRatio(vm.price_to_book),    extra: '' },
+    { label: 'Price-to-Sales',   value: formatRatio(vm.price_to_sales),   extra: '' },
+    { label: 'EV/EBITDA',        value: formatRatio(vm.ev_to_ebitda),     extra: '' },
+    { label: 'EPS (TTM)',        value: formatEps(vm.eps_trailing),       extra: '' },
+    { label: 'Forward EPS',      value: formatEps(vm.eps_forward),        extra: '' },
+    { label: 'Market Cap',       value: formatMarketCap(vm.market_cap),   extra: '' },
+    { label: 'Enterprise Value', value: formatMarketCap(vm.enterprise_value), extra: '' },
+    { label: 'Sector',           value: vm.sector || '--',                extra: '' },
+    { label: 'Industry',         value: vm.industry || '--',              extra: '' },
+  ];
+
+  let html = '<div class="stats-grid">';
+  rows.forEach(r => {
+    html += `<div class="stat-card"><span class="stat-label">${r.label}</span><span class="stat-value">${r.value}${r.extra ? ' ' + r.extra : ''}</span></div>`;
+  });
+  html += '</div>';
+
+  if (vm.valuation_note) {
+    html += `<p style="color:#a0aec0;font-size:0.85rem;margin-top:0.75rem;line-height:1.5;">${vm.valuation_note}</p>`;
+  }
+
+  el.innerHTML = html;
+}</script>
 {% endblock %}
