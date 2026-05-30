@@ -180,6 +180,11 @@
     var tooltip = row.momentum_reasons && row.momentum_reasons.length
       ? row.momentum_reasons.join('; ')
       : '';
+    if (row.rsi_14 != null) {
+      if (tooltip) tooltip += '. ';
+      tooltip += 'RSI(14): ' + row.rsi_14;
+      if (row.rsi_label) tooltip += ' — ' + row.rsi_label;
+    }
     return '<span title="' + escapeHtml(tooltip) +
            '" style="background:' + m.bg + ';color:' + m.text +
            ';border:1px solid ' + m.border +

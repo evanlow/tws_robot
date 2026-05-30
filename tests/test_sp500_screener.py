@@ -1431,9 +1431,9 @@ class TestComputeRSI:
         assert result["reasons"] == []
 
     def test_exactly_period_bars_insufficient(self):
-        """Exactly period bars (need period+1) → rsi_insufficient_data."""
-        bars = _make_rsi_bars([100.0] * 14)
-        result = self._call(bars, period=14)
+        """Exactly period bars with a custom period (need period+1) → rsi_insufficient_data."""
+        bars = _make_rsi_bars([100.0] * 5)
+        result = self._call(bars, period=5)
         assert result["status"] == "rsi_insufficient_data"
 
     def test_minimum_bars_gives_value(self):
@@ -1517,14 +1517,25 @@ class TestComputeRSI:
     # RSI neutral
     # ------------------------------------------------------------------
 
-    def test_rsi_neutral_flat_prices(self):
-        """Flat prices with no moves → RSI=100 (no losses), but flat is fine."""
+    def test_rsi_flat_prices_treated_as_overbought(self):
+        """Flat prices with no moves → avg_loss=0 → RSI=100 → rsi_overbought."""
         closes = [100.0] * 20
         bars = _make_rsi_bars(closes)
         result = self._call(bars)
-        # 100.0 RSI → overbought (>70)
-        assert result["status"] in ("rsi_overbought", "rsi_neutral")
+        # avg_loss=0 forces RSI to 100, which is overbought (>70)
+        assert result["status"] == "rsi_overbought"
+        assert result["value"] == 100.0
+
+    def test_rsi_neutral_midrange_prices(self):
+        """Alternating equal gains and losses → RSI≈50 → rsi_neutral."""
+        # Build 16 bars: 15 alternating +1/-1 moves from 100
+        closes = [100.0]
+        for i in range(15):
+            closes.append(closes[-1] + (1.0 if i % 2 == 0 else -1.0))
+        bars = _make_rsi_bars(closes)
+        result = self._call(bars)
         assert result["value"] is not None
+        assert result["status"] == "rsi_neutral"
 
     def test_rsi_neutral_mixed_prices(self):
         """Alternating up/down closes produce RSI near 50 → rsi_neutral."""
