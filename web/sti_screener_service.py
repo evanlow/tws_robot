@@ -40,6 +40,7 @@ from web.technical_analysis import (
     BOLLINGER_STATUS_RANK,
     calc_52w_percentile,
     compute_bollinger_bands,
+    compute_oversold_momentum_confirmation,
 )
 from web.sp500_screener_service import (
     compute_quality_score,
@@ -195,6 +196,9 @@ class STIScreenerService:
         # Bollinger Bands
         bb = compute_bollinger_bands(bars, current_price)
 
+        # Momentum confirmation — only populated for oversold / near-oversold
+        momentum = compute_oversold_momentum_confirmation(bars, bb["status"])
+
         # Fundamentals / quality score — failures are non-fatal
         try:
             fundamentals = get_fundamentals(symbol)
@@ -217,6 +221,9 @@ class STIScreenerService:
         row["quality_label"] = quality["quality_label"]
         row["quality_reasons"] = quality["quality_reasons"]
         row["quality_warnings"] = quality["quality_warnings"]
+        row["momentum_confirmation"] = momentum["momentum_confirmation"]
+        row["momentum_label"] = momentum["momentum_label"]
+        row["momentum_reasons"] = momentum["momentum_reasons"]
         row["last_updated"] = now_iso
         return row
 
@@ -304,6 +311,9 @@ def _sti_insufficient_data_row(constituent: Dict[str, str]) -> Dict[str, Any]:
         "quality_label": "Insufficient Data",
         "quality_reasons": [],
         "quality_warnings": [],
+        "momentum_confirmation": None,
+        "momentum_label": None,
+        "momentum_reasons": [],
         "last_updated": None,
     }
 
