@@ -183,7 +183,7 @@
       : '';
     if (row.rsi_14 != null) {
       if (tooltip) tooltip += '. ';
-      tooltip += 'RSI(14): ' + row.rsi_14;
+      tooltip += 'RSI(14): ' + row.rsi_14.toFixed(1);
       if (row.rsi_label) tooltip += ' — ' + row.rsi_label;
     }
     return '<span title="' + escapeHtml(tooltip) +
