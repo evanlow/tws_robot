@@ -6,7 +6,7 @@ alerts, and provides a simple notification interface for trading events.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
@@ -59,10 +59,10 @@ class AlertRule:
     def is_in_cooldown(self) -> bool:
         if self._last_triggered is None:
             return False
-        return (datetime.utcnow() - self._last_triggered) < timedelta(minutes=self.cooldown_minutes)
+        return (datetime.now(timezone.utc) - self._last_triggered) < timedelta(minutes=self.cooldown_minutes)
 
     def mark_triggered(self) -> None:
-        self._last_triggered = datetime.utcnow()
+        self._last_triggered = datetime.now(timezone.utc)
 
     def to_dict(self) -> dict:
         return {
@@ -82,7 +82,7 @@ class Alert:
     severity: AlertSeverity
     message: str
     metric_value: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {
@@ -117,7 +117,7 @@ class Report:
     end_date: datetime
     sections: List[ReportSection] = field(default_factory=list)
     alerts_during_period: List[Alert] = field(default_factory=list)
-    generated_at: datetime = field(default_factory=datetime.utcnow)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {
@@ -244,7 +244,7 @@ class ReportGenerator:
 
     def push_snapshot(self, snapshot: Dict) -> None:
         """Store a daily metrics snapshot for report generation."""
-        snapshot.setdefault("timestamp", datetime.utcnow().isoformat())
+        snapshot.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
         self._snapshots.append(snapshot)
 
     # ------------------------------------------------------------------
@@ -265,7 +265,7 @@ class ReportGenerator:
         Returns:
             Report object with sections and alerts.
         """
-        end = end_date or datetime.utcnow()
+        end = end_date or datetime.now(timezone.utc)
         if period == ReportPeriod.DAILY:
             start = end - timedelta(days=1)
         elif period == ReportPeriod.WEEKLY:

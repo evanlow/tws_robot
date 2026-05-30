@@ -7,7 +7,7 @@ fill-rate metrics, and rejection-pattern tracking.
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -34,7 +34,7 @@ class ExecutionRecord:
     vwap: float = 0.0     # volume-weighted average price at fill time
     market_price: float = 0.0  # mid-price at order submission
     fill_time_ms: float = 0.0  # time from submit to fill
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
     def slippage(self) -> float:
@@ -99,7 +99,7 @@ class RejectionRecord:
     order_id: str
     symbol: str
     reason: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {
@@ -181,7 +181,7 @@ class ExecutionQualityAnalyzer:
             vwap=vwap,
             market_price=market_price or limit_price,
             fill_time_ms=fill_time_ms,
-            timestamp=timestamp or datetime.utcnow(),
+            timestamp=timestamp or datetime.now(timezone.utc),
         )
         self._fills.append(rec)
         return rec
@@ -198,7 +198,7 @@ class ExecutionQualityAnalyzer:
             order_id=order_id,
             symbol=symbol,
             reason=reason,
-            timestamp=timestamp or datetime.utcnow(),
+            timestamp=timestamp or datetime.now(timezone.utc),
         )
         self._rejections.append(rec)
         return rec
@@ -283,13 +283,13 @@ class ExecutionQualityAnalyzer:
     def _filter_fills(self, period_days: Optional[int]) -> List[ExecutionRecord]:
         if period_days is None:
             return self._fills
-        cutoff = datetime.utcnow() - timedelta(days=period_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)
         return [f for f in self._fills if f.timestamp >= cutoff]
 
     def _filter_rejections(self, period_days: Optional[int]) -> List[RejectionRecord]:
         if period_days is None:
             return self._rejections
-        cutoff = datetime.utcnow() - timedelta(days=period_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)
         return [r for r in self._rejections if r.timestamp >= cutoff]
 
     @staticmethod

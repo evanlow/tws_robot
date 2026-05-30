@@ -7,7 +7,7 @@ fee drag, and tracks tax-lot information for wash-sale awareness.
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -35,7 +35,7 @@ class BenchmarkComparison:
     information_ratio: float = 0.0
     beta: float = 0.0
     correlation: float = 0.0
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
         self.alpha = self.portfolio_return_pct - self.benchmark_return_pct
@@ -91,7 +91,7 @@ class TaxLot:
 
     def update_gain(self, current_price: float) -> None:
         self.unrealized_gain = (current_price - self.cost_basis) * self.quantity
-        holding_days = (datetime.utcnow() - self.acquisition_date).days
+        holding_days = (datetime.now(timezone.utc) - self.acquisition_date).days
         self.is_short_term = holding_days < 365
 
     def to_dict(self) -> dict:
@@ -103,7 +103,7 @@ class TaxLot:
             "lot_id": self.lot_id,
             "is_short_term": self.is_short_term,
             "unrealized_gain": round(self.unrealized_gain, 2),
-            "holding_days": (datetime.utcnow() - self.acquisition_date).days,
+            "holding_days": (datetime.now(timezone.utc) - self.acquisition_date).days,
         }
 
 
@@ -176,7 +176,7 @@ class PerformanceBenchmarker:
             "commission": commission,
             "fees": fees,
             "slippage": slippage,
-            "timestamp": (timestamp or datetime.utcnow()).isoformat(),
+            "timestamp": (timestamp or datetime.now(timezone.utc)).isoformat(),
         })
 
     # ------------------------------------------------------------------
@@ -234,7 +234,7 @@ class PerformanceBenchmarker:
         Returns:
             FeeDragAnalysis with gross vs. net returns.
         """
-        cutoff = datetime.utcnow() - timedelta(days=period_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)
         recent = [t for t in self._trade_fees if datetime.fromisoformat(t["timestamp"]) >= cutoff]
 
         total_comm = sum(t["commission"] for t in recent)
@@ -367,7 +367,7 @@ class PerformanceBenchmarker:
     ) -> float:
         if len(history) < 2:
             return 0.0
-        cutoff = datetime.utcnow() - timedelta(days=period_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)
         relevant = [(t, v) for t, v in history if t >= cutoff]
         if len(relevant) < 2:
             relevant = history[-min(len(history), period_days):]
@@ -386,7 +386,7 @@ class PerformanceBenchmarker:
     ) -> List[float]:
         if len(history) < 2:
             return []
-        cutoff = datetime.utcnow() - timedelta(days=period_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)
         relevant = [(t, v) for t, v in history if t >= cutoff]
         if len(relevant) < 2:
             relevant = history[-min(len(history), period_days):]

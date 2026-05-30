@@ -6,7 +6,7 @@ forecasting to keep liquidity aligned with trading requirements.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -75,7 +75,7 @@ class CashAnalysis:
     idle_days: int = 0
     recommendations: List[str] = field(default_factory=list)
     forecast: List[CashFlowEntry] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
     def cash_pct(self) -> float:
@@ -137,7 +137,7 @@ class CashManagementEngine:
         Returns:
             CashAnalysis with reserve status, idle cash detection, and recommendations.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         self._balance_history.append((now, cash_balance))
 
         target = self._compute_target_reserve(equity)
@@ -190,8 +190,8 @@ class CashManagementEngine:
 
     def get_forecast(self, days: int = 30) -> List[CashFlowEntry]:
         """Return expected cash-flow entries for the next *days* days."""
-        cutoff = datetime.utcnow() + timedelta(days=days)
-        now = datetime.utcnow()
+        cutoff = datetime.now(timezone.utc) + timedelta(days=days)
+        now = datetime.now(timezone.utc)
         flows = [f for f in self._scheduled_flows if now <= f.date <= cutoff]
         flows.sort(key=lambda f: f.date)
         return flows
@@ -206,7 +206,7 @@ class CashManagementEngine:
         Returns list of (date, projected_balance) tuples.
         """
         flows = self.get_forecast(days)
-        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         flow_by_day: Dict[str, float] = {}
         for f in flows:
             key = f.date.strftime("%Y-%m-%d")

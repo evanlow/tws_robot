@@ -13,7 +13,7 @@ Covers:
 """
 
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -171,7 +171,7 @@ class TestCashManagementEngine:
 
     def test_idle_cash_detection(self):
         engine = self._make_engine()
-        old_date = datetime.utcnow() - timedelta(days=30)
+        old_date = datetime.now(timezone.utc) - timedelta(days=30)
         result = engine.analyze(cash_balance=50_000, equity=100_000, last_trade_date=old_date)
         assert result.idle_days >= 30
         assert result.idle_cash > 0
@@ -185,7 +185,7 @@ class TestCashManagementEngine:
 
     def test_expected_flow_scheduling(self):
         engine = self._make_engine()
-        future = datetime.utcnow() + timedelta(days=5)
+        future = datetime.now(timezone.utc) + timedelta(days=5)
         engine.add_expected_flow(future, 1000, "Dividend AAPL", category="dividend")
         flows = engine.get_forecast(days=10)
         assert len(flows) == 1
@@ -193,7 +193,7 @@ class TestCashManagementEngine:
 
     def test_forecast_balance(self):
         engine = self._make_engine()
-        future = datetime.utcnow() + timedelta(days=3)
+        future = datetime.now(timezone.utc) + timedelta(days=3)
         engine.add_expected_flow(future, 5000, "Deposit")
         projection = engine.forecast_balance(current_cash=10_000, days=7)
         # Should have 8 entries (day 0 through day 7)
@@ -471,7 +471,7 @@ class TestPerformanceBenchmarker:
         return PerformanceBenchmarker(**kw)
 
     def _populate_history(self, b, days=30, start_val=100_000, daily_return=0.001):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         val = start_val
         bench_val = 100.0
         for i in range(days):
@@ -503,26 +503,26 @@ class TestPerformanceBenchmarker:
 
     def test_tax_lot_tracking(self):
         b = self._make_benchmarker()
-        lot = b.add_tax_lot("AAPL", 100, 150.0, datetime.utcnow() - timedelta(days=400))
+        lot = b.add_tax_lot("AAPL", 100, 150.0, datetime.now(timezone.utc) - timedelta(days=400))
         assert lot.symbol == "AAPL"
         lots = b.get_tax_lots("AAPL")
         assert len(lots) == 1
 
     def test_wash_sale_alert(self):
         b = self._make_benchmarker()
-        alert = b.check_wash_sale("AAPL", datetime.utcnow(), sale_price=140, cost_basis=150, quantity=100)
+        alert = b.check_wash_sale("AAPL", datetime.now(timezone.utc), sale_price=140, cost_basis=150, quantity=100)
         assert alert is not None
         assert alert.loss_amount < 0
 
     def test_no_wash_sale_on_profit(self):
         b = self._make_benchmarker()
-        alert = b.check_wash_sale("AAPL", datetime.utcnow(), sale_price=160, cost_basis=150, quantity=100)
+        alert = b.check_wash_sale("AAPL", datetime.now(timezone.utc), sale_price=160, cost_basis=150, quantity=100)
         assert alert is None
 
     def test_unrealized_tax_summary(self):
         b = self._make_benchmarker()
-        b.add_tax_lot("AAPL", 100, 150.0, datetime.utcnow() - timedelta(days=400))
-        b.add_tax_lot("GOOG", 50, 100.0, datetime.utcnow() - timedelta(days=30))
+        b.add_tax_lot("AAPL", 100, 150.0, datetime.now(timezone.utc) - timedelta(days=400))
+        b.add_tax_lot("GOOG", 50, 100.0, datetime.now(timezone.utc) - timedelta(days=30))
         summary = b.get_unrealized_tax_summary({"AAPL": 170, "GOOG": 110})
         assert summary["total_unrealized"] > 0
         assert summary["total_lots"] == 2
@@ -716,7 +716,7 @@ class TestReportGenerator:
             "equity": 100_000,
             "daily_pnl": 500,
             "drawdown_pct": 0.02,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         report = gen.generate_report(period=ReportPeriod.DAILY)
         assert report.period == ReportPeriod.DAILY
@@ -936,7 +936,7 @@ class TestExecutionQualityAnalyzer:
 
     def test_period_filter(self):
         a = self._make_analyzer()
-        old = datetime.utcnow() - timedelta(days=60)
+        old = datetime.now(timezone.utc) - timedelta(days=60)
         a.record_fill("O1", "AAPL", "BUY", 100, 150, 150.02,
                        market_price=150.0, timestamp=old)
         a.record_fill("O2", "GOOG", "BUY", 50, 100, 100.01,

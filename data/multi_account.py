@@ -6,7 +6,7 @@ accounts and provides unified portfolio views.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ class AccountSnapshot:
     realized_pnl: float = 0.0
     position_count: int = 0
     positions: List[Dict] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {
@@ -55,7 +55,7 @@ class AggregateView:
     largest_account: str = ""
     concentration_pct: float = 0.0  # largest account as % of total
     accounts: List[Dict] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {

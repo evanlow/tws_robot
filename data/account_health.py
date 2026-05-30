@@ -7,7 +7,7 @@ checks, and compound annual growth rate (CAGR) computation for trading accounts.
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -94,7 +94,7 @@ class HealthScore:
     grade: HealthGrade = HealthGrade.FAIR
     components: Dict[str, float] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {

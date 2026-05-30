@@ -8,7 +8,7 @@ import logging
 import math
 import random
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -52,7 +52,7 @@ class MonteCarloResult:
     probability_of_loss: float
     max_simulated_loss: float
     max_simulated_gain: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {
