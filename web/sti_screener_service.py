@@ -208,8 +208,8 @@ class STIScreenerService:
         quality = compute_quality_score(fundamentals)
 
         # Dividend fields — missing values stay None
-        annual_dividend = fundamentals.get("dividend_rate") or None
-        dividend_yield = fundamentals.get("dividend_yield") or None
+        annual_dividend = fundamentals.get("dividend_rate")
+        dividend_yield = fundamentals.get("dividend_yield")
 
         import datetime
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
