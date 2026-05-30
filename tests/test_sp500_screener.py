@@ -1355,8 +1355,10 @@ class TestComputeOversoldMomentumConfirmation:
         from web.sp500_screener_service import SP500ScreenerService
         svc = SP500ScreenerService()
         constituent = {"symbol": "NTRL", "security": "Neutral Corp", "sector": "Tech", "sub_industry": ""}
-        # Deterministic bars: last 20 bars alternate 90/110 with the final close
-        # at 100 (the midpoint), giving percent_b ≈ 0.51 → within_bands guaranteed.
+        # Deterministic bars: 59 alternating closes of 90/110 provide enough
+        # history (≥20 bars) with non-zero std; the final close at 100 (the
+        # midpoint of the last-20-bar band) gives percent_b ≈ 0.51 → within_bands
+        # guaranteed.
         bars = [
             {
                 "timestamp": f"2024-{i // 28 + 1:02d}-{(i % 28) + 1:02d}",
