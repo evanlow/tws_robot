@@ -1355,20 +1355,33 @@ class TestComputeOversoldMomentumConfirmation:
         from web.sp500_screener_service import SP500ScreenerService
         svc = SP500ScreenerService()
         constituent = {"symbol": "NTRL", "security": "Neutral Corp", "sector": "Tech", "sub_industry": ""}
-        # All bars at 100.0 with tiny variance → within_bands
-        bars = _make_bars(60, 100.0, variance=0.01)
+        # Deterministic bars: last 20 bars alternate 90/110 with the final close
+        # at 100 (the midpoint), giving percent_b ≈ 0.51 → within_bands guaranteed.
+        bars = [
+            {
+                "timestamp": f"2024-{i // 28 + 1:02d}-{(i % 28) + 1:02d}",
+                "open": 100.0, "high": 101.0, "low": 99.0,
+                "close": 90.0 if i % 2 == 0 else 110.0,
+                "volume": 500_000,
+            }
+            for i in range(59)
+        ]
+        bars.append({
+            "timestamp": "2024-03-01", "open": 100.0, "high": 101.0, "low": 99.0,
+            "close": 100.0, "volume": 500_000,
+        })
 
         with patch("data.fundamentals.fetch_price_history", return_value=bars):
             with patch("data.fundamentals.get_fundamentals", return_value={}):
                 row = svc._scan_ticker(constituent)
 
+        assert row["bollinger_status"] == "within_bands"
         assert "momentum_confirmation" in row
         assert "momentum_label" in row
         assert "momentum_reasons" in row
-        # Non-oversold → momentum fields should be null/empty
-        if row["bollinger_status"] not in ("below_lower_band", "near_lower_band"):
-            assert row["momentum_confirmation"] is None
-            assert row["momentum_label"] is None
+        # Non-oversold → momentum fields must be null/empty
+        assert row["momentum_confirmation"] is None
+        assert row["momentum_label"] is None
 
     # ------------------------------------------------------------------
     # Frontend: page renders successfully (Momentum Confirmation column present)
