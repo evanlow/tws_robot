@@ -67,10 +67,49 @@ class _BridgeApp(EWrapper, EClient):
 
     # -- account data -------------------------------------------------------
 
+    # Broker account-value keys that map to per-currency cash balances.
+    # These are forwarded regardless of the ``currency`` parameter so that
+    # multi-currency accounts can report each currency's cash separately.
+    _PER_CURRENCY_KEYS = frozenset({"CashBalance", "TotalCashBalance"})
+
+    # Broker account-value keys (BASE currency) that are stored directly into
+    # the account summary with a fixed internal name.
+    _BASE_CURRENCY_MAP = {
+        "TotalCashBalance": "cash_balance",
+        "AvailableFunds": "available_funds",
+        "FullAvailableFunds": "full_available_funds",
+        "BuyingPower": "buying_power",
+        "ExcessLiquidity": "excess_liquidity",
+        "FullExcessLiquidity": "full_excess_liquidity",
+        "InitMarginReq": "init_margin_req",
+        "FullInitMarginReq": "full_init_margin_req",
+        "MaintMarginReq": "maint_margin_req",
+        "FullMaintMarginReq": "full_maint_margin_req",
+        "LookAheadAvailableFunds": "lookahead_available_funds",
+        "LookAheadExcessLiquidity": "lookahead_excess_liquidity",
+        "SettledCash": "settled_cash",
+    }
+
     def updateAccountValue(self, key: str, val: str, currency: str,
                            accountName: str) -> None:
+        # -- Per-currency cash balances (all currencies, not only BASE) -----
+        if key in self._PER_CURRENCY_KEYS and currency and currency != "BASE":
+            with self._svc._lock:
+                by_ccy = self._svc._account_summary.setdefault(
+                    "cash_by_currency", {}
+                )
+                by_ccy[currency] = _to_float(val)
+
         if currency != "BASE":
+            # Publish event but skip BASE-only field handling below
+            self._svc.event_bus.publish(Event(
+                EventType.ACCOUNT_UPDATE,
+                data={"key": key, "value": val, "currency": currency},
+                source="TWSBridge",
+            ))
             return
+
+        # -- BASE currency fields ------------------------------------------
         if key == "TotalCashBalance":
             self._svc.update_account_summary({"cash_balance": _to_float(val)})
         elif key == "NetLiquidationByCurrency":
@@ -88,8 +127,9 @@ class _BridgeApp(EWrapper, EClient):
                     rm._equity_initialized = True
                 elif equity > rm.peak_equity:
                     rm.peak_equity = equity
-        elif key == "BuyingPower":
-            self._svc.update_account_summary({"buying_power": _to_float(val)})
+        elif key in self._BASE_CURRENCY_MAP:
+            internal_key = self._BASE_CURRENCY_MAP[key]
+            self._svc.update_account_summary({internal_key: _to_float(val)})
 
         self._svc.event_bus.publish(Event(
             EventType.ACCOUNT_UPDATE,
