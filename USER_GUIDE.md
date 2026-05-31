@@ -722,7 +722,7 @@ Add these keys to your `.env` file to customize behaviour:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CASH_RESERVE_MODE` | `gross_assignment` | Reserve mode: `gross_assignment`, `net_premium`, or `broker_margin` |
-| `MANUAL_CASH_BUFFER_PCT` | `0.05` | Fraction of cash balance to keep untouched (e.g. `0.10` = 10%) |
+| `MANUAL_CASH_BUFFER_PCT` | `0.10` | Fraction of cash balance to keep untouched (e.g. `0.10` = 10%) |
 | `MANUAL_CASH_BUFFER_AMOUNT` | `0` | Fixed dollar amount to keep untouched (larger of the two is used) |
 | `OPTION_CONTRACT_MULTIPLIER_DEFAULT` | `100` | Multiplier when not available from position data |
 | `ENABLE_CASH_AVAILABILITY_GUARD` | `true` | Enable/disable the deployable-cash safety gate |

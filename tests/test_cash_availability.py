@@ -128,7 +128,7 @@ def _stock(symbol, qty, entry_price=100.0):
 # 1. No option positions
 # ===========================================================================
 
-class TestNoBpositions:
+class TestNoPositions:
     def test_no_positions_deployable_equals_cash(self):
         analyzer = _make_analyzer()
         result = analyzer.analyze(_account(cash=50_000), {})
@@ -505,6 +505,22 @@ class TestMarginUsage:
         result = analyzer.analyze(account, {})
 
         assert result.margin_safety_buffer == 0.0
+
+    def test_excess_liquidity_exactly_at_threshold_no_margin_buffer(self):
+        """Excess liquidity exactly at 10% of cash should NOT trigger the buffer."""
+        analyzer = _make_analyzer()
+        account = _account(cash=100_000, excess_liquidity=10_000)  # == 10%
+        result = analyzer.analyze(account, {})
+
+        assert result.margin_safety_buffer == 0.0
+
+    def test_excess_liquidity_just_below_threshold_triggers_buffer(self):
+        """Excess liquidity just below 10% of cash should trigger the 5% buffer."""
+        analyzer = _make_analyzer()
+        account = _account(cash=100_000, excess_liquidity=9_999)  # < 10%
+        result = analyzer.analyze(account, {})
+
+        assert result.margin_safety_buffer == pytest.approx(5_000.0)
 
     def test_high_margin_req_sets_flag(self):
         analyzer = _make_analyzer()
