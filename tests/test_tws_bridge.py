@@ -132,6 +132,31 @@ class TestBridgeApp:
         app.nextValidId(100)
         
         assert app._ready is True
+
+    @pytest.mark.unit
+    def test_next_valid_id_stores_order_id(self, mock_service_manager):
+        """nextValidId must cache the broker-issued order ID."""
+        app = _BridgeApp(mock_service_manager, "DU12345")
+
+        app.nextValidId(4242)
+
+        assert app._next_valid_order_id == 4242
+
+    @pytest.mark.unit
+    def test_next_valid_id_only_advances(self, mock_service_manager):
+        """Subsequent nextValidId callbacks must not roll the cursor back."""
+        app = _BridgeApp(mock_service_manager, "DU12345")
+
+        app.nextValidId(4242)
+        # A stale/lower callback (e.g. from a delayed ``reqIds``) must
+        # not regress the cursor — we'd otherwise hand out IDs the
+        # broker has already issued.
+        app.nextValidId(100)
+
+        assert app._next_valid_order_id == 4242
+
+        app.nextValidId(5000)
+        assert app._next_valid_order_id == 5000
     
     @pytest.mark.unit
     def test_connection_closed(self, mock_service_manager):
@@ -562,6 +587,43 @@ class TestTWSBridge:
             bridge.cancel_order(42)
 
         mock_app.cancelOrder.assert_not_called()
+
+    @pytest.mark.unit
+    def test_reserve_order_id_uses_broker_cursor(self, bridge):
+        """reserve_order_id returns the broker-issued ID and advances."""
+        # Use a real _BridgeApp so the lock and cursor behave like prod.
+        app = _BridgeApp(bridge._svc, "DU12345")
+        app._connected = True
+        app.nextValidId(4242)
+        bridge._app = app
+
+        first = bridge.reserve_order_id()
+        second = bridge.reserve_order_id()
+
+        assert first == 4242
+        assert second == 4243
+        # The cached cursor is advanced even when nextValidId isn't
+        # re-broadcast — otherwise back-to-back orders would collide.
+        assert app._next_valid_order_id == 4244
+
+    @pytest.mark.unit
+    def test_reserve_order_id_without_handshake_raises(self, bridge):
+        """reserve_order_id rejects calls before nextValidId arrives."""
+        app = _BridgeApp(bridge._svc, "DU12345")
+        app._connected = True
+        # No nextValidId yet → no broker-issued cursor.
+        bridge._app = app
+
+        with pytest.raises(RuntimeError, match="nextValidId"):
+            bridge.reserve_order_id()
+
+    @pytest.mark.unit
+    def test_reserve_order_id_requires_connection(self, bridge):
+        """reserve_order_id refuses to mint IDs when disconnected."""
+        bridge._app = None
+
+        with pytest.raises(RuntimeError, match="not connected to TWS"):
+            bridge.reserve_order_id()
 
 
 # ==============================================================================

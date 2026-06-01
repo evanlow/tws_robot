@@ -155,3 +155,92 @@ class TestScannerIntegration:
         # Only AAA actually qualifies under the engine's hard filters.
         qualifying = [s for s in results if s.strength_score >= 100]
         assert [s.symbol for s in qualifying] == ["AAA"]
+
+
+class TestSupportResistanceLimitation:
+    """The screener does not yet expose support / resistance.
+
+    The provider must surface that limitation honestly (``None`` rather
+    than guessing) and the trade planner must fall back to a safe
+    decision (``BUY_SHARES`` or no plan) instead of sizing a short put
+    against an unknown level.
+    """
+
+    def test_signal_has_no_support_or_resistance(self):
+        screener = _StubScreener([_row("AAA")])
+        provider = TechnicalAnalysisSignalProvider(
+            screener_service=screener, refresh_on_first_call=False
+        )
+        signal = provider.analyze("AAA")
+        assert signal is not None
+        assert signal.support_price is None
+        assert signal.resistance_price is None
+
+    def test_trade_planner_falls_back_to_shares_without_support(self):
+        """Short-put planning must not engage when support is unknown."""
+        from datetime import date
+
+        from autonomous.autonomous_config import AutonomousTradingConfig
+        from autonomous.trade_planner import (
+            OptionChainHint,
+            TradePlanner,
+            TradeType,
+        )
+
+        screener = _StubScreener([_row("AAA", current_price=100.0)])
+        provider = TechnicalAnalysisSignalProvider(
+            screener_service=screener, refresh_on_first_call=False
+        )
+        signal = provider.analyze("AAA")
+        assert signal is not None and signal.support_price is None
+
+        # Tempting cash-secured put: hint looks valid, but support is
+        # unknown so the planner must decline rather than guess.
+        hint = OptionChainHint(
+            strike=90.0,
+            expiry=date(2026, 12, 18),
+            bid=1.10,
+            ask=1.30,
+            contracts_available=5,
+        )
+        cfg = AutonomousTradingConfig(
+            prefer_cash_secured_put=True, allow_short_put=True,
+        )
+        plan = TradePlanner(cfg).plan(
+            signal,
+            deployable_cash=50_000.0,
+            equity=100_000.0,
+            option_hint=hint,
+        )
+        assert plan is not None
+        # Safe fallback: shares, not a guessed short put.
+        assert plan.trade_type == TradeType.BUY_SHARES
+
+    def test_planner_returns_none_when_only_short_put_allowed(self):
+        """If shares are disabled, missing support → no plan at all."""
+        from datetime import date
+
+        from autonomous.autonomous_config import AutonomousTradingConfig
+        from autonomous.trade_planner import OptionChainHint, TradePlanner
+
+        screener = _StubScreener([_row("AAA")])
+        provider = TechnicalAnalysisSignalProvider(
+            screener_service=screener, refresh_on_first_call=False
+        )
+        signal = provider.analyze("AAA")
+        cfg = AutonomousTradingConfig(
+            allow_share_buy=False,
+            allow_short_put=True,
+            prefer_cash_secured_put=True,
+        )
+        hint = OptionChainHint(
+            strike=90.0, expiry=date(2026, 12, 18),
+            bid=1.0, ask=1.2, contracts_available=2,
+        )
+        plan = TradePlanner(cfg).plan(
+            signal, deployable_cash=50_000.0, equity=100_000.0,
+            option_hint=hint,
+        )
+        # Missing support_price prevents the only allowed trade type;
+        # the planner refuses to guess and returns None.
+        assert plan is None

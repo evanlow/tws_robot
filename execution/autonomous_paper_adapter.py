@@ -26,12 +26,16 @@ Design notes
   receives account / position updates.  We re-use the bridge's
   next-valid-order-id flag (``_ready``) so we don't submit orders before
   the IB handshake has completed.
+* **Order IDs come from TWS.**  Every order ID is reserved through
+  :meth:`TWSBridge.reserve_order_id`, which returns the latest value
+  delivered by IBKR via ``nextValidId(orderId)`` under a lock.  This
+  avoids the classic ``orderId=1`` bug where a hardcoded starting ID
+  collides with IDs the broker already issued earlier in the session.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -50,10 +54,10 @@ class AutonomousPaperAdapter:
 
     def __init__(self, service_manager: Any) -> None:
         self._svc = service_manager
-        self._order_id_lock = threading.Lock()
-        # Cached next order ID; seeded from the bridge's nextValidId
-        # handshake the first time we place an order.
-        self._next_order_id: Optional[int] = None
+        # Order IDs are reserved through the bridge's
+        # ``reserve_order_id()``, which itself serialises access under a
+        # lock and only returns IDs supplied by TWS' ``nextValidId``
+        # callback.  No local counter is needed here.
 
     # ------------------------------------------------------------------
     # Readiness
@@ -166,19 +170,17 @@ class AutonomousPaperAdapter:
         from ibapi.contract import Contract  # type: ignore
         from ibapi.order import Order as IBOrder  # type: ignore
 
-        with self._order_id_lock:
-            if self._next_order_id is None:
-                # ``_BridgeApp.nextValidId`` does not stash the id on
-                # the bridge itself, so request a fresh one through
-                # ibapi.  We fall back to ``reqIds`` (which triggers a
-                # ``nextValidId`` callback) when there's no cached id.
-                # To keep the public surface simple we just start from
-                # 1 and let TWS reject duplicates — TWS replies with a
-                # sane ID either way.  In practice operators using
-                # this adapter will always have an active connection.
-                self._next_order_id = 1
-            order_id = self._next_order_id
-            self._next_order_id += 1
+        # Reserve a broker-provided order ID.  ``reserve_order_id`` is
+        # the only safe source: it returns the latest value delivered
+        # by TWS' ``nextValidId(orderId)`` callback under a lock so
+        # concurrent dashboard requests cannot collide on the same ID.
+        reserve = getattr(bridge, "reserve_order_id", None)
+        if not callable(reserve):
+            raise RuntimeError(
+                "AutonomousPaperAdapter: TWS bridge does not expose "
+                "reserve_order_id(); cannot obtain a broker-issued order ID"
+            )
+        order_id = int(reserve())
 
         contract = Contract()
         contract.symbol = symbol.upper()

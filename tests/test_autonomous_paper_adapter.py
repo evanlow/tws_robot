@@ -25,9 +25,17 @@ class _FakeApp:
 
 
 class _FakeBridge:
-    def __init__(self, ready=True, app=None):
+    def __init__(self, ready=True, app=None, next_id=1001):
         self.is_connected = ready
         self._app = app or _FakeApp()
+        self._next_id = next_id
+        self.reserve_calls = 0
+
+    def reserve_order_id(self):
+        self.reserve_calls += 1
+        oid = self._next_id
+        self._next_id += 1
+        return oid
 
 
 class _FakeServiceManager:
@@ -118,3 +126,60 @@ class TestSafetyRejections:
         with pytest.raises(RuntimeError, match="not ready"):
             adapter.buy(symbol="AAPL", quantity=1, order_type="LIMIT",
                         limit_price=100.0)
+
+
+class TestOrderIdReservation:
+    """Order IDs must come from TWS via ``reserve_order_id``."""
+
+    def test_buy_uses_bridge_provided_order_id(self):
+        bridge = _FakeBridge(next_id=4242)
+        adapter = AutonomousPaperAdapter(_FakeServiceManager(bridge=bridge))
+
+        order_id = adapter.buy(
+            symbol="AAPL", quantity=1, order_type="LIMIT", limit_price=10.0,
+        )
+        assert order_id == 4242
+        assert bridge.reserve_calls == 1
+        assert bridge._app.placed[0]["order_id"] == 4242
+
+    def test_consecutive_orders_get_distinct_ids(self):
+        bridge = _FakeBridge(next_id=7000)
+        adapter = AutonomousPaperAdapter(_FakeServiceManager(bridge=bridge))
+
+        first = adapter.buy(
+            symbol="AAPL", quantity=1, order_type="LIMIT", limit_price=10.0,
+        )
+        second = adapter.sell(
+            symbol="AAPL", quantity=1, order_type="LIMIT", limit_price=11.0,
+        )
+        assert first == 7000
+        assert second == 7001
+        assert first != second
+        placed_ids = [p["order_id"] for p in bridge._app.placed]
+        assert placed_ids == [7000, 7001]
+
+    def test_missing_reserve_order_id_method_raises(self):
+        class _BadBridge:
+            is_connected = True
+            _app = _FakeApp()
+
+        svc = _FakeServiceManager(bridge=_BadBridge())
+        adapter = AutonomousPaperAdapter(svc)
+        with pytest.raises(RuntimeError, match="reserve_order_id"):
+            adapter.buy(symbol="AAPL", quantity=1, order_type="LIMIT",
+                        limit_price=10.0)
+
+    def test_bridge_runtime_error_propagates(self):
+        class _UnreadyBridge:
+            is_connected = True
+            _app = _FakeApp()
+
+            def reserve_order_id(self):
+                raise RuntimeError("nextValidId handshake not complete")
+
+        adapter = AutonomousPaperAdapter(
+            _FakeServiceManager(bridge=_UnreadyBridge())
+        )
+        with pytest.raises(RuntimeError, match="nextValidId"):
+            adapter.buy(symbol="AAPL", quantity=1, order_type="LIMIT",
+                        limit_price=10.0)

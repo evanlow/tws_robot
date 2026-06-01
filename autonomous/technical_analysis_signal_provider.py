@@ -37,6 +37,28 @@ Failures (missing screener data, exceptions inside the screener
 service, missing rows) are converted to ``None`` so the upstream
 :class:`CandidateScanner` simply skips the symbol; **the provider must
 never raise into the scanner loop**.
+
+Known limitation: support / resistance
+--------------------------------------
+
+The S&P 500 screener service does not yet publish explicit support /
+resistance price levels, so every signal produced here carries
+``support_price = None`` and ``resistance_price = None``.
+
+This is acceptable for the initial paper-trading MVP because:
+
+* ``BUY_SHARES`` planning in :class:`TradePlanner` does not require
+  support/resistance — it sizes off ``last_price`` and the configured
+  ``max_new_position_pct``.
+* :class:`TradePlanner._plan_short_put` deliberately **refuses to plan**
+  a cash-secured short put when ``support_price`` is missing or the
+  candidate strike is above support, rather than guessing.  The planner
+  therefore falls back to ``BUY_SHARES`` (or returns ``None`` when
+  share-buying is disabled) — there is no silent unsafe path.
+
+Once the screener exposes support / resistance, ``_row_to_signal``
+should be updated to forward those fields so cash-secured short-put
+planning can engage automatically.
 """
 
 from __future__ import annotations
@@ -213,9 +235,12 @@ class TechnicalAnalysisSignalProvider:
             last_price=float(row.get("current_price") or 0.0),
             technical_reason=technical_reason,
             # The screener does not currently expose explicit support /
-            # resistance levels; leave them None so the ranker scores
-            # purely off strength_score (closest-to-support tie-breaker
-            # is skipped).
+            # resistance levels (see module docstring → "Known
+            # limitation: support / resistance").  Leaving these as
+            # ``None`` causes ``TradePlanner._plan_short_put`` to
+            # decline the candidate and fall back to ``BUY_SHARES`` —
+            # the planner never guesses a strike when support is
+            # unknown, so the safety boundary is preserved.
             support_price=None,
             resistance_price=None,
             volume_ok=True,
