@@ -12,7 +12,7 @@ Configuration is driven by environment variables (or explicit overrides):
 
   CASH_RESERVE_MODE            gross_assignment | net_premium | broker_margin
   MANUAL_CASH_BUFFER_PCT       fractional e.g. 0.10 for 10%
-  MANUAL_CASH_BUFFER_AMOUNT    fixed dollar amount (added to pct buffer)
+  MANUAL_CASH_BUFFER_AMOUNT    fixed dollar amount (larger of pct/fixed buffer)
   OPTION_CONTRACT_MULTIPLIER_DEFAULT  100 by default
 
 This module is deliberately **not** connected to a broker: it consumes data
@@ -560,6 +560,7 @@ class CashAvailabilityAnalyzer:
                         "parsed": parsed,
                         "pos": pos,
                         "contracts": contracts,
+                        "short_strike": short_strike,
                         "spread_width": spread_width,
                         "reserve": reserve,
                         "used_in_iron_condor": False,
@@ -732,6 +733,7 @@ class CashAvailabilityAnalyzer:
                         if (
                             not bc_rec.get("used_in_iron_condor")
                             and bc_rec["contracts"] == contracts
+                            and bc_rec["short_strike"] > short_strike
                         ):
                             matched_bc = bc_rec
                             break

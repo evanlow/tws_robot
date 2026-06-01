@@ -713,7 +713,7 @@ The full analysis is available via the REST API:
 GET /api/account/cash-availability
 ```
 
-See [docs/WEB_API_REFERENCE.md](docs/WEB_API_REFERENCE.md#get-apiacountcash-availability) for the complete response schema.
+See [docs/WEB_API_REFERENCE.md](docs/WEB_API_REFERENCE.md#get-apiaccountcash-availability) for the complete response schema.
 
 ### Configuration
 

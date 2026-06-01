@@ -396,6 +396,36 @@ class TestIronCondor:
         assert len(ic_reserves) == 1
         assert ic_reserves[0].defined_risk_protected
 
+    def test_overlapping_spreads_are_not_treated_as_iron_condor(self):
+        """Overlapping put/call spreads must retain both spread reserves."""
+        analyzer = _make_analyzer()
+        short_put_sym, short_put_pos = _short_put("SPY", "260619", 150.0, 1)
+        long_put_sym, long_put_pos = _long_put("SPY", "260619", 140.0, 1)
+        short_call_sym, short_call_pos = _short_call("SPY", "260619", 130.0, 1)
+        long_call_sym, long_call_pos = _long_call("SPY", "260619", 135.0, 1)
+        positions = {
+            short_put_sym: short_put_pos,
+            long_put_sym: long_put_pos,
+            short_call_sym: short_call_pos,
+            long_call_sym: long_call_pos,
+        }
+        result = analyzer.analyze(_account(cash=100_000), positions)
+
+        assert result.reserved_cash_defined_risk_spreads == 1_500.0
+        assert sum(
+            1 for pr in result.position_reserves if pr.position_type == "iron_condor"
+        ) == 0
+        assert sum(
+            1
+            for pr in result.position_reserves
+            if pr.position_type == "defined_risk_put_spread"
+        ) == 1
+        assert sum(
+            1
+            for pr in result.position_reserves
+            if pr.position_type == "defined_risk_call_spread"
+        ) == 1
+
     def test_iron_condor_with_stock_cover_no_extra_reserve(self):
         """When the short call is covered by long stock, it adds no reserve."""
         analyzer = _make_analyzer()
