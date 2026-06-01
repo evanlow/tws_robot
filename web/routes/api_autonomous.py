@@ -35,6 +35,13 @@ from autonomous import (
     CandidateScanner,
     StaticSignalProvider,
 )
+from autonomous.autonomous_runner import (
+    AutonomousPaperRunner,
+    NOT_CONNECTED,
+)
+from autonomous.exit_manager import AutonomousExitManager
+from autonomous.runner_config import AutonomousRunnerConfig
+from autonomous.trade_store import TradeStore
 from autonomous.technical_analysis_signal_provider import (
     TechnicalAnalysisSignalProvider,
 )
@@ -455,4 +462,140 @@ def emergency_stop():
         "status": "halted",
         "emergency_stop_file": str(EMERGENCY_STOP_FILE),
         "reason": reason,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Paper-only autonomous runner
+# ---------------------------------------------------------------------------
+
+def _runner_config() -> AutonomousRunnerConfig:
+    """Return the active runner config.
+
+    Tests / operators can register a fully constructed
+    :class:`AutonomousRunnerConfig` via
+    ``current_app.config['autonomous_runner_config']`` to enable the
+    runner.  The default config has ``runner_enabled=False`` which the
+    runner enforces — ``/runner/run-once-paper`` will safely refuse to
+    act unless explicitly enabled.
+    """
+    cfg = current_app.config.get("autonomous_runner_config")
+    if isinstance(cfg, AutonomousRunnerConfig):
+        return cfg
+    return AutonomousRunnerConfig()
+
+
+def _trade_store() -> TradeStore:
+    """Return a shared :class:`TradeStore` instance."""
+    store = current_app.config.get("autonomous_trade_store")
+    if isinstance(store, TradeStore):
+        return store
+    store = TradeStore(path=_runner_config().trade_store_path)
+    current_app.config["autonomous_trade_store"] = store
+    return store
+
+
+def _build_runner() -> AutonomousPaperRunner:
+    """Construct an :class:`AutonomousPaperRunner` wired to the live app."""
+    override = current_app.config.get("autonomous_runner_factory")
+    if callable(override):
+        return override()
+
+    svc = get_services()
+    runner_config = _runner_config()
+    engine = _build_engine({"mode": AutonomousMode.PAPER_EXECUTE.value})
+
+    def _connected() -> bool:
+        return bool(getattr(svc, "connected", False))
+
+    def _env():
+        return getattr(svc, "connection_env", None)
+
+    def _adapter():
+        return _resolve_paper_adapter(svc)
+
+    def _provider():
+        return _resolve_signal_provider()
+
+    def _estop() -> bool:
+        try:
+            return EMERGENCY_STOP_FILE.exists()
+        except OSError:  # pragma: no cover - defensive
+            return False
+
+    return AutonomousPaperRunner(
+        engine=engine,
+        trade_store=_trade_store(),
+        runner_config=runner_config,
+        connected_provider=_connected,
+        connection_env_provider=_env,
+        paper_adapter_provider=_adapter,
+        signal_provider_provider=_provider,
+        emergency_stop_provider=_estop,
+    )
+
+
+def _build_exit_manager() -> AutonomousExitManager:
+    override = current_app.config.get("autonomous_exit_manager_factory")
+    if callable(override):
+        return override()
+    svc = get_services()
+    return AutonomousExitManager(
+        trade_store=_trade_store(),
+        paper_adapter=_resolve_paper_adapter(svc),
+        positions_provider=svc.get_positions,
+        risk_manager=getattr(svc, "risk_manager", None),
+        emergency_stop_file=str(EMERGENCY_STOP_FILE),
+    )
+
+
+@bp.route("/runner/status", methods=["GET"])
+def runner_status():
+    """Return runner config and current readiness gates."""
+    runner = _build_runner()
+    gates = runner.evaluate_gates()
+    return jsonify({
+        "runner_config": runner.config.to_dict(),
+        "gates": gates.to_dict(),
+        "open_autonomous_trades": runner.trade_store.count_open(),
+    })
+
+
+@bp.route("/runner/run-once-paper", methods=["POST"])
+def runner_run_once_paper():
+    """Run one full paper-autonomous cycle.  Paper-only; never live."""
+    runner = _build_runner()
+    result = runner.run_once()
+    return jsonify(result.to_dict())
+
+
+@bp.route("/runner/evaluate-exits", methods=["POST"])
+def runner_evaluate_exits():
+    """Evaluate every open autonomous trade and submit paper SELL exits."""
+    manager = _build_exit_manager()
+    decisions = manager.evaluate_open_trades()
+    return jsonify({
+        "decisions": [d.to_dict() for d in decisions],
+        "count": len(decisions),
+    })
+
+
+@bp.route("/runner/trades", methods=["GET"])
+def runner_trades():
+    """Return open and recently-closed autonomous trades."""
+    store = _trade_store()
+    trades = store.list_all()
+    open_trades = [t.to_dict() for t in trades if t.status == "OPEN"]
+    exit_pending = [t.to_dict() for t in trades if t.status == "EXIT_PENDING"]
+    closed = [t.to_dict() for t in trades if t.status in ("CLOSED", "FAILED")]
+    return jsonify({
+        "open": open_trades,
+        "exit_pending": exit_pending,
+        "closed": closed,
+        "counts": {
+            "open": len(open_trades),
+            "exit_pending": len(exit_pending),
+            "closed": len(closed),
+            "total": len(trades),
+        },
     })
