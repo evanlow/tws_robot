@@ -1041,3 +1041,39 @@ class TestIntelligenceAPI:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["period"] == "WEEKLY"
+
+    def test_cash_availability_endpoint_accessible(self, monkeypatch):
+        """The /api/account/cash-availability endpoint used by Account Intelligence UI is reachable."""
+        monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
+        from web import create_app
+        app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
+        with app.test_client() as client:
+            resp = client.get("/api/account/cash-availability")
+            assert resp.status_code == 200
+            data = resp.get_json()
+        assert "deployable_cash" in data
+        assert "reserved_cash_total" in data
+        assert "broker_buying_power" in data
+        assert "position_reserves" in data
+        assert "warnings" in data
+
+    def test_cash_availability_returns_breakdown_fields(self, monkeypatch):
+        """All reserved-capital breakdown fields required by the UI are present."""
+        monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
+        from web import create_app
+        app = create_app({"TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False})
+        with app.test_client() as client:
+            resp = client.get("/api/account/cash-availability")
+            assert resp.status_code == 200
+            data = resp.get_json()
+        for field in [
+            "reserved_cash_short_puts",
+            "reserved_cash_defined_risk_spreads",
+            "reserved_for_pending_orders",
+            "manual_cash_buffer",
+            "margin_safety_buffer",
+            "broker_available_funds",
+            "broker_excess_liquidity",
+            "reserve_coverage_ratio",
+        ]:
+            assert field in data, f"Expected field {field!r} missing from /api/account/cash-availability"
