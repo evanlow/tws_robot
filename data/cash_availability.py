@@ -197,7 +197,7 @@ class CashAvailabilityResult:
     # Result
     reserved_cash_total: float = 0.0
     deployable_cash: float = 0.0
-    reserve_coverage_ratio: Optional[float] = 0.0
+    reserve_coverage_ratio: Optional[float] = None
 
     # Flags
     uncovered_short_call_risk: bool = False
@@ -519,7 +519,7 @@ class CashAvailabilityAnalyzer:
                 scall_list,
                 key=lambda x: x["parsed"]["strike"],
             )
-            # Sort long calls descending by strike (prefer lowest premium risk)
+            # Sort long calls descending by strike (highest strike first)
             lc_sorted = sorted(
                 lcall_list,
                 key=lambda x: x["parsed"]["strike"],
