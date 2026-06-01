@@ -35,7 +35,11 @@ from autonomous import (
     CandidateScanner,
     StaticSignalProvider,
 )
+from autonomous.technical_analysis_signal_provider import (
+    TechnicalAnalysisSignalProvider,
+)
 from data.cash_availability import CashAvailabilityAnalyzer
+from execution.autonomous_paper_adapter import AutonomousPaperAdapter
 from web.services import get_services
 
 logger = logging.getLogger(__name__)
@@ -148,9 +152,9 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
             emergency_stop_file=str(EMERGENCY_STOP_FILE),
         )
 
-    scanner = CandidateScanner(signal_provider=StaticSignalProvider())
+    scanner = CandidateScanner(signal_provider=_resolve_signal_provider())
     cash_analyzer = CashAvailabilityAnalyzer()
-    paper_adapter = current_app.config.get("autonomous_paper_adapter")
+    paper_adapter = _resolve_paper_adapter(svc)
     return AutonomousTradingEngine(
         scanner=scanner,
         cash_analyzer=cash_analyzer,
@@ -163,23 +167,101 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
     )
 
 
+# ---------------------------------------------------------------------------
+# Signal provider / paper adapter resolution
+# ---------------------------------------------------------------------------
+
+def _resolve_signal_provider():
+    """Return the active signal provider, preferring the real one.
+
+    Resolution order:
+
+    1. ``current_app.config['autonomous_signal_provider']`` — explicit
+       override (used by tests and operators who want to swap in a
+       different production provider).
+    2. :class:`TechnicalAnalysisSignalProvider` — production provider
+       backed by the S&P 500 screener service.  If construction fails
+       for any reason we fall back to the static stub.
+    3. :class:`StaticSignalProvider` — placeholder that returns no
+       signals.  Surfaces a warning in the ``/status`` payload so the
+       dashboard renders ``STATIC PROVIDER``.
+    """
+    override = current_app.config.get("autonomous_signal_provider")
+    if override is not None:
+        return override
+    provider = TechnicalAnalysisSignalProvider.try_build()
+    if provider is not None:
+        return provider
+    return StaticSignalProvider()
+
+
+def _resolve_paper_adapter(svc):
+    """Return the active paper-execution adapter or ``None``.
+
+    Resolution order:
+
+    1. ``current_app.config['autonomous_paper_adapter']`` — explicit
+       override (used by tests and operators who already wired their
+       own adapter).
+    2. :class:`AutonomousPaperAdapter` wrapping the live service
+       manager **only** when it is connected to the IBKR paper account.
+       Returning ``None`` when not connected (or connected to live)
+       keeps ``/execute-paper`` returning a safe ``execution_failed``
+       result instead of placing orders.
+    """
+    override = current_app.config.get("autonomous_paper_adapter")
+    if override is not None:
+        return override
+    try:
+        if (
+            getattr(svc, "connected", False)
+            and getattr(svc, "connection_env", None) == "paper"
+        ):
+            adapter = AutonomousPaperAdapter(svc)
+            if adapter.is_ready():
+                return adapter
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("Failed to construct AutonomousPaperAdapter")
+    return None
+
+
+def _signal_provider_info(provider) -> Dict[str, Any]:
+    """Describe the active signal provider for ``/status`` responses."""
+    name = type(provider).__name__
+    is_real = not isinstance(provider, StaticSignalProvider)
+    info: Dict[str, Any] = {
+        "signal_provider": name,
+        "signal_provider_ready": is_real,
+    }
+    if not is_real:
+        info["warning"] = SIGNAL_PROVIDER_WARNING
+    return info
+
+
 # Surfaced in API responses so operators know the live signal pipeline
 # is still using the placeholder ``StaticSignalProvider``.  Remove (or
 # clear) this notice once a production ``TechnicalAnalysisSignalProvider``
 # is wired into :func:`_build_engine`.
 SIGNAL_PROVIDER_WARNING = (
-    "TODO: production signal provider not yet wired; using "
-    "StaticSignalProvider stub. /scan and /propose will return "
-    "no_candidate until a Strong(100) / Confirmed Rebound adapter "
-    "(planned: TechnicalAnalysisSignalProvider) is registered."
+    "Production signal provider not wired; using StaticSignalProvider "
+    "stub. /scan and /propose will return no_candidate until the "
+    "TechnicalAnalysisSignalProvider (or another real adapter) is "
+    "registered via current_app.config['autonomous_signal_provider']."
 )
 
 
 def _provider_warning_if_default() -> Dict[str, Any]:
-    """Return a ``{"warning": ...}`` dict when the engine is still using
-    the default ``StaticSignalProvider``; empty dict otherwise."""
+    """Return a ``{"warning": ...}`` dict when the active provider is the
+    fallback stub; empty dict otherwise.
+
+    When an ``autonomous_engine_factory`` is registered we trust the
+    operator wired a real provider and suppress the stub warning.
+    """
     factory = current_app.config.get("autonomous_engine_factory")
     if callable(factory):
+        return {}
+    provider = _resolve_signal_provider()
+    if not isinstance(provider, StaticSignalProvider):
         return {}
     return {"warning": SIGNAL_PROVIDER_WARNING}
 
@@ -194,15 +276,38 @@ def status():
     config = AutonomousTradingConfig(
         emergency_stop_file=str(EMERGENCY_STOP_FILE),
     ).to_dict()
-    payload = {
+    svc = get_services()
+    provider = _resolve_signal_provider()
+    paper_adapter = _resolve_paper_adapter(svc)
+
+    payload: Dict[str, Any] = {
         "config": config,
         "emergency_stop_file_exists": EMERGENCY_STOP_FILE.exists(),
         "emergency_stop_file": str(EMERGENCY_STOP_FILE),
-        "paper_adapter_configured": bool(
-            current_app.config.get("autonomous_paper_adapter")
-        ),
+        "paper_adapter_configured": paper_adapter is not None,
+        "connection_env": getattr(svc, "connection_env", None),
+        "connected": bool(getattr(svc, "connected", False)),
     }
-    payload.update(_provider_warning_if_default())
+    payload.update(_signal_provider_info(provider))
+
+    # Helpful reason string so the dashboard can explain why paper
+    # execution is disabled even when the user hasn't tried clicking yet.
+    if not payload["paper_adapter_configured"]:
+        if not payload["connected"]:
+            payload["paper_adapter_reason"] = (
+                "Connect to IBKR paper mode to enable paper execution."
+            )
+        elif payload["connection_env"] != "paper":
+            env_name = payload["connection_env"] or "unknown"
+            payload["paper_adapter_reason"] = (
+                f"Connected to {env_name} mode; paper execution requires "
+                "the paper account."
+            )
+        else:
+            payload["paper_adapter_reason"] = (
+                "Paper TWS bridge not ready yet; retry once the connection "
+                "handshake completes."
+            )
     return jsonify(payload)
 
 

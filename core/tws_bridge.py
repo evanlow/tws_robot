@@ -45,6 +45,14 @@ class _BridgeApp(EWrapper, EClient):
         self._connected = False
         self._ready = False  # set after nextValidId
 
+        # Latest order ID supplied by TWS via ``nextValidId``.  IBKR
+        # requires every order to use an ID >= the most recent value
+        # reported by the broker; starting from a hardcoded value (e.g.
+        # ``1``) risks duplicate/rejected orders when the TWS session
+        # has already issued IDs.  Protected by ``_order_id_lock``.
+        self._next_valid_order_id: Optional[int] = None
+        self._order_id_lock = threading.Lock()
+
     # -- connection lifecycle -----------------------------------------------
 
     def connectAck(self) -> None:
@@ -52,8 +60,18 @@ class _BridgeApp(EWrapper, EClient):
         logger.info("TWS connection acknowledged")
 
     def nextValidId(self, orderId: int) -> None:
+        # TWS calls ``nextValidId`` once on connect and again whenever
+        # ``reqIds`` is invoked.  Always advance to the broker-supplied
+        # value so we never reuse an ID the broker has already handed out.
+        with self._order_id_lock:
+            if (
+                self._next_valid_order_id is None
+                or orderId > self._next_valid_order_id
+            ):
+                self._next_valid_order_id = orderId
+            current_order_id = self._next_valid_order_id
         self._ready = True
-        logger.info("TWS ready — next valid order ID: %s", orderId)
+        logger.info("TWS ready — next valid order ID: %s", current_order_id)
 
     def connectionClosed(self) -> None:
         self._connected = False
@@ -304,6 +322,33 @@ class TWSBridge:
         return (self._app is not None
                 and self._app._connected
                 and self._app._ready)
+
+    def reserve_order_id(self) -> int:
+        """Atomically reserve the next IBKR-provided order ID.
+
+        Returns the most recent ``nextValidId(orderId)`` supplied by TWS
+        and increments the cached cursor so subsequent reservations
+        cannot reuse the same value.  Concurrent callers (e.g. multiple
+        dashboard requests racing each other) are serialised through
+        the bridge app's order-ID lock.
+
+        Raises
+        ------
+        RuntimeError
+            If the bridge is not connected or TWS has not yet delivered
+            a ``nextValidId`` value (the handshake is incomplete).
+        """
+        if self._app is None or not self._app._connected:
+            raise RuntimeError("TWSBridge: not connected to TWS")
+        with self._app._order_id_lock:
+            current = self._app._next_valid_order_id
+            if current is None:
+                raise RuntimeError(
+                    "TWSBridge: nextValidId handshake not complete; "
+                    "no broker-issued order ID is available yet"
+                )
+            self._app._next_valid_order_id = current + 1
+            return current
 
     def cancel_order(self, broker_order_id: int) -> None:
         """Send a cancellation request to TWS for the given order ID.

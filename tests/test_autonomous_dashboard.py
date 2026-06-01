@@ -233,3 +233,34 @@ class TestFrontendSecurity:
         assert "header.textContent" in src
         assert "rej.textContent" in src
         assert "Failed to load audit log: ' + ((err && err.message)" in src
+
+
+class TestStatusBadges:
+    """The dashboard's status panel must surface the wired provider /
+    paper-adapter readiness so operators can see whether the system is
+    really executable, not just whether the page rendered."""
+
+    def _js_source(self) -> str:
+        js_path = (
+            Path(__file__).resolve().parent.parent
+            / "web" / "static" / "js" / "autonomous_trading.js"
+        )
+        return js_path.read_text(encoding="utf-8")
+
+    def test_signal_provider_ready_badge_is_rendered(self):
+        src = self._js_source()
+        assert "SIGNAL PROVIDER READY" in src
+        # The badge must be driven by the explicit boolean from /status.
+        assert "signal_provider_ready" in src
+
+    def test_paper_adapter_badges_are_rendered(self):
+        src = self._js_source()
+        assert "PAPER ADAPTER READY" in src
+        assert "NO PAPER ADAPTER" in src
+
+    def test_disabled_button_uses_paper_adapter_reason(self):
+        src = self._js_source()
+        # When the adapter is unavailable the tooltip should show the
+        # backend-supplied reason (e.g. "Connect to IBKR paper mode…")
+        # rather than a hard-coded string.
+        assert "paper_adapter_reason" in src

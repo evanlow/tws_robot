@@ -118,13 +118,33 @@ class _RecordingAdapter:
 
 
 class TestStatus:
-    def test_status_warns_when_using_default_provider(self, client):
+    def test_status_reports_real_provider_by_default(self, client):
         resp = client.get("/api/autonomous/status")
         assert resp.status_code == 200
         body = resp.get_json()
+        # Production wiring: the real TechnicalAnalysisSignalProvider is
+        # used by default, so /status must advertise it as ready and
+        # must *not* surface the StaticSignalProvider warning.
+        assert body["signal_provider"] == "TechnicalAnalysisSignalProvider"
+        assert body["signal_provider_ready"] is True
+        assert "warning" not in body
+        # No paper adapter wired by default (service manager is not
+        # connected to a paper TWS in the test client).
+        assert body["paper_adapter_configured"] is False
+        assert "paper_adapter_reason" in body
+
+    def test_status_falls_back_to_static_when_provider_construction_fails(
+        self, app, client, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "web.routes.api_autonomous.TechnicalAnalysisSignalProvider.try_build",
+            classmethod(lambda cls, **kw: None),
+        )
+        body = client.get("/api/autonomous/status").get_json()
+        assert body["signal_provider"] == "StaticSignalProvider"
+        assert body["signal_provider_ready"] is False
         assert "warning" in body
         assert "StaticSignalProvider" in body["warning"]
-        assert body["paper_adapter_configured"] is False
 
     def test_status_omits_warning_when_factory_registered(self, app, client, tmp_path):
         _install_factory(app, tmp_path)
@@ -133,6 +153,51 @@ class TestStatus:
         # When a factory is installed we trust the operator wired a real
         # provider and suppress the stub warning.
         assert "warning" not in body
+
+    def test_status_reports_paper_adapter_when_connected_to_paper(
+        self, app, client, monkeypatch
+    ):
+        """When the service manager is connected to paper TWS the adapter
+        must be advertised as configured so the dashboard renders
+        ``PAPER ADAPTER READY``.
+        """
+        with app.app_context():
+            from web.services import get_services
+            svc = get_services()
+        monkeypatch.setattr(type(svc), "connected", property(lambda self: True))
+        monkeypatch.setattr(
+            type(svc), "connection_env", property(lambda self: "paper")
+        )
+
+        class _FakeBridge:
+            is_connected = True
+            _app = object()
+
+        monkeypatch.setattr(svc, "_tws_bridge", _FakeBridge(), raising=False)
+        body = client.get("/api/autonomous/status").get_json()
+        assert body["paper_adapter_configured"] is True
+        assert body["connection_env"] == "paper"
+
+    def test_status_blocks_paper_adapter_when_connected_to_live(
+        self, app, client, monkeypatch
+    ):
+        with app.app_context():
+            from web.services import get_services
+            svc = get_services()
+        monkeypatch.setattr(type(svc), "connected", property(lambda self: True))
+        monkeypatch.setattr(
+            type(svc), "connection_env", property(lambda self: "live")
+        )
+
+        class _FakeBridge:
+            is_connected = True
+            _app = object()
+
+        monkeypatch.setattr(svc, "_tws_bridge", _FakeBridge(), raising=False)
+        body = client.get("/api/autonomous/status").get_json()
+        # Even when connected, live mode must never expose paper exec.
+        assert body["paper_adapter_configured"] is False
+        assert "live" in (body.get("paper_adapter_reason") or "")
 
 
 class TestExecutePaper:

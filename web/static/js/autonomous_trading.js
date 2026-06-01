@@ -110,7 +110,12 @@
       badges.push(['PAPER ADAPTER READY', 'badge-safe']);
     }
 
-    if (payload.warning) {
+    // Signal provider readiness. Prefer the explicit boolean from the
+    // status payload; fall back to "warning present" for old responses.
+    const providerReady = payload.signal_provider_ready === true;
+    if (providerReady) {
+      badges.push(['SIGNAL PROVIDER READY', 'badge-safe']);
+    } else if (payload.warning || payload.signal_provider_ready === false) {
       badges.push(['STATIC PROVIDER', 'badge-warn']);
     }
 
@@ -136,6 +141,10 @@
       ['Emergency stop file', payload.emergency_stop_file || '—'],
       ['Emergency stop active', halted ? 'YES' : 'no'],
       ['Paper adapter configured', state.paperAdapterConfigured ? 'yes' : 'no'],
+      ['Paper adapter reason', payload.paper_adapter_reason || '—'],
+      ['Signal provider', payload.signal_provider || '—'],
+      ['Signal provider ready', payload.signal_provider_ready ? 'yes' : 'no'],
+      ['Connection environment', payload.connection_env || '—'],
     ];
     for (const [label, value] of rows) {
       const dt = document.createElement('dt');
@@ -160,7 +169,8 @@
       const disable = !state.paperAdapterConfigured || halted;
       btnExec.disabled = disable;
       if (!state.paperAdapterConfigured) {
-        btnExec.title = 'Disabled: no paper trading adapter is configured.';
+        btnExec.title = payload.paper_adapter_reason ||
+          'Disabled: no paper trading adapter is configured.';
       } else if (halted) {
         btnExec.title = 'Disabled: emergency stop is active.';
       } else {
