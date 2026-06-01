@@ -140,3 +140,71 @@ class TestAuditEndpoint:
         body = client.get("/api/autonomous/audit").get_json()
         assert body["count"] == 1
         assert body["entries"][0]["status"] == "recommended"
+
+
+class TestShortlistRendering:
+    """Guard against regressing the Candidate Shortlist payload shape.
+
+    The backend returns ranked candidates shaped like
+    ``RankedCandidate.to_dict()`` — a wrapper ``{"candidate": {...},
+    "score": ..., "reasons": [...]}``.  The dashboard's JS must read the
+    candidate fields from the nested ``candidate`` object (with a flat
+    fallback for older fixtures) or the table silently renders blanks.
+    """
+
+    def _js_source(self) -> str:
+        from autonomous.candidate_ranker import RankedCandidate
+        from autonomous.candidate_scanner import CandidateSignal
+
+        # Build a realistic /api/autonomous/scan row to make sure the
+        # contract we're asserting against is the one the backend actually
+        # produces.
+        sample = RankedCandidate(
+            candidate=CandidateSignal(
+                symbol="AAPL",
+                company_name="Apple Inc.",
+                sector="Information Technology",
+                strength_score=100,
+                signal_label="Confirmed Rebound",
+                last_price=190.25,
+                support_price=185.0,
+                resistance_price=205.0,
+            ),
+            score=100.25,
+            reasons=["strength_score=100", "signal_label=Confirmed Rebound"],
+        ).to_dict()
+        assert "candidate" in sample and sample["candidate"]["symbol"] == "AAPL"
+        assert sample["candidate"]["company_name"] == "Apple Inc."
+
+        js_path = (
+            Path(__file__).resolve().parent.parent
+            / "web" / "static" / "js" / "autonomous_trading.js"
+        )
+        return js_path.read_text(encoding="utf-8")
+
+    def test_shortlist_normalises_ranked_candidate_wrapper(self):
+        src = self._js_source()
+        # The JS must look at the nested `candidate` wrapper produced by
+        # RankedCandidate.to_dict(); otherwise every candidate cell will
+        # render as an em-dash placeholder.
+        assert "row.candidate" in src, (
+            "renderShortlist() must dereference the nested `candidate` "
+            "object from RankedCandidate.to_dict()."
+        )
+        for field in (
+            "candidate.symbol",
+            "candidate.company_name",
+            "candidate.sector",
+            "candidate.strength_score",
+            "candidate.signal_label",
+            "candidate.last_price",
+            "candidate.support_price",
+            "candidate.resistance_price",
+        ):
+            assert field in src, (
+                f"renderShortlist() must read `{field}` from the nested "
+                "CandidateSignal payload."
+            )
+        # Ranking metadata stays at the wrapper level.
+        assert "row.score" in src
+        assert "row.reasons" in src

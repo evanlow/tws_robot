@@ -221,18 +221,29 @@
     }
     rows.forEach((row, idx) => {
       const tr = document.createElement('tr');
+      // RankedCandidate.to_dict() nests the CandidateSignal under
+      // `candidate`; fall back to the row itself so flat fixtures and
+      // older payloads keep working.
+      const candidate = (row && row.candidate) || row || {};
       const reasons = row.reasons || row.ranking_reasons || [];
       const cells = [
         row.rank != null ? row.rank : (idx + 1),
-        row.symbol || '—',
-        row.company || row.security || '—',
-        row.sector || '—',
-        fmtNumber(row.strength_score, 0),
-        row.signal_label || '—',
-        fmtNumber(row.last_price),
-        fmtNumber(row.support_price ?? row.support),
-        fmtNumber(row.resistance_price ?? row.resistance),
-        fmtNumber(row.ranking_score ?? row.score),
+        candidate.symbol || row.symbol || '—',
+        candidate.company_name || candidate.company || candidate.security ||
+          row.company || row.security || '—',
+        candidate.sector || row.sector || '—',
+        fmtNumber(candidate.strength_score ?? row.strength_score, 0),
+        candidate.signal_label || row.signal_label || '—',
+        fmtNumber(candidate.last_price ?? row.last_price),
+        fmtNumber(
+          candidate.support_price ?? candidate.support ??
+            row.support_price ?? row.support
+        ),
+        fmtNumber(
+          candidate.resistance_price ?? candidate.resistance ??
+            row.resistance_price ?? row.resistance
+        ),
+        fmtNumber(row.score ?? row.ranking_score),
         Array.isArray(reasons) ? reasons.join('; ') : String(reasons || ''),
       ];
       cells.forEach((c) => {
