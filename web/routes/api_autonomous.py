@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -263,17 +264,17 @@ def execute_paper():
 def audit():
     """Return the most recent autonomous-trading audit entries.
 
-    Reads today's JSONL audit log (plus, if needed, the previous day's
-    file) and returns up to ``limit`` of the most recent decisions in
-    reverse-chronological order.  This is a read-only endpoint intended
-    for the dashboard timeline view.
+    Scans audit log files matching ``autonomous_trading_*.jsonl`` in
+    newest-file-first order and returns up to ``limit`` of the most
+    recent decisions in reverse-chronological order. This is a
+    read-only endpoint intended for the dashboard timeline view.
     """
     try:
         limit = int(request.args.get("limit", 20))
     except (TypeError, ValueError):
         limit = 20
     if limit <= 0:
-        limit = 20
+        limit = 1
     if limit > 200:
         limit = 200
 
@@ -290,7 +291,10 @@ def audit():
         for path in files:
             try:
                 with path.open("r", encoding="utf-8") as fh:
-                    file_records: list[Dict[str, Any]] = []
+                    remaining = limit - len(entries)
+                    if remaining <= 0:
+                        break
+                    file_records = deque(maxlen=remaining)
                     for line in fh:
                         line = line.strip()
                         if not line:

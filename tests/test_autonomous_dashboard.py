@@ -127,6 +127,19 @@ class TestAuditEndpoint:
         body = client.get("/api/autonomous/audit?limit=2").get_json()
         assert body["count"] == 2
 
+    def test_audit_limit_zero_clamps_to_one(self, app, client, tmp_path):
+        records = [
+            {
+                "timestamp": f"2024-01-01T10:00:0{i}+00:00",
+                "decision": {"status": f"s{i}", "mode": "recommend_only"},
+            }
+            for i in range(3)
+        ]
+        _write_audit_log(tmp_path, records)
+        body = client.get("/api/autonomous/audit?limit=0").get_json()
+        assert body["count"] == 1
+        assert body["entries"][0]["status"] == "s2"
+
     def test_audit_ignores_malformed_lines(self, app, client, tmp_path):
         when = datetime.now(timezone.utc)
         log = tmp_path / f"autonomous_trading_{when:%Y%m%d}.jsonl"
@@ -208,3 +221,15 @@ class TestShortlistRendering:
         # Ranking metadata stays at the wrapper level.
         assert "row.score" in src
         assert "row.reasons" in src
+
+
+class TestFrontendSecurity:
+    def test_proposal_and_audit_errors_use_text_content(self):
+        js_path = (
+            Path(__file__).resolve().parent.parent
+            / "web" / "static" / "js" / "autonomous_trading.js"
+        )
+        src = js_path.read_text(encoding="utf-8")
+        assert "header.textContent" in src
+        assert "rej.textContent" in src
+        assert "Failed to load audit log: ' + ((err && err.message)" in src

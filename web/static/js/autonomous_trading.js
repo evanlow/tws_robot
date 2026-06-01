@@ -295,14 +295,14 @@
     const risk = decision.risk_check || {};
 
     const header = document.createElement('p');
-    header.innerHTML =
-      '<strong>Status:</strong> ' + (decision.status || '—') +
-      ' &nbsp;|&nbsp; <strong>Mode:</strong> ' + (decision.mode || '—');
+    header.textContent =
+      'Status: ' + (decision.status || '—') +
+      ' | Mode: ' + (decision.mode || '—');
     card.appendChild(header);
 
     if (decision.rejection_reason) {
       const rej = document.createElement('p');
-      rej.innerHTML = '<strong>Rejection reason:</strong> ' + decision.rejection_reason;
+      rej.textContent = 'Rejection reason: ' + decision.rejection_reason;
       card.appendChild(rej);
     }
 
@@ -428,9 +428,14 @@
         body.appendChild(tr);
       });
     } catch (err) {
-      body.innerHTML =
-        '<tr><td colspan="7" class="empty">Failed to load audit log: ' +
-        err.message + '</td></tr>';
+      body.innerHTML = '';
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 7;
+      td.className = 'empty';
+      td.textContent = 'Failed to load audit log: ' + ((err && err.message) || String(err));
+      tr.appendChild(td);
+      body.appendChild(tr);
     }
   }
 
