@@ -298,9 +298,10 @@ def status():
                 "Connect to IBKR paper mode to enable paper execution."
             )
         elif payload["connection_env"] != "paper":
+            env_name = payload["connection_env"] or "unknown"
             payload["paper_adapter_reason"] = (
-                "Connected to {env} mode; paper execution requires the "
-                "paper account.".format(env=payload["connection_env"] or "unknown")
+                f"Connected to {env_name} mode; paper execution requires "
+                "the paper account."
             )
         else:
             payload["paper_adapter_reason"] = (
