@@ -35,7 +35,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from autonomous.audit import AuditLogger
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
-from autonomous.candidate_ranker import CandidateRanker, RankedCandidate
+from autonomous.candidate_ranker import CandidateRanker
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.trade_planner import OptionChainHint, TradePlan, TradePlanner, TradeType
 

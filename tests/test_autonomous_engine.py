@@ -2,8 +2,6 @@
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Dict, List
 
 import pytest
 

@@ -5,7 +5,7 @@ JSON endpoints that wrap :class:`autonomous.AutonomousTradingEngine`.
 Endpoints:
 
 * ``GET  /api/autonomous/status``       — current config + emergency stop state
-* ``POST /api/autonomous/scan``         — scan + rank only, no plan, no order
+* ``POST /api/autonomous/scan``         — non-executing recommendation pass
 * ``POST /api/autonomous/propose``      — full ``run_once`` in recommend_only mode
 * ``POST /api/autonomous/execute-paper``— full ``run_once`` in paper_execute mode
 * ``POST /api/autonomous/emergency-stop`` — create the EMERGENCY_STOP file
@@ -51,6 +51,34 @@ EMERGENCY_STOP_FILE = Path(
         str(Path(__file__).resolve().parent.parent.parent / "EMERGENCY_STOP"),
     )
 )
+
+
+def _sanitize_config_overrides(overrides: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a type-safe subset of request overrides."""
+    cleaned: Dict[str, Any] = {}
+    for key, value in overrides.items():
+        if key == "mode":
+            if isinstance(value, str):
+                try:
+                    cleaned[key] = AutonomousMode(value).value
+                except ValueError:
+                    continue
+        elif key in {"allow_live_execution", "require_user_confirmation"}:
+            if isinstance(value, bool):
+                cleaned[key] = value
+        elif key in {"max_trades_per_day", "min_signal_strength"}:
+            if isinstance(value, int) and not isinstance(value, bool):
+                cleaned[key] = value
+        elif key in {"max_new_position_pct", "min_deployable_cash"}:
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            ):
+                cleaned[key] = float(value)
+        elif key == "required_signal_label":
+            if isinstance(value, str):
+                cleaned[key] = value
+    return cleaned
 
 
 def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousTradingEngine:
@@ -102,7 +130,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
             "required_signal_label",
         }
         kwargs = base_config.to_dict()
-        for k, v in config_overrides.items():
+        for k, v in _sanitize_config_overrides(config_overrides).items():
             if k in allowed:
                 kwargs[k] = v
         kwargs.pop("audit_log_dir", None)
@@ -125,7 +153,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
         cash_analyzer=cash_analyzer,
         account_provider=svc.get_account_summary,
         positions_provider=svc.get_positions,
-        orders_provider=lambda: list(getattr(svc, "_orders", []) or []),
+        orders_provider=svc.get_orders,
         config=base_config,
         risk_manager=getattr(svc, "risk_manager", None),
         paper_adapter=paper_adapter,
@@ -160,7 +188,9 @@ def _provider_warning_if_default() -> Dict[str, Any]:
 @bp.route("/status", methods=["GET"])
 def status():
     """Return current configuration + emergency-stop state."""
-    config = AutonomousTradingConfig().to_dict()
+    config = AutonomousTradingConfig(
+        emergency_stop_file=str(EMERGENCY_STOP_FILE),
+    ).to_dict()
     payload = {
         "config": config,
         "emergency_stop_file_exists": EMERGENCY_STOP_FILE.exists(),
@@ -175,9 +205,9 @@ def status():
 
 @bp.route("/scan", methods=["POST"])
 def scan():
-    """Run scan + ranking without generating a trade plan."""
+    """Run a non-executing recommendation pass and return scan/rank outputs."""
     body = request.get_json(silent=True) or {}
-    overrides = dict(body)
+    overrides = _sanitize_config_overrides(dict(body))
     # Force recommend_only — /scan must never propose or execute.
     overrides["mode"] = AutonomousMode.RECOMMEND_ONLY.value
     engine = _build_engine(overrides)
@@ -197,7 +227,7 @@ def scan():
 def propose():
     """Return a full decision in recommend_only mode (no order placed)."""
     body = request.get_json(silent=True) or {}
-    overrides = dict(body)
+    overrides = _sanitize_config_overrides(dict(body))
     overrides["mode"] = AutonomousMode.RECOMMEND_ONLY.value
     engine = _build_engine(overrides)
     decision = engine.run_once(confirm=False)
@@ -217,8 +247,8 @@ def execute_paper():
     skipping the trade.
     """
     body = request.get_json(silent=True) or {}
-    confirm = bool(body.get("confirm", False))
-    overrides = dict(body)
+    confirm = body.get("confirm") is True
+    overrides = _sanitize_config_overrides(dict(body))
     overrides["mode"] = AutonomousMode.PAPER_EXECUTE.value
     engine = _build_engine(overrides)
     decision = engine.run_once(confirm=confirm)

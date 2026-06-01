@@ -2,8 +2,6 @@
 
 from datetime import date, timedelta
 
-import pytest
-
 from autonomous.autonomous_config import AutonomousTradingConfig
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.candidate_scanner import CandidateSignal

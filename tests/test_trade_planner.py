@@ -2,8 +2,6 @@
 
 from datetime import date
 
-import pytest
-
 from autonomous.autonomous_config import AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
 from autonomous.trade_planner import OptionChainHint, TradePlanner, TradeType

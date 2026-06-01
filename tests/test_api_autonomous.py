@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from autonomous import (
-    AutonomousMode,
     AutonomousTradingConfig,
     AutonomousTradingEngine,
     CandidateScanner,
@@ -23,6 +22,7 @@ from autonomous import (
 from autonomous.audit import AuditLogger
 from data.cash_availability import CashAvailabilityAnalyzer
 from web import create_app
+from web.routes.api_autonomous import _sanitize_config_overrides
 
 
 def _signal(symbol="AAA"):
@@ -178,6 +178,20 @@ class TestExecutePaper:
         assert body["status"] == "execution_failed"
         assert "no paper_adapter" in body["rejection_reason"]
 
+    def test_string_confirm_does_not_bypass_confirmation(
+        self, app, client, tmp_path
+    ):
+        adapter = _RecordingAdapter()
+        _install_factory(
+            app, tmp_path, signals=[_signal()], paper_adapter=adapter
+        )
+        resp = client.post(
+            "/api/autonomous/execute-paper", json={"confirm": "false"}
+        )
+        body = resp.get_json()
+        assert body["status"] == "confirmation_required"
+        assert adapter.calls == []
+
 
 class TestDailyLimit:
     def test_second_same_day_execution_is_blocked(self, app, client, tmp_path):
@@ -213,3 +227,13 @@ class TestLiveBlocked:
         """
         resp = client.post("/api/autonomous/execute-live", json={"confirm": True})
         assert resp.status_code == 404
+
+
+class TestConfigOverrideValidation:
+    def test_non_boolean_live_flag_is_ignored(self):
+        cleaned = _sanitize_config_overrides({"allow_live_execution": "false"})
+        assert "allow_live_execution" not in cleaned
+
+    def test_non_boolean_confirmation_flag_is_ignored(self):
+        cleaned = _sanitize_config_overrides({"require_user_confirmation": "false"})
+        assert "require_user_confirmation" not in cleaned

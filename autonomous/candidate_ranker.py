@@ -21,16 +21,12 @@ Rules (per the issue):
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence
 
 from autonomous.autonomous_config import AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
-
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class RankedCandidate:
