@@ -24,6 +24,9 @@ from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
 from autonomous.signal_provider import SignalProvider, StaticSignalProvider
+from autonomous.technical_analysis_signal_provider import (
+    TechnicalAnalysisSignalProvider,
+)
 from autonomous.autonomous_engine import (
     AutonomousTradingEngine,
     AutonomousDecision,
@@ -45,5 +48,6 @@ __all__ = [
     "TradeType",
     "SignalProvider",
     "StaticSignalProvider",
+    "TechnicalAnalysisSignalProvider",
     "AuditLogger",
 ]
