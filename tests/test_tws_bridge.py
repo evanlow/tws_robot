@@ -31,7 +31,8 @@ def mock_service_manager():
     svc.update_position = Mock()
     svc.remove_position = Mock()
     svc._lock = threading.Lock()
-    
+    svc._account_summary = {}
+
     # Mock risk manager
     svc.risk_manager = Mock()
     svc.risk_manager.current_equity = 100000.0
@@ -194,12 +195,16 @@ class TestBridgeApp:
     
     @pytest.mark.unit
     def test_update_account_value_ignores_non_base_currency(self, mock_service_manager):
-        """Test that non-BASE currency updates are ignored."""
+        """Test that non-BASE currency cash balances are stored per-currency but
+        do not trigger an update_account_summary call."""
         app = _BridgeApp(mock_service_manager, "DU12345")
-        
+
         app.updateAccountValue("TotalCashBalance", "50000.00", "USD", "DU12345")
-        
+
+        # update_account_summary must NOT be called for per-currency events
         mock_service_manager.update_account_summary.assert_not_called()
+        # But the balance should have been stored in cash_by_currency
+        assert mock_service_manager._account_summary.get("cash_by_currency", {}).get("USD") == 50000.0
     
     @pytest.mark.unit
     def test_update_portfolio_long_position(self, mock_service_manager):

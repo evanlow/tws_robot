@@ -230,3 +230,74 @@ def portfolio_analysis():
     svc = get_services()
     analysis = svc.get_portfolio_analysis()
     return jsonify(analysis)
+
+
+@bp.route("/cash-availability", methods=["GET"])
+def cash_availability():
+    """Return deployable-cash analysis.
+
+    Breaks down cash balance into reserved capital (short puts, defined-risk
+    spreads, pending orders, safety buffers) and estimated deployable cash.
+
+    Query parameters
+    ----------------
+    reserve_mode : str, optional
+        Override the reserve mode for this request.
+        Accepted values: ``gross_assignment`` (default), ``net_premium``,
+        ``broker_margin``.
+
+    Returns
+    -------
+    JSON matching the ``CashAvailabilityResult.to_dict()`` schema::
+
+        {
+          "cash_balance": 50000.0,
+          "broker_buying_power": 100000.0,
+          "broker_available_funds": 48000.0,
+          "broker_excess_liquidity": 47000.0,
+          "reserved_cash_total": 35000.0,
+          "reserved_cash_short_puts": 30000.0,
+          "reserved_cash_defined_risk_spreads": 3000.0,
+          "reserved_for_pending_orders": 2000.0,
+          "manual_cash_buffer": 5000.0,
+          "margin_safety_buffer": 0.0,
+          "deployable_cash": 10000.0,
+          "reserve_coverage_ratio": 1.43,
+          "uncovered_short_call_risk": false,
+          "cash_by_currency": {"USD": 50000.0},
+          "position_reserves": [...],
+          "warnings": []
+        }
+    """
+    from data.cash_availability import (
+        CashAvailabilityAnalyzer,
+        CashAvailabilityConfig,
+        CashReserveMode,
+    )
+
+    svc = get_services()
+    account_summary = svc.get_account_summary()
+    positions = svc.get_positions()
+    orders = svc.get_orders()
+
+    # Allow a per-request override of the reserve mode
+    mode_param = request.args.get("reserve_mode", "").lower()
+    config = CashAvailabilityConfig.from_env()
+    if mode_param:
+        try:
+            config.reserve_mode = CashReserveMode(mode_param)
+        except ValueError:
+            return jsonify({
+                "error": (
+                    f"Invalid reserve_mode {mode_param!r}. "
+                    "Use gross_assignment, net_premium, or broker_margin."
+                )
+            }), 400
+
+    analyzer = CashAvailabilityAnalyzer(config=config)
+    result = analyzer.analyze(
+        account_summary=account_summary,
+        positions=positions,
+        orders=orders,
+    )
+    return jsonify(result.to_dict())
