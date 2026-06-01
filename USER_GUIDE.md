@@ -675,6 +675,73 @@ If any check fails, the order is rejected with an explanatory error message.
 
 ---
 
+## 10.1 Cash Availability & Deployable Capital
+
+TWS Robot estimates **deployable cash** — the portion of your account balance that is genuinely available for new trades, after setting aside capital already committed to open obligations.
+
+> This is labelled *TWS Robot estimated* throughout the UI. It is **not** an official broker margin figure. Broker margin rules may differ.
+
+### Why broker buying power is not enough
+
+Interactive Brokers reports a `BuyingPower` figure that may include margin headroom. However, some of your cash is already implicitly committed:
+
+- **Cash-secured short puts** — if assigned, you must buy the underlying at the strike price. That notional obligation should be reserved.
+- **Defined-risk spreads** — only the maximum loss (spread width × contracts × multiplier) needs to be reserved, not the full assignment value.
+- **Covered calls** — do not consume cash, but the underlying shares are "committed" and may be called away.
+- **Pending open orders** — a buy order sitting in the market has not yet consumed cash but will do so if filled.
+- **Multi-currency positions** — SGD or HKD cash is not freely interchangeable with USD without explicit FX conversion.
+
+### Deployable cash formula
+
+```
+deployable_cash = max(
+    0,
+    cash_balance
+    − reserved_for_short_puts
+    − reserved_for_defined_risk_spreads
+    − reserved_for_pending_orders
+    − manual_cash_buffer
+    − margin_safety_buffer
+)
+```
+
+### Cash Availability API
+
+The full analysis is available via the REST API:
+
+```http
+GET /api/account/cash-availability
+```
+
+See [docs/WEB_API_REFERENCE.md](docs/WEB_API_REFERENCE.md#get-apiaccountcash-availability) for the complete response schema.
+
+### Configuration
+
+Add these keys to your `.env` file to customize behaviour:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CASH_RESERVE_MODE` | `gross_assignment` | Reserve mode: `gross_assignment`, `net_premium`, or `broker_margin` |
+| `MANUAL_CASH_BUFFER_PCT` | `0.10` | Fraction of cash balance to keep untouched (e.g. `0.10` = 10%) |
+| `MANUAL_CASH_BUFFER_AMOUNT` | `0` | Fixed dollar amount to keep untouched (larger of the two is used) |
+| `OPTION_CONTRACT_MULTIPLIER_DEFAULT` | `100` | Multiplier when not available from position data |
+| `ENABLE_CASH_AVAILABILITY_GUARD` | `true` | Enable/disable the deployable-cash safety gate |
+| `BLOCK_AUTOMATED_TRADING_IF_UNCOVERED_SHORT_CALL` | `true` | Block automated recommendations when uncovered short calls exist |
+| `BLOCK_AUTOMATED_TRADING_IF_DEPLOYABLE_CASH_NEGATIVE` | `true` | Block automated recommendations when deployable cash ≤ 0 |
+
+### Warnings
+
+| Warning | Meaning |
+|---------|---------|
+| ⚠ Deployable cash ≤ 0 | All cash is reserved; no capital available for new trades |
+| ⚠ Cash balance < reserved cash | Obligations exceed your current cash balance |
+| 🔴 Uncovered short call risk | One or more short calls are not covered by shares or long calls |
+| 🔴 Short stock risk | Short stock positions may increase margin requirements |
+| ⚠ High margin usage | Less than 10% excess liquidity remaining |
+| ⚠ Multi-currency risk | Multiple currency cash balances detected; USD deployable cash may be overstated |
+
+---
+
 ## 11. Order Management
 
 ### Viewing Orders

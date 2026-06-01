@@ -3625,6 +3625,139 @@ All API endpoints follow consistent error response format:
 
 ---
 
+## Cash Availability API
+
+The cash availability API provides a conservative, robot-estimated view of deployable capital, clearly distinguishing between broker-reported buying power, capital reserved for open obligations, and truly deployable cash.
+
+> **Note:** All values are labelled as *TWS Robot estimated* — they are not official broker margin figures. Broker margin rules can differ from the conservative calculations used here.
+
+---
+
+### `GET /api/account/cash-availability`
+
+Return a full deployable-cash analysis including per-position reserve breakdown, warnings, and broker reference numbers.
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `reserve_mode` | string | Override the configured reserve mode for this request. Valid values: `gross_assignment`, `net_premium`, `broker_margin`. Optional. |
+
+**Reserve modes:**
+
+| Mode | Description |
+|------|-------------|
+| `gross_assignment` (default) | Reserve the full assignment obligation (`contracts × multiplier × strike`) |
+| `net_premium` | Reserve the net obligation after subtracting premium already collected |
+| `broker_margin` | Falls back to `gross_assignment` when no broker margin data is available for the position type. Broker-specific margin figures are not yet selectively applied per position. |
+
+**Response `200 OK`:**
+```json
+{
+  "cash_balance": 50000.0,
+  "broker_buying_power": 100000.0,
+  "broker_available_funds": 48000.0,
+  "broker_excess_liquidity": 47000.0,
+  "broker_initial_margin_req": 3000.0,
+  "broker_maintenance_margin_req": 2500.0,
+  "reserved_cash_total": 35000.0,
+  "reserved_cash_short_puts": 30000.0,
+  "reserved_cash_defined_risk_spreads": 3000.0,
+  "reserved_for_pending_orders": 2000.0,
+  "manual_cash_buffer": 5000.0,
+  "margin_safety_buffer": 0.0,
+  "deployable_cash": 10000.0,
+  "reserve_coverage_ratio": 1.43,
+  "uncovered_short_call_risk": false,
+  "has_short_stock": false,
+  "cash_by_currency": {
+    "USD": 50000.0
+  },
+  "committed_shares": {},
+  "position_reserves": [
+    {
+      "symbol": "AAPL 260619P00150000",
+      "underlying": "AAPL",
+      "type": "cash_secured_short_put",
+      "expiry": "260619",
+      "strike": 150.0,
+      "contracts": 2,
+      "multiplier": 100,
+      "gross_assignment_obligation": 30000.0,
+      "reserve_amount": 30000.0,
+      "premium_collected": 500.0,
+      "current_liability": 300.0,
+      "defined_risk_protected": false
+    }
+  ],
+  "warnings": []
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cash_balance` | number | Total cash balance from broker |
+| `broker_buying_power` | number | Broker-reported buying power |
+| `broker_available_funds` | number | Broker-reported available funds |
+| `broker_excess_liquidity` | number | Broker-reported excess liquidity |
+| `broker_initial_margin_req` | number | Broker initial margin requirement |
+| `broker_maintenance_margin_req` | number | Broker maintenance margin requirement |
+| `reserved_cash_total` | number | Sum of all robot-estimated reserves |
+| `reserved_cash_short_puts` | number | Capital reserved for cash-secured short puts |
+| `reserved_cash_defined_risk_spreads` | number | Capital reserved for defined-risk spreads (max loss only) |
+| `reserved_for_pending_orders` | number | Capital reserved for open buy/short-put orders |
+| `manual_cash_buffer` | number | User-configured safety buffer kept untouched |
+| `margin_safety_buffer` | number | Additional margin safety buffer when excess liquidity is low |
+| `deployable_cash` | number | **Robot-estimated deployable cash** (floors at 0) |
+| `reserve_coverage_ratio` | number | `cash_balance / reserved_cash_total`; null when no reserves |
+| `uncovered_short_call_risk` | boolean | True when one or more short calls lack sufficient long shares or long calls |
+| `has_short_stock` | boolean | True when short stock positions are held |
+| `cash_by_currency` | object | Per-currency cash balances when multi-currency data is available |
+| `committed_shares` | object | Shares committed to cover short calls, keyed by underlying symbol |
+| `position_reserves` | array | Per-position reserve breakdown (see below) |
+| `warnings` | array | Human-readable warning strings |
+
+**`position_reserves` entry fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | string | Full position symbol |
+| `underlying` | string | Underlying ticker |
+| `type` | string | Position type: `cash_secured_short_put`, `defined_risk_put_spread`, `defined_risk_call_spread`, `iron_condor`, `covered_short_call`, `uncovered_short_call`, `unparseable_option` |
+| `expiry` | string | Option expiry in `YYMMDD` format |
+| `strike` | number | Strike price |
+| `contracts` | integer | Number of contracts (absolute value) |
+| `multiplier` | integer | Contract multiplier (usually 100) |
+| `gross_assignment_obligation` | number | Full notional assignment value |
+| `reserve_amount` | number | Amount actually reserved (depends on reserve mode and spread protection) |
+| `premium_collected` | number | Total premium collected for this position |
+| `current_liability` | number | Current absolute market value (mark-to-market loss) |
+| `defined_risk_protected` | boolean | True when covered by a protective long put/spread |
+
+**Possible warnings:**
+
+| Warning | Meaning |
+|---------|---------|
+| `deployable_cash <= 0` | All available cash is reserved or overcommitted |
+| `cash_balance < reserved_cash_total` | Obligations exceed current cash balance |
+| `uncovered_short_call_risk` | One or more short calls are not covered |
+| `short_stock_risk` | Short stock positions may increase margin exposure |
+| `high_margin_usage` | Less than 10% excess liquidity available |
+| `multi_currency_risk` | Multiple currencies detected — deployable cash may overstate USD availability |
+
+**Error responses:**
+
+`400 Bad Request` — invalid `reserve_mode` value:
+```json
+{
+  "error": "Invalid reserve_mode 'xyz'. Valid values: gross_assignment, net_premium, broker_margin"
+}
+```
+
+---
+
 ## Rate Limiting
 
 API endpoints are designed for dashboard usage and have reasonable rate limits:
