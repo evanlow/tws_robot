@@ -197,10 +197,11 @@ class CashAvailabilityResult:
     # Result
     reserved_cash_total: float = 0.0
     deployable_cash: float = 0.0
-    reserve_coverage_ratio: float = 0.0
+    reserve_coverage_ratio: Optional[float] = 0.0
 
     # Flags
     uncovered_short_call_risk: bool = False
+    has_short_stock: bool = False
     high_margin_usage: bool = False
     multi_currency_mismatch: bool = False
 
@@ -233,8 +234,13 @@ class CashAvailabilityResult:
             "manual_cash_buffer": round(self.manual_cash_buffer, 2),
             "margin_safety_buffer": round(self.margin_safety_buffer, 2),
             "deployable_cash": round(self.deployable_cash, 2),
-            "reserve_coverage_ratio": round(self.reserve_coverage_ratio, 4),
+            "reserve_coverage_ratio": (
+                round(self.reserve_coverage_ratio, 4)
+                if self.reserve_coverage_ratio is not None
+                else None
+            ),
             "uncovered_short_call_risk": self.uncovered_short_call_risk,
+            "has_short_stock": self.has_short_stock,
             "high_margin_usage": self.high_margin_usage,
             "multi_currency_mismatch": self.multi_currency_mismatch,
             "cash_by_currency": {
@@ -371,10 +377,11 @@ class CashAvailabilityAnalyzer:
             result.reserve_coverage_ratio = (
                 result.cash_balance / result.reserved_cash_total
             )
+        elif result.cash_balance > 0:
+            # No reserves and positive cash: ratio is undefined (null in JSON)
+            result.reserve_coverage_ratio = None
         else:
-            result.reserve_coverage_ratio = (
-                float("inf") if result.cash_balance > 0 else 0.0
-            )
+            result.reserve_coverage_ratio = 0.0
 
         # -- Top-level warnings --------------------------------------------
         if result.deployable_cash <= 0:
@@ -491,15 +498,78 @@ class CashAvailabilityAnalyzer:
                 "Short stock requires margin and creates buy-to-cover obligations. "
                 "Deployable cash may be further reduced by broker margin rules."
             )
+            result.has_short_stock = True
             result.high_margin_usage = True
 
-        # --- Covered-call matching ----------------------------------------
-        # For each underlying with a short call, check whether there is
-        # enough long stock to cover it.
-        used_short_calls: set = set()
+        # --- Bear call spread matching ------------------------------------
+        # For each underlying with short calls, first try to match them with
+        # a higher-strike long call (same underlying/expiry, sufficient qty).
+        # Matched pairs are bear call spreads (defined-risk).
+        # Unmatched short calls go on to covered-call / naked-call processing.
+        #
+        # Structure: {(und, expiry): [spread_record, ...]}
+        bear_call_spread_records: Dict[tuple, List[Dict[str, Any]]] = {}
+        # Short calls not protected by a long call
+        remaining_short_calls: Dict[str, List[Dict[str, Any]]] = {}
 
         for und, scall_list in short_calls.items():
-            # Find the stock symbol (may differ from underlying: e.g. BRK.B)
+            lcall_list = long_calls.get(und, [])
+            # Sort short calls ascending by strike so we match lowest first
+            sc_sorted = sorted(
+                scall_list,
+                key=lambda x: x["parsed"]["strike"],
+            )
+            # Sort long calls descending by strike (prefer lowest premium risk)
+            lc_sorted = sorted(
+                lcall_list,
+                key=lambda x: x["parsed"]["strike"],
+                reverse=True,
+            )
+            used_long_calls: set = set()
+
+            for sc in sc_sorted:
+                sym = sc["symbol"]
+                parsed = sc["parsed"]
+                pos = sc["pos"]
+                short_strike = parsed["strike"]
+                short_expiry = parsed.get("expiry", "")
+                contracts = int(abs(pos.get("quantity", 0)))
+
+                # Find a higher-strike long call in same expiry with enough qty
+                matched_lc = None
+                for lc in lc_sorted:
+                    if lc["symbol"] in used_long_calls:
+                        continue
+                    lc_parsed = lc["parsed"]
+                    lc_qty = int(abs(lc["pos"].get("quantity", 0)))
+                    if (
+                        lc_parsed["strike"] > short_strike
+                        and lc_parsed.get("expiry") == short_expiry
+                        and lc_qty >= contracts
+                    ):
+                        matched_lc = lc
+                        break
+
+                if matched_lc is not None:
+                    used_long_calls.add(matched_lc["symbol"])
+                    spread_width = matched_lc["parsed"]["strike"] - short_strike
+                    reserve = contracts * multiplier * spread_width
+                    key = (und, short_expiry)
+                    bear_call_spread_records.setdefault(key, []).append({
+                        "sym": sym,
+                        "parsed": parsed,
+                        "pos": pos,
+                        "contracts": contracts,
+                        "spread_width": spread_width,
+                        "reserve": reserve,
+                        "used_in_iron_condor": False,
+                    })
+                else:
+                    remaining_short_calls.setdefault(und, []).append(sc)
+
+        # --- Covered-call matching (with partial coverage support) --------
+        # Only consider short calls not already matched as bear call spreads.
+        for und, scall_list in remaining_short_calls.items():
             stock_pos = stocks.get(und)
             stock_qty = int(abs(stock_pos.get("quantity", 0))) if stock_pos else 0
 
@@ -509,6 +579,9 @@ class CashAvailabilityAnalyzer:
                 pos = sc["pos"]
                 contracts = int(abs(pos.get("quantity", 0)))
                 shares_needed = contracts * multiplier
+                entry_price = abs(pos.get("entry_price", 0.0))
+                prem_total = contracts * multiplier * entry_price
+                current_liability = abs(pos.get("market_value", 0.0))
 
                 if stock_qty >= shares_needed:
                     # Fully covered — mark shares as committed; no cash reserve
@@ -516,7 +589,6 @@ class CashAvailabilityAnalyzer:
                         result.committed_shares.get(und, 0) + shares_needed
                     )
                     stock_qty -= shares_needed
-                    used_short_calls.add(sym)
                     result.position_reserves.append(PositionReserve(
                         symbol=sym,
                         underlying=und,
@@ -526,14 +598,60 @@ class CashAvailabilityAnalyzer:
                         contracts=contracts,
                         multiplier=multiplier,
                         reserve_amount=0.0,
-                        premium_collected=abs(pos.get("quantity", 0))
-                        * abs(pos.get("entry_price", 0.0))
-                        * multiplier,
-                        current_liability=abs(pos.get("market_value", 0.0)),
+                        premium_collected=prem_total,
+                        current_liability=current_liability,
                         defined_risk_protected=True,
                     ))
+                elif stock_qty > 0:
+                    # Partially covered — split into covered and uncovered legs
+                    covered_contracts = stock_qty // multiplier
+                    uncovered_contracts = contracts - covered_contracts
+                    covered_shares = covered_contracts * multiplier
+
+                    result.committed_shares[und] = (
+                        result.committed_shares.get(und, 0) + covered_shares
+                    )
+                    stock_qty = 0
+
+                    if covered_contracts > 0:
+                        result.position_reserves.append(PositionReserve(
+                            symbol=sym,
+                            underlying=und,
+                            position_type="covered_short_call",
+                            expiry=parsed.get("expiry", ""),
+                            strike=parsed.get("strike", 0.0),
+                            contracts=covered_contracts,
+                            multiplier=multiplier,
+                            reserve_amount=0.0,
+                            premium_collected=covered_contracts * multiplier * entry_price,
+                            current_liability=(
+                                current_liability * covered_contracts / contracts
+                            ),
+                            defined_risk_protected=True,
+                        ))
+
+                    result.uncovered_short_call_risk = True
+                    result.position_reserves.append(PositionReserve(
+                        symbol=sym,
+                        underlying=und,
+                        position_type="uncovered_short_call",
+                        expiry=parsed.get("expiry", ""),
+                        strike=parsed.get("strike", 0.0),
+                        contracts=uncovered_contracts,
+                        multiplier=multiplier,
+                        reserve_amount=0.0,
+                        premium_collected=uncovered_contracts * multiplier * entry_price,
+                        current_liability=(
+                            current_liability * uncovered_contracts / contracts
+                        ),
+                        warning=(
+                            f"Partially uncovered short call {sym}: "
+                            f"{uncovered_contracts} of {contracts} contracts "
+                            "lack stock coverage."
+                        ),
+                    ))
                 else:
-                    # Uncovered (naked) short call
+                    # Fully uncovered (naked) short call
                     result.uncovered_short_call_risk = True
                     result.position_reserves.append(PositionReserve(
                         symbol=sym,
@@ -543,18 +661,19 @@ class CashAvailabilityAnalyzer:
                         strike=parsed.get("strike", 0.0),
                         contracts=contracts,
                         multiplier=multiplier,
-                        reserve_amount=0.0,  # Unknown; broker margin governs
-                        premium_collected=abs(pos.get("quantity", 0))
-                        * abs(pos.get("entry_price", 0.0))
-                        * multiplier,
-                        current_liability=abs(pos.get("market_value", 0.0)),
+                        reserve_amount=0.0,
+                        premium_collected=prem_total,
+                        current_liability=current_liability,
                         warning=(
                             f"Uncovered short call {sym}: "
                             "margin requirement governed by broker rules."
                         ),
                     ))
 
-        # --- Short put spread detection and reserve computation ----------
+        # --- Short put spread detection + iron condor detection ----------
+        # After matching bull put spreads, check each spread for a paired
+        # bear call spread on the same underlying/expiry.  When one is found
+        # the position is an iron condor; reserve = max spread width only.
         total_short_put_reserve = 0.0
         total_spread_reserve = 0.0
 
@@ -602,26 +721,63 @@ class CashAvailabilityAnalyzer:
                         break
 
                 if matched_lp is not None:
-                    # Defined-risk bull put spread
+                    # Bull put spread — check for iron condor pairing
                     used_long_puts.add(matched_lp["symbol"])
-                    spread_width = short_strike - matched_lp["parsed"]["strike"]
-                    reserve = contracts * multiplier * spread_width
-                    total_spread_reserve += reserve
-                    result.position_reserves.append(PositionReserve(
-                        symbol=sym,
-                        underlying=und,
-                        position_type="defined_risk_put_spread",
-                        expiry=short_expiry,
-                        strike=short_strike,
-                        contracts=contracts,
-                        multiplier=multiplier,
-                        gross_assignment_obligation=gross_obligation,
-                        reserve_amount=reserve,
-                        premium_collected=premium_collected,
-                        current_liability=current_liability,
-                        defined_risk_protected=True,
-                        spread_width=spread_width,
-                    ))
+                    put_spread_width = short_strike - matched_lp["parsed"]["strike"]
+
+                    ic_key = (und, short_expiry)
+                    bc_records = bear_call_spread_records.get(ic_key, [])
+                    matched_bc = None
+                    for bc_rec in bc_records:
+                        if (
+                            not bc_rec.get("used_in_iron_condor")
+                            and bc_rec["contracts"] == contracts
+                        ):
+                            matched_bc = bc_rec
+                            break
+
+                    if matched_bc is not None:
+                        # Iron condor — reserve max loss of the wider spread
+                        matched_bc["used_in_iron_condor"] = True
+                        ic_spread_width = max(
+                            put_spread_width, matched_bc["spread_width"]
+                        )
+                        ic_reserve = contracts * multiplier * ic_spread_width
+                        total_spread_reserve += ic_reserve
+                        result.position_reserves.append(PositionReserve(
+                            symbol=sym,
+                            underlying=und,
+                            position_type="iron_condor",
+                            expiry=short_expiry,
+                            strike=short_strike,
+                            contracts=contracts,
+                            multiplier=multiplier,
+                            gross_assignment_obligation=gross_obligation,
+                            reserve_amount=ic_reserve,
+                            premium_collected=premium_collected,
+                            current_liability=current_liability,
+                            defined_risk_protected=True,
+                            spread_width=ic_spread_width,
+                        ))
+                    else:
+                        # Standalone bull put spread
+                        put_reserve = contracts * multiplier * put_spread_width
+                        total_spread_reserve += put_reserve
+                        result.position_reserves.append(PositionReserve(
+                            symbol=sym,
+                            underlying=und,
+                            position_type="defined_risk_put_spread",
+                            expiry=short_expiry,
+                            strike=short_strike,
+                            contracts=contracts,
+                            multiplier=multiplier,
+                            gross_assignment_obligation=gross_obligation,
+                            reserve_amount=put_reserve,
+                            premium_collected=premium_collected,
+                            current_liability=current_liability,
+                            defined_risk_protected=True,
+                            spread_width=put_spread_width,
+                        ))
                 else:
                     # Naked (cash-secured) short put
                     if (
@@ -653,6 +809,39 @@ class CashAvailabilityAnalyzer:
                         defined_risk_protected=False,
                     ))
 
+        # --- Standalone bear call spread reserves -------------------------
+        # Any bear call spread not consumed by an iron condor is its own
+        # defined-risk position.
+        for (und, expiry), bc_records in bear_call_spread_records.items():
+            for bc_rec in bc_records:
+                if bc_rec.get("used_in_iron_condor"):
+                    continue
+                parsed = bc_rec["parsed"]
+                pos = bc_rec["pos"]
+                contracts = bc_rec["contracts"]
+                spread_width = bc_rec["spread_width"]
+                reserve = bc_rec["reserve"]
+                prem = contracts * multiplier * abs(pos.get("entry_price", 0.0))
+                current_liability = abs(pos.get("market_value", 0.0))
+                gross_obligation = contracts * multiplier * parsed.get("strike", 0.0)
+
+                total_spread_reserve += reserve
+                result.position_reserves.append(PositionReserve(
+                    symbol=bc_rec["sym"],
+                    underlying=und,
+                    position_type="defined_risk_call_spread",
+                    expiry=expiry,
+                    strike=parsed.get("strike", 0.0),
+                    contracts=contracts,
+                    multiplier=multiplier,
+                    gross_assignment_obligation=gross_obligation,
+                    reserve_amount=reserve,
+                    premium_collected=prem,
+                    current_liability=current_liability,
+                    defined_risk_protected=True,
+                    spread_width=spread_width,
+                ))
+
         result.reserved_cash_short_puts = total_short_put_reserve
         result.reserved_cash_defined_risk_spreads = total_spread_reserve
 
@@ -674,12 +863,39 @@ class CashAvailabilityAnalyzer:
     ) -> float:
         """Estimate capital reserved for pending (open) orders.
 
-        Only unexecuted orders in PENDING / RECORDED status are included.
-        Terminal statuses (FILLED, CANCELLED, REJECTED) are ignored.
+        Buy orders reserve ``limit_price × quantity`` (× multiplier for options).
+        Pending short-put orders also reserve capital: gross assignment obligation
+        by default, or spread max loss when paired with a pending protective long put
+        in the same order list.
+
+        Only unexecuted orders in PENDING / RECORDED / OPEN / SUBMITTED status are
+        included.  Terminal statuses (FILLED, CANCELLED, REJECTED) are ignored.
         """
         _ACTIVE_STATUSES = {"PENDING", "RECORDED", "OPEN", "SUBMITTED"}
         _BUY_ACTIONS = {"BUY", "BTO", "LONG"}
+        _SELL_ACTIONS = {"SELL", "STO", "SHORT"}
         multiplier = self.config.option_contract_multiplier
+
+        # First pass: collect active pending long-put orders for spread matching
+        pending_long_puts: List[Dict[str, Any]] = []
+        for order in orders:
+            status = (order.get("status") or "").upper()
+            if status and status not in _ACTIVE_STATUSES:
+                continue
+            action = (order.get("action") or order.get("side") or "").upper()
+            if action not in _BUY_ACTIONS:
+                continue
+            symbol = (order.get("symbol") or "").replace(" ", "").upper()
+            qty = abs(float(order.get("quantity", 0) or 0))
+            parsed = _parse_option_symbol(symbol)
+            if parsed and parsed["right"] == "P":
+                pending_long_puts.append({
+                    "underlying": parsed["underlying"],
+                    "expiry": parsed["expiry"],
+                    "strike": parsed["strike"],
+                    "contracts": int(qty),
+                    "used": False,
+                })
 
         total = 0.0
         for order in orders:
@@ -689,22 +905,65 @@ class CashAvailabilityAnalyzer:
 
             action = (order.get("action") or order.get("side") or "").upper()
             sec_type = (order.get("sec_type") or "").upper()
+            symbol = (order.get("symbol") or "").replace(" ", "").upper()
             qty = abs(float(order.get("quantity", 0) or 0))
             limit_price = float(order.get("limit_price", 0) or 0)
 
-            if action not in _BUY_ACTIONS:
-                # Short/sell orders don't directly consume new cash
-                continue
+            if action in _BUY_ACTIONS:
+                if sec_type in ("OPT", "OPTION"):
+                    reserve = qty * limit_price * multiplier
+                elif sec_type in ("STK", "STOCK"):
+                    reserve = qty * limit_price
+                else:
+                    # No sec_type — try symbol parsing to detect options
+                    parsed_buy = _parse_option_symbol(symbol)
+                    if parsed_buy is not None:
+                        reserve = qty * limit_price * multiplier
+                    else:
+                        reserve = qty * limit_price
+                if reserve > 0:
+                    total += reserve
 
-            if sec_type in ("STK", "", "STOCK"):
-                reserve = qty * limit_price
-            elif sec_type in ("OPT", "OPTION"):
-                reserve = qty * limit_price * multiplier
-            else:
-                reserve = qty * limit_price
+            elif action in _SELL_ACTIONS:
+                # Pending short-put orders must reserve assignment capital.
+                # Try to identify the order as a put option via symbol parsing
+                # (sec_type field is often absent from locally-recorded orders).
+                parsed = _parse_option_symbol(symbol)
+                if parsed and parsed["right"] == "P":
+                    contracts = int(qty)
+                    short_strike = parsed["strike"]
+                    short_expiry = parsed["expiry"]
+                    und = parsed["underlying"]
+                    gross_obligation = contracts * multiplier * short_strike
 
-            if reserve > 0:
-                total += reserve
+                    # Check for a paired pending long put (spread protection)
+                    matched_lp = None
+                    for lp in pending_long_puts:
+                        if (
+                            not lp["used"]
+                            and lp["underlying"] == und
+                            and lp["expiry"] == short_expiry
+                            and lp["strike"] < short_strike
+                            and lp["contracts"] >= contracts
+                        ):
+                            matched_lp = lp
+                            break
+
+                    if matched_lp is not None:
+                        matched_lp["used"] = True
+                        spread_width = short_strike - matched_lp["strike"]
+                        reserve = contracts * multiplier * spread_width
+                    elif (
+                        self.config.reserve_mode == CashReserveMode.NET_PREMIUM
+                    ):
+                        credit = contracts * multiplier * limit_price
+                        reserve = max(0.0, gross_obligation - credit)
+                    else:
+                        # GROSS_ASSIGNMENT and BROKER_MARGIN both default to gross
+                        reserve = gross_obligation
+
+                    if reserve > 0:
+                        total += reserve
 
         return total
 

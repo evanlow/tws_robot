@@ -3649,7 +3649,7 @@ Return a full deployable-cash analysis including per-position reserve breakdown,
 |------|-------------|
 | `gross_assignment` (default) | Reserve the full assignment obligation (`contracts × multiplier × strike`) |
 | `net_premium` | Reserve the net obligation after subtracting premium already collected |
-| `broker_margin` | Use broker-reported margin requirement where available; falls back to `gross_assignment` |
+| `broker_margin` | Falls back to `gross_assignment` when no broker margin data is available for the position type. Broker-specific margin figures are not yet selectively applied per position. |
 
 **Response `200 OK`:**
 ```json
@@ -3725,7 +3725,7 @@ Return a full deployable-cash analysis including per-position reserve breakdown,
 |-------|------|-------------|
 | `symbol` | string | Full position symbol |
 | `underlying` | string | Underlying ticker |
-| `type` | string | `cash_secured_short_put`, `credit_spread_short_put`, `uncovered_short_call` |
+| `type` | string | Position type: `cash_secured_short_put`, `defined_risk_put_spread`, `defined_risk_call_spread`, `iron_condor`, `covered_short_call`, `uncovered_short_call`, `unparseable_option` |
 | `expiry` | string | Option expiry in `YYMMDD` format |
 | `strike` | number | Strike price |
 | `contracts` | integer | Number of contracts (absolute value) |

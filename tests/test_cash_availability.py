@@ -5,19 +5,22 @@ Covers:
   2. One cash-secured short put: reserve = strike * multiplier * contracts
   3. Multiple short puts across underlyings: reserves aggregate correctly
   4. Bull put spread: reserve = spread width * 100 * contracts, not full notional
-  5. Iron condor: reserve = put spread max loss only
+  5. Iron condor: reserve = max loss of wider spread side
   6. Covered call: does not reduce cash reserve when enough shares exist
   7. Covered call: marks corresponding shares as committed
   8. Uncovered short call: high-risk warning and flag set
   9. Short stock: margin/risk warning issued
  10. Margin-financed long stock: margin safety buffer applied
  11. Pending stock buy order: reserves limit price * quantity
- 12. Pending short-put order not reserved (sell order)
+ 12. Pending short-put order reserves gross assignment obligation
  13. Multi-currency account: deployable cash warns on mismatch
  14. Missing option parse data: conservative fallback warning
  15. Broker buying power shown separately from deployable cash
  16. Deployable cash floors at zero
  17. API endpoint: returns expected keys and format
+ 18. Bear call spread: short call protected by higher-strike long call
+ 19. Partial covered-call: covered + uncovered contracts split correctly
+ 20. Pending credit spread: paired short put + long put order uses spread reserve
 """
 
 from unittest.mock import MagicMock, patch
@@ -328,16 +331,13 @@ class TestBullPutSpread:
 # ===========================================================================
 
 class TestIronCondor:
-    def test_iron_condor_reserve_is_put_spread_only(self):
-        """Short call component of iron condor is covered-call matched where possible;
-        otherwise the put spread sets the reserve (wider of call/put spread).
-        In this test we use a stock to cover the call side."""
+    def test_iron_condor_reserve_is_max_spread_width(self):
+        """Full iron condor (put spread + call spread) reserves max-loss of wider leg."""
         analyzer = _make_analyzer()
-        # Put spread
+        # Put spread: short 500, long 490 → width 10
         short_put_sym, short_put_pos = _short_put("SPY", "260619", 500.0, 1)
         long_put_sym, long_put_pos = _long_put("SPY", "260619", 490.0, 1)
-        # Call spread (not covered by stock → bear call spread, but we expect
-        # the put spread reserve to dominate)
+        # Call spread: short 520, long 530 → width 10
         short_call_sym, short_call_pos = _short_call("SPY", "260619", 520.0, 1)
         long_call_sym, long_call_pos = _long_call("SPY", "260619", 530.0, 1)
         positions = {
@@ -348,10 +348,53 @@ class TestIronCondor:
         }
         result = analyzer.analyze(_account(cash=100_000), positions)
 
-        # Put spread reserve = 1 × 100 × (500-490) = 1_000
+        # Iron condor: max(10, 10) × 1 × 100 = 1_000 (not 2_000 for both sides)
         assert result.reserved_cash_defined_risk_spreads == 1_000.0
-        # Naked short call is detected (no stock to cover it)
-        assert result.uncovered_short_call_risk
+        # Short call is protected by the long call — NOT flagged as uncovered
+        assert not result.uncovered_short_call_risk
+
+    def test_iron_condor_wider_call_spread_sets_reserve(self):
+        """When the call spread is wider, it sets the reserve."""
+        analyzer = _make_analyzer()
+        # Put spread width = 10
+        short_put_sym, short_put_pos = _short_put("SPY", "260619", 500.0, 1)
+        long_put_sym, long_put_pos = _long_put("SPY", "260619", 490.0, 1)
+        # Call spread width = 15
+        short_call_sym, short_call_pos = _short_call("SPY", "260619", 520.0, 1)
+        long_call_sym, long_call_pos = _long_call("SPY", "260619", 535.0, 1)
+        positions = {
+            short_put_sym: short_put_pos,
+            long_put_sym: long_put_pos,
+            short_call_sym: short_call_pos,
+            long_call_sym: long_call_pos,
+        }
+        result = analyzer.analyze(_account(cash=100_000), positions)
+
+        # max(10, 15) × 1 × 100 = 1_500
+        assert result.reserved_cash_defined_risk_spreads == 1_500.0
+        assert not result.uncovered_short_call_risk
+
+    def test_iron_condor_position_type_is_iron_condor(self):
+        """Iron condor produces a single position_reserve entry with type 'iron_condor'."""
+        analyzer = _make_analyzer()
+        short_put_sym, short_put_pos = _short_put("SPY", "260619", 500.0, 1)
+        long_put_sym, long_put_pos = _long_put("SPY", "260619", 490.0, 1)
+        short_call_sym, short_call_pos = _short_call("SPY", "260619", 520.0, 1)
+        long_call_sym, long_call_pos = _long_call("SPY", "260619", 530.0, 1)
+        positions = {
+            short_put_sym: short_put_pos,
+            long_put_sym: long_put_pos,
+            short_call_sym: short_call_pos,
+            long_call_sym: long_call_pos,
+        }
+        result = analyzer.analyze(_account(cash=100_000), positions)
+
+        ic_reserves = [
+            pr for pr in result.position_reserves
+            if pr.position_type == "iron_condor"
+        ]
+        assert len(ic_reserves) == 1
+        assert ic_reserves[0].defined_risk_protected
 
     def test_iron_condor_with_stock_cover_no_extra_reserve(self):
         """When the short call is covered by long stock, it adds no reserve."""
@@ -405,8 +448,8 @@ class TestCoveredCalls:
 
         assert result.committed_shares.get("AAPL") == 200
 
-    def test_partial_cover_creates_uncovered_residual(self):
-        """If stock covers only part of the short call, the rest is naked."""
+    def test_partial_cover_creates_covered_and_uncovered_entries(self):
+        """Partial stock coverage splits into covered + uncovered position reserves."""
         analyzer = _make_analyzer()
         stock_sym, stock_pos = _stock("AAPL", 100)   # covers 1 contract
         call_sym, call_pos = _short_call("AAPL", "260619", 160.0, 2)  # needs 200
@@ -415,6 +458,21 @@ class TestCoveredCalls:
 
         # Only 1 contract is covered; the other is naked
         assert result.uncovered_short_call_risk
+
+        covered = [
+            pr for pr in result.position_reserves
+            if pr.position_type == "covered_short_call"
+        ]
+        uncovered = [
+            pr for pr in result.position_reserves
+            if pr.position_type == "uncovered_short_call"
+        ]
+        assert len(covered) == 1
+        assert covered[0].contracts == 1
+        assert result.committed_shares.get("AAPL") == 100
+
+        assert len(uncovered) == 1
+        assert uncovered[0].contracts == 1
 
     def test_covered_call_position_type(self):
         analyzer = _make_analyzer()
@@ -579,18 +637,105 @@ class TestPendingOrders:
         result = analyzer.analyze(_account(cash=50_000), {}, orders)
         assert result.reserved_for_pending_orders == 0.0
 
-    def test_sell_order_not_reserved(self):
+    def test_sell_stock_order_not_reserved(self):
+        """Sell orders for stock do not consume cash reserve."""
         analyzer = _make_analyzer()
         orders = [{
             "id": "4",
             "status": "PENDING",
             "action": "SELL",
             "sec_type": "STK",
+            "symbol": "AAPL",
             "quantity": 100,
             "limit_price": 150.0,
         }]
         result = analyzer.analyze(_account(cash=50_000), {}, orders)
         assert result.reserved_for_pending_orders == 0.0
+
+    def test_pending_short_put_order_reserves_gross_obligation(self):
+        """A pending SELL order for a put option reserves the gross assignment amount."""
+        analyzer = _make_analyzer()
+        # Short put at strike 150, 2 contracts
+        sym, _ = _short_put("AAPL", "260619", 150.0, 2)
+        orders = [{
+            "id": "5",
+            "status": "PENDING",
+            "action": "SELL",
+            "symbol": sym,
+            "quantity": 2,
+            "limit_price": 3.0,
+        }]
+        result = analyzer.analyze(_account(cash=100_000), {}, orders)
+
+        # 2 contracts × 100 × $150 = $30,000
+        assert result.reserved_for_pending_orders == 30_000.0
+
+    def test_pending_short_put_order_net_premium_mode(self):
+        """In net_premium mode, credit is subtracted from gross obligation."""
+        from data.cash_availability import CashReserveMode
+
+        analyzer = _make_analyzer(reserve_mode=CashReserveMode.NET_PREMIUM)
+        sym, _ = _short_put("AAPL", "260619", 150.0, 1)
+        orders = [{
+            "id": "6",
+            "status": "PENDING",
+            "action": "SELL",
+            "symbol": sym,
+            "quantity": 1,
+            "limit_price": 3.0,  # credit per share
+        }]
+        result = analyzer.analyze(_account(cash=100_000), {}, orders)
+
+        # gross = 1 × 100 × 150 = 15_000; credit = 1 × 100 × 3 = 300
+        # net = 15_000 - 300 = 14_700
+        assert result.reserved_for_pending_orders == pytest.approx(14_700.0)
+
+    def test_pending_credit_spread_uses_spread_width_reserve(self):
+        """A paired pending short-put + long-put order reserves spread max loss."""
+        analyzer = _make_analyzer()
+        short_sym, _ = _short_put("AAPL", "260619", 150.0, 1)
+        long_sym, _ = _long_put("AAPL", "260619", 140.0, 1)
+        orders = [
+            {
+                "id": "7",
+                "status": "PENDING",
+                "action": "SELL",
+                "symbol": short_sym,
+                "quantity": 1,
+                "limit_price": 3.0,
+            },
+            {
+                "id": "8",
+                "status": "PENDING",
+                "action": "BUY",
+                "symbol": long_sym,
+                "quantity": 1,
+                "limit_price": 1.0,
+            },
+        ]
+        result = analyzer.analyze(_account(cash=100_000), {}, orders)
+
+        # Spread width = 10; reserve = 1 × 100 × 10 = 1_000
+        # Long put buy premium = 1 × 100 × 1 = 100
+        # Total = 1_000 (spread reserve) + 100 (long put premium buy order)
+        assert result.reserved_for_pending_orders == pytest.approx(1_100.0)
+
+    def test_pending_short_put_sto_action_reserved(self):
+        """STO (Sell To Open) action is treated as a short sell for reserve purposes."""
+        analyzer = _make_analyzer()
+        sym, _ = _short_put("AAPL", "260619", 100.0, 1)
+        orders = [{
+            "id": "9",
+            "status": "PENDING",
+            "action": "STO",
+            "symbol": sym,
+            "quantity": 1,
+            "limit_price": 2.0,
+        }]
+        result = analyzer.analyze(_account(cash=100_000), {}, orders)
+
+        # 1 × 100 × 100 = 10_000
+        assert result.reserved_for_pending_orders == 10_000.0
 
 
 # ===========================================================================
@@ -731,10 +876,14 @@ class TestFloor:
         # 30_000 / 10_000 = 3.0
         assert result.reserve_coverage_ratio == pytest.approx(3.0)
 
-    def test_zero_reserve_infinite_ratio(self):
+    def test_zero_reserve_ratio_is_null(self):
+        """No reserves + positive cash → coverage ratio is null (not infinity)."""
         analyzer = _make_analyzer()
         result = analyzer.analyze(_account(cash=50_000), {})
-        assert result.reserve_coverage_ratio == float("inf")
+        assert result.reserve_coverage_ratio is None
+        # to_dict() should serialize as JSON null, not Infinity
+        d = result.to_dict()
+        assert d["reserve_coverage_ratio"] is None
 
     def test_zero_cash_zero_ratio(self):
         analyzer = _make_analyzer()
@@ -917,3 +1066,89 @@ class TestTWSBridgeAccountIngestion:
         app = self._make_bridge_app(svc)
         self._call_update(app, "BuyingPower", "200000.0")
         assert svc._account_summary.get("buying_power") == 200_000.0
+
+
+# ===========================================================================
+# 18. Bear call spread
+# ===========================================================================
+
+class TestBearCallSpread:
+    def test_bear_call_spread_reserve_is_width_not_notional(self):
+        """Short call + higher-strike long call = defined-risk bear call spread."""
+        analyzer = _make_analyzer()
+        short_call_sym, short_call_pos = _short_call(
+            "AAPL", "260619", 160.0, 1, premium_per_share=3.0
+        )
+        long_call_sym, long_call_pos = _long_call(
+            "AAPL", "260619", 170.0, 1, premium_per_share=1.0
+        )
+        positions = {short_call_sym: short_call_pos, long_call_sym: long_call_pos}
+        result = analyzer.analyze(_account(cash=100_000), positions)
+
+        # Spread width = 170 - 160 = 10; reserve = 1 × 100 × 10 = 1_000
+        assert result.reserved_cash_defined_risk_spreads == 1_000.0
+        # No naked short call risk
+        assert not result.uncovered_short_call_risk
+
+    def test_bear_call_spread_position_type(self):
+        """Bear call spread produces a defined_risk_call_spread position entry."""
+        analyzer = _make_analyzer()
+        sc_sym, sc_pos = _short_call("AAPL", "260619", 160.0, 2)
+        lc_sym, lc_pos = _long_call("AAPL", "260619", 175.0, 2)
+        positions = {sc_sym: sc_pos, lc_sym: lc_pos}
+        result = analyzer.analyze(_account(), positions)
+
+        call_spreads = [
+            pr for pr in result.position_reserves
+            if pr.position_type == "defined_risk_call_spread"
+        ]
+        assert len(call_spreads) == 1
+        assert call_spreads[0].defined_risk_protected
+        assert call_spreads[0].spread_width == pytest.approx(15.0)
+        # reserve = 2 × 100 × 15 = 3_000
+        assert call_spreads[0].reserve_amount == pytest.approx(3_000.0)
+
+    def test_bear_call_spread_mismatched_expiry_is_uncovered(self):
+        """Long call with a different expiry does not protect the short call."""
+        analyzer = _make_analyzer()
+        sc_sym, sc_pos = _short_call("AAPL", "260619", 160.0, 1)
+        lc_sym, lc_pos = _long_call("AAPL", "260718", 170.0, 1)  # diff expiry
+        positions = {sc_sym: sc_pos, lc_sym: lc_pos}
+        result = analyzer.analyze(_account(), positions)
+
+        assert result.uncovered_short_call_risk
+
+    def test_standalone_bear_call_spread_no_iron_condor(self):
+        """Bear call spread without a matching put spread is standalone."""
+        analyzer = _make_analyzer()
+        sc_sym, sc_pos = _short_call("AAPL", "260619", 160.0, 1)
+        lc_sym, lc_pos = _long_call("AAPL", "260619", 170.0, 1)
+        positions = {sc_sym: sc_pos, lc_sym: lc_pos}
+        result = analyzer.analyze(_account(cash=50_000), positions)
+
+        assert result.reserved_cash_defined_risk_spreads == 1_000.0
+        assert result.reserved_cash_short_puts == 0.0
+        assert not result.uncovered_short_call_risk
+
+
+# ===========================================================================
+# 19. has_short_stock field
+# ===========================================================================
+
+class TestHasShortStock:
+    def test_has_short_stock_set_when_short(self):
+        analyzer = _make_analyzer()
+        sym, pos = _stock("TSLA", -50, entry_price=200.0)
+        result = analyzer.analyze(_account(), {sym: pos})
+
+        assert result.has_short_stock
+        d = result.to_dict()
+        assert d["has_short_stock"] is True
+
+    def test_has_short_stock_false_when_no_short_stock(self):
+        analyzer = _make_analyzer()
+        result = analyzer.analyze(_account(), {})
+
+        assert not result.has_short_stock
+        d = result.to_dict()
+        assert d["has_short_stock"] is False
