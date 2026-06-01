@@ -2905,6 +2905,10 @@ Return the S&P 500 Bollinger Bands screener payload.
 | `momentum_confirmation` | string\|null | Momentum confirmation code for oversold stocks (see below), `null` when not oversold. |
 | `momentum_label` | string\|null | Human-readable momentum label, `null` when not oversold. |
 | `momentum_reasons` | array | Plain-English reasons explaining the momentum assessment. |
+| `rsi_14` | float\|null | 14-period RSI value (0–100), `null` if fewer than 15 bars available. Always present regardless of Bollinger status. |
+| `rsi_status` | string\|null | RSI status code (see below), `null` if insufficient data. |
+| `rsi_label` | string\|null | Human-readable RSI label (e.g. `"RSI Oversold"`), `null` if insufficient data. |
+| `rsi_reasons` | array | Plain-English reasons describing the RSI reading. Empty array when `rsi_status` is `null`. |
 | `last_updated` | string\|null | ISO timestamp of this row's data |
 
 **Bollinger Status Values:**
@@ -2930,6 +2934,18 @@ Return the S&P 500 Bollinger Bands screener payload.
 | `no_confirmation_yet` | No Confirmation Yet | Oversold but no clear rebound signal yet |
 | `insufficient_data` | Insufficient Data | Fewer than 21 bars available to assess momentum |
 | `null` | — | Stock is not in oversold territory |
+
+**RSI(14) Values** (added in PR #115; always computed when sufficient bars are available):
+
+| `rsi_status` | `rsi_label` | Condition |
+|---|---|---|
+| `rsi_oversold` | RSI Oversold | RSI ≤ 30 |
+| `rsi_recovering_from_oversold` | RSI Recovering | RSI was ≤ 30 on previous bar and is now rising |
+| `rsi_neutral` | RSI Neutral | 30 < RSI < 70 and no directional signal |
+| `rsi_weakening` | RSI Weakening | RSI dropping toward oversold territory |
+| `rsi_overbought` | RSI Overbought | RSI ≥ 70 |
+| `rsi_insufficient_data` | RSI Insufficient Data | Fewer than 15 bars available to compute RSI |
+| `null` | — | `rsi_14` is `null` (data fetch failed) |
 
 **Error Responses:**
 
@@ -3076,6 +3092,10 @@ Return the STI Bollinger Bands screener payload.
 | `momentum_confirmation` | string\|null | Momentum confirmation code for oversold stocks (see below), `null` when not oversold. |
 | `momentum_label` | string\|null | Human-readable momentum label, `null` when not oversold. |
 | `momentum_reasons` | array | Plain-English reasons explaining the momentum assessment. |
+| `rsi_14` | float\|null | 14-period RSI value (0–100), `null` if fewer than 15 bars available. Always present regardless of Bollinger status. |
+| `rsi_status` | string\|null | RSI status code (see below), `null` if insufficient data. |
+| `rsi_label` | string\|null | Human-readable RSI label (e.g. `"RSI Oversold"`), `null` if insufficient data. |
+| `rsi_reasons` | array | Plain-English reasons describing the RSI reading. Empty array when `rsi_status` is `null`. |
 | `last_updated` | string\|null | ISO timestamp of when this row was last refreshed, `null` if scan failed. |
 
 **Bollinger Status Values:**
@@ -3101,6 +3121,18 @@ Return the STI Bollinger Bands screener payload.
 | `no_confirmation_yet` | No Confirmation Yet | Oversold but no clear rebound signal yet |
 | `insufficient_data` | Insufficient Data | Fewer than 21 bars available to assess momentum |
 | `null` | — | Stock is not in oversold territory |
+
+**RSI(14) Values** (added in PR #115; always computed when sufficient bars are available):
+
+| `rsi_status` | `rsi_label` | Condition |
+|---|---|---|
+| `rsi_oversold` | RSI Oversold | RSI ≤ 30 |
+| `rsi_recovering_from_oversold` | RSI Recovering | RSI was ≤ 30 on previous bar and is now rising |
+| `rsi_neutral` | RSI Neutral | 30 < RSI < 70 and no directional signal |
+| `rsi_weakening` | RSI Weakening | RSI dropping toward oversold territory |
+| `rsi_overbought` | RSI Overbought | RSI ≥ 70 |
+| `rsi_insufficient_data` | RSI Insufficient Data | Fewer than 15 bars available to compute RSI |
+| `null` | — | `rsi_14` is `null` (data fetch failed) |
 
 **Caching Behaviour:**
 - Default TTL: 15 minutes (`_CACHE_TTL_SECONDS = 900`).
@@ -3247,6 +3279,10 @@ Return the HSI Bollinger Bands screener payload.
 | `momentum_confirmation` | string\|null | Momentum confirmation code for oversold stocks (see below), `null` when not oversold. |
 | `momentum_label` | string\|null | Human-readable momentum label, `null` when not oversold. |
 | `momentum_reasons` | array | Plain-English reasons explaining the momentum assessment. |
+| `rsi_14` | float\|null | 14-period RSI value (0–100), `null` if fewer than 15 bars available. Always present regardless of Bollinger status. |
+| `rsi_status` | string\|null | RSI status code (see below), `null` if insufficient data. |
+| `rsi_label` | string\|null | Human-readable RSI label (e.g. `"RSI Oversold"`), `null` if insufficient data. |
+| `rsi_reasons` | array | Plain-English reasons describing the RSI reading. Empty array when `rsi_status` is `null`. |
 | `last_updated` | string\|null | ISO timestamp of when this row was last refreshed, `null` if scan failed. |
 
 **Bollinger Status Values:**
@@ -3270,6 +3306,20 @@ Return the HSI Bollinger Bands screener payload.
 | `confirmed_rebound` | Confirmed Rebound | Price above 5-day SMA with two consecutive higher closes |
 | `stabilising` | Stabilising | Selling pressure easing — latest close at or above previous close |
 | `no_confirmation_yet` | No Confirmation Yet | Oversold but no clear rebound signal yet |
+| `insufficient_data` | Insufficient Data | Fewer than 21 bars available to assess momentum |
+| `null` | — | Stock is not in oversold territory |
+
+**RSI(14) Values** (added in PR #115; always computed when sufficient bars are available):
+
+| `rsi_status` | `rsi_label` | Condition |
+|---|---|---|
+| `rsi_oversold` | RSI Oversold | RSI ≤ 30 |
+| `rsi_recovering_from_oversold` | RSI Recovering | RSI was ≤ 30 on previous bar and is now rising |
+| `rsi_neutral` | RSI Neutral | 30 < RSI < 70 and no directional signal |
+| `rsi_weakening` | RSI Weakening | RSI dropping toward oversold territory |
+| `rsi_overbought` | RSI Overbought | RSI ≥ 70 |
+| `rsi_insufficient_data` | RSI Insufficient Data | Fewer than 15 bars available to compute RSI |
+| `null` | — | `rsi_14` is `null` (data fetch failed) |
 
 **Page Route:**
 
