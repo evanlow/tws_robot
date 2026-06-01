@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -48,9 +48,9 @@ class AuditLogger:
         Returns the file path written to (useful for tests), or ``None``
         on failure.
         """
-        moment = when or datetime.utcnow()
+        moment = when or datetime.now(timezone.utc)
         record = dict(record)  # don't mutate caller's dict
-        record.setdefault("timestamp", moment.isoformat() + "Z")
+        record.setdefault("timestamp", moment.isoformat())
 
         path = self._path_for(moment)
         try:

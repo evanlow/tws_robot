@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -180,13 +180,13 @@ def emergency_stop():
     try:
         EMERGENCY_STOP_FILE.write_text(
             f"EMERGENCY STOP - {reason}\n"
-            f"Triggered: {datetime.utcnow().isoformat()}Z\n"
+            f"Triggered: {datetime.now(timezone.utc).isoformat()}\n"
         )
-    except OSError as exc:
-        logger.error("Failed to write EMERGENCY_STOP file: %s", exc)
+    except OSError:
+        logger.exception("Failed to write EMERGENCY_STOP file")
         return jsonify({
             "status": "error",
-            "error": f"Failed to write emergency stop file: {exc}",
+            "error": "Failed to write emergency stop file",
         }), 500
 
     return jsonify({

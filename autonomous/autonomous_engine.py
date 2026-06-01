@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -68,7 +68,7 @@ class AutonomousDecision:
 
     status: DecisionStatus
     mode: AutonomousMode
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     rejection_reason: Optional[str] = None
     deployable_cash: float = 0.0
     cash_snapshot: Dict[str, Any] = field(default_factory=dict)
@@ -84,7 +84,7 @@ class AutonomousDecision:
         return {
             "status": self.status.value,
             "mode": self.mode.value,
-            "timestamp": self.timestamp.isoformat() + "Z",
+            "timestamp": self.timestamp.isoformat(),
             "rejection_reason": self.rejection_reason,
             "deployable_cash": round(self.deployable_cash, 2),
             "cash_snapshot": dict(self.cash_snapshot),
@@ -326,7 +326,8 @@ class AutonomousTradingEngine:
                     positions=self._risk_positions(positions),
                 )
             except Exception as exc:  # pragma: no cover - defensive
-                approved, reason = False, f"risk_manager raised: {exc!r}"
+                logger.exception("risk_manager.check_trade_risk raised")
+                approved, reason = False, "risk_manager raised an exception"
             decision.risk_check = {"approved": approved, "reason": reason}
             if not approved:
                 decision.status = DecisionStatus.RISK_REJECTED
@@ -410,9 +411,10 @@ class AutonomousTradingEngine:
                 order_type="LMT",
                 limit_price=plan.limit_price,
             )
-        except Exception as exc:
+        except Exception:
+            logger.exception("paper_adapter.buy raised")
             decision.status = DecisionStatus.EXECUTION_FAILED
-            decision.rejection_reason = f"paper_adapter.buy raised: {exc!r}"
+            decision.rejection_reason = "paper adapter raised an exception"
             return decision
 
         decision.status = DecisionStatus.PAPER_EXECUTED
