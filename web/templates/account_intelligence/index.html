@@ -288,7 +288,7 @@ async function fetchJSON(url) {
         for (var j = 0; j < posReserves.length; j++) {
           var pr = posReserves[j];
           phtml += '<tr>';
-          phtml += '<td>' + escapeHtml(pr.position_type || pr.type || '--') + '</td>';
+          phtml += '<td>' + escapeHtml(pr.type || '--') + '</td>';
           phtml += '<td>' + escapeHtml(pr.symbol || '--') + '</td>';
           phtml += '<td>' + escapeHtml(pr.underlying || '--') + '</td>';
           phtml += '<td>' + escapeHtml(pr.strike != null ? String(pr.strike) : '--') + '</td>';
