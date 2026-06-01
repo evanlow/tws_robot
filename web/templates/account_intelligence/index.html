@@ -34,6 +34,16 @@
 <section id="cashSection" style="display:none;margin-bottom:2rem;">
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">💰 Cash Management</h2>
   <div class="stats-grid" id="cashStats"></div>
+  <div id="cashAvailPrimary" style="display:none;margin-top:1rem;">
+    <h3 style="font-size:0.95rem;color:#a0aec0;margin-bottom:0.5rem;">Deployable Capital</h3>
+    <div class="stats-grid" id="cashAvailStats"></div>
+  </div>
+  <div id="cashBreakdownSection" style="display:none;margin-top:1rem;">
+    <h3 style="font-size:0.95rem;color:#a0aec0;margin-bottom:0.5rem;">Reserved Capital Breakdown</h3>
+    <div class="stats-grid" id="cashBreakdownStats"></div>
+  </div>
+  <div id="cashWarnings" style="display:none;margin-top:1rem;"></div>
+  <div id="cashPositionReserves" style="display:none;margin-top:1rem;"></div>
   <div id="cashDetails" style="margin-top:0.75rem;"></div>
 </section>
 
@@ -159,17 +169,19 @@ async function fetchJSON(url) {
     fetchJSON('/api/intelligence/risk'),
     fetchJSON('/api/intelligence/execution'),
     fetchJSON('/api/intelligence/reports'),
+    fetchJSON('/api/account/cash-availability'),
   ]);
 
   loader.style.display = 'none';
 
-  var health       = results[0].status === 'fulfilled' ? results[0].value : null;
-  var cash         = results[1].status === 'fulfilled' ? results[1].value : null;
-  var opportunities = results[2].status === 'fulfilled' ? results[2].value : null;
-  var benchmark    = results[3].status === 'fulfilled' ? results[3].value : null;
-  var riskIntel    = results[4].status === 'fulfilled' ? results[4].value : null;
-  var execution    = results[5].status === 'fulfilled' ? results[5].value : null;
-  var reports      = results[6].status === 'fulfilled' ? results[6].value : null;
+  var health           = results[0].status === 'fulfilled' ? results[0].value : null;
+  var cash             = results[1].status === 'fulfilled' ? results[1].value : null;
+  var opportunities    = results[2].status === 'fulfilled' ? results[2].value : null;
+  var benchmark        = results[3].status === 'fulfilled' ? results[3].value : null;
+  var riskIntel        = results[4].status === 'fulfilled' ? results[4].value : null;
+  var execution        = results[5].status === 'fulfilled' ? results[5].value : null;
+  var reports          = results[6].status === 'fulfilled' ? results[6].value : null;
+  var cashAvailability = results[7].status === 'fulfilled' ? results[7].value : null;
 
   var anyLoaded = false;
 
@@ -202,21 +214,99 @@ async function fetchJSON(url) {
   }
 
   // --- 2. Cash Management ---
-  if (cash && !cash.error) {
+  if ((cash && !cash.error) || (cashAvailability && !cashAvailability.error)) {
     anyLoaded = true;
     showSection('cashSection');
+
+    // Basic cash summary from /api/intelligence/cash
     var grid = document.getElementById('cashStats');
     var html = '';
-    html += statCard('Cash Balance', fmtDollar(cash.cash_balance));
-    html += statCard('Cash %', fmtPct(cash.cash_pct));
-    html += statCard('Adequate', cash.is_adequate ? '✅ Yes' : '❌ No');
-    if (cash.target_cash_pct != null) html += statCard('Target Cash %', fmtPct(cash.target_cash_pct));
-    if (cash.excess_cash != null) html += statCard('Excess Cash', fmtDollar(cash.excess_cash));
-    if (cash.deficit != null && cash.deficit > 0) html += statCard('Deficit', fmtDollar(cash.deficit), 'pnl-negative');
+    if (cash && !cash.error) {
+      html += statCard('Cash Balance', fmtDollar(cash.cash_balance));
+      html += statCard('Cash %', fmtPct(cash.cash_pct));
+      html += statCard('Adequate', cash.is_adequate ? '✅ Yes' : '❌ No');
+      if (cash.target_cash_pct != null) html += statCard('Target Cash %', fmtPct(cash.target_cash_pct));
+      if (cash.excess_cash != null) html += statCard('Excess Cash', fmtDollar(cash.excess_cash));
+      if (cash.deficit != null && cash.deficit > 0) html += statCard('Deficit', fmtDollar(cash.deficit), 'pnl-negative');
+    }
     grid.innerHTML = html;
 
+    // Deployable capital primary cards from /api/account/cash-availability
+    if (cashAvailability && !cashAvailability.error) {
+      var availPrimary = document.getElementById('cashAvailPrimary');
+      availPrimary.style.display = '';
+      var availGrid = document.getElementById('cashAvailStats');
+      var ahtml = '';
+      ahtml += statCard('Estimated Deployable Cash', fmtDollar(cashAvailability.deployable_cash));
+      ahtml += statCard('Reserved Capital Total', fmtDollar(cashAvailability.reserved_cash_total));
+      ahtml += statCard('Broker Buying Power', fmtDollar(cashAvailability.broker_buying_power));
+      if (cashAvailability.broker_available_funds != null) ahtml += statCard('Broker Available Funds', fmtDollar(cashAvailability.broker_available_funds));
+      if (cashAvailability.broker_excess_liquidity != null) ahtml += statCard('Broker Excess Liquidity', fmtDollar(cashAvailability.broker_excess_liquidity));
+      if (cashAvailability.reserve_coverage_ratio != null) ahtml += statCard('Reserve Coverage Ratio', fmtNum(cashAvailability.reserve_coverage_ratio, 2) + 'x');
+      availGrid.innerHTML = ahtml;
+
+      // Reserved capital breakdown cards
+      var breakdownSection = document.getElementById('cashBreakdownSection');
+      var breakdownGrid = document.getElementById('cashBreakdownStats');
+      var bhtml = '';
+      if (cashAvailability.reserved_cash_short_puts != null) bhtml += statCard('Reserved for Short Puts', fmtDollar(cashAvailability.reserved_cash_short_puts));
+      if (cashAvailability.reserved_cash_defined_risk_spreads != null) bhtml += statCard('Reserved for Defined-Risk Spreads', fmtDollar(cashAvailability.reserved_cash_defined_risk_spreads));
+      if (cashAvailability.reserved_for_pending_orders != null) bhtml += statCard('Reserved for Pending Orders', fmtDollar(cashAvailability.reserved_for_pending_orders));
+      if (cashAvailability.manual_cash_buffer != null) bhtml += statCard('Manual Cash Buffer', fmtDollar(cashAvailability.manual_cash_buffer));
+      if (cashAvailability.margin_safety_buffer != null) bhtml += statCard('Margin Safety Buffer', fmtDollar(cashAvailability.margin_safety_buffer));
+      if (bhtml) {
+        breakdownSection.style.display = '';
+        breakdownGrid.innerHTML = bhtml;
+      }
+
+      // Warnings panel
+      var warnings = cashAvailability.warnings || [];
+      if (warnings.length > 0) {
+        var warningsDiv = document.getElementById('cashWarnings');
+        warningsDiv.style.display = '';
+        var whtml = '<h3 style="font-size:0.95rem;color:#ecc94b;margin-bottom:0.5rem;">⚠️ Cash Warnings</h3>';
+        whtml += '<ul style="list-style:none;padding:0;">';
+        for (var i = 0; i < warnings.length; i++) {
+          whtml += '<li style="padding:0.4rem 0.75rem;margin-bottom:0.35rem;background:#2d2a1b;border-radius:4px;border-left:3px solid #ecc94b;color:#fefcbf;">' +
+                   escapeHtml(warnings[i]) + '</li>';
+        }
+        whtml += '</ul>';
+        warningsDiv.innerHTML = whtml;
+      }
+
+      // Position reserves table
+      var posReserves = cashAvailability.position_reserves || [];
+      if (posReserves.length > 0) {
+        var reservesDiv = document.getElementById('cashPositionReserves');
+        reservesDiv.style.display = '';
+        var phtml = '<details><summary style="cursor:pointer;color:#a0aec0;font-size:0.95rem;margin-bottom:0.5rem;">📋 Position Reserves (' + posReserves.length + ')</summary>';
+        phtml += '<table class="data-table" style="margin-top:0.5rem;"><thead><tr>';
+        phtml += '<th>Type</th><th>Symbol</th><th>Underlying</th><th>Strike</th><th>Expiry</th>';
+        phtml += '<th style="text-align:right;">Contracts</th><th style="text-align:right;">Reserve Amount</th>';
+        phtml += '<th style="text-align:right;">Gross Obligation</th><th style="text-align:center;">Defined Risk</th>';
+        phtml += '</tr></thead><tbody>';
+        for (var j = 0; j < posReserves.length; j++) {
+          var pr = posReserves[j];
+          phtml += '<tr>';
+          phtml += '<td>' + escapeHtml(pr.position_type || pr.type || '--') + '</td>';
+          phtml += '<td>' + escapeHtml(pr.symbol || '--') + '</td>';
+          phtml += '<td>' + escapeHtml(pr.underlying || '--') + '</td>';
+          phtml += '<td>' + escapeHtml(pr.strike != null ? String(pr.strike) : '--') + '</td>';
+          phtml += '<td>' + escapeHtml(pr.expiry || '--') + '</td>';
+          phtml += '<td style="text-align:right;">' + escapeHtml(pr.contracts != null ? String(pr.contracts) : '--') + '</td>';
+          phtml += '<td style="text-align:right;">' + fmtDollar(pr.reserve_amount) + '</td>';
+          phtml += '<td style="text-align:right;">' + fmtDollar(pr.gross_assignment_obligation) + '</td>';
+          phtml += '<td style="text-align:center;">' + (pr.defined_risk_protected ? '✅' : '—') + '</td>';
+          phtml += '</tr>';
+        }
+        phtml += '</tbody></table></details>';
+        reservesDiv.innerHTML = phtml;
+      }
+    }
+
+    // Recommendations from /api/intelligence/cash
     var details = document.getElementById('cashDetails');
-    if (cash.recommendations && cash.recommendations.length > 0) {
+    if (cash && !cash.error && cash.recommendations && cash.recommendations.length > 0) {
       var dhtml = '<h3 style="font-size:0.95rem;color:#a0aec0;margin-bottom:0.5rem;">Recommendations</h3><ul style="list-style:none;padding:0;">';
       for (var i = 0; i < cash.recommendations.length; i++) {
         dhtml += '<li style="padding:0.4rem 0.75rem;margin-bottom:0.35rem;background:#2d3748;border-radius:4px;border-left:3px solid #63b3ed;">' +
