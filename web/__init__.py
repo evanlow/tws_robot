@@ -127,6 +127,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_sp500_screener import bp as api_sp500_screener_bp
     from web.routes.api_sti_screener import bp as api_sti_screener_bp
     from web.routes.api_hsi_screener import bp as api_hsi_screener_bp
+    from web.routes.api_autonomous import bp as api_autonomous_bp
 
     api_blueprints = [
         api_connection_bp, api_disclaimer_bp, api_account_bp, api_emergency_bp,
@@ -134,7 +135,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
         api_system_bp, api_backtest_bp, api_data_bp, api_market_bp,
         api_portfolio_analysis_bp, api_account_intelligence_bp,
         api_market_events_bp, api_stock_analysis_bp, api_sp500_screener_bp,
-        api_sti_screener_bp, api_hsi_screener_bp,
+        api_sti_screener_bp, api_hsi_screener_bp, api_autonomous_bp,
     ]
     for api_bp in api_blueprints:
         app.register_blueprint(api_bp)
