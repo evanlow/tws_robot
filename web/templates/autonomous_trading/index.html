@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/autonomous_trading.css') }}" />
+{% endblock %}
+
+{% block content %}
+<div class="auto-trading-page">
+
+  <header class="auto-trading-header">
+    <h1>Autonomous Trading</h1>
+    <p class="auto-trading-subtitle">
+      Supervised control tower &mdash; review what the robot sees, why it
+      recommends or rejects trades, and safely drive paper execution and
+      the emergency stop. <strong>Live autonomous execution is intentionally
+      not exposed from this dashboard.</strong>
+    </p>
+  </header>
+
+  <!-- ============================================================
+       1. Status / Safety Control Panel
+       ============================================================ -->
+  <section class="panel" id="statusPanel" aria-labelledby="statusHeading">
+    <h2 id="statusHeading">Status &amp; Safety</h2>
+    <div class="badge-row" id="statusBadges">
+      <span class="badge badge-muted">Loading status…</span>
+    </div>
+    <dl class="status-grid" id="statusGrid"></dl>
+    <p class="provider-warning" id="providerWarning" style="display:none;"></p>
+  </section>
+
+  <!-- ============================================================
+       2. Deployable Cash & Reserve Panel
+       ============================================================ -->
+  <section class="panel" id="cashPanel" aria-labelledby="cashHeading">
+    <h2 id="cashHeading">Deployable Cash &amp; Reserves</h2>
+    <p class="panel-help">
+      The robot never trades on raw cash. Deployable cash subtracts every
+      reserved obligation (short puts, defined-risk spreads, pending orders,
+      manual buffer, margin safety buffer) from the live cash balance.
+    </p>
+    <dl class="cash-grid" id="cashGrid">
+      <dt>Cash balance</dt><dd id="cashBalance">—</dd>
+      <dt>Reserved (total)</dt><dd id="cashReservedTotal">—</dd>
+      <dt>Reserved for short puts</dt><dd id="cashReservedPuts">—</dd>
+      <dt>Reserved for spreads</dt><dd id="cashReservedSpreads">—</dd>
+      <dt>Reserved for pending orders</dt><dd id="cashReservedOrders">—</dd>
+      <dt>Manual cash buffer</dt><dd id="cashManualBuffer">—</dd>
+      <dt>Margin safety buffer</dt><dd id="cashMarginBuffer">—</dd>
+      <dt class="cash-grid-highlight">Deployable cash</dt>
+      <dd id="cashDeployable" class="cash-grid-highlight">—</dd>
+    </dl>
+    <ul class="cash-warnings" id="cashWarnings"></ul>
+  </section>
+
+  <!-- ============================================================
+       3. Controls
+       ============================================================ -->
+  <section class="panel" aria-labelledby="controlsHeading">
+    <h2 id="controlsHeading">Controls</h2>
+    <div class="control-row">
+      <button class="btn-secondary" id="btnRefreshStatus" type="button">
+        Refresh Status
+      </button>
+      <button class="btn-secondary" id="btnScan" type="button">
+        Scan Opportunities
+      </button>
+      <button class="btn-secondary" id="btnPropose" type="button">
+        Propose Trade
+      </button>
+      <button class="btn-primary" id="btnExecutePaper" type="button" disabled
+              title="Disabled until a paper trading adapter is configured.">
+        Execute Paper Trade
+      </button>
+      <button class="btn-emergency" id="btnEmergencyStop" type="button">
+        🚨 Emergency Stop
+      </button>
+    </div>
+    <p class="control-help">
+      Paper execution requires explicit confirmation. Emergency stop creates
+      the <code>EMERGENCY_STOP</code> file which blocks all subsequent
+      autonomous runs.
+    </p>
+    <div class="action-feedback" id="actionFeedback" role="status" aria-live="polite"></div>
+  </section>
+
+  <!-- ============================================================
+       4. Candidate Shortlist
+       ============================================================ -->
+  <section class="panel" aria-labelledby="shortlistHeading">
+    <h2 id="shortlistHeading">Candidate Shortlist</h2>
+    <div class="table-wrap">
+      <table class="data-table" id="shortlistTable">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Symbol</th>
+            <th>Company</th>
+            <th>Sector</th>
+            <th>Strength</th>
+            <th>Signal</th>
+            <th>Last</th>
+            <th>Support</th>
+            <th>Resistance</th>
+            <th>Score</th>
+            <th>Reasons</th>
+          </tr>
+        </thead>
+        <tbody id="shortlistBody">
+          <tr><td colspan="11" class="empty">No scan run yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <details class="rejected-block">
+      <summary>Rejected candidates (<span id="rejectedCount">0</span>)</summary>
+      <div class="table-wrap">
+        <table class="data-table" id="rejectedTable">
+          <thead>
+            <tr><th>Symbol</th><th>Rejection reason</th></tr>
+          </thead>
+          <tbody id="rejectedBody">
+            <tr><td colspan="2" class="empty">No rejections recorded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <!-- ============================================================
+       5. Trade Proposal Card
+       ============================================================ -->
+  <section class="panel" aria-labelledby="proposalHeading">
+    <h2 id="proposalHeading">Trade Proposal</h2>
+    <div id="proposalCard" class="proposal-card proposal-empty">
+      <p>No proposal generated yet. Use <strong>Propose Trade</strong> to ask
+      the engine for its current best-effort recommendation.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       6. Decision Timeline / Audit Viewer
+       ============================================================ -->
+  <section class="panel" aria-labelledby="auditHeading">
+    <h2 id="auditHeading">Decision Timeline</h2>
+    <p class="panel-help">
+      Recent autonomous decisions read from the JSONL audit log. Includes
+      both executed trades and rejections so you can see why the robot
+      stayed out of the market.
+    </p>
+    <div class="table-wrap">
+      <table class="data-table" id="auditTable">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Mode</th>
+            <th>Status</th>
+            <th>Symbol</th>
+            <th>Trade type</th>
+            <th>Order ID</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody id="auditBody">
+          <tr><td colspan="7" class="empty">Loading audit log…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<!-- ============================================================
+     Paper-execute confirmation modal
+     ============================================================ -->
+<div id="paperConfirmOverlay" class="modal-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="paperConfirmTitle" style="display:none;">
+  <div class="modal-card">
+    <h3 id="paperConfirmTitle">Confirm paper execution</h3>
+    <p>You are about to call <code>/api/autonomous/execute-paper</code> with
+       <code>confirm=true</code>. This will route the trade through the
+       configured paper adapter. Review the plan below carefully.</p>
+    <div id="paperConfirmPlan" class="proposal-card"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="paperConfirmCancel" type="button">Cancel</button>
+      <button class="btn-primary" id="paperConfirmGo" type="button">Yes, execute paper trade</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/autonomous_trading.js') }}"></script>
+{% endblock %}

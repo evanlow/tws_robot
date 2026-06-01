@@ -1,0 +1,257 @@
+/* Autonomous Trading dashboard styles */
+
+.auto-trading-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1rem 0;
+}
+
+.auto-trading-header h1 {
+  margin: 0 0 0.5rem;
+}
+
+.auto-trading-subtitle {
+  color: #a0aec0;
+  margin: 0;
+  max-width: 78ch;
+  line-height: 1.5;
+}
+
+.auto-trading-page .panel {
+  background: #1a202c;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  padding: 1.25rem 1.25rem 1rem;
+}
+
+.auto-trading-page .panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  color: #e2e8f0;
+}
+
+.auto-trading-page .panel-help,
+.auto-trading-page .control-help {
+  color: #a0aec0;
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0.75rem;
+  line-height: 1.5;
+}
+
+/* ---- Badges ---- */
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.badge-safe    { background: #22543d; color: #c6f6d5; border-color: #2f855a; }
+.badge-warn    { background: #744210; color: #fefcbf; border-color: #b7791f; }
+.badge-danger  { background: #742a2a; color: #fed7d7; border-color: #c53030; }
+.badge-info    { background: #2a4365; color: #bee3f8; border-color: #3182ce; }
+.badge-muted   { background: #2d3748; color: #a0aec0; border-color: #4a5568; }
+
+.provider-warning {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  background: #744210;
+  border: 1px solid #b7791f;
+  border-radius: 6px;
+  color: #fefcbf;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* ---- Status grid ---- */
+.status-grid,
+.cash-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1.25rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+
+.status-grid dt,
+.cash-grid dt {
+  color: #a0aec0;
+}
+
+.status-grid dd,
+.cash-grid dd {
+  margin: 0;
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.cash-grid-highlight {
+  font-weight: 700;
+  color: #f6e05e !important;
+  border-top: 1px solid #2d3748;
+  padding-top: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.cash-warnings {
+  margin: 0.75rem 0 0;
+  padding-left: 1.2rem;
+  color: #fc8181;
+  font-size: 0.85rem;
+}
+
+.cash-warnings:empty { display: none; }
+
+/* ---- Controls ---- */
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.control-row button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.action-feedback {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #a0aec0;
+  min-height: 1.2rem;
+}
+
+.action-feedback.is-error   { color: #fc8181; }
+.action-feedback.is-success { color: #68d391; }
+
+/* ---- Tables ---- */
+.table-wrap {
+  overflow-x: auto;
+}
+
+.auto-trading-page .data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.auto-trading-page .data-table th,
+.auto-trading-page .data-table td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid #2d3748;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.auto-trading-page .data-table th {
+  background: #2d3748;
+  color: #cbd5e0;
+  font-weight: 600;
+}
+
+.auto-trading-page .data-table tbody tr:hover {
+  background: #2d3748;
+}
+
+.auto-trading-page .data-table .empty {
+  color: #718096;
+  text-align: center;
+  font-style: italic;
+}
+
+.rejected-block {
+  margin-top: 0.75rem;
+  border-top: 1px solid #2d3748;
+  padding-top: 0.75rem;
+}
+
+.rejected-block > summary {
+  cursor: pointer;
+  color: #cbd5e0;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+/* ---- Proposal card ---- */
+.proposal-card {
+  background: #0f1929;
+  border: 1px solid #2d3748;
+  border-radius: 6px;
+  padding: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.proposal-empty {
+  color: #a0aec0;
+  font-style: italic;
+}
+
+.proposal-card .proposal-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 1rem;
+}
+
+.proposal-card .proposal-grid dt { color: #a0aec0; }
+.proposal-card .proposal-grid dd { margin: 0; color: #e2e8f0; font-variant-numeric: tabular-nums; }
+
+.proposal-card .proposal-section-title {
+  margin: 0.75rem 0 0.3rem;
+  color: #cbd5e0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.proposal-card .proposal-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #e2e8f0;
+}
+
+/* ---- Modal ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal-card {
+  max-width: 640px;
+  width: 100%;
+  background: #1a202c;
+  border: 1px solid #4a5568;
+  border-radius: 10px;
+  padding: 1.25rem;
+  color: #e2e8f0;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-card h3 {
+  margin: 0 0 0.75rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}

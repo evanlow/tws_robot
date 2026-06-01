@@ -87,6 +87,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.sp500_screener import bp as sp500_screener_bp
     from web.routes.sti_screener import bp as sti_screener_bp
     from web.routes.hsi_screener import bp as hsi_screener_bp
+    from web.routes.autonomous_trading import bp as autonomous_trading_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(strategies_bp)
@@ -103,6 +104,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(sp500_screener_bp)
     app.register_blueprint(sti_screener_bp)
     app.register_blueprint(hsi_screener_bp)
+    app.register_blueprint(autonomous_trading_bp)
 
     # ---- JSON API blueprints ----
     # Session-authenticated API requests remain CSRF-protected and the web

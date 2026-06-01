@@ -9,6 +9,7 @@ Endpoints:
 * ``POST /api/autonomous/propose``      — full ``run_once`` in recommend_only mode
 * ``POST /api/autonomous/execute-paper``— full ``run_once`` in paper_execute mode
 * ``POST /api/autonomous/emergency-stop`` — create the EMERGENCY_STOP file
+* ``GET  /api/autonomous/audit``        — recent audit-log entries (read-only)
 
 The engine itself enforces every safety rule; these routes are thin
 adapters that convert HTTP bodies into engine calls and serialise the
@@ -17,6 +18,7 @@ decision to JSON.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -255,6 +257,72 @@ def execute_paper():
     payload = decision.to_dict()
     payload.update(_provider_warning_if_default())
     return jsonify(payload)
+
+
+@bp.route("/audit", methods=["GET"])
+def audit():
+    """Return the most recent autonomous-trading audit entries.
+
+    Reads today's JSONL audit log (plus, if needed, the previous day's
+    file) and returns up to ``limit`` of the most recent decisions in
+    reverse-chronological order.  This is a read-only endpoint intended
+    for the dashboard timeline view.
+    """
+    try:
+        limit = int(request.args.get("limit", 20))
+    except (TypeError, ValueError):
+        limit = 20
+    if limit <= 0:
+        limit = 20
+    if limit > 200:
+        limit = 200
+
+    log_dir = Path(
+        current_app.config.get("autonomous_audit_log_dir")
+        or AutonomousTradingConfig().audit_log_dir
+    )
+    entries: list[Dict[str, Any]] = []
+    if log_dir.exists():
+        files = sorted(
+            log_dir.glob("autonomous_trading_*.jsonl"),
+            reverse=True,
+        )
+        for path in files:
+            try:
+                with path.open("r", encoding="utf-8") as fh:
+                    file_records: list[Dict[str, Any]] = []
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            file_records.append(json.loads(line))
+                        except ValueError:
+                            continue
+                    # Newest entries are at the end of the file.
+                    entries.extend(reversed(file_records))
+            except OSError:
+                logger.exception("Failed to read autonomous audit log %s", path)
+            if len(entries) >= limit:
+                break
+
+    summarised: list[Dict[str, Any]] = []
+    for record in entries[:limit]:
+        decision = record.get("decision") or {}
+        selected = decision.get("selected") or {}
+        trade_plan = decision.get("trade_plan") or {}
+        summarised.append({
+            "timestamp": record.get("timestamp") or decision.get("timestamp"),
+            "mode": decision.get("mode"),
+            "status": decision.get("status"),
+            "selected_symbol": selected.get("symbol")
+            or trade_plan.get("symbol"),
+            "trade_type": trade_plan.get("trade_type"),
+            "order_id": decision.get("order_id"),
+            "rejection_reason": decision.get("rejection_reason"),
+        })
+
+    return jsonify({"entries": summarised, "count": len(summarised)})
 
 
 @bp.route("/emergency-stop", methods=["POST"])
