@@ -482,7 +482,7 @@ def _runner_config() -> AutonomousRunnerConfig:
     cfg = current_app.config.get("autonomous_runner_config")
     if isinstance(cfg, AutonomousRunnerConfig):
         return cfg
-    return AutonomousRunnerConfig()
+    return AutonomousRunnerConfig.from_env()
 
 
 def _trade_store() -> TradeStore:

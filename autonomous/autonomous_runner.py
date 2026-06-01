@@ -94,7 +94,11 @@ class ReadinessGates:
         if self.emergency_stop_active:
             out.append("Emergency stop active")
         if not self.runner_enabled:
-            out.append("Runner disabled in config")
+            out.append(
+                "Runner disabled in config. Enable "
+                "AUTONOMOUS_RUNNER_ENABLED=true or set app config "
+                "autonomous_runner_config.runner_enabled=True."
+            )
         if self.open_autonomous_trades >= self.max_open_autonomous_trades:
             out.append(
                 f"Max open autonomous trades reached "

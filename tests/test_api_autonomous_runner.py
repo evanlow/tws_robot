@@ -157,7 +157,22 @@ class TestRunnerStatus:
         body = client.get("/api/autonomous/runner/status").get_json()
         assert body["gates"]["runner_enabled"] is False
         assert body["gates"]["ready"] is False
-        assert any("disabled" in r.lower() for r in body["gates"]["reasons"])
+        # Disabled reason must be actionable: tell the operator exactly
+        # which env var / config flag enables the runner.
+        joined = " ".join(body["gates"]["reasons"])
+        assert "AUTONOMOUS_RUNNER_ENABLED" in joined
+        assert "autonomous_runner_config.runner_enabled" in joined
+
+    def test_runner_config_reads_env_flag(self, monkeypatch):
+        """``AUTONOMOUS_RUNNER_ENABLED`` is the documented opt-in path."""
+        monkeypatch.delenv("AUTONOMOUS_RUNNER_ENABLED", raising=False)
+        assert AutonomousRunnerConfig.from_env().runner_enabled is False
+        monkeypatch.setenv("AUTONOMOUS_RUNNER_ENABLED", "true")
+        assert AutonomousRunnerConfig.from_env().runner_enabled is True
+        monkeypatch.setenv("AUTONOMOUS_RUNNER_ENABLED", "false")
+        assert AutonomousRunnerConfig.from_env().runner_enabled is False
+        monkeypatch.setenv("AUTONOMOUS_RUNNER_ENABLED", "1")
+        assert AutonomousRunnerConfig.from_env().runner_enabled is True
 
 
 class TestRunOncePaper:

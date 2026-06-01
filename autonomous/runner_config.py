@@ -15,7 +15,26 @@ Hard rules baked into the defaults:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean environment variable.
+
+    Accepts ``1/true/yes/on`` (case-insensitive) as truthy values.
+    Any unrecognised value falls back to ``default`` so a typo in the
+    operator's shell never silently flips a safety flag.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    val = raw.strip().lower()
+    if val in {"1", "true", "yes", "on"}:
+        return True
+    if val in {"0", "false", "no", "off", ""}:
+        return False
+    return default
 
 
 @dataclass
@@ -55,3 +74,15 @@ class AutonomousRunnerConfig:
             "avoid_last_minutes_before_close": self.avoid_last_minutes_before_close,
             "trade_store_path": self.trade_store_path,
         }
+
+    @classmethod
+    def from_env(cls) -> "AutonomousRunnerConfig":
+        """Build a config, allowing ``AUTONOMOUS_RUNNER_ENABLED`` to opt in.
+
+        The runner stays off unless the operator explicitly sets
+        ``AUTONOMOUS_RUNNER_ENABLED=true`` (or ``1``/``yes``/``on``) in
+        the environment, or supplies an
+        ``autonomous_runner_config`` override in the Flask app config.
+        All other defaults remain the safe values defined above.
+        """
+        return cls(runner_enabled=_env_bool("AUTONOMOUS_RUNNER_ENABLED", False))

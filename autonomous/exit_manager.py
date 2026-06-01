@@ -13,9 +13,15 @@ Safety invariants:
 
 * Exit orders are placed **only** through the paper adapter; live
   execution is impossible from this module.
-* When no price is available (no live position, no cached quote) the
-  trade is left as ``OPEN`` and a ``NO_PRICE_AVAILABLE`` decision is
-  returned for visibility.  We never guess an exit.
+* Only ``BUY_SHARES`` trades are acted on in this MVP.  Any other
+  trade type returns ``NO_EXIT`` with a reason indicating the
+  skip — we never submit unsupported exit orders.
+* Every submitted SELL LIMIT order is anchored to the current live
+  price.  When no live price is available — including for
+  ``RISK_EXIT`` / emergency-stop cases — the trade is left as
+  ``OPEN`` and a ``NO_PRICE_AVAILABLE`` decision is returned (with a
+  ``would_exit:<REASON>`` note for visibility).  We never guess an
+  exit or fall back to a stale ``entry_limit_price``.
 * No fake fills.  After submitting the SELL order the trade is set to
   ``EXIT_PENDING`` until real fill information is available.
 """
@@ -29,6 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from autonomous.audit import AuditLogger
+from autonomous.trade_planner import TradeType
 from autonomous.trade_store import (
     AutonomousTrade,
     EXIT_PENDING,
@@ -178,11 +185,48 @@ class AutonomousExitManager:
         now: datetime,
         risk_active: bool,
     ) -> ExitDecision:
-        # 1. Risk / emergency stop overrides everything else.
-        if risk_active:
-            return self._submit_exit(trade, RISK_EXIT, "emergency stop or risk_manager halt active", price=None)
+        # 0. MVP only acts on BUY_SHARES trades.  Anything else is left
+        #    untouched so non-equity lifecycle handling can be added
+        #    later without the exit manager submitting unsupported
+        #    orders.
+        trade_type = str(getattr(trade, "trade_type", "") or "")
+        if trade_type.upper() != TradeType.BUY_SHARES.value:
+            return ExitDecision(
+                autonomous_trade_id=trade.autonomous_trade_id,
+                symbol=trade.symbol,
+                decision=NO_EXIT,
+                reason=f"trade_type {trade_type!r} is not BUY_SHARES; skipped",
+            )
 
-        # 2. Time-based exit (does not require price).
+        # 1. Risk / emergency stop overrides everything else — but we
+        #    still require a current price before submitting any order.
+        #    Submitting a SELL LIMIT at a stale entry/target/stop would
+        #    be guessing the exit, which this MVP explicitly refuses to
+        #    do.
+        if risk_active:
+            price = self._last_price(trade.symbol, positions)
+            if price is None:
+                return ExitDecision(
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    symbol=trade.symbol,
+                    decision=NO_PRICE_AVAILABLE,
+                    reason=(
+                        "emergency stop or risk_manager halt active but "
+                        "no current_price for symbol; refusing to submit "
+                        "blind exit"
+                    ),
+                    notes=[f"would_exit:{RISK_EXIT}"],
+                )
+            return self._submit_exit(
+                trade,
+                RISK_EXIT,
+                "emergency stop or risk_manager halt active",
+                price=price,
+            )
+
+        # 2. Time-based exit — still requires a current price so the
+        #    submitted LIMIT order is anchored to a real quote rather
+        #    than a stale entry price.
         entry_time = trade.entry_time
         if isinstance(entry_time, str):
             try:
@@ -195,6 +239,19 @@ class AutonomousExitManager:
             age = now - entry_time
             if age >= timedelta(days=max(1, int(trade.max_holding_days))):
                 price = self._last_price(trade.symbol, positions)
+                if price is None:
+                    return ExitDecision(
+                        autonomous_trade_id=trade.autonomous_trade_id,
+                        symbol=trade.symbol,
+                        decision=NO_PRICE_AVAILABLE,
+                        reason=(
+                            f"open for {age.days}d >= "
+                            f"max_holding_days={trade.max_holding_days} but "
+                            "no current_price for symbol; refusing to submit "
+                            "blind exit"
+                        ),
+                        notes=[f"would_exit:{TIME_EXIT}"],
+                    )
                 return self._submit_exit(
                     trade,
                     TIME_EXIT,
@@ -246,6 +303,13 @@ class AutonomousExitManager:
     ) -> ExitDecision:
         """Submit a paper SELL limit order and mark the trade EXIT_PENDING.
 
+        ``price`` is the current live price for the symbol and is
+        **required**.  We deliberately do not fall back to
+        ``entry_limit_price``, ``target_price`` or ``stop_price`` here:
+        callers are responsible for returning ``NO_PRICE_AVAILABLE``
+        when no live quote is known so that we never submit a SELL
+        LIMIT at a stale anchor.
+
         If the paper adapter is not configured, no order is submitted —
         the decision is still returned so the dashboard / audit log can
         surface the reason.
@@ -260,26 +324,18 @@ class AutonomousExitManager:
                 notes=[f"would_exit:{reason_code}", reason_text],
             )
 
-        # Determine the limit price for the SELL.  Prefer the live price
-        # when available so the order has a realistic chance of filling;
-        # otherwise fall back to the configured target or stop level.
-        limit_price: Optional[float] = price
-        if limit_price is None:
-            if reason_code == TAKE_PROFIT and trade.target_price is not None:
-                limit_price = float(trade.target_price)
-            elif reason_code == STOP_LOSS and trade.stop_price is not None:
-                limit_price = float(trade.stop_price)
-            elif trade.entry_limit_price is not None:
-                limit_price = float(trade.entry_limit_price)
-        if limit_price is None or limit_price <= 0:
+        if price is None or price <= 0:
+            # Defensive: callers should already have returned
+            # NO_PRICE_AVAILABLE; refuse to guess if they did not.
             return ExitDecision(
                 autonomous_trade_id=trade.autonomous_trade_id,
                 symbol=trade.symbol,
-                decision=NO_EXIT,
-                reason="no usable limit price for exit order",
+                decision=NO_PRICE_AVAILABLE,
+                reason="no current price; refusing to submit blind exit",
                 price=price,
                 notes=[f"would_exit:{reason_code}", reason_text],
             )
+        limit_price = float(price)
 
         try:
             order_id = self._paper_adapter.sell(
