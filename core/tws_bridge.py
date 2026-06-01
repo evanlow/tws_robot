@@ -69,8 +69,9 @@ class _BridgeApp(EWrapper, EClient):
                 or orderId > self._next_valid_order_id
             ):
                 self._next_valid_order_id = orderId
+            current_order_id = self._next_valid_order_id
         self._ready = True
-        logger.info("TWS ready — next valid order ID: %s", orderId)
+        logger.info("TWS ready — next valid order ID: %s", current_order_id)
 
     def connectionClosed(self) -> None:
         self._connected = False

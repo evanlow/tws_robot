@@ -228,7 +228,7 @@ def _resolve_paper_adapter(svc):
 def _signal_provider_info(provider) -> Dict[str, Any]:
     """Describe the active signal provider for ``/status`` responses."""
     name = type(provider).__name__
-    is_real = isinstance(provider, TechnicalAnalysisSignalProvider)
+    is_real = not isinstance(provider, StaticSignalProvider)
     info: Dict[str, Any] = {
         "signal_provider": name,
         "signal_provider_ready": is_real,
@@ -261,7 +261,7 @@ def _provider_warning_if_default() -> Dict[str, Any]:
     if callable(factory):
         return {}
     provider = _resolve_signal_provider()
-    if isinstance(provider, TechnicalAnalysisSignalProvider):
+    if not isinstance(provider, StaticSignalProvider):
         return {}
     return {"warning": SIGNAL_PROVIDER_WARNING}
 
