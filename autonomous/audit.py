@@ -38,6 +38,45 @@ class AuditLogger:
     def _path_for(self, when: datetime) -> Path:
         return self._log_dir / f"autonomous_trading_{when:%Y%m%d}.jsonl"
 
+    def count_executions_on(
+        self,
+        when: Optional[datetime] = None,
+        statuses: Optional[tuple] = None,
+    ) -> int:
+        """Return how many decisions on ``when``'s date have a status in
+        ``statuses`` (defaults to the set of execution outcomes).
+
+        Used by :class:`autonomous.autonomous_engine.AutonomousTradingEngine`
+        to enforce ``max_trades_per_day`` across process restarts: the
+        audit log is the system of record for what has been traded today.
+        Missing or unreadable files count as zero (defensive — the
+        engine must never crash because the audit log is unavailable).
+        """
+        moment = when or datetime.now(timezone.utc)
+        statuses = statuses or ("paper_executed", "live_executed")
+        path = self._path_for(moment)
+        if not path.exists():
+            return 0
+        count = 0
+        try:
+            with self._lock:
+                with path.open("r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        decision = record.get("decision") or {}
+                        if decision.get("status") in statuses:
+                            count += 1
+        except OSError as exc:  # pragma: no cover - defensive
+            logger.error("Failed to read autonomous audit log: %s", exc)
+            return 0
+        return count
+
     def log_decision(
         self,
         record: Dict[str, Any],

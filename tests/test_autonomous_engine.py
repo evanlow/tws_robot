@@ -164,7 +164,8 @@ def test_paper_execute_places_order_with_confirm(tmp_path):
     assert d.status is DecisionStatus.PAPER_EXECUTED
     assert d.order_id == 7
     assert placed and placed[0]["symbol"] == "AAA"
-    assert placed[0]["order_type"] == "LMT"
+    assert placed[0]["order_type"] == "LIMIT"
+    assert placed[0]["limit_price"] == d.trade_plan["limit_price"]
 
 
 def test_live_execution_blocked_unless_explicitly_enabled(tmp_path):
@@ -263,3 +264,52 @@ def test_risk_manager_rejection_blocks_recommendation(tmp_path):
     d = engine.run_once(confirm=True)
     assert d.status is DecisionStatus.RISK_REJECTED
     assert placed == []
+
+
+def test_max_trades_per_day_blocks_second_execution(tmp_path):
+    placed = []
+
+    class _Adapter:
+        def buy(self, **kw):
+            placed.append(kw)
+            return len(placed)
+
+    cfg = AutonomousTradingConfig(
+        mode=AutonomousMode.PAPER_EXECUTE,
+        require_user_confirmation=False,
+        max_trades_per_day=1,
+        emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
+        audit_log_dir=str(tmp_path),
+    )
+    engine = _make_engine(
+        tmp_path,
+        signals=[_make_signal("AAA")],
+        paper_adapter=_Adapter(),
+        config=cfg,
+    )
+
+    first = engine.run_once(confirm=True)
+    assert first.status is DecisionStatus.PAPER_EXECUTED
+    assert len(placed) == 1
+
+    second = engine.run_once(confirm=True)
+    assert second.status is DecisionStatus.DAILY_LIMIT_REACHED
+    assert len(placed) == 1  # adapter NOT called a second time
+
+
+def test_live_execution_remains_blocked_even_when_allow_live_true_and_confirmed(
+    tmp_path,
+):
+    """MVP live path is a deliberate blocked stub even when fully enabled."""
+    cfg = AutonomousTradingConfig(
+        mode=AutonomousMode.ASSISTED_LIVE,
+        allow_live_execution=True,
+        require_user_confirmation=True,
+        max_trades_per_day=5,
+        emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
+        audit_log_dir=str(tmp_path),
+    )
+    engine = _make_engine(tmp_path, signals=[_make_signal("AAA")], config=cfg)
+    d = engine.run_once(confirm=True)
+    assert d.status is DecisionStatus.LIVE_BLOCKED
+    assert "not implemented" in (d.rejection_reason or "")

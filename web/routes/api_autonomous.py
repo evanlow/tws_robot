@@ -62,6 +62,24 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
     :class:`StaticSignalProvider` (i.e. the engine returns "no candidate"
     until a real signal provider is wired in) — this keeps the endpoint
     exercising the full safety path without inventing trading signals.
+
+    A paper-execution adapter may optionally be supplied via
+    ``current_app.config['autonomous_paper_adapter']``.  When absent,
+    ``/execute-paper`` requests still flow through the engine but the
+    engine returns ``EXECUTION_FAILED`` with a clear
+    ``no paper_adapter configured`` reason instead of silently faking a
+    fill.  Operators must wire a real ``PaperTradingAdapter`` (or
+    compatible object exposing ``buy()`` / ``sell()``) before
+    ``/execute-paper`` will actually place orders.
+
+    .. note::
+
+       **Production signal provider is not yet wired.**  The default
+       :class:`StaticSignalProvider` returns no signals, so live
+       ``/scan`` / ``/propose`` calls will report ``no_candidate``
+       until a real ``Strong(100)`` / ``Confirmed Rebound`` adapter
+       (planned name: ``TechnicalAnalysisSignalProvider`` or
+       ``StockAnalysisSignalProvider``) is registered as the factory.
     """
     factory = current_app.config.get("autonomous_engine_factory")
     if callable(factory):
@@ -101,6 +119,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
 
     scanner = CandidateScanner(signal_provider=StaticSignalProvider())
     cash_analyzer = CashAvailabilityAnalyzer()
+    paper_adapter = current_app.config.get("autonomous_paper_adapter")
     return AutonomousTradingEngine(
         scanner=scanner,
         cash_analyzer=cash_analyzer,
@@ -109,7 +128,29 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
         orders_provider=lambda: list(getattr(svc, "_orders", []) or []),
         config=base_config,
         risk_manager=getattr(svc, "risk_manager", None),
+        paper_adapter=paper_adapter,
     )
+
+
+# Surfaced in API responses so operators know the live signal pipeline
+# is still using the placeholder ``StaticSignalProvider``.  Remove (or
+# clear) this notice once a production ``TechnicalAnalysisSignalProvider``
+# is wired into :func:`_build_engine`.
+SIGNAL_PROVIDER_WARNING = (
+    "TODO: production signal provider not yet wired; using "
+    "StaticSignalProvider stub. /scan and /propose will return "
+    "no_candidate until a Strong(100) / Confirmed Rebound adapter "
+    "(planned: TechnicalAnalysisSignalProvider) is registered."
+)
+
+
+def _provider_warning_if_default() -> Dict[str, Any]:
+    """Return a ``{"warning": ...}`` dict when the engine is still using
+    the default ``StaticSignalProvider``; empty dict otherwise."""
+    factory = current_app.config.get("autonomous_engine_factory")
+    if callable(factory):
+        return {}
+    return {"warning": SIGNAL_PROVIDER_WARNING}
 
 
 # ---------------------------------------------------------------------------
@@ -120,11 +161,16 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
 def status():
     """Return current configuration + emergency-stop state."""
     config = AutonomousTradingConfig().to_dict()
-    return jsonify({
+    payload = {
         "config": config,
         "emergency_stop_file_exists": EMERGENCY_STOP_FILE.exists(),
         "emergency_stop_file": str(EMERGENCY_STOP_FILE),
-    })
+        "paper_adapter_configured": bool(
+            current_app.config.get("autonomous_paper_adapter")
+        ),
+    }
+    payload.update(_provider_warning_if_default())
+    return jsonify(payload)
 
 
 @bp.route("/scan", methods=["POST"])
@@ -136,13 +182,15 @@ def scan():
     overrides["mode"] = AutonomousMode.RECOMMEND_ONLY.value
     engine = _build_engine(overrides)
     decision = engine.run_once(confirm=False)
-    return jsonify({
+    payload = {
         "shortlist": decision.shortlist,
         "rejected_candidates": decision.rejected_candidates,
         "deployable_cash": decision.deployable_cash,
         "status": decision.status.value,
         "rejection_reason": decision.rejection_reason,
-    })
+    }
+    payload.update(_provider_warning_if_default())
+    return jsonify(payload)
 
 
 @bp.route("/propose", methods=["POST"])
@@ -153,7 +201,9 @@ def propose():
     overrides["mode"] = AutonomousMode.RECOMMEND_ONLY.value
     engine = _build_engine(overrides)
     decision = engine.run_once(confirm=False)
-    return jsonify(decision.to_dict())
+    payload = decision.to_dict()
+    payload.update(_provider_warning_if_default())
+    return jsonify(payload)
 
 
 @bp.route("/execute-paper", methods=["POST"])
@@ -161,7 +211,10 @@ def execute_paper():
     """Run the engine in paper_execute mode.
 
     Requires an explicit ``confirm=true`` field in the request body.
-    The engine itself also requires a configured paper adapter.
+    The engine itself also requires a configured paper adapter (registered
+    via ``current_app.config['autonomous_paper_adapter']``); without one
+    the engine returns ``EXECUTION_FAILED`` rather than silently
+    skipping the trade.
     """
     body = request.get_json(silent=True) or {}
     confirm = bool(body.get("confirm", False))
@@ -169,7 +222,9 @@ def execute_paper():
     overrides["mode"] = AutonomousMode.PAPER_EXECUTE.value
     engine = _build_engine(overrides)
     decision = engine.run_once(confirm=confirm)
-    return jsonify(decision.to_dict())
+    payload = decision.to_dict()
+    payload.update(_provider_warning_if_default())
+    return jsonify(payload)
 
 
 @bp.route("/emergency-stop", methods=["POST"])

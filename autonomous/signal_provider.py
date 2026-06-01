@@ -43,6 +43,17 @@ class StaticSignalProvider:
     engine when the production technical-analysis adapter is not yet
     available.  Symbols not present in the provided mapping return
     ``None`` from :meth:`analyze`.
+
+    .. warning::
+
+       This is **not** the production ``Strong(100)`` / ``Confirmed
+       Rebound`` analyser.  When the autonomous web API is wired with
+       this provider (the default), ``/scan`` and ``/propose`` will
+       report ``no_candidate`` for the live universe.  The production
+       adapter (planned: ``TechnicalAnalysisSignalProvider`` /
+       ``StockAnalysisSignalProvider``) must be registered via
+       ``current_app.config['autonomous_engine_factory']`` before the
+       autonomous endpoints will return real candidates.
     """
 
     def __init__(self, signals: Optional[Iterable[CandidateSignal]] = None) -> None:

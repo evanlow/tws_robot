@@ -56,6 +56,7 @@ class DecisionStatus(str, Enum):
     RISK_REJECTED = "risk_rejected"
     LIVE_BLOCKED = "live_blocked"
     CONFIRMATION_REQUIRED = "confirmation_required"
+    DAILY_LIMIT_REACHED = "daily_limit_reached"
     RECOMMENDED = "recommended"
     PAPER_EXECUTED = "paper_executed"
     LIVE_EXECUTED = "live_executed"
@@ -198,6 +199,21 @@ class AutonomousTradingEngine:
         }
         self.audit.log_decision(record, when=decision.timestamp)
         return decision
+
+    def _daily_limit_reached(self, when: datetime) -> bool:
+        """True when today's audit log already contains ``max_trades_per_day``
+        executed decisions.
+
+        The audit log is used as the persisted source of truth so that a
+        process restart cannot reset the daily counter and allow more
+        trades than the operator configured.
+        """
+        limit = self.config.max_trades_per_day
+        if limit <= 0:
+            # ``0`` means "no execution allowed".  Treat as reached.
+            return True
+        executed = self.audit.count_executions_on(when=when)
+        return executed >= limit
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -348,6 +364,13 @@ class AutonomousTradingEngine:
                     "paper_execute requires confirm=True"
                 )
                 return self._emit(decision)
+            if self._daily_limit_reached(decision.timestamp):
+                decision.status = DecisionStatus.DAILY_LIMIT_REACHED
+                decision.rejection_reason = (
+                    f"max_trades_per_day ({self.config.max_trades_per_day}) "
+                    "already reached for today"
+                )
+                return self._emit(decision)
             return self._emit(self._execute_paper(decision, plan))
 
         # 12. Assisted live -----------------------------------------------
@@ -362,6 +385,13 @@ class AutonomousTradingEngine:
                 decision.status = DecisionStatus.CONFIRMATION_REQUIRED
                 decision.rejection_reason = (
                     "assisted_live execution requires confirm=True"
+                )
+                return self._emit(decision)
+            if self._daily_limit_reached(decision.timestamp):
+                decision.status = DecisionStatus.DAILY_LIMIT_REACHED
+                decision.rejection_reason = (
+                    f"max_trades_per_day ({self.config.max_trades_per_day}) "
+                    "already reached for today"
                 )
                 return self._emit(decision)
             # Live execution is intentionally not implemented in this
@@ -405,10 +435,15 @@ class AutonomousTradingEngine:
             return decision
 
         try:
+            # NOTE: use ``"LIMIT"`` (not ``"LMT"``).  ``PaperTradingAdapter``
+            # only populates ``order.lmtPrice`` when ``order_type == "LIMIT"``
+            # (see ``execution/paper_adapter.py``); passing ``"LMT"`` would
+            # silently drop the limit price and emit a market-style order,
+            # which violates ``use_limit_orders_only``.
             order_id = self.paper_adapter.buy(
                 symbol=plan.symbol,
                 quantity=plan.quantity,
-                order_type="LMT",
+                order_type="LIMIT",
                 limit_price=plan.limit_price,
             )
         except Exception:
