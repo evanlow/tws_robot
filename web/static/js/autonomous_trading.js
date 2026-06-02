@@ -547,6 +547,193 @@
     }
   }
 
+  /* ------------------------- paper robot runner ------------------------- */
+
+  function setRunnerFeedback(message, kind) {
+    const el = $('runnerFeedback');
+    if (!el) return;
+    el.textContent = message || '';
+    el.dataset.kind = kind || '';
+  }
+
+  function renderRunnerGates(payload) {
+    const badges = $('runnerGates');
+    const reasonsEl = $('runnerReasons');
+    const btn = $('btnRunPaperRobot');
+    if (!badges) return;
+    badges.innerHTML = '';
+    const gates = payload && payload.gates ? payload.gates : null;
+    if (!gates) {
+      badges.innerHTML = '<span class="badge badge-muted">Runner status unavailable</span>';
+      if (btn) btn.disabled = true;
+      return;
+    }
+    const items = [
+      ['Connected', gates.connected],
+      ['Paper mode', gates.paper_mode],
+      ['Paper adapter', gates.paper_adapter_ready],
+      ['Signal provider', gates.signal_provider_ready],
+      ['Runner enabled', gates.runner_enabled],
+      ['No emergency stop', !gates.emergency_stop_active],
+    ];
+    items.forEach(([label, ok]) => {
+      const b = document.createElement('span');
+      b.className = 'badge ' + (ok ? 'badge-success' : 'badge-warning');
+      b.textContent = label + ': ' + (ok ? 'OK' : 'NO');
+      b.setAttribute('aria-label', label + ' ' + (ok ? 'OK' : 'not ready'));
+      badges.appendChild(b);
+    });
+    const occ = document.createElement('span');
+    occ.className = 'badge badge-muted';
+    occ.textContent = 'Open: ' + gates.open_autonomous_trades + '/' +
+      gates.max_open_autonomous_trades;
+    badges.appendChild(occ);
+
+    if (reasonsEl) {
+      reasonsEl.innerHTML = '';
+      (gates.reasons || []).forEach((r) => {
+        const li = document.createElement('li');
+        li.textContent = r;
+        reasonsEl.appendChild(li);
+      });
+    }
+    if (btn) {
+      btn.disabled = !gates.ready;
+      btn.title = gates.ready ? 'Run one paper-only autonomous cycle.'
+        : 'Disabled: ' + (gates.reasons || []).join('; ');
+    }
+  }
+
+  function renderAutonomousTrades(payload) {
+    const openBody = $('openTradesBody');
+    const closedBody = $('closedTradesBody');
+    if (openBody) {
+      openBody.innerHTML = '';
+      const open = (payload && payload.open) || [];
+      if (!open.length) {
+        openBody.innerHTML = '<tr><td colspan="8" class="empty">No open autonomous trades.</td></tr>';
+      } else {
+        open.forEach((t) => {
+          const tr = document.createElement('tr');
+          [
+            t.autonomous_trade_id || '',
+            t.symbol || '',
+            t.quantity != null ? t.quantity : '',
+            fmtMoney(t.entry_limit_price),
+            fmtMoney(t.target_price),
+            fmtMoney(t.stop_price),
+            t.status || '',
+            t.entry_order_id != null ? t.entry_order_id : '',
+          ].forEach((c) => {
+            const td = document.createElement('td');
+            td.textContent = String(c);
+            tr.appendChild(td);
+          });
+          openBody.appendChild(tr);
+        });
+      }
+    }
+    if (closedBody) {
+      closedBody.innerHTML = '';
+      const combined = []
+        .concat((payload && payload.exit_pending) || [])
+        .concat((payload && payload.closed) || []);
+      if (!combined.length) {
+        closedBody.innerHTML = '<tr><td colspan="7" class="empty">No closed autonomous trades yet.</td></tr>';
+      } else {
+        combined.forEach((t) => {
+          const tr = document.createElement('tr');
+          [
+            t.autonomous_trade_id || '',
+            t.symbol || '',
+            t.quantity != null ? t.quantity : '',
+            t.status || '',
+            t.exit_reason || '',
+            fmtMoney(t.exit_price),
+            fmtMoney(t.realised_pnl),
+          ].forEach((c) => {
+            const td = document.createElement('td');
+            td.textContent = String(c);
+            tr.appendChild(td);
+          });
+          closedBody.appendChild(tr);
+        });
+      }
+    }
+  }
+
+  function renderExitDecisions(decisions) {
+    const body = $('exitDecisionsBody');
+    if (!body) return;
+    body.innerHTML = '';
+    if (!decisions || !decisions.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty">No exit evaluation run yet.</td></tr>';
+      return;
+    }
+    decisions.forEach((d) => {
+      const tr = document.createElement('tr');
+      [
+        d.symbol || '',
+        d.decision || '',
+        d.reason || '',
+        fmtMoney(d.price),
+        d.exit_order_id != null ? d.exit_order_id : '',
+      ].forEach((c) => {
+        const td = document.createElement('td');
+        td.textContent = String(c);
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+  }
+
+  async function refreshRunnerStatus() {
+    try {
+      const body = await getJson('/api/autonomous/runner/status');
+      renderRunnerGates(body);
+    } catch (err) {
+      setRunnerFeedback('Failed to load runner status: ' + err.message, 'error');
+    }
+  }
+
+  async function refreshAutonomousTrades() {
+    try {
+      const body = await getJson('/api/autonomous/runner/trades');
+      renderAutonomousTrades(body);
+    } catch (err) {
+      setRunnerFeedback('Failed to load autonomous trades: ' + err.message, 'error');
+    }
+  }
+
+  async function runPaperRobotOnce() {
+    setRunnerFeedback('Running paper robot once…');
+    try {
+      const body = await postJson('/api/autonomous/runner/run-once-paper', {});
+      const status = body.status || 'unknown';
+      const msg = status === 'executed'
+        ? 'Paper trade executed and recorded.'
+        : 'Runner: ' + status + (body.rejection_reason ? ' — ' + body.rejection_reason : '');
+      setRunnerFeedback(msg, status === 'executed' ? 'success' : 'warning');
+      refreshRunnerStatus();
+      refreshAutonomousTrades();
+      refreshAudit();
+    } catch (err) {
+      setRunnerFeedback('Run-once failed: ' + err.message, 'error');
+    }
+  }
+
+  async function evaluateExitsNow() {
+    setRunnerFeedback('Evaluating exits…');
+    try {
+      const body = await postJson('/api/autonomous/runner/evaluate-exits', {});
+      renderExitDecisions(body.decisions || []);
+      setRunnerFeedback('Evaluated ' + (body.count || 0) + ' open trade(s).', 'success');
+      refreshAutonomousTrades();
+    } catch (err) {
+      setRunnerFeedback('Evaluate exits failed: ' + err.message, 'error');
+    }
+  }
+
   /* ------------------------- wire up ------------------------- */
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -558,7 +745,16 @@
     $('paperConfirmCancel').addEventListener('click', closePaperConfirm);
     $('paperConfirmGo').addEventListener('click', confirmPaperExecute);
 
+    const btnRunRobot = $('btnRunPaperRobot');
+    if (btnRunRobot) btnRunRobot.addEventListener('click', runPaperRobotOnce);
+    const btnExits = $('btnEvaluateExits');
+    if (btnExits) btnExits.addEventListener('click', evaluateExitsNow);
+    const btnRefreshTrades = $('btnRefreshAutonomousTrades');
+    if (btnRefreshTrades) btnRefreshTrades.addEventListener('click', refreshAutonomousTrades);
+
     refreshStatus();
     refreshAudit();
+    refreshRunnerStatus();
+    refreshAutonomousTrades();
   });
 })();

@@ -140,7 +140,81 @@
   </section>
 
   <!-- ============================================================
-       6. Decision Timeline / Audit Viewer
+       6. Paper Robot Runner
+       ============================================================ -->
+  <section class="panel" id="runnerPanel" aria-labelledby="runnerHeading">
+    <h2 id="runnerHeading">Paper Robot Runner</h2>
+    <p class="panel-help">
+      Paper-only autonomous lifecycle controls. <strong>This section never
+      exposes live autonomous execution.</strong> The <em>Run Paper Robot
+      Once</em> button is disabled until every readiness gate passes.
+    </p>
+    <div class="badge-row" id="runnerGates">
+      <span class="badge badge-muted">Loading runner status…</span>
+    </div>
+    <ul class="runner-reasons" id="runnerReasons"></ul>
+    <div class="control-row">
+      <button class="btn-primary" id="btnRunPaperRobot" type="button" disabled
+              title="Disabled until all readiness gates pass.">
+        Run Paper Robot Once
+      </button>
+      <button class="btn-secondary" id="btnEvaluateExits" type="button">
+        Evaluate Exits Now
+      </button>
+      <button class="btn-secondary" id="btnRefreshAutonomousTrades" type="button">
+        Refresh Autonomous Trades
+      </button>
+    </div>
+    <div class="action-feedback" id="runnerFeedback" role="status" aria-live="polite"></div>
+
+    <h3>Open autonomous trades</h3>
+    <div class="table-wrap">
+      <table class="data-table" id="openTradesTable">
+        <thead>
+          <tr>
+            <th>ID</th><th>Symbol</th><th>Qty</th><th>Entry</th>
+            <th>Target</th><th>Stop</th><th>Status</th><th>Order ID</th>
+          </tr>
+        </thead>
+        <tbody id="openTradesBody">
+          <tr><td colspan="8" class="empty">No open autonomous trades.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Recent closed / exit-pending autonomous trades</h3>
+    <div class="table-wrap">
+      <table class="data-table" id="closedTradesTable">
+        <thead>
+          <tr>
+            <th>ID</th><th>Symbol</th><th>Qty</th><th>Status</th>
+            <th>Exit reason</th><th>Exit price</th><th>Realised PnL</th>
+          </tr>
+        </thead>
+        <tbody id="closedTradesBody">
+          <tr><td colspan="7" class="empty">No closed autonomous trades yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Last exit evaluation</h3>
+    <div class="table-wrap">
+      <table class="data-table" id="exitDecisionsTable">
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Decision</th><th>Reason</th>
+            <th>Price</th><th>Exit order ID</th>
+          </tr>
+        </thead>
+        <tbody id="exitDecisionsBody">
+          <tr><td colspan="5" class="empty">No exit evaluation run yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       7. Decision Timeline / Audit Viewer
        ============================================================ -->
   <section class="panel" aria-labelledby="auditHeading">
     <h2 id="auditHeading">Decision Timeline</h2>

@@ -33,6 +33,14 @@ from autonomous.autonomous_engine import (
     DecisionStatus,
 )
 from autonomous.audit import AuditLogger
+from autonomous.runner_config import AutonomousRunnerConfig
+from autonomous.trade_store import AutonomousTrade, TradeStore
+from autonomous.exit_manager import AutonomousExitManager, ExitDecision
+from autonomous.autonomous_runner import (
+    AutonomousPaperRunner,
+    AutonomousRunResult,
+    ReadinessGates,
+)
 
 __all__ = [
     "AutonomousTradingConfig",
@@ -50,4 +58,12 @@ __all__ = [
     "StaticSignalProvider",
     "TechnicalAnalysisSignalProvider",
     "AuditLogger",
+    "AutonomousRunnerConfig",
+    "AutonomousTrade",
+    "TradeStore",
+    "AutonomousExitManager",
+    "ExitDecision",
+    "AutonomousPaperRunner",
+    "AutonomousRunResult",
+    "ReadinessGates",
 ]
