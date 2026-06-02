@@ -68,9 +68,9 @@ from typing import Optional
 from pathlib import Path
 
 # Core imports - verified to exist
-from execution.paper_adapter import PaperTradingAdapter
+from execution.paper_adapter import PaperTradingAdapter, TwsTradingAdapter
 from execution.market_data_feed import MarketDataFeed
-from execution.order_executor import OrderExecutor
+from execution.order_executor import OrderExecutor, LiveTradingConfirmation
 from strategies.bollinger_bands import BollingerBandsStrategy
 from risk.risk_manager import RiskManager
 from config.env_config import get_config
@@ -187,6 +187,26 @@ Examples:
         '--skip-market-check',
         action='store_true',
         help='Skip market hours check (for testing)'
+    )
+
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help=(
+            'Run the full live/paper pipeline but DO NOT submit orders to '
+            'TWS.  Use this to rehearse a live-mode session end-to-end and '
+            'verify audit logging without placing real trades.'
+        )
+    )
+
+    parser.add_argument(
+        '--confirmed-by',
+        type=str,
+        default=None,
+        help=(
+            'Operator identifier required for live mode (logged with the '
+            'per-session live-trading confirmation).'
+        )
     )
     
     args = parser.parse_args()
@@ -329,6 +349,11 @@ def main():
             host=config['host'],
             port=config['port'],
             client_id=config['client_id']
+        ) if not is_live_mode else TwsTradingAdapter(
+            host=config['host'],
+            port=config['port'],
+            client_id=config['client_id'],
+            environment='live',
         )
         
         # 5. Connect (blocks until connected or timeout)
@@ -353,11 +378,36 @@ def main():
         logger.info("✅ Risk manager initialized")
         
         # 7. Create order executor with safety checks
+        live_confirmation = None
+        if is_live_mode and not args.dry_run:
+            if not args.confirmed_by:
+                logger.error(
+                    "❌ Live mode requires --confirmed-by <operator> "
+                    "(used for the per-session live-trading confirmation)"
+                )
+                sys.exit(1)
+            live_confirmation = LiveTradingConfirmation(
+                environment='live',
+                account_id=config['account'],
+                port=config['port'],
+                confirmed_by=args.confirmed_by,
+            )
+
         order_executor = OrderExecutor(
             tws_adapter=tws_adapter,
             risk_manager=risk_manager,
             is_live_mode=is_live_mode,
-            require_confirmation=is_live_mode  # Only ask for confirmation in live mode
+            require_confirmation=is_live_mode and not args.dry_run,
+            dry_run=args.dry_run,
+            # Live trading is OFF by default at the application level; passing
+            # --confirm-live + --confirmed-by flips the switch ON for this
+            # process only.  Dry-run sessions don't need it because no orders
+            # leave the executor.
+            live_trading_enabled=(
+                is_live_mode and bool(args.confirm_live) and not args.dry_run
+            ),
+            live_confirmation=live_confirmation,
+            expected_account_id=config['account'] if is_live_mode else None,
         )
         logger.info("✅ Order executor initialized")
         
