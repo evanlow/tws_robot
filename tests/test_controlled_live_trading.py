@@ -232,13 +232,23 @@ def test_dry_run_live_mode_does_not_submit(
     assert stats["dry_run"] == 1
     assert stats["submitted"] == 0
 
-    # Audit log must contain at least one SIGNAL_RECEIVED event and the
-    # DRY_RUN outcome.
+    # Audit log must contain the full pipeline sequence:
+    # SIGNAL_RECEIVED → RISK_CHECK_PASSED → DRY_RUN outcome.  This
+    # validates the "complete audit trail" acceptance criterion.
     audit_files = list((tmp_path / "logs").glob("order_audit_*.log"))
     assert audit_files, "audit log file was not written"
     audit_text = audit_files[0].read_text()
     assert "EVENT:SIGNAL_RECEIVED" in audit_text
+    assert "EVENT:RISK_CHECK_PASSED" in audit_text
     assert "DRY_RUN" in audit_text
+    # And the events must be in the right order.
+    sig_pos = audit_text.index("EVENT:SIGNAL_RECEIVED")
+    risk_pos = audit_text.index("EVENT:RISK_CHECK_PASSED")
+    outcome_pos = audit_text.index("DRY_RUN")
+    assert sig_pos < risk_pos < outcome_pos, (
+        f"audit events out of order: sig={sig_pos} risk={risk_pos} "
+        f"outcome={outcome_pos}\n{audit_text}"
+    )
 
 
 def test_dry_run_still_blocks_on_emergency_stop(
