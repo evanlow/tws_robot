@@ -936,7 +936,7 @@ When you are comfortable with the recommendations after several cycles:
 
 1. Add `AUTONOMOUS_RUNNER_ENABLED=true` to your `.env` file and restart the web server.
 2. On the **Autonomous Trading** dashboard, confirm all readiness gates are green.
-3. Click **Execute Paper Trade**. The system places a limit order on your IBKR paper account.
+3. Click **Execute Paper Trade**. The system calls `POST /api/autonomous/runner/run-once-paper`, which places a limit order on your IBKR paper account after passing all readiness gates.
 4. Monitor the trade on the **Autonomous Trades** panel — status will progress from `OPEN` through to `CLOSED` as the exit manager evaluates your position each cycle.
 
 ---
@@ -1259,12 +1259,22 @@ Runs the full pipeline in `recommend_only` mode — returns a complete `TradePla
 
 #### `POST /api/autonomous/execute-paper`
 
-Runs the full pipeline and submits a limit order to the IBKR paper account.
+Runs the engine directly in `paper_execute` mode — hardcoded; the mode cannot be overridden. Submits a limit order to the IBKR paper account via the configured `AutonomousPaperAdapter`. This endpoint bypasses the runner's readiness gates (see `runner/run-once-paper` below for the fully-gated version).
+
+Requires an active paper connection and a configured paper adapter. Returns `EXECUTION_FAILED` (not an HTTP error) if the adapter is absent.
+
+```json
+POST /api/autonomous/execute-paper
+{ "confirm": true }
+```
+
+#### `POST /api/autonomous/runner/run-once-paper`
+
+Runs one full paper-autonomous cycle through the `AutonomousPaperRunner` — the **recommended endpoint** for paper execution. Enforces all readiness gates (connection, paper mode, runner enabled, open-trade limit, daily trade limit) before calling the engine. Records the trade in the trade store on success.
 
 Requires:
-- All readiness gates green
 - `AUTONOMOUS_RUNNER_ENABLED=true`
-- Active paper connection
+- Active paper connection (port `7497`)
 
 **Response (success):**
 ```json
@@ -1304,31 +1314,37 @@ Creates the `EMERGENCY_STOP` sentinel file. Takes effect immediately for all sub
 
 #### `GET /api/autonomous/audit`
 
-Returns up to the last 50 entries from today's audit log file. Each entry is a full decision record.
+Returns up to the last 200 entries (default 20; pass `?limit=N`) from today's audit log file, in reverse-chronological order. Each entry is a full decision record. Read-only.
 
-#### `GET /api/autonomous/trades`
+#### `GET /api/autonomous/runner/trades`
 
-Returns all autonomous trades (open, closed, and failed) replayed from the trade store.
+Returns all autonomous trades replayed from the trade store, grouped by status.
 
 ```json
 {
-  "trades": [
-    {
-      "autonomous_trade_id": "abc123",
-      "symbol": "AAPL",
-      "status": "CLOSED",
-      "entry_limit_price": 182.00,
-      "exit_price": 194.50,
-      "realised_pnl": 675.00,
-      "exit_reason": "TAKE_PROFIT"
-    }
-  ]
+  "open": [ { "autonomous_trade_id": "abc123", "symbol": "AAPL", "status": "OPEN", "..." : "..." } ],
+  "exit_pending": [],
+  "closed": [ { "autonomous_trade_id": "def456", "symbol": "MSFT", "status": "CLOSED", "realised_pnl": 320.00, "exit_reason": "TAKE_PROFIT" } ],
+  "counts": { "open": 1, "exit_pending": 0, "closed": 1, "total": 2 }
 }
 ```
 
-#### `POST /api/autonomous/exit`
+#### `POST /api/autonomous/runner/evaluate-exits`
 
-Manually triggers the exit manager to evaluate all open trades. Useful for testing exit conditions during market hours without waiting for the next scheduled cycle.
+Manually triggers the exit manager to evaluate all open trades. Returns a list of `ExitDecision` objects — one per open trade, whether or not an exit was submitted.
+
+```json
+{
+  "decisions": [
+    { "autonomous_trade_id": "abc123", "symbol": "AAPL", "decision": "NO_EXIT", "reason": "price 185.00 below target 196.00" }
+  ],
+  "count": 1
+}
+```
+
+#### `GET /api/autonomous/runner/status`
+
+Returns the runner's readiness gates snapshot — useful for programmatic health checks.
 
 #### Allowed `config_overrides` Fields
 
@@ -1427,17 +1443,22 @@ Switch TWS to Live mode (port `7496`). In the dashboard Settings, set Environmen
 
 **Step 3 — Execute with explicit confirmation:**
 
-The `assisted_live` API call requires `confirm: true` in the request body:
+Live execution via `assisted_live` mode is invoked programmatically through the engine (the `/api/autonomous/execute-paper` endpoint is hardcoded to `paper_execute` mode and cannot run live trades). Use the engine directly in application code with:
 
-```json
-POST /api/autonomous/execute-paper
-{
-  "config_overrides": { "mode": "assisted_live" },
-  "confirm": true
-}
+```python
+from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
+from autonomous.autonomous_engine import AutonomousTradingEngine
+
+config = AutonomousTradingConfig(
+    mode=AutonomousMode.ASSISTED_LIVE,
+    allow_live_execution=True,
+    require_user_confirmation=True,
+)
+engine = AutonomousTradingEngine(config=config, ...)
+decision = engine.run_once(confirm=True)   # confirm=True required
 ```
 
-Without `confirm: true`, the engine returns `rejected` even in `assisted_live` mode.
+Without `confirm=True`, the engine returns `rejected` even in `assisted_live` mode.
 
 **Step 4 — Monitor closely:**
 
