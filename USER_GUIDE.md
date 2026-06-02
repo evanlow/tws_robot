@@ -26,11 +26,28 @@
 8. [Live Trading](#8-live-trading)
 9. [Strategies Reference](#9-strategies-reference)
 10. [Risk Management](#10-risk-management)
-11. [Order Management](#11-order-management)
-12. [Command-Line Tools](#12-command-line-tools)
-13. [Your Weekly Routine](#13-your-weekly-routine)
-14. [Troubleshooting](#14-troubleshooting)
-15. [Frequently Asked Questions](#15-frequently-asked-questions)
+11. [Autonomous Trading](#11-autonomous-trading)
+    - [Overview](#111-overview)
+    - [How the Pipeline Works](#112-how-the-pipeline-works)
+    - [Operating Modes](#113-operating-modes)
+    - [Safety Architecture](#114-safety-architecture)
+    - [Prerequisites](#115-prerequisites)
+    - [Quick Start: Your First Autonomous Paper Trade](#116-quick-start-your-first-autonomous-paper-trade)
+    - [Configuration Reference](#117-configuration-reference)
+    - [Signal Providers & Candidate Ranking](#118-signal-providers--candidate-ranking)
+    - [Trade Planning](#119-trade-planning)
+    - [Trade Lifecycle & Exit Management](#1110-trade-lifecycle--exit-management)
+    - [The Autonomous Trading Dashboard](#1111-the-autonomous-trading-dashboard)
+    - [REST API Reference](#1112-rest-api-reference)
+    - [The Audit Log](#1113-the-audit-log)
+    - [Progressing to Live Execution](#1114-progressing-to-live-execution)
+    - [Troubleshooting](#1115-troubleshooting)
+    - [Frequently Asked Questions](#1116-frequently-asked-questions)
+12. [Order Management](#12-order-management)
+13. [Command-Line Tools](#13-command-line-tools)
+14. [Your Weekly Routine](#14-your-weekly-routine)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Frequently Asked Questions](#16-frequently-asked-questions)
 
 ---
 
@@ -761,7 +778,772 @@ Add these keys to your `.env` file to customize behaviour:
 
 ---
 
-## 11. Order Management
+## 11. Autonomous Trading
+
+> ⚠️ **Risk Warning:** Autonomous trading places real orders without moment-to-moment human oversight. Always paper trade first. Validate extensively before considering live execution. You are solely responsible for all outcomes. See [`DISCLAIMER.md`](DISCLAIMER.md) and [`prime_directive.md`](prime_directive.md).
+
+---
+
+### 11.1 Overview
+
+TWS Robot's **Autonomous Trading** module lets the system scan the S&P 500 universe, identify high-quality oversold candidates, size a trade against your available cash, and optionally submit that order to your paper (or live) Interactive Brokers account — all without you clicking a button for each trade.
+
+The module is built around **safety-first defaults**:
+
+- Every setting starts in a conservative, non-executing mode.
+- Live execution is **disabled by default** and requires explicit configuration changes.
+- A single file (`EMERGENCY_STOP`) halts the system instantly at any time.
+- Every decision — including rejections — is written to an append-only audit log so you can replay exactly what the system did and why.
+- The system never guesses at prices: if a live price is unavailable, exit orders are not placed rather than using a stale estimate.
+
+Think of Autonomous Trading as a tireless analyst that runs the same disciplined checklist every time, then either presents its recommendation to you (Recommend-Only mode) or executes it on your paper account (Paper Execute mode).
+
+---
+
+### 11.2 How the Pipeline Works
+
+Every autonomous cycle follows the same five-stage pipeline:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                      AUTONOMOUS CYCLE                          │
+├──────────┬──────────┬──────────┬─────────────┬────────────────┤
+│  Scanner  │  Ranker  │ Planner  │   Engine    │    Adapter     │
+│           │          │          │  (Gating)   │  (Execution)   │
+│  S&P 500  │ Hard     │ BUY_     │ Cash check  │ Paper adapter  │
+│  universe │ filters  │ SHARES   │ Risk check  │ Live adapter   │
+│  +        │ Scoring  │   or     │ Daily limit │   (future)     │
+│  Signal   │ Ranking  │ SHORT_   │ Emergency   │                │
+│  provider │          │ PUT      │   stop gate │                │
+└──────────┴──────────┴──────────┴─────────────┴────────────────┘
+```
+
+| Stage | What Happens |
+|-------|-------------|
+| **Scanner** | Iterates over the configured stock universe (default: S&P 500). For each symbol, calls the active `SignalProvider` to retrieve a `CandidateSignal`. Symbols without a signal are skipped. |
+| **Ranker** | Applies hard filters (signal strength, label, volume, trend, earnings proximity, concentration limits). Surviving candidates are scored and sorted — the one closest to support with the most room to resistance and the highest strength score wins. |
+| **Planner** | Given the top-ranked candidate plus your deployable cash, decides between `BUY_SHARES` (limit order for shares) and `SELL_CASH_SECURED_PUT` (cash-secured put, if option chain data is available and strike is at-or-below support). Produces a `TradePlan` with exact quantities, limit price, target, and stop. |
+| **Engine** | Validates the `TradePlan` against safety gates: emergency stop, daily trade limit, account equity checks, and the optional `RiskManager`. Returns a structured `AutonomousDecision` (approved or rejected with reasons). |
+| **Adapter** | In `PAPER_EXECUTE` mode, sends the order to the paper account via `AutonomousPaperAdapter`. In `RECOMMEND_ONLY` mode, the adapter is never called — the decision is returned as a recommendation only. |
+
+The **ExitManager** runs as a separate pass over open autonomous trades. It checks each open position against take-profit, stop-loss, maximum holding duration, and the emergency stop, and submits a paper SELL order when exit conditions are met.
+
+---
+
+### 11.3 Operating Modes
+
+The autonomous engine has three operating modes. Switch between them in the dashboard or via the API.
+
+| Mode | What the Engine Does | Orders Placed? |
+|------|---------------------|---------------|
+| `recommend_only` | Runs the full pipeline and returns a `TradePlan`, but never calls the execution adapter. Safe to run at any time. | ❌ Never |
+| `paper_execute` | Runs the full pipeline **and** sends limit orders to your IBKR paper account via `AutonomousPaperAdapter`. Requires an active paper connection. | ✅ Paper only |
+| `assisted_live` | May submit to your live account, **but only** when `allow_live_execution = True` is set in config **and** the API call explicitly passes `confirm = True`. | ✅ Live (opt-in) |
+
+**Start with `recommend_only`.** Review several cycles of recommendations before ever enabling paper execution. Paper trade for at least 30 days before considering `assisted_live`.
+
+---
+
+### 11.4 Safety Architecture
+
+Multiple independent layers protect against unintended trading. All of them must pass before an order is placed:
+
+```
+Layer 1 — Emergency stop file
+  └─ If EMERGENCY_STOP file exists on disk → halt immediately, no orders
+
+Layer 2 — Runner gates (paper runner only)
+  ├─ runner_enabled must be True
+  ├─ Must be connected to IBKR paper account (not live)
+  ├─ Paper adapter must report ready
+  ├─ Signal provider must be ready
+  ├─ open_autonomous_trades < max_open_autonomous_trades
+  └─ daily_trade_count < max_trades_per_day
+
+Layer 3 — Engine validation
+  ├─ Deployable cash >= min_deployable_cash
+  ├─ Trade size <= max_new_position_pct * equity
+  ├─ Candidate passed all ranker hard filters
+  └─ Optional RiskManager check
+
+Layer 4 — Mode gate
+  ├─ RECOMMEND_ONLY → never executes
+  ├─ PAPER_EXECUTE  → paper adapter only, never live
+  └─ ASSISTED_LIVE  → requires allow_live_execution=True AND confirm=True
+```
+
+**Emergency Stop** is always available:
+- Click the red **Emergency Stop** button from any page in the dashboard.
+- Touch `EMERGENCY_STOP` file: `touch EMERGENCY_STOP` (or delete it to re-enable).
+- Call the API: `POST /api/autonomous/emergency-stop`.
+- Call the shared endpoint: `POST /api/emergency/stop`.
+
+The autonomous engine checks for this file at the start of every cycle and the exit manager checks it before evaluating every open trade. The moment the file exists, no new orders are placed and no exits are submitted.
+
+---
+
+### 11.5 Prerequisites
+
+Before running autonomous trading in any mode:
+
+| Requirement | Needed For |
+|-------------|-----------|
+| TWS Robot fully installed and running (`python scripts/run_web.py`) | All modes |
+| Interactive Brokers TWS open and connected | Paper and live modes |
+| TWS Paper account connected (port `7497`) | `paper_execute` mode |
+| `AUTONOMOUS_RUNNER_ENABLED=true` in `.env` (or set in app config) | `paper_execute` mode |
+| Sustained paper trading success over 30+ days | Live mode only |
+| `allow_live_execution = True` explicitly set in config | Live mode only |
+| Minimum $1,000 deployable cash (configurable) | Paper and live modes |
+
+> **Check your prerequisites from the dashboard:** navigate to **Autonomous Trading** → **Status**. The readiness panel shows a green ✅ or red ❌ for every gate with a plain-English explanation for any failures.
+
+---
+
+### 11.6 Quick Start: Your First Autonomous Paper Trade
+
+This walkthrough gets you to your first recommended trade in about 10 minutes using `recommend_only` mode (no orders placed).
+
+#### Step 1 — Start the dashboard
+
+```bash
+python scripts/run_web.py
+```
+
+Navigate to **http://127.0.0.1:5000** and log in.
+
+#### Step 2 — Connect to your paper account
+
+In TWS, switch to **Paper Trading** mode (port `7497`). In the TWS Robot dashboard, go to **Settings** → set Environment to `paper` and Port to `7497`. Click **Save & Reconnect**.
+
+#### Step 3 — Open the Autonomous Trading page
+
+Click **Autonomous Trading** in the left navigation. You will see the **Status** panel showing current configuration and readiness gates.
+
+#### Step 4 — Run a scan
+
+Click **Scan Universe**. The engine queries the S&P 500 screener for `Strong(100) / Confirmed Rebound` signals, applies the ranker, and returns a list of candidates. No order is placed. Review the candidates, their scores, and why others were rejected.
+
+#### Step 5 — Get a full proposal
+
+Click **Propose Trade**. This runs the full pipeline including the trade planner and produces a concrete `TradePlan` — symbol, action, quantity, limit price, take-profit target, and stop-loss — based on your current deployable cash.
+
+Review the plan carefully. The plan is a recommendation only; nothing has been submitted to your broker.
+
+#### Step 6 — Enable paper execution (optional)
+
+When you are comfortable with the recommendations after several cycles:
+
+1. Add `AUTONOMOUS_RUNNER_ENABLED=true` to your `.env` file and restart the web server.
+2. On the **Autonomous Trading** dashboard, confirm all readiness gates are green.
+3. Click **Execute Paper Trade**. The system places a limit order on your IBKR paper account.
+4. Monitor the trade on the **Autonomous Trades** panel — status will progress from `OPEN` through to `CLOSED` as the exit manager evaluates your position each cycle.
+
+---
+
+### 11.7 Configuration Reference
+
+#### Core Engine Configuration (`AutonomousTradingConfig`)
+
+These settings control the trading engine's behaviour. They can be supplied as JSON overrides to the API endpoints (see [§11.12](#1112-rest-api-reference)).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `mode` | `recommend_only` | Operating mode: `recommend_only`, `paper_execute`, or `assisted_live` |
+| `allow_live_execution` | `false` | Master switch for live order submission. Must be `true` before `assisted_live` mode can place orders. |
+| `require_user_confirmation` | `true` | When `true`, `assisted_live` calls must pass `confirm: true` in the request body |
+| `max_trades_per_day` | `1` | Maximum number of new autonomous positions opened per calendar day (enforced via the audit log, persists across restarts) |
+| `max_new_position_pct` | `0.10` | Maximum fraction of account equity for any single new position (e.g. `0.10` = 10%) |
+| `min_deployable_cash` | `1000.0` | Minimum deployable cash (USD) required before any trade is proposed |
+| `min_signal_strength` | `100` | Minimum `strength_score` a candidate must carry to pass the ranker |
+| `required_signal_label` | `Confirmed Rebound` | The exact signal label required; currently only `Confirmed Rebound` qualifies |
+| `stock_universe` | `sp500` | Universe scanned by the candidate scanner |
+| `prefer_cash_secured_put` | `true` | Prefer a cash-secured short put over buying shares when option chain data is available |
+| `allow_share_buy` | `true` | Allow `BUY_SHARES` trade type |
+| `allow_short_put` | `true` | Allow `SELL_CASH_SECURED_PUT` trade type |
+| `avoid_earnings_within_days` | `7` | Reject candidates whose earnings date is within this many days (in either direction) |
+| `use_limit_orders_only` | `true` | Always use limit orders; market orders are never placed |
+| `emergency_stop_file` | `EMERGENCY_STOP` | Path to the emergency stop sentinel file |
+| `audit_log_dir` | `logs` | Directory for JSONL audit log files |
+| `symbol_whitelist` | `null` | When set, only these symbols are eligible (list of tickers) |
+| `symbol_blacklist` | `[]` | Symbols permanently excluded from autonomous trading |
+
+#### Runner Configuration (`AutonomousRunnerConfig`)
+
+These settings control the paper-only runner that wraps the engine with additional safety gates.
+
+| Parameter | Default | Environment Variable | Description |
+|-----------|---------|---------------------|-------------|
+| `runner_enabled` | `false` | `AUTONOMOUS_RUNNER_ENABLED` | Master on/off switch. Set `true` to allow paper execution. |
+| `paper_only` | `true` | — | Runner refuses to act unless connected to the IBKR paper account. |
+| `buy_shares_only` | `true` | — | Only `BUY_SHARES` trades are eligible in the current paper MVP. |
+| `max_new_trades_per_run` | `1` | — | Maximum new trades a single `run_once` call may open |
+| `max_open_autonomous_trades` | `1` | — | Maximum number of simultaneously open autonomous positions |
+| `max_holding_days` | `5` | — | Automatically exit a position after this many calendar days |
+| `run_during_market_hours_only` | `true` | — | Reserved for future enforcement of market-hours guard |
+| `avoid_first_minutes_after_open` | `15` | — | Reserved: minutes after market open to skip |
+| `avoid_last_minutes_before_close` | `15` | — | Reserved: minutes before market close to skip |
+| `trade_store_path` | `logs/autonomous_trades.jsonl` | — | Path to the trade lifecycle store (JSONL) |
+
+**To enable paper execution**, add this to your `.env`:
+
+```bash
+AUTONOMOUS_RUNNER_ENABLED=true
+```
+
+Restart the web server for the change to take effect. All other defaults remain safely conservative.
+
+---
+
+### 11.8 Signal Providers & Candidate Ranking
+
+#### What is a Signal Provider?
+
+The engine does not perform technical analysis itself — it delegates that to a pluggable `SignalProvider`. This separation means:
+
+- The engine's safety logic, ranking, and planning can be tested in isolation.
+- You can swap in a different analysis engine without touching the orchestration code.
+- The same analysis that powers the **S&P 500 Screener** page is reused for autonomous candidate generation.
+
+#### The Production Provider: `TechnicalAnalysisSignalProvider`
+
+When the S&P 500 screener service is active, the autonomous engine automatically uses `TechnicalAnalysisSignalProvider`. This provider maps screener rows to `CandidateSignal` objects using the following rules:
+
+| Condition | Meaning |
+|-----------|---------|
+| `momentum_label == "Confirmed Rebound"` | Price is above the 5-day SMA with two consecutive higher closes — an early-stage recovery signal |
+| `quality_label == "Strong"` | The stock passed the fundamentals-based quality threshold in the screener |
+| Both conditions met → `strength_score = 100` | Qualifies as a `Strong(100) / Confirmed Rebound` candidate |
+| Either condition missing → `strength_score = 0` | Rejected by the ranker's `min_signal_strength` filter |
+
+> **Dashboard indicator:** The Status panel shows `TechnicalAnalysisSignalProvider` when the production provider is active. If it shows `StaticSignalProvider` with a ⚠ warning, the screener service is not reachable and all scan/propose calls will return `no_candidate` until it is available.
+
+#### Candidate Ranking
+
+After the scanner collects signals, the **Ranker** applies filters and scoring:
+
+**Hard filters (must all pass):**
+1. `strength_score >= min_signal_strength` (default: 100)
+2. `signal_label == required_signal_label` (default: `"Confirmed Rebound"`)
+3. `volume_ok == True` — sufficient trading volume
+4. `trend_ok == True` — price is in an acceptable trend context
+5. No earnings within `avoid_earnings_within_days` (default: 7 days)
+6. Existing position in the symbol is not already at `max_new_position_pct` of equity
+
+**Scoring (higher = better rank):**
+
+| Component | Weight | Rule |
+|-----------|--------|------|
+| Signal strength | Dominant | `score = strength_score` (base) |
+| Proximity to support | Up to +0.20 | Price closer to support = higher score; price at or below support scores maximum |
+| Room to resistance | Up to +0.30 | Larger gap between current price and resistance = higher score |
+
+Rejected candidates and their rejection reasons are visible in the **Audit Log** and on the dashboard's **Rejected Candidates** panel — useful for understanding what the engine considered and why it passed.
+
+---
+
+### 11.9 Trade Planning
+
+The **TradePlanner** converts the top-ranked candidate plus your deployable cash into a concrete `TradePlan`. It never places orders; it purely calculates what to do and exposes that as a data structure.
+
+#### Trade Types
+
+| Trade Type | When Used | Requirements |
+|-----------|-----------|-------------|
+| `SELL_CASH_SECURED_PUT` | Preferred when `prefer_cash_secured_put=True` and option chain data is available | Strike must be ≤ support price; deployable cash ≥ `strike × 100 × contracts` |
+| `BUY_SHARES` | Default fallback; also used when no option chain data is available or CSP conditions aren't met | Deployable cash ≥ `quantity × limit_price` |
+
+#### What a `TradePlan` Contains
+
+| Field | Description |
+|-------|-------------|
+| `symbol` | Ticker (e.g. `AAPL`) |
+| `trade_type` | `BUY_SHARES` or `SELL_CASH_SECURED_PUT` |
+| `action` | `BUY` (shares) or `SELL` (short put) |
+| `quantity` | Number of shares (for `BUY_SHARES`) |
+| `limit_price` | Limit order price — never a market order |
+| `target_price` | Take-profit price target |
+| `stop_price` | Stop-loss price level |
+| `required_cash` | Cash that must be available before the order can proceed |
+| `contracts` | Number of option contracts (for `SELL_CASH_SECURED_PUT`) |
+| `strike` | Option strike price (for `SELL_CASH_SECURED_PUT`) |
+| `expiry` | Option expiry date (for `SELL_CASH_SECURED_PUT`) |
+| `reason` | Human-readable explanation of why this plan was chosen |
+| `risk_notes` | List of risk considerations |
+| `exit_plan` | Plain-English description of the exit strategy |
+
+#### Position Sizing
+
+For `BUY_SHARES`, the quantity is sized so that `quantity × limit_price` does not exceed:
+
+```
+min(deployable_cash, max_new_position_pct × equity)
+```
+
+This ensures no single autonomous trade consumes more than the configured fraction of your account equity, regardless of how much cash is available.
+
+---
+
+### 11.10 Trade Lifecycle & Exit Management
+
+#### Trade States
+
+Every autonomous paper trade flows through these states:
+
+```
+  OPEN ──→ EXIT_PENDING ──→ CLOSED
+   │                           ↑
+   └─────────────────────────→ FAILED
+```
+
+| State | Meaning |
+|-------|---------|
+| `OPEN` | Entry order placed; position is open and being monitored by the exit manager |
+| `EXIT_PENDING` | Exit order submitted; waiting for fill confirmation |
+| `CLOSED` | Exit filled; trade complete (realised P&L available) |
+| `FAILED` | Entry or exit order encountered an unrecoverable error |
+
+#### Exit Conditions (checked by `AutonomousExitManager`)
+
+The exit manager evaluates every `OPEN` trade on each cycle. It will submit a paper SELL limit order when any of these conditions is met:
+
+| Exit Type | Trigger | Priority |
+|-----------|---------|----------|
+| `TAKE_PROFIT` | `current_price >= target_price` | Checked first |
+| `STOP_LOSS` | `current_price <= stop_price` | Checked second |
+| `TIME_EXIT` | Position has been open for ≥ `max_holding_days` calendar days | Checked third |
+| `RISK_EXIT` | Emergency stop file exists **or** the `RiskManager` raises a risk flag | Checked fourth |
+
+**Important safety rule:** The exit manager **never guesses prices**. If a live price is unavailable for any reason (including during a `RISK_EXIT`), the trade stays `OPEN` and a `NO_PRICE_AVAILABLE` note is written to the audit log. The exit will be attempted again on the next cycle when live data is available.
+
+#### The Trade Store
+
+All autonomous paper trades are persisted to `logs/autonomous_trades.jsonl`. This is an append-only JSONL file where:
+
+- An `"op": "OPEN"` line records the full trade snapshot when entered.
+- `"op": "UPDATE"` lines record each state change (filled price, exit reason, realised P&L, etc.).
+
+On restart, the runner replays this log to reconstruct the full current state of open trades — daily trade limits and open position counts survive restarts.
+
+To view all trades:
+
+```http
+GET /api/autonomous/trades
+```
+
+---
+
+### 11.11 The Autonomous Trading Dashboard
+
+Navigate to **Autonomous Trading** in the left navigation bar to access the full dashboard. It has four panels:
+
+#### Status Panel
+
+Shows a real-time snapshot of the system's readiness:
+
+| Indicator | Green ✅ | Red ❌ |
+|-----------|---------|-------|
+| Connected | IBKR connection is active | Not connected |
+| Paper Mode | Connected to paper account | Connected to live, or not connected |
+| Paper Adapter Ready | Adapter wired and operational | Adapter not available |
+| Signal Provider Ready | Production `TechnicalAnalysisSignalProvider` active | Using stub `StaticSignalProvider` |
+| Emergency Stop | Not active | `EMERGENCY_STOP` file exists |
+| Runner Enabled | `runner_enabled = True` | Runner disabled in config |
+| Open Trades | Below `max_open_autonomous_trades` | At or above limit |
+
+A single ❌ gate prevents paper execution from proceeding. The reasons list tells you exactly what to fix.
+
+#### Scan & Propose Panel
+
+| Button | What Happens |
+|--------|-------------|
+| **Scan Universe** | Runs the scanner and ranker; returns ranked candidates and rejected symbols with reasons. No trade planned, no order placed. |
+| **Propose Trade** | Runs the full pipeline (scan → rank → plan); returns a complete `TradePlan`. No order placed. |
+| **Execute Paper Trade** | Runs the full pipeline and submits the order to your IBKR paper account. Requires all readiness gates to be green and `runner_enabled = True`. |
+
+#### Open Trades Panel
+
+Displays all trades currently in `OPEN` or `EXIT_PENDING` state:
+
+| Column | Description |
+|--------|-------------|
+| Symbol | Ticker |
+| Entry | Entry limit price and time |
+| Type | `BUY_SHARES` or `SELL_CASH_SECURED_PUT` |
+| Target / Stop | Take-profit and stop-loss levels |
+| Status | `OPEN` or `EXIT_PENDING` |
+| Days Held | Days since entry |
+
+#### Audit Log Panel
+
+Shows the last 50 entries from the daily JSONL audit log. Each entry records the full decision context: which candidate was selected, why others were rejected, what plan was produced, and whether execution succeeded.
+
+---
+
+### 11.12 REST API Reference
+
+All autonomous endpoints are under `/api/autonomous/`. They require authentication (same cookie or token used by the rest of the dashboard).
+
+#### `GET /api/autonomous/status`
+
+Returns the current configuration, emergency stop state, signal provider status, and paper adapter readiness.
+
+```json
+{
+  "config": { "mode": "recommend_only", "max_trades_per_day": 1, "..." : "..." },
+  "emergency_stop_file_exists": false,
+  "paper_adapter_configured": true,
+  "connected": true,
+  "connection_env": "paper",
+  "signal_provider": "TechnicalAnalysisSignalProvider",
+  "signal_provider_ready": true
+}
+```
+
+#### `POST /api/autonomous/scan`
+
+Runs the scanner and ranker (no trade planning, no order). Returns candidates and rejections.
+
+**Request body (all optional):**
+```json
+{
+  "config_overrides": {
+    "min_signal_strength": 100,
+    "required_signal_label": "Confirmed Rebound"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "candidates": [
+    { "symbol": "AAPL", "score": 100.25, "strength_score": 100, "signal_label": "Confirmed Rebound" }
+  ],
+  "rejected": [
+    { "symbol": "TSLA", "reason": "earnings within 7 days" }
+  ]
+}
+```
+
+#### `POST /api/autonomous/propose`
+
+Runs the full pipeline in `recommend_only` mode — returns a complete `TradePlan` without placing any order.
+
+**Request body (all optional):**
+```json
+{ "config_overrides": { "max_new_position_pct": 0.08 } }
+```
+
+**Response:**
+```json
+{
+  "status": "proposed",
+  "decision": {
+    "status": "recommended",
+    "candidate": { "symbol": "AAPL", "last_price": 182.50 },
+    "plan": {
+      "symbol": "AAPL",
+      "trade_type": "BUY_SHARES",
+      "action": "BUY",
+      "quantity": 54,
+      "limit_price": 182.00,
+      "target_price": 196.00,
+      "stop_price": 170.00,
+      "required_cash": 9828.00
+    }
+  }
+}
+```
+
+#### `POST /api/autonomous/execute-paper`
+
+Runs the full pipeline and submits a limit order to the IBKR paper account.
+
+Requires:
+- All readiness gates green
+- `AUTONOMOUS_RUNNER_ENABLED=true`
+- Active paper connection
+
+**Response (success):**
+```json
+{
+  "status": "executed",
+  "trade": {
+    "autonomous_trade_id": "abc123",
+    "symbol": "AAPL",
+    "status": "OPEN",
+    "entry_order_id": 42,
+    "entry_limit_price": 182.00,
+    "quantity": 54
+  }
+}
+```
+
+**Response (gate failure):**
+```json
+{
+  "status": "rejected",
+  "rejection_reason": "not_paper_mode",
+  "gates": {
+    "connected": true,
+    "paper_mode": false,
+    "reasons": ["Not connected to paper account"]
+  }
+}
+```
+
+#### `POST /api/autonomous/emergency-stop`
+
+Creates the `EMERGENCY_STOP` sentinel file. Takes effect immediately for all subsequent engine and exit-manager calls.
+
+```json
+{ "status": "emergency_stop_activated" }
+```
+
+#### `GET /api/autonomous/audit`
+
+Returns up to the last 50 entries from today's audit log file. Each entry is a full decision record.
+
+#### `GET /api/autonomous/trades`
+
+Returns all autonomous trades (open, closed, and failed) replayed from the trade store.
+
+```json
+{
+  "trades": [
+    {
+      "autonomous_trade_id": "abc123",
+      "symbol": "AAPL",
+      "status": "CLOSED",
+      "entry_limit_price": 182.00,
+      "exit_price": 194.50,
+      "realised_pnl": 675.00,
+      "exit_reason": "TAKE_PROFIT"
+    }
+  ]
+}
+```
+
+#### `POST /api/autonomous/exit`
+
+Manually triggers the exit manager to evaluate all open trades. Useful for testing exit conditions during market hours without waiting for the next scheduled cycle.
+
+#### Allowed `config_overrides` Fields
+
+Only the following fields are accepted in request bodies to prevent privilege escalation:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `mode` | string | `"recommend_only"`, `"paper_execute"`, `"assisted_live"` |
+| `allow_live_execution` | boolean | Must also have backend config enabled |
+| `require_user_confirmation` | boolean | |
+| `max_trades_per_day` | integer | |
+| `max_new_position_pct` | float | Must be in (0, 1] |
+| `min_deployable_cash` | float | |
+| `min_signal_strength` | integer | |
+| `required_signal_label` | string | |
+
+The `emergency_stop_file` and `audit_log_dir` paths are **never** overridable from the request body.
+
+---
+
+### 11.13 The Audit Log
+
+Every autonomous cycle appends one JSON line to a daily log file:
+
+```
+logs/autonomous_trading_YYYYMMDD.jsonl
+```
+
+Each line contains a full decision record regardless of outcome — executed trades **and** every rejection are recorded. Example entry:
+
+```json
+{
+  "timestamp": "2025-11-15T09:32:11.042Z",
+  "config": { "mode": "paper_execute", "max_trades_per_day": 1 },
+  "decision": {
+    "status": "paper_executed",
+    "candidate": { "symbol": "AAPL", "strength_score": 100, "signal_label": "Confirmed Rebound" },
+    "plan": { "trade_type": "BUY_SHARES", "quantity": 54, "limit_price": 182.00 },
+    "execution_result": { "order_id": 42, "status": "submitted" }
+  },
+  "rejected_candidates": [
+    { "symbol": "TSLA", "reason": "earnings within 7 days" },
+    { "symbol": "NVDA", "reason": "symbol already over-concentrated in portfolio" }
+  ]
+}
+```
+
+**Why the audit log matters:**
+
+- The engine counts executions from the audit log to enforce `max_trades_per_day` **across process restarts** — if you restart the server mid-day, the daily limit is preserved.
+- Missing or unreadable audit log files are treated as zero (the engine never refuses to start because a log is unavailable).
+- Logs rotate daily. Older files accumulate in the `logs/` directory and can be archived or deleted as needed.
+
+To view recent audit log entries from the dashboard, open the **Audit Log** panel on the Autonomous Trading page. To query via the API: `GET /api/autonomous/audit`.
+
+---
+
+### 11.14 Progressing to Live Execution
+
+> ⚠️ **Live trading puts real money at risk. This section is for experienced users only. Paper trade extensively before proceeding.**
+
+Live execution via `assisted_live` mode has multiple independent safeguards that must all be satisfied simultaneously. There is no single toggle that "enables live trading."
+
+#### Checklist Before Considering Live Execution
+
+- [ ] **Paper trade success:** Run in `paper_execute` mode for at least 30 consecutive trading days with net-positive results
+- [ ] **Manual review:** Review every audit log entry from your paper period. Understand every rejection and every exit reason.
+- [ ] **Drawdown test:** Confirm the autonomous strategy stayed within acceptable drawdown during your paper period (check the Risk page)
+- [ ] **Emergency stop test:** Deliberately trigger and clear the emergency stop at least once to confirm you can halt the system
+- [ ] **Capital adequacy:** Ensure your live account has sufficient capital for the `max_new_position_pct` limit to leave meaningful room for diversification
+- [ ] **Understand exit timing:** The exit manager only runs when you call it (no automatic background scheduler by default). Decide how often you will trigger it.
+
+#### Enabling Live Execution
+
+**Step 1 — Set backend config:**
+
+In your `.env`:
+```bash
+AUTONOMOUS_RUNNER_ENABLED=true
+```
+
+In `config/live.py` or your Flask app config, set:
+```python
+autonomous_engine_config = {
+    "mode": "assisted_live",
+    "allow_live_execution": True,
+    "require_user_confirmation": True,   # keep True
+    "max_trades_per_day": 1,
+    "max_new_position_pct": 0.10,
+}
+```
+
+**Step 2 — Connect to the live account:**
+
+Switch TWS to Live mode (port `7496`). In the dashboard Settings, set Environment to `live` and Port to `7496`.
+
+**Step 3 — Execute with explicit confirmation:**
+
+The `assisted_live` API call requires `confirm: true` in the request body:
+
+```json
+POST /api/autonomous/execute-paper
+{
+  "config_overrides": { "mode": "assisted_live" },
+  "confirm": true
+}
+```
+
+Without `confirm: true`, the engine returns `rejected` even in `assisted_live` mode.
+
+**Step 4 — Monitor closely:**
+
+- Check the audit log after every execution
+- Verify orders appear in your IBKR account immediately
+- Have the emergency stop one click away at all times
+
+---
+
+### 11.15 Troubleshooting
+
+#### "All gates show green but Execute Paper Trade returns `runner_disabled`"
+
+The runner requires `AUTONOMOUS_RUNNER_ENABLED=true` in the environment. Check your `.env` file and restart the web server.
+
+```bash
+grep AUTONOMOUS_RUNNER_ENABLED .env   # should output: AUTONOMOUS_RUNNER_ENABLED=true
+python scripts/run_web.py
+```
+
+#### "Scan returns `no_candidate` every time"
+
+The signal provider is returning no qualifying signals. Check:
+
+1. **Status panel:** Is `signal_provider_ready: true`? If not, the `StaticSignalProvider` stub is active — the S&P 500 screener service is not available.
+2. **Screener page:** Open the S&P 500 Screener page. If it shows no `Strong` / `Confirmed Rebound` rows, there are genuinely no qualifying candidates today.
+3. **Signal threshold:** Your `min_signal_strength` may be too high. The default is `100`, which only accepts the `Strong(100) / Confirmed Rebound` label.
+4. **Universe connectivity:** Run `python scripts/connection_test.py` to verify the IBKR connection is live.
+
+#### "Emergency stop is active but I did not trigger it"
+
+The `EMERGENCY_STOP` file may have been created by the risk monitoring system or a previous manual stop. Check and remove it:
+
+```bash
+ls -la EMERGENCY_STOP         # confirm it exists
+cat EMERGENCY_STOP            # read any message written to it
+rm EMERGENCY_STOP             # remove to re-enable
+```
+
+Then call `GET /api/autonomous/status` to confirm `emergency_stop_file_exists: false`.
+
+#### "Paper adapter not ready"
+
+This means either:
+
+1. You are not connected to the IBKR paper account (check that TWS is in Paper mode on port `7497`).
+2. TWS Robot is connected but the paper adapter failed to initialise — check the web server logs for a Python traceback.
+
+#### "Trade stuck in `EXIT_PENDING` for a long time"
+
+`EXIT_PENDING` means the exit order was submitted but a fill confirmation has not been received. This can happen when:
+
+- The limit price is away from the market (common for limit sells above the current price).
+- The paper account simulation has not matched the order yet.
+
+Check the **Positions** page for the exit order status. You can also cancel the pending exit order and let the exit manager re-evaluate on the next cycle.
+
+#### "Audit log is empty"
+
+If no cycles have been run today, the daily log file does not exist (it is created on the first write). Run a scan or propose call to generate the first entry.
+
+---
+
+### 11.16 Frequently Asked Questions
+
+**Q: Is autonomous trading the same as "set it and forget it"?**
+
+**A:** No. TWS Robot's autonomous module is a decision-support tool that requires active oversight. There is no background scheduler that triggers automatically — you (or a cron job you set up) must call `run_once` or use the dashboard button. This is intentional: the system is designed to remove execution friction, not human judgment.
+
+**Q: How many trades will it place per day?**
+
+**A:** At most `max_trades_per_day` (default: 1). The daily count persists across server restarts via the audit log. On days when the scanner finds no qualifying candidates, no trade is placed and the engine returns `no_candidate`.
+
+**Q: What happens if I have no deployable cash?**
+
+**A:** The engine returns `insufficient_cash` and records the rejection in the audit log. No order is placed. See [§10.1 Cash Availability](#101-cash-availability--deployable-capital) for how to interpret your deployable cash figure.
+
+**Q: Can I run it on non-S&P 500 stocks?**
+
+**A:** The `stock_universe` config currently only supports `sp500`. Support for other universes (e.g. STI, HKEX) is planned. You can use the `symbol_whitelist` option to restrict the scan to a custom subset of the S&P 500.
+
+**Q: What if my put gets assigned?**
+
+**A:** Assignment of a `SELL_CASH_SECURED_PUT` position is handled outside the autonomous module at this stage — it results in a long stock position in your IBKR account that you would manage manually. The trade store records the original put entry; no automatic management of an assigned position is currently implemented.
+
+**Q: Can I use it with a margin account?**
+
+**A:** The cash sizing logic (`required_cash = strike × 100 × contracts` for puts; `quantity × limit_price` for shares) assumes cash collateralisation, not margin. Using margin could lead to larger positions than intended. Ensure your `max_new_position_pct` limit reflects your actual risk appetite.
+
+**Q: How do I add my own signal provider?**
+
+**A:** Create a class implementing the `SignalProvider` protocol (a single `analyze(symbol: str) -> Optional[CandidateSignal]` method), then register it in your Flask app config:
+
+```python
+app.config["autonomous_signal_provider"] = MyCustomProvider()
+```
+
+The engine will use your provider instead of `TechnicalAnalysisSignalProvider`.
+
+**Q: Can I back-test the autonomous strategy?**
+
+**A:** Not directly via the Autonomous Trading module — the engine is designed for live/paper execution. However, you can replay your audit logs to analyse past decisions, or wire the technical analysis signal conditions into the main **Backtest** module to simulate the `Strong(100) / Confirmed Rebound` entry criteria historically.
+
+---
+
+## 12. Order Management
 
 ### Viewing Orders
 
@@ -810,7 +1592,7 @@ The order passes through the same risk and emergency-stop gates as strategy-gene
 
 ---
 
-## 12. Command-Line Tools
+## 13. Command-Line Tools
 
 All scripts live in the `scripts/` directory. Run them from the project root with your virtual environment activated.
 
@@ -846,7 +1628,7 @@ python tws_client.py --skip-market-check  # Skip market hours check
 
 ---
 
-## 13. Your Weekly Routine
+## 14. Your Weekly Routine
 
 ### Daily (5 minutes)
 
@@ -886,7 +1668,7 @@ When in doubt, stop first and investigate.
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 ### "ModuleNotFoundError: No module named 'backtest'"
 
@@ -952,7 +1734,7 @@ More help:
 
 ---
 
-## 15. Frequently Asked Questions
+## 16. Frequently Asked Questions
 
 ### Do I need to know how to code?
 
