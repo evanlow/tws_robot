@@ -122,11 +122,30 @@ Then open `.env` in any text editor and fill in your values:
 | `LIVE_ACCOUNT` | *(your ID)* | Your IB live account number |
 | `LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `TWS_ADMIN_USERNAME` | `admin` | Web dashboard login username |
-| `TWS_ADMIN_PASSWORD` | `changeme` | Web dashboard login password |
+| `TWS_ADMIN_PASSWORD` | `changeme` | Web dashboard login password (plain-text; hashed at startup) |
+| `TWS_ADMIN_PASSWORD_HASH` | *(unset)* | Pre-hashed bcrypt/PBKDF2 password — takes priority over `TWS_ADMIN_PASSWORD` |
+| `ALLOW_DEFAULT_PASSWORD` | `false` | Set to `true` in local dev to suppress the insecure-default-password warning |
 | `SECRET_KEY` | *(random)* | Flask session secret — **change in production** |
 | `OPENAI_API_KEY` | *(unset)* | Your OpenAI API key — required to enable AI features |
 | `OPENAI_MODEL` | `gpt-4o` | OpenAI model used for AI chat and insights |
+| `AI_ENABLED` | *(auto)* | Explicitly force AI on (`true`) or off (`false`); defaults to enabled when `OPENAI_API_KEY` is set |
 | `LOGIN_DISABLED` | *(unset)* | Set to `true` to bypass auth in local development |
+| `ENVIRONMENT` | *(unset)* | Set to `production` to enforce strict security checks (e.g. `SECRET_KEY` required) |
+| `AUTONOMOUS_RUNNER_ENABLED` | `false` | Set to `true` to allow the autonomous paper-trading runner to open/close positions automatically |
+| `DATABASE_URL` | *(SQLite)* | SQLAlchemy connection string; defaults to a local SQLite file when unset |
+| `FX_DATA_MODE` | `not_configured` | FX research data source: `not_configured`, `demo`, or `live_research` |
+| `FX_PROVIDER` | `yfinance` | FX data provider library (currently only `yfinance` is supported) |
+| `FX_PROVIDER_TIMEOUT_SECONDS` | `10` | HTTP timeout in seconds for FX provider requests |
+| `EMERGENCY_STOP_FILE` | `EMERGENCY_STOP` | Path to the emergency-stop sentinel file; trading halts when this file exists |
+| `DISCLAIMER_ACCEPTANCE_FILE` | `disclaimer_acceptance.json` | Path to the disclaimer acceptance record |
+| `STRATEGY_DB_PATH` | `strategy_lifecycle.db` | Path to the strategy lifecycle SQLite database |
+| `CASH_RESERVE_MODE` | `gross_assignment` | Cash reserve calculation method: `gross_assignment`, `net_premium`, or `broker_margin` |
+| `MANUAL_CASH_BUFFER_PCT` | `0.05` | Fraction of cash balance kept as an untouched buffer (e.g. `0.10` = 10 %) |
+| `MANUAL_CASH_BUFFER_AMOUNT` | `0` | Fixed dollar amount kept as an untouched buffer (larger of this or `MANUAL_CASH_BUFFER_PCT` applies) |
+| `OPTION_CONTRACT_MULTIPLIER_DEFAULT` | `100` | Default option-contract multiplier when not available from position data |
+| `ENABLE_CASH_AVAILABILITY_GUARD` | `true` | Enable the deployable-cash safety guard |
+| `BLOCK_AUTOMATED_TRADING_IF_UNCOVERED_SHORT_CALL` | `true` | Block automated trades when an uncovered short call is detected |
+| `BLOCK_AUTOMATED_TRADING_IF_DEPLOYABLE_CASH_NEGATIVE` | `true` | Block automated trades when deployable cash is negative |
 
 > 💡 **Tip:** Never commit your `.env` file to version control. It is already in `.gitignore`.
 
