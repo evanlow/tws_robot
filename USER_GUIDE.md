@@ -821,7 +821,7 @@ Every autonomous cycle follows the same five-stage pipeline:
 | Stage | What Happens |
 |-------|-------------|
 | **Scanner** | Iterates over the configured stock universe (default: S&P 500). For each symbol, calls the active `SignalProvider` to retrieve a `CandidateSignal`. Symbols without a signal are skipped. |
-| **Ranker** | Applies hard filters (signal strength, label, volume, trend, earnings proximity, concentration limits). Surviving candidates are scored and sorted — the one closest to support with the most room to resistance and the highest strength score wins. |
+| **Ranker** | Applies hard filters (signal strength, label, volume, trend, earnings proximity, concentration limits). Surviving candidates are scored and sorted — `strength_score` dominates, and support/resistance bonuses apply only when those fields are present. With the current `TechnicalAnalysisSignalProvider`, those fields are `null`, so ranking effectively falls back to strength score. |
 | **Planner** | Given the top-ranked candidate plus your deployable cash, decides between `BUY_SHARES` (limit order for shares) and `SELL_CASH_SECURED_PUT` (cash-secured put, if option chain data is available and strike is at-or-below support). Produces a `TradePlan` with exact quantities, limit price, target, and stop. |
 | **Engine** | Validates the `TradePlan` against safety gates: emergency stop, daily trade limit, account equity checks, and the optional `RiskManager`. Returns a structured `AutonomousDecision` (approved or rejected with reasons). |
 | **Adapter** | In `PAPER_EXECUTE` mode, sends the order to the paper account via `AutonomousPaperAdapter`. In `RECOMMEND_ONLY` mode, the adapter is never called — the decision is returned as a recommendation only. |
@@ -832,13 +832,13 @@ The **ExitManager** runs as a separate pass over open autonomous trades. It chec
 
 ### 11.3 Operating Modes
 
-The autonomous engine has three operating modes. Switch between them in the dashboard or via the API.
+The autonomous engine has three operating modes. The dashboard shows the currently configured mode, but it does not persist mode changes at runtime. Over HTTP, `scan`/`propose` always run in `recommend_only`, `execute-paper`/`runner/*` are paper-only paths, and `assisted_live` is intentionally only reachable by calling the engine directly in code.
 
 | Mode | What the Engine Does | Orders Placed? |
 |------|---------------------|---------------|
 | `recommend_only` | Runs the full pipeline and returns a `TradePlan`, but never calls the execution adapter. Safe to run at any time. | ❌ Never |
 | `paper_execute` | Runs the full pipeline **and** sends limit orders to your IBKR paper account via `AutonomousPaperAdapter`. Requires an active paper connection. | ✅ Paper only |
-| `assisted_live` | May submit to your live account, **but only** when `allow_live_execution = True` is set in config **and** the API call explicitly passes `confirm = True`. | ✅ Live (opt-in) |
+| `assisted_live` | May submit to your live account, **but only** when `allow_live_execution = True` is set in config **and** your code calls `engine.run_once(confirm=True)`. This mode is not exposed as an HTTP endpoint. | ✅ Live (opt-in) |
 
 **Start with `recommend_only`.** Review several cycles of recommendations before ever enabling paper execution. Paper trade for at least 30 days before considering `assisted_live`.
 
@@ -876,9 +876,9 @@ Layer 4 — Mode gate
 - Click the red **Emergency Stop** button from any page in the dashboard.
 - Touch `EMERGENCY_STOP` file: `touch EMERGENCY_STOP` (or delete it to re-enable).
 - Call the API: `POST /api/autonomous/emergency-stop`.
-- Call the shared endpoint: `POST /api/emergency/stop`.
+- Call the shared endpoint: `POST /api/emergency/halt`.
 
-The autonomous engine checks for this file at the start of every cycle and the exit manager checks it before evaluating every open trade. The moment the file exists, no new orders are placed and no exits are submitted.
+The autonomous engine checks for this file at the start of every cycle and the exit manager checks it before evaluating every open trade. Once active, no new entries are placed, and the exit manager treats it as a `RISK_EXIT` trigger — submitting a paper exit when a current price is available, or leaving the trade `OPEN` and retrying on the next cycle when price data is unavailable.
 
 ---
 
@@ -891,7 +891,7 @@ Before running autonomous trading in any mode:
 | TWS Robot fully installed and running (`python scripts/run_web.py`) | All modes |
 | Interactive Brokers TWS open and connected | Paper and live modes |
 | TWS Paper account connected (port `7497`) | `paper_execute` mode |
-| `AUTONOMOUS_RUNNER_ENABLED=true` in `.env` (or set in app config) | `paper_execute` mode |
+| `AUTONOMOUS_RUNNER_ENABLED=true` in `.env` (or set in app config) | `/api/autonomous/runner/*` endpoints only |
 | Sustained paper trading success over 30+ days | Live mode only |
 | `allow_live_execution = True` explicitly set in config | Live mode only |
 | Minimum $1,000 deployable cash (configurable) | Paper and live modes |
@@ -934,9 +934,9 @@ Review the plan carefully. The plan is a recommendation only; nothing has been s
 
 When you are comfortable with the recommendations after several cycles:
 
-1. Add `AUTONOMOUS_RUNNER_ENABLED=true` to your `.env` file and restart the web server.
-2. On the **Autonomous Trading** dashboard, confirm all readiness gates are green.
-3. Click **Execute Paper Trade**. The system calls `POST /api/autonomous/runner/run-once-paper`, which places a limit order on your IBKR paper account after passing all readiness gates.
+1. On the **Autonomous Trading** dashboard, confirm you are connected to the IBKR paper account and the paper adapter is ready.
+2. Click **Execute Paper Trade**. The dashboard shows a confirmation modal and then calls `POST /api/autonomous/execute-paper`, which submits through the configured paper adapter.
+3. If you want the extra runner gates (`runner_enabled`, open-trade limit, etc.), enable `AUTONOMOUS_RUNNER_ENABLED=true` and use the separate **Paper Robot Runner** controls.
 4. Monitor the trade on the **Autonomous Trades** panel — status will progress from `OPEN` through to `CLOSED` as the exit manager evaluates your position each cycle.
 
 ---
@@ -985,13 +985,13 @@ These settings control the paper-only runner that wraps the engine with addition
 | `avoid_last_minutes_before_close` | `15` | — | Reserved: minutes before market close to skip |
 | `trade_store_path` | `logs/autonomous_trades.jsonl` | — | Path to the trade lifecycle store (JSONL) |
 
-**To enable paper execution**, add this to your `.env`:
+**To enable the Paper Robot Runner**, add this to your `.env`:
 
 ```bash
 AUTONOMOUS_RUNNER_ENABLED=true
 ```
 
-Restart the web server for the change to take effect. All other defaults remain safely conservative.
+Restart the web server for the change to take effect. This opt-in gates `/api/autonomous/runner/*` only; a confirmed `POST /api/autonomous/execute-paper` call can still execute a paper trade without it. All other defaults remain safely conservative.
 
 ---
 
@@ -1037,6 +1037,8 @@ After the scanner collects signals, the **Ranker** applies filters and scoring:
 | Signal strength | Dominant | `score = strength_score` (base) |
 | Proximity to support | Up to +0.20 | Price closer to support = higher score; price at or below support scores maximum |
 | Room to resistance | Up to +0.30 | Larger gap between current price and resistance = higher score |
+
+When `support_price` / `resistance_price` are missing, those two bonuses are skipped and ranking falls back to `strength_score`. That is the current runtime behavior with `TechnicalAnalysisSignalProvider`.
 
 Rejected candidates and their rejection reasons are visible in the **Audit Log** and on the dashboard's **Rejected Candidates** panel — useful for understanding what the engine considered and why it passed.
 
@@ -1109,10 +1111,10 @@ The exit manager evaluates every `OPEN` trade on each cycle. It will submit a pa
 
 | Exit Type | Trigger | Priority |
 |-----------|---------|----------|
-| `TAKE_PROFIT` | `current_price >= target_price` | Checked first |
-| `STOP_LOSS` | `current_price <= stop_price` | Checked second |
-| `TIME_EXIT` | Position has been open for ≥ `max_holding_days` calendar days | Checked third |
-| `RISK_EXIT` | Emergency stop file exists **or** the `RiskManager` raises a risk flag | Checked fourth |
+| `RISK_EXIT` | Emergency stop file exists **or** the `RiskManager` raises a risk flag | Checked first |
+| `TIME_EXIT` | Position has been open for ≥ `max_holding_days` calendar days | Checked second |
+| `TAKE_PROFIT` | `current_price >= target_price` | Checked third |
+| `STOP_LOSS` | `current_price <= stop_price` | Checked fourth |
 
 **Important safety rule:** The exit manager **never guesses prices**. If a live price is unavailable for any reason (including during a `RISK_EXIT`), the trade stays `OPEN` and a `NO_PRICE_AVAILABLE` note is written to the audit log. The exit will be attempted again on the next cycle when live data is available.
 
@@ -1128,7 +1130,7 @@ On restart, the runner replays this log to reconstruct the full current state of
 To view all trades:
 
 ```http
-GET /api/autonomous/trades
+GET /api/autonomous/runner/trades
 ```
 
 ---
@@ -1157,9 +1159,9 @@ A single ❌ gate prevents paper execution from proceeding. The reasons list tel
 
 | Button | What Happens |
 |--------|-------------|
-| **Scan Universe** | Runs the scanner and ranker; returns ranked candidates and rejected symbols with reasons. No trade planned, no order placed. |
+| **Scan Universe** | Runs a full recommend-only engine pass; the response returns ranked candidates and rejected symbols with reasons. A trade plan may still be computed internally, but no order is placed and the `/scan` response does not include the plan. |
 | **Propose Trade** | Runs the full pipeline (scan → rank → plan); returns a complete `TradePlan`. No order placed. |
-| **Execute Paper Trade** | Runs the full pipeline and submits the order to your IBKR paper account. Requires all readiness gates to be green and `runner_enabled = True`. |
+| **Execute Paper Trade** | Runs the full pipeline and submits the order to your IBKR paper account through `/api/autonomous/execute-paper` after a confirmation modal. It requires a paper connection and configured paper adapter, but does **not** enforce the separate Paper Robot Runner gates. |
 
 #### Open Trades Panel
 
@@ -1202,28 +1204,36 @@ Returns the current configuration, emergency stop state, signal provider status,
 
 #### `POST /api/autonomous/scan`
 
-Runs the scanner and ranker (no trade planning, no order). Returns candidates and rejections.
+Runs a full recommend-only engine pass. The engine may still compute a trade plan internally, but the `/scan` response returns only the shortlist and rejected candidates; no order is placed.
 
 **Request body (all optional):**
 ```json
 {
-  "config_overrides": {
-    "min_signal_strength": 100,
-    "required_signal_label": "Confirmed Rebound"
-  }
+  "min_signal_strength": 100,
+  "required_signal_label": "Confirmed Rebound"
 }
 ```
 
 **Response:**
 ```json
 {
-  "status": "ok",
-  "candidates": [
-    { "symbol": "AAPL", "score": 100.25, "strength_score": 100, "signal_label": "Confirmed Rebound" }
+  "status": "recommended",
+  "shortlist": [
+    {
+      "candidate": {
+        "symbol": "AAPL",
+        "strength_score": 100,
+        "signal_label": "Confirmed Rebound"
+      },
+      "score": 100.0,
+      "reasons": ["strength_score=100", "signal_label=Confirmed Rebound"]
+    }
   ],
-  "rejected": [
+  "rejected_candidates": [
     { "symbol": "TSLA", "reason": "earnings within 7 days" }
-  ]
+  ],
+  "deployable_cash": 10000.0,
+  "rejection_reason": null
 }
 ```
 
@@ -1233,27 +1243,37 @@ Runs the full pipeline in `recommend_only` mode — returns a complete `TradePla
 
 **Request body (all optional):**
 ```json
-{ "config_overrides": { "max_new_position_pct": 0.08 } }
+{ "max_new_position_pct": 0.08 }
 ```
 
 **Response:**
 ```json
 {
-  "status": "proposed",
-  "decision": {
-    "status": "recommended",
-    "candidate": { "symbol": "AAPL", "last_price": 182.50 },
-    "plan": {
-      "symbol": "AAPL",
-      "trade_type": "BUY_SHARES",
-      "action": "BUY",
-      "quantity": 54,
-      "limit_price": 182.00,
-      "target_price": 196.00,
-      "stop_price": 170.00,
-      "required_cash": 9828.00
-    }
-  }
+  "status": "recommended",
+  "mode": "recommend_only",
+  "timestamp": "2026-06-02T09:00:00+00:00",
+  "rejection_reason": null,
+  "deployable_cash": 10000.0,
+  "shortlist": [],
+  "rejected_candidates": [],
+  "selected": {
+    "candidate": { "symbol": "AAPL", "last_price": 182.5 },
+    "score": 100.0,
+    "reasons": ["strength_score=100", "signal_label=Confirmed Rebound"]
+  },
+  "trade_plan": {
+    "symbol": "AAPL",
+    "trade_type": "BUY_SHARES",
+    "action": "BUY",
+    "quantity": 54,
+    "limit_price": 182.0,
+    "target_price": 196.0,
+    "stop_price": 170.0,
+    "required_cash": 9828.0
+  },
+  "risk_check": null,
+  "order_id": null,
+  "notes": ["recommend_only mode — no order placed"]
 }
 ```
 
@@ -1261,10 +1281,12 @@ Runs the full pipeline in `recommend_only` mode — returns a complete `TradePla
 
 Runs the engine directly in `paper_execute` mode — hardcoded; the mode cannot be overridden. Submits a limit order to the IBKR paper account via the configured `AutonomousPaperAdapter`. This endpoint bypasses the runner's readiness gates (see `runner/run-once-paper` below for the fully-gated version).
 
-Requires an active paper connection and a configured paper adapter. Returns `EXECUTION_FAILED` (not an HTTP error) if the adapter is absent.
+Requires an active paper connection and a configured paper adapter. Returns `execution_failed` (not an HTTP error) if the adapter is absent.
 
-```json
+```http
 POST /api/autonomous/execute-paper
+Content-Type: application/json
+
 { "confirm": true }
 ```
 
@@ -1294,13 +1316,23 @@ Requires:
 **Response (gate failure):**
 ```json
 {
-  "status": "rejected",
-  "rejection_reason": "not_paper_mode",
+  "status": "not_paper_mode",
+  "rejection_reason": "Not connected to paper account",
   "gates": {
     "connected": true,
     "paper_mode": false,
+    "paper_adapter_ready": true,
+    "signal_provider_ready": true,
+    "emergency_stop_active": false,
+    "runner_enabled": true,
+    "open_autonomous_trades": 0,
+    "max_open_autonomous_trades": 1,
+    "ready": false,
     "reasons": ["Not connected to paper account"]
-  }
+  },
+  "decision": null,
+  "trade": null,
+  "notes": []
 }
 ```
 
@@ -1346,9 +1378,9 @@ Manually triggers the exit manager to evaluate all open trades. Returns a list o
 
 Returns the runner's readiness gates snapshot — useful for programmatic health checks.
 
-#### Allowed `config_overrides` Fields
+#### Allowed Top-Level Request Override Fields
 
-Only the following fields are accepted in request bodies to prevent privilege escalation:
+Only the following top-level JSON fields are accepted in request bodies to prevent privilege escalation. There is no nested `config_overrides` wrapper:
 
 | Field | Type | Notes |
 |-------|------|-------|
