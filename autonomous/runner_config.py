@@ -51,9 +51,8 @@ class AutonomousRunnerConfig:
     max_open_autonomous_trades: int = 1
     max_holding_days: int = 5
 
-    # ---- Market-hours guard rails (advisory; runner does not enforce
-    # them itself unless ``run_during_market_hours_only`` is True and a
-    # market-hours checker is provided to the runner) -------------------
+    # ---- Market-hours guard rails (informational; not currently enforced
+    # by the runner — these fields are reserved for future use) ----------
     run_during_market_hours_only: bool = True
     avoid_first_minutes_after_open: int = 15
     avoid_last_minutes_before_close: int = 15

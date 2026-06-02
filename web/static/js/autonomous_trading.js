@@ -615,7 +615,7 @@
       } else {
         open.forEach((t) => {
           const tr = document.createElement('tr');
-          tr.innerHTML = [
+          [
             t.autonomous_trade_id || '',
             t.symbol || '',
             t.quantity != null ? t.quantity : '',
@@ -624,7 +624,11 @@
             fmtMoney(t.stop_price),
             t.status || '',
             t.entry_order_id != null ? t.entry_order_id : '',
-          ].map((c) => '<td>' + c + '</td>').join('');
+          ].forEach((c) => {
+            const td = document.createElement('td');
+            td.textContent = String(c);
+            tr.appendChild(td);
+          });
           openBody.appendChild(tr);
         });
       }
@@ -639,7 +643,7 @@
       } else {
         combined.forEach((t) => {
           const tr = document.createElement('tr');
-          tr.innerHTML = [
+          [
             t.autonomous_trade_id || '',
             t.symbol || '',
             t.quantity != null ? t.quantity : '',
@@ -647,7 +651,11 @@
             t.exit_reason || '',
             fmtMoney(t.exit_price),
             fmtMoney(t.realised_pnl),
-          ].map((c) => '<td>' + c + '</td>').join('');
+          ].forEach((c) => {
+            const td = document.createElement('td');
+            td.textContent = String(c);
+            tr.appendChild(td);
+          });
           closedBody.appendChild(tr);
         });
       }
@@ -664,21 +672,24 @@
     }
     decisions.forEach((d) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = [
+      [
         d.symbol || '',
         d.decision || '',
         d.reason || '',
         fmtMoney(d.price),
         d.exit_order_id != null ? d.exit_order_id : '',
-      ].map((c) => '<td>' + c + '</td>').join('');
+      ].forEach((c) => {
+        const td = document.createElement('td');
+        td.textContent = String(c);
+        tr.appendChild(td);
+      });
       body.appendChild(tr);
     });
   }
 
   async function refreshRunnerStatus() {
     try {
-      const resp = await fetch('/api/autonomous/runner/status', { credentials: 'same-origin' });
-      const body = await resp.json();
+      const body = await getJson('/api/autonomous/runner/status');
       renderRunnerGates(body);
     } catch (err) {
       setRunnerFeedback('Failed to load runner status: ' + err.message, 'error');
@@ -687,8 +698,7 @@
 
   async function refreshAutonomousTrades() {
     try {
-      const resp = await fetch('/api/autonomous/runner/trades', { credentials: 'same-origin' });
-      const body = await resp.json();
+      const body = await getJson('/api/autonomous/runner/trades');
       renderAutonomousTrades(body);
     } catch (err) {
       setRunnerFeedback('Failed to load autonomous trades: ' + err.message, 'error');

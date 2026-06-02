@@ -557,7 +557,7 @@ def runner_status():
     return jsonify({
         "runner_config": runner.config.to_dict(),
         "gates": gates.to_dict(),
-        "open_autonomous_trades": runner.trade_store.count_open(),
+        "open_autonomous_trades": gates.open_autonomous_trades,
     })
 
 
