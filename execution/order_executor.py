@@ -60,6 +60,7 @@ class OrderStatus(str, Enum):
     BLOCKED = "BLOCKED"  # Blocked by risk manager
     CANCELLED = "CANCELLED"  # User cancelled
     FILLED = "FILLED"  # Execution complete
+    DRY_RUN = "DRY_RUN"  # Order previewed but not submitted (dry-run mode)
 
 
 class RejectionReason(str, Enum):
@@ -73,6 +74,60 @@ class RejectionReason(str, Enum):
     PRICE_SANITY_FAILED = "Price sanity check failed"
     PORTFOLIO_MISMATCH = "Portfolio state mismatch"
     CONFIRMATION_DENIED = "User denied confirmation"
+    LIVE_TRADING_DISABLED = "Live trading is disabled (application setting OFF)"
+    LIVE_CONFIRMATION_MISSING = "Live trading session not confirmed"
+    LIVE_ENV_MISMATCH = "Live environment/account/mode mismatch"
+
+
+@dataclass
+class LiveTradingConfirmation:
+    """
+    Per-session live-trading confirmation tuple.
+
+    All four values must agree with the adapter/account before any live
+    order is permitted to leave :class:`OrderExecutor`.  The intent is to
+    make it impossible to "accidentally" send a real order: the operator
+    must have already enabled live trading at the application level *and*
+    confirmed the specific session by supplying this token.
+
+    Attributes:
+        environment: ``"live"`` (rejected otherwise).
+        account_id: IBKR account number the order targets.
+        port: TWS socket port (used to cross-check the live ports).
+        confirmed_by: Free-form identifier of the confirming operator/user.
+    """
+
+    environment: str
+    account_id: str
+    port: int
+    confirmed_by: str
+
+    def matches_adapter(self, adapter) -> Tuple[bool, str]:
+        """Return ``(ok, reason)`` describing whether this confirmation
+        matches the supplied TWS adapter."""
+        if (self.environment or "").lower() != "live":
+            return False, f"confirmation environment={self.environment!r} is not 'live'"
+        if not hasattr(adapter, "environment"):
+            return False, "adapter is missing required 'environment' attribute"
+        adapter_env = getattr(adapter, "environment", None)
+        if (adapter_env or "").lower() != "live":
+            return False, (
+                f"adapter environment={adapter_env!r} does not match "
+                f"confirmation environment='live'"
+            )
+        if not hasattr(adapter, "port"):
+            return False, "adapter is missing required 'port' attribute"
+        adapter_port = getattr(adapter, "port", None)
+        if adapter_port != self.port:
+            return False, (
+                f"adapter port={adapter_port} does not match "
+                f"confirmation port={self.port}"
+            )
+        if not self.account_id:
+            return False, "confirmation account_id is empty"
+        if not self.confirmed_by:
+            return False, "confirmation confirmed_by is empty"
+        return True, ""
 
 
 @dataclass
@@ -121,6 +176,17 @@ class OrderResult:
             reason=reason
         )
 
+    @classmethod
+    def dry_run(cls, signal: Signal, quantity: int, price: float):
+        """Order previewed in dry-run mode (no TWS call)."""
+        return cls(
+            status=OrderStatus.DRY_RUN,
+            signal=signal,
+            quantity=quantity,
+            price=price,
+            reason="Dry-run preview only — order NOT submitted",
+        )
+
 
 class OrderExecutor:
     """
@@ -155,40 +221,84 @@ class OrderExecutor:
         risk_manager: RiskManager,
         is_live_mode: bool = False,
         require_confirmation: bool = True,
-        emergency_stop_file: str = "EMERGENCY_STOP"
+        emergency_stop_file: str = "EMERGENCY_STOP",
+        dry_run: bool = False,
+        live_trading_enabled: bool = False,
+        live_confirmation: Optional["LiveTradingConfirmation"] = None,
+        expected_account_id: Optional[str] = None,
     ):
         """
         Initialize order executor.
         
         Args:
-            tws_adapter: PaperTradingAdapter or live TWS connection
-            risk_manager: RiskManager instance for validation
-            is_live_mode: True if trading with real money
-            require_confirmation: Require explicit confirmation for live orders
-            emergency_stop_file: Path to emergency stop file
+            tws_adapter: TwsTradingAdapter (paper or live) or live TWS connection.
+            risk_manager: RiskManager instance for validation.
+            is_live_mode: True if trading with real money.
+            require_confirmation: Require explicit per-order confirmation in
+                live mode (in addition to the session-level confirmation).
+            emergency_stop_file: Path to emergency stop file.
+            dry_run: If True, all signals are previewed and audited but no
+                orders are sent to TWS.  Returned status is
+                :data:`OrderStatus.DRY_RUN`.  Enables end-to-end live-mode
+                rehearsal without placing real orders.
+            live_trading_enabled: Application-level "live trading enable"
+                switch.  Must be True in live mode or every live order is
+                rejected.  Defaults to ``False`` so live trading is OFF by
+                default.
+            live_confirmation: Per-session confirmation tuple (see
+                :class:`LiveTradingConfirmation`).  Required in live mode
+                when ``dry_run=False``.
+            expected_account_id: Optional account ID that must match
+                ``live_confirmation.account_id`` when supplied (used by
+                callers that resolve the account from environment config).
         """
         self.tws_adapter = tws_adapter
         self.risk_manager = risk_manager
         self.is_live_mode = is_live_mode
         self.require_confirmation = require_confirmation and is_live_mode
         self.emergency_stop_file = Path(emergency_stop_file)
-        
+        self.dry_run = bool(dry_run)
+        self.live_trading_enabled = bool(live_trading_enabled)
+        self.live_confirmation = live_confirmation
+        self.expected_account_id = expected_account_id
+
+        # Pre-validate the live-confirmation tuple at construction time so
+        # configuration errors surface before the first signal arrives.
+        if is_live_mode and not self.dry_run:
+            ok, reason = self._validate_live_session()
+            if not ok:
+                # Don't raise — keep the executor usable so audit logging
+                # still records the rejections, but log the configuration
+                # error loudly.
+                logger.error(
+                    "Live executor configuration is INVALID; live orders "
+                    "will be rejected until fixed: %s",
+                    reason,
+                )
+
         # State tracking
         self.orders_submitted = 0
         self.orders_rejected = 0
         self.orders_blocked = 0
+        self.orders_dry_run = 0
         
         # Audit trail
         self.order_history: list[OrderResult] = []
         
         mode = "LIVE" if is_live_mode else "PAPER"
+        if self.dry_run:
+            mode = f"{mode} (DRY-RUN)"
         logger.warning(f"OrderExecutor initialized in {mode} MODE")
         logger.info(f"  Risk validation: ENABLED")
         logger.info(f"  Confirmation required: {self.require_confirmation}")
+        logger.info(f"  Live trading enabled (app switch): {self.live_trading_enabled}")
+        logger.info(f"  Dry-run mode: {self.dry_run}")
         logger.info(f"  Emergency stop file: {self.emergency_stop_file}")
-        
-        if is_live_mode:
+
+        if is_live_mode and not self.dry_run:
             logger.warning("⚠️  LIVE MODE - REAL MONEY AT RISK ⚠️")
+        elif is_live_mode and self.dry_run:
+            logger.warning("LIVE MODE in DRY-RUN — no orders will be submitted")
     
     def execute_signal(
         self,
@@ -212,7 +322,61 @@ class OrderExecutor:
             OrderResult with status and reason
         """
         logger.info(f"Processing signal from {strategy_name}: {signal.signal_type.value} {signal.symbol}")
-        
+        # Audit-log every signal we receive *before* any check, so the trail
+        # captures every approval/risk decision that follows.
+        self._audit_event(
+            event="SIGNAL_RECEIVED",
+            strategy_name=strategy_name,
+            signal=signal,
+            detail=(
+                f"qty={signal.quantity} price={signal.target_price} "
+                f"strength={getattr(signal.strength, 'value', signal.strength)}"
+            ),
+        )
+
+        adapter_env = (getattr(self.tws_adapter, "environment", "") or "").lower()
+        if adapter_env == "live" and not self.is_live_mode:
+            result = OrderResult.rejected(
+                RejectionReason.LIVE_ENV_MISMATCH,
+                signal,
+                "adapter environment='live' but executor is_live_mode=False",
+            )
+            self._record_order(result)
+            self._audit_log(result, strategy_name)
+            logger.error(
+                "❌ Live adapter configured while executor is in paper mode "
+                "(is_live_mode=False) — order rejected"
+            )
+            return result
+
+        # === SAFETY CHECK 0: Live-mode environment / account / mode gate ===
+        # Must precede every other check so a misconfigured live executor
+        # cannot place orders even if all downstream checks would approve.
+        if self.is_live_mode and not self.dry_run:
+            if not self.live_trading_enabled:
+                result = OrderResult.rejected(
+                    RejectionReason.LIVE_TRADING_DISABLED,
+                    signal,
+                    "Application-level live trading switch is OFF",
+                )
+                self._record_order(result)
+                self._audit_log(result, strategy_name)
+                logger.error("❌ Live trading switch is OFF — order rejected")
+                return result
+
+            ok, reason = self._validate_live_session()
+            if not ok:
+                rejection = (
+                    RejectionReason.LIVE_CONFIRMATION_MISSING
+                    if self.live_confirmation is None
+                    else RejectionReason.LIVE_ENV_MISMATCH
+                )
+                result = OrderResult.rejected(rejection, signal, reason)
+                self._record_order(result)
+                self._audit_log(result, strategy_name)
+                logger.error(f"❌ Live session validation failed: {reason}")
+                return result
+
         # === SAFETY CHECK 1: Emergency Stop ===
         if self._check_emergency_stop():
             stop_detail = (
@@ -257,8 +421,19 @@ class OrderExecutor:
             result = OrderResult.blocked(risk_reason, signal)
             self._record_order(result)
             self.orders_blocked += 1
+            self._audit_event(
+                event="RISK_CHECK_BLOCKED",
+                strategy_name=strategy_name,
+                signal=signal,
+                detail=risk_reason,
+            )
             logger.warning(f"⚠️  Order blocked by risk manager: {risk_reason}")
             return result
+        self._audit_event(
+            event="RISK_CHECK_PASSED",
+            strategy_name=strategy_name,
+            signal=signal,
+        )
         
         # === SAFETY CHECK 4: Portfolio Reconciliation ===
         if not self._reconcile_portfolio(positions):
@@ -293,6 +468,29 @@ class OrderExecutor:
                 logger.info("User cancelled order")
                 return result
         
+        # === ALL CHECKS PASSED ===
+        # In dry-run mode we stop here: log the would-be order to the audit
+        # trail and return a DRY_RUN result without calling the TWS adapter.
+        # This is the end-to-end live-mode rehearsal path required by the
+        # acceptance criteria.
+        if self.dry_run:
+            result = OrderResult.dry_run(
+                signal=signal,
+                quantity=signal.quantity or 0,
+                price=signal.target_price or 0.0,
+            )
+            self._record_order(result)
+            self.orders_dry_run += 1
+            self._audit_log(result, strategy_name)
+            logger.warning(
+                "🟡 DRY-RUN: %s %s x%s @ %s — order NOT submitted",
+                signal.signal_type.value,
+                signal.symbol,
+                signal.quantity,
+                signal.target_price,
+            )
+            return result
+
         # === ALL CHECKS PASSED - Execute Order ===
         return self._place_order(signal, strategy_name)
     
@@ -304,6 +502,32 @@ class OrderExecutor:
             True if emergency stop file exists OR risk manager flag is set
         """
         return self.emergency_stop_file.exists() or self.risk_manager.emergency_stop_active
+
+    def _validate_live_session(self) -> Tuple[bool, str]:
+        """
+        Validate the live-trading session: environment, account, port, and
+        per-session confirmation must all line up before any live order is
+        permitted.  Called both from ``__init__`` (early config check) and
+        from ``execute_signal`` (per-order gate).
+
+        Returns:
+            ``(ok, reason)`` — ``ok=True`` means it is safe to send live
+            orders; ``ok=False`` carries a human-readable rejection reason.
+        """
+        if self.live_confirmation is None:
+            return False, "No per-session LiveTradingConfirmation supplied"
+        ok, reason = self.live_confirmation.matches_adapter(self.tws_adapter)
+        if not ok:
+            return False, reason
+        if (
+            self.expected_account_id
+            and self.live_confirmation.account_id != self.expected_account_id
+        ):
+            return False, (
+                f"confirmation account_id={self.live_confirmation.account_id!r} "
+                f"does not match expected {self.expected_account_id!r}"
+            )
+        return True, ""
     
     def _validate_signal(self, signal: Signal) -> bool:
         """
@@ -508,6 +732,41 @@ class OrderExecutor:
                 f.write(f"{result.quantity} | ")
                 f.write(f"${result.price:.2f} | ")
             f.write(f"{result.reason or 'Success'}\n")
+
+    def _audit_event(
+        self,
+        event: str,
+        strategy_name: str,
+        signal: Optional[Signal] = None,
+        detail: str = "",
+    ) -> None:
+        """Write a non-order audit event (signal received, risk-check
+        outcome, etc.) to the same daily audit log used for orders.
+
+        Keeps the audit trail complete for every signal-approval-risk-check
+        decision, not only the final submit/reject outcome.
+        """
+        try:
+            log_file = Path('logs') / f'order_audit_{datetime.now().strftime("%Y%m%d")}.log'
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            mode_tag = "LIVE" if self.is_live_mode else "PAPER"
+            if self.dry_run:
+                mode_tag += "/DRY"
+            with open(log_file, 'a') as f:
+                f.write(f"{datetime.now().isoformat()} | ")
+                f.write(f"{strategy_name} | ")
+                f.write(f"EVENT:{event} | ")
+                f.write(f"{mode_tag} | ")
+                if signal is not None:
+                    sig_type = getattr(signal.signal_type, "value", signal.signal_type)
+                    f.write(f"{sig_type} | {signal.symbol} | ")
+                f.write(f"{detail}\n")
+        except OSError:
+            logger.exception(
+                "Audit event logging failed (event=%s, strategy=%s); continuing execution",
+                event,
+                strategy_name,
+            )
     
     def validate_manual_order(
         self,
@@ -590,6 +849,7 @@ class OrderExecutor:
             'submitted': self.orders_submitted,
             'rejected': self.orders_rejected,
             'blocked': self.orders_blocked,
+            'dry_run': self.orders_dry_run,
             'rejection_rate': self.orders_rejected / total if total > 0 else 0,
             'block_rate': self.orders_blocked / total if total > 0 else 0
         }

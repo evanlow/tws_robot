@@ -41,6 +41,10 @@ def mock_tws_adapter():
     adapter.sell = Mock(return_value=12346)
     adapter.close_position = Mock(return_value=12347)
     adapter.get_all_positions = Mock(return_value={})
+    # Mark as a live-capable adapter for the new env/port safety gate;
+    # the per-test live fixture explicitly switches this to "live" below.
+    adapter.environment = "paper"
+    adapter.port = 7497
     return adapter
 
 
@@ -97,14 +101,27 @@ def executor_paper(mock_tws_adapter, mock_risk_manager, tmp_path):
 
 @pytest.fixture
 def executor_live(mock_tws_adapter, mock_risk_manager, tmp_path):
-    """OrderExecutor in live mode"""
+    """OrderExecutor in live mode with all live-mode safeguards satisfied."""
+    from execution.order_executor import LiveTradingConfirmation
     emergency_file = tmp_path / "EMERGENCY_STOP"
+    # Configure the mock adapter for live use so the env/port/account
+    # cross-check passes.
+    mock_tws_adapter.environment = "live"
+    mock_tws_adapter.port = 7496
     return OrderExecutor(
         tws_adapter=mock_tws_adapter,
         risk_manager=mock_risk_manager,
         is_live_mode=True,
         require_confirmation=True,
-        emergency_stop_file=str(emergency_file)
+        emergency_stop_file=str(emergency_file),
+        live_trading_enabled=True,
+        live_confirmation=LiveTradingConfirmation(
+            environment="live",
+            account_id="U1234567",
+            port=7496,
+            confirmed_by="test-operator",
+        ),
+        expected_account_id="U1234567",
     )
 
 

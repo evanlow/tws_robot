@@ -50,37 +50,99 @@ class PendingOrder:
     commission: float = 0.0
 
 
-class PaperTradingAdapter(EWrapper, EClient):
+# Conventional IBKR/TWS socket ports.  These constants are used by
+# :class:`TwsTradingAdapter` (and the back-compat :class:`PaperTradingAdapter`
+# alias) to detect mismatches between the requested ``environment`` and the
+# configured ``port`` before any TWS connection is opened.
+PAPER_PORTS = frozenset({7497, 4002})  # TWS paper, Gateway paper
+LIVE_PORTS = frozenset({7496, 4001})   # TWS live,  Gateway live
+
+
+class TwsTradingAdapter(EWrapper, EClient):
     """
-    Adapter for paper trading through TWS API.
-    
-    Wraps TWS client and provides Strategy-compatible interface.
-    Tracks positions, manages orders, simulates commissions.
+    Neutral TWS trading adapter usable for both *paper* and *live* trading.
+
+    Wraps the TWS client and provides a Strategy-compatible interface.  Tracks
+    positions, manages orders, simulates commissions.
+
+    The adapter takes an explicit ``environment`` argument (``"paper"`` or
+    ``"live"``) and refuses to initialize if the configured ``port`` does not
+    match a well-known port for that environment.  This is the first of the
+    "environment / account / mode" guards that protect the OrderExecutor live
+    path; the corresponding account/mode confirmations are enforced by
+    :class:`execution.order_executor.OrderExecutor`.
+
+    The historical :class:`PaperTradingAdapter` name remains available as a
+    thin subclass that pins ``environment="paper"`` for backward compatibility
+    with existing callers and tests.
     """
-    
+
     def __init__(
         self,
         host: str = "127.0.0.1",
         port: int = 7497,  # Paper trading port
         client_id: int = 100,
-        commission_per_share: float = 0.005  # $0.005 per share (match backtest)
+        commission_per_share: float = 0.005,  # $0.005 per share (match backtest)
+        environment: str = "paper",
     ):
         """
-        Initialize paper trading adapter.
-        
+        Initialize the TWS trading adapter.
+
         Args:
-            host: TWS host address
-            port: TWS port (7497 for paper)
-            client_id: Unique client ID
-            commission_per_share: Commission rate per share
+            host: TWS host address.
+            port: TWS socket port (7497/4002 for paper, 7496/4001 for live).
+            client_id: Unique client ID.
+            commission_per_share: Commission rate per share (simulation only).
+            environment: ``"paper"`` or ``"live"``.  Must agree with ``port``.
+
+        Raises:
+            ValueError: If ``environment`` is unknown or if ``port`` is one of
+                the well-known TWS ports but does not match ``environment``
+                (e.g. ``environment="live"`` with the paper port ``7497``).
         """
+        env_normalized = (environment or "").lower()
+        if env_normalized not in ("paper", "live"):
+            raise ValueError(
+                f"Invalid environment {environment!r}; must be 'paper' or 'live'"
+            )
+
+        # Reject obvious port/environment mismatches *before* connecting.  We
+        # only block ports we recognize as belonging to the *opposite*
+        # environment; custom/unknown ports are allowed for non-standard
+        # setups but logged loudly so the operator sees them.
+        if env_normalized == "live" and port in PAPER_PORTS:
+            raise ValueError(
+                f"Refusing to start LIVE adapter on paper port {port}; "
+                f"use a live TWS/Gateway port (e.g. 7496/4001)"
+            )
+        if env_normalized == "paper" and port in LIVE_PORTS:
+            raise ValueError(
+                f"Refusing to start PAPER adapter on live port {port}; "
+                f"use a paper TWS/Gateway port (e.g. 7497/4002)"
+            )
+
+        # Custom/unknown port: not in any of the well-known TWS/Gateway port
+        # sets.  Allowed for non-standard setups, but logged at WARNING level
+        # so the operator sees the non-standard configuration.
+        if port not in PAPER_PORTS and port not in LIVE_PORTS:
+            logger.warning(
+                "Non-standard port %d for %r environment; expected one of "
+                "paper ports %s or live ports %s — verify your TWS/Gateway "
+                "configuration before connecting.",
+                port,
+                env_normalized,
+                sorted(PAPER_PORTS),
+                sorted(LIVE_PORTS),
+            )
+
         EWrapper.__init__(self)
         EClient.__init__(self, wrapper=self)
-        
+
         self.host = host
         self.port = port
         self.client_id = client_id
         self.commission_per_share = commission_per_share
+        self.environment = env_normalized
         
         # Connection state
         self.connected = False
@@ -99,7 +161,10 @@ class PaperTradingAdapter(EWrapper, EClient):
         self._on_fill_callback: Optional[Callable] = None
         self._on_error_callback: Optional[Callable] = None
         
-        logger.info(f"Initialized PaperTradingAdapter (port={port}, client_id={client_id})")
+        logger.info(
+            f"Initialized TwsTradingAdapter (env={self.environment}, "
+            f"port={port}, client_id={client_id})"
+        )
     
     # ==================== Connection Management ====================
     
@@ -475,3 +540,37 @@ class PaperTradingAdapter(EWrapper, EClient):
     def set_on_error_callback(self, callback: Callable):
         """Set callback for errors"""
         self._on_error_callback = callback
+
+
+class PaperTradingAdapter(TwsTradingAdapter):
+    """
+    Backward-compatible alias for :class:`TwsTradingAdapter` pinned to the
+    paper environment.
+
+    New code should prefer :class:`TwsTradingAdapter` and pass an explicit
+    ``environment`` argument so paper- and live-mode adapters can be told
+    apart at a glance.  This subclass exists solely so existing imports
+    (``from execution.paper_adapter import PaperTradingAdapter``) and tests
+    keep working.
+    """
+
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 7497,
+        client_id: int = 100,
+        commission_per_share: float = 0.005,
+        environment: str = "paper",
+    ):
+        if (environment or "").lower() != "paper":
+            raise ValueError(
+                "PaperTradingAdapter is paper-only; use TwsTradingAdapter "
+                "with environment='live' for live trading"
+            )
+        super().__init__(
+            host=host,
+            port=port,
+            client_id=client_id,
+            commission_per_share=commission_per_share,
+            environment="paper",
+        )

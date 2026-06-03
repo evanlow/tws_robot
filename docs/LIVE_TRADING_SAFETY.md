@@ -38,6 +38,29 @@
 
 Every order must pass **6 mandatory checks** before reaching TWS:
 
+> **Phase 1 — Controlled live trading (added 2026)**
+>
+> Live mode now adds three preconditions on top of the existing checks:
+>
+> 1. **Adapter neutrality** — `TwsTradingAdapter` (and the back-compat
+>    `PaperTradingAdapter` subclass) refuses to start if the configured
+>    socket port does not match the requested `environment` (paper port on
+>    `environment="live"` raises immediately, and vice versa).
+> 2. **Application-level live switch** — `OrderExecutor(live_trading_enabled=…)`
+>    defaults to `False`.  Live signals are rejected with
+>    `LIVE_TRADING_DISABLED` until the switch is flipped on.
+> 3. **Per-session confirmation** — a `LiveTradingConfirmation(environment,
+>    account_id, port, confirmed_by)` tuple must be supplied for each live
+>    session, and its `environment`/`port`/`account_id` must match the
+>    adapter and the optional `expected_account_id`.  Missing or mismatched
+>    confirmations produce `LIVE_CONFIRMATION_MISSING` or
+>    `LIVE_ENV_MISMATCH` rejections.
+>
+> In addition, `OrderExecutor(dry_run=True)` runs the full safety pipeline
+> end-to-end and writes the would-be order to the audit log, but never
+> calls the TWS adapter.  Use `python scripts/run_live.py --env live
+> --dry-run` to rehearse a live session safely.
+
 ### Layer 1: Emergency Stop
 - File: `EMERGENCY_STOP`
 - If this file exists, **ALL orders are blocked**
