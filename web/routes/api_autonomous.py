@@ -315,6 +315,21 @@ def status():
                 "Paper TWS bridge not ready yet; retry once the connection "
                 "handshake completes."
             )
+
+    # Include a cash snapshot so the Deployable Cash panel populates on
+    # page load / Refresh Status without needing a full scan/propose run.
+    if payload["connected"]:
+        try:
+            cash_analyzer = CashAvailabilityAnalyzer()
+            cash_result = cash_analyzer.analyze(
+                account_summary=svc.get_account_summary(),
+                positions=svc.get_positions(),
+                orders=svc.get_orders(),
+            )
+            payload["cash_snapshot"] = cash_result.to_dict()
+        except Exception:
+            pass  # Non-critical — dashboard keeps showing dashes if unavailable
+
     return jsonify(payload)
 
 

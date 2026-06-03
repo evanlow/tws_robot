@@ -183,6 +183,7 @@
     try {
       const data = await getJson('/api/autonomous/status');
       renderStatus(data);
+      if (data.cash_snapshot) renderCashSnapshot(data.cash_snapshot);
       setFeedback('Status refreshed.', 'success');
     } catch (err) {
       setFeedback('Failed to refresh status: ' + err.message, 'error');
