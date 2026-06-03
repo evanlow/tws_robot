@@ -41,7 +41,7 @@ from autonomous.autonomous_runner import (
 )
 from autonomous.exit_manager import AutonomousExitManager
 from autonomous.runner_config import AutonomousRunnerConfig
-from autonomous.trade_store import TradeStore
+from autonomous.trade_store import FAILED, OPEN, TradeStore
 from autonomous.technical_analysis_signal_provider import (
     TechnicalAnalysisSignalProvider,
 )
@@ -564,6 +564,22 @@ def _build_exit_manager() -> AutonomousExitManager:
     )
 
 
+def _cancel_entry_order(order_id: int) -> bool:
+    """Forward an entry-order cancellation to the broker.
+
+    Supports a test override via ``current_app.config['autonomous_cancel_order']``.
+    """
+    override = current_app.config.get("autonomous_cancel_order")
+    if callable(override):
+        try:
+            return bool(override(int(order_id)))
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("autonomous_cancel_order override raised")
+            return False
+    svc = get_services()
+    return bool(svc.cancel_broker_order(int(order_id)))
+
+
 @bp.route("/runner/status", methods=["GET"])
 def runner_status():
     """Return runner config and current readiness gates."""
@@ -592,6 +608,80 @@ def runner_evaluate_exits():
     return jsonify({
         "decisions": [d.to_dict() for d in decisions],
         "count": len(decisions),
+    })
+
+
+@bp.route("/runner/cancel-entry", methods=["POST"])
+def runner_cancel_entry():
+    """Cancel an OPEN autonomous entry order and close its lifecycle record.
+
+    Request body:
+        {"autonomous_trade_id": "..."}
+
+    This endpoint forwards a cancel request to the broker for the trade's
+    ``entry_order_id``. On successful forwarding, the trade lifecycle is moved
+    from ``OPEN`` to ``FAILED`` with ``exit_reason='ENTRY_CANCELLED'`` so the
+    open-trade gate can clear immediately.
+    """
+    body = request.get_json(silent=True) or {}
+    trade_id = str(body.get("autonomous_trade_id") or "").strip()
+    if not trade_id:
+        return jsonify({"error": "autonomous_trade_id is required"}), 400
+
+    store = _trade_store()
+    trade = store.get(trade_id)
+    if trade is None:
+        return jsonify({"error": f"Autonomous trade '{trade_id}' not found"}), 404
+
+    if str(trade.status) != OPEN:
+        return jsonify({
+            "error": (
+                f"Autonomous trade '{trade_id}' is not OPEN "
+                f"(current status: {trade.status})"
+            ),
+        }), 409
+
+    order_id = int(getattr(trade, "entry_order_id", 0) or 0)
+    if order_id <= 0:
+        return jsonify({
+            "error": (
+                f"Autonomous trade '{trade_id}' has no valid entry_order_id "
+                "to cancel"
+            ),
+        }), 409
+
+    forwarded = _cancel_entry_order(order_id)
+    if not forwarded:
+        return jsonify({
+            "status": "cancel_not_forwarded",
+            "autonomous_trade_id": trade_id,
+            "entry_order_id": order_id,
+            "forwarded_to_broker": False,
+            "warning": (
+                "Cancellation was not forwarded to broker. Trade remains OPEN."
+            ),
+        }), 503
+
+    notes = list(getattr(trade, "notes", []) or [])
+    notes.append("entry cancel requested by operator")
+    store.update_trade(
+        trade_id,
+        status=FAILED,
+        exit_reason="ENTRY_CANCELLED",
+        exit_time=datetime.now(timezone.utc),
+        notes=notes,
+    )
+
+    return jsonify({
+        "status": "cancel_requested",
+        "autonomous_trade_id": trade_id,
+        "entry_order_id": order_id,
+        "forwarded_to_broker": True,
+        "trade_status": FAILED,
+        "message": (
+            "Cancel request forwarded to broker. "
+            "Autonomous trade lifecycle marked FAILED (ENTRY_CANCELLED)."
+        ),
     })
 
 

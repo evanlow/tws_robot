@@ -683,7 +683,7 @@
       openBody.innerHTML = '';
       const open = (payload && payload.open) || [];
       if (!open.length) {
-        openBody.innerHTML = '<tr><td colspan="8" class="empty">No open autonomous trades.</td></tr>';
+        openBody.innerHTML = '<tr><td colspan="9" class="empty">No open autonomous trades.</td></tr>';
       } else {
         open.forEach((t) => {
           const tr = document.createElement('tr');
@@ -701,6 +701,22 @@
             td.textContent = String(c);
             tr.appendChild(td);
           });
+
+          const tdAction = document.createElement('td');
+          const btnCancel = document.createElement('button');
+          btnCancel.className = 'btn-sm btn-danger';
+          btnCancel.type = 'button';
+          btnCancel.textContent = 'Cancel Entry';
+          btnCancel.disabled = !t.entry_order_id;
+          btnCancel.title = t.entry_order_id
+            ? 'Cancel unfilled entry order at broker and close autonomous lifecycle record.'
+            : 'No entry order id available for cancel.';
+          btnCancel.addEventListener('click', () => {
+            cancelAutonomousEntry(t.autonomous_trade_id, t.symbol, t.entry_order_id);
+          });
+          tdAction.appendChild(btnCancel);
+          tr.appendChild(tdAction);
+
           openBody.appendChild(tr);
         });
       }
@@ -803,6 +819,29 @@
       refreshAutonomousTrades();
     } catch (err) {
       setRunnerFeedback('Evaluate exits failed: ' + err.message, 'error');
+    }
+  }
+
+  async function cancelAutonomousEntry(tradeId, symbol, orderId) {
+    if (!tradeId) return;
+    const label = symbol || tradeId;
+    const idPart = orderId != null ? (' (order ' + orderId + ')') : '';
+    if (!window.confirm('Cancel entry for ' + label + idPart + '?')) return;
+
+    setRunnerFeedback('Cancelling autonomous entry…');
+    try {
+      const body = await postJson('/api/autonomous/runner/cancel-entry', {
+        autonomous_trade_id: tradeId,
+      });
+      const status = body.status || 'unknown';
+      const msg = (status === 'cancel_requested')
+        ? ('Cancel requested for ' + label + idPart + '.')
+        : ('Cancel result: ' + status + (body.warning ? ' — ' + body.warning : ''));
+      setRunnerFeedback(msg, status === 'cancel_requested' ? 'success' : 'warning');
+      refreshRunnerStatus();
+      refreshAutonomousTrades();
+    } catch (err) {
+      setRunnerFeedback('Cancel entry failed: ' + err.message, 'error');
     }
   }
 

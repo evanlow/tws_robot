@@ -18,7 +18,7 @@ from autonomous import (
 from autonomous.audit import AuditLogger
 from autonomous.autonomous_runner import AutonomousPaperRunner
 from autonomous.runner_config import AutonomousRunnerConfig
-from autonomous.trade_store import AutonomousTrade, OPEN, TradeStore
+from autonomous.trade_store import AutonomousTrade, FAILED, OPEN, TradeStore
 from data.cash_availability import CashAvailabilityAnalyzer
 from web import create_app
 
@@ -233,6 +233,82 @@ class TestTrades:
         body = client.get("/api/autonomous/runner/trades").get_json()
         assert body["counts"]["open"] == 1
         assert body["open"][0]["symbol"] == "AAA"
+
+
+class TestCancelEntry:
+    def test_cancel_entry_forwards_and_marks_failed(self, app, client, tmp_path):
+        seed = [AutonomousTrade(
+            autonomous_trade_id="open1",
+            symbol="AAA",
+            trade_type="buy_shares",
+            status=OPEN,
+            entry_order_id=4242,
+            entry_time=datetime.now(timezone.utc),
+            entry_limit_price=100.0,
+            quantity=10,
+        )]
+        store, _ = _install_runner(app, tmp_path, store_seed=seed)
+        app.config["autonomous_cancel_order"] = lambda order_id: order_id == 4242
+
+        resp = client.post(
+            "/api/autonomous/runner/cancel-entry",
+            json={"autonomous_trade_id": "open1"},
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["status"] == "cancel_requested"
+        assert body["entry_order_id"] == 4242
+
+        trade = store.get("open1")
+        assert trade is not None
+        assert trade.status == FAILED
+        assert trade.exit_reason == "ENTRY_CANCELLED"
+
+    def test_cancel_entry_rejects_non_open_trade(self, app, client, tmp_path):
+        seed = [AutonomousTrade(
+            autonomous_trade_id="closed1",
+            symbol="AAA",
+            trade_type="buy_shares",
+            status=FAILED,
+            entry_order_id=4242,
+            entry_time=datetime.now(timezone.utc),
+            entry_limit_price=100.0,
+            quantity=10,
+            exit_reason="ENTRY_CANCELLED",
+        )]
+        _install_runner(app, tmp_path, store_seed=seed)
+
+        resp = client.post(
+            "/api/autonomous/runner/cancel-entry",
+            json={"autonomous_trade_id": "closed1"},
+        )
+        assert resp.status_code == 409
+
+    def test_cancel_entry_keeps_open_when_forward_fails(self, app, client, tmp_path):
+        seed = [AutonomousTrade(
+            autonomous_trade_id="open2",
+            symbol="AAA",
+            trade_type="buy_shares",
+            status=OPEN,
+            entry_order_id=9898,
+            entry_time=datetime.now(timezone.utc),
+            entry_limit_price=100.0,
+            quantity=10,
+        )]
+        store, _ = _install_runner(app, tmp_path, store_seed=seed)
+        app.config["autonomous_cancel_order"] = lambda order_id: False
+
+        resp = client.post(
+            "/api/autonomous/runner/cancel-entry",
+            json={"autonomous_trade_id": "open2"},
+        )
+        assert resp.status_code == 503
+        body = resp.get_json()
+        assert body["status"] == "cancel_not_forwarded"
+
+        trade = store.get("open2")
+        assert trade is not None
+        assert trade.status == OPEN
 
 
 class TestDashboardSafety:
