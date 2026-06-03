@@ -16,6 +16,7 @@ from strategies.base_strategy import StrategyState
 from web.stock_analysis_services import valuation_service, technical_levels_service, position_appraisal_service
 from web.services import get_services
 from web.technical_analysis import compute_bollinger_bands
+from web.sp500_screener_service import compute_quality_score
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,9 @@ def stock_analysis(ticker: str):
         # --- Dividend Profile ---
         dividend_profile = _build_dividend_profile(fundamentals)
 
+        # --- Quality Score ---
+        quality = compute_quality_score(fundamentals)
+
         # --- Build response ---
         response = {
             "ticker": ticker,
@@ -143,6 +147,7 @@ def stock_analysis(ticker: str):
             "open_position": open_position,
             "valuation_metrics": valuation_metrics,
             "dividend_profile": dividend_profile,
+            "quality": quality,
             "disclaimer": (
                 "This analysis is for educational and decision-support purposes only. "
                 "It is not financial advice, not a buy/sell recommendation, and does not "

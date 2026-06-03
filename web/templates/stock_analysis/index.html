@@ -96,6 +96,12 @@
     <div id="dividendProfileContent"></div>
   </section>
 
+  <!-- Section 5d: Fundamental Quality -->
+  <section id="qualitySection" style="margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Fundamental Quality</h2>
+    <div id="qualityContent"></div>
+  </section>
+
   <!-- Section 6: Support & Resistance Zones -->
   <section id="technicalLevelsSection" style="margin-bottom:1.5rem;">
     <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Support &amp; Resistance Zones (Past 1 Year)</h2>
@@ -193,6 +199,9 @@ function renderAnalysis(data) {
 
   // Dividend profile
   renderDividendProfile(data.dividend_profile);
+
+  // Fundamental quality
+  renderQuality(data.quality);
 
   // Technical levels
   renderTechnicalLevels(data.technical_levels);
@@ -680,6 +689,53 @@ function renderDividendProfile(dp) {
   if (dp.dividend_note) {
     html += `<p style="color:#a0aec0;font-size:0.85rem;margin-top:0.75rem;line-height:1.5;">${escapeHtml(dp.dividend_note)}</p>`;
   }
+
+  el.innerHTML = html;
+}
+
+/* ---- Fundamental Quality ---- */
+const QUALITY_COLORS = {
+  'Strong':            { bg: '#22543d', border: '#48bb78', text: '#48bb78' },
+  'Moderate':          { bg: '#2a4365', border: '#63b3ed', text: '#63b3ed' },
+  'Weak':              { bg: '#63171b', border: '#fc8181', text: '#fc8181' },
+  'Insufficient Data': { bg: '#1a202c', border: '#718096', text: '#718096' },
+};
+
+function renderQuality(q) {
+  const el = document.getElementById('qualityContent');
+  if (!q) {
+    el.innerHTML = '<div class="stat-card" style="padding:1rem;"><p style="color:#a0aec0;">Quality data unavailable.</p></div>';
+    return;
+  }
+
+  const label = q.quality_label || 'Insufficient Data';
+  const score = q.quality_score;
+  const c = QUALITY_COLORS[label] || QUALITY_COLORS['Insufficient Data'];
+  const scoreStr = score != null ? ' (' + score + ')' : '';
+  const badge = `<span style="display:inline-block;padding:0.25rem 0.75rem;border-radius:12px;font-size:0.85rem;font-weight:700;background:${c.bg};color:${c.text};border:1px solid ${c.border};">${escapeHtml(label)}${escapeHtml(scoreStr)}</span>`;
+
+  let html = `<div class="stat-card" style="padding:1rem;">`;
+  html += `<div style="margin-bottom:0.75rem;">${badge}</div>`;
+
+  const reasons = q.quality_reasons || [];
+  const warnings = q.quality_warnings || [];
+
+  if (reasons.length) {
+    html += `<p style="color:#a0aec0;font-size:0.85rem;margin-bottom:0.25rem;font-weight:600;">Passing checks:</p>`;
+    html += `<ul style="color:#68d391;font-size:0.85rem;line-height:1.7;margin:0 0 0.5rem 1.25rem;padding:0;">`;
+    reasons.forEach(r => { html += `<li>${escapeHtml(r)}</li>`; });
+    html += `</ul>`;
+  }
+
+  if (warnings.length) {
+    html += `<p style="color:#a0aec0;font-size:0.85rem;margin-bottom:0.25rem;font-weight:600;">Unavailable data:</p>`;
+    html += `<ul style="color:#a0aec0;font-size:0.85rem;line-height:1.7;margin:0 0 0 1.25rem;padding:0;">`;
+    warnings.forEach(w => { html += `<li>${escapeHtml(w)}</li>`; });
+    html += `</ul>`;
+  }
+
+  html += `<p style="color:#718096;font-size:0.8rem;margin-top:0.75rem;line-height:1.5;">Quality is a simplified fundamental screen (revenue growth, margins, ROE, debt, current ratio). It is not a complete business valuation and may be inaccurate when data is missing or stale.</p>`;
+  html += `</div>`;
 
   el.innerHTML = html;
 }</script>
