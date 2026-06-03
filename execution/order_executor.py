@@ -107,14 +107,18 @@ class LiveTradingConfirmation:
         matches the supplied TWS adapter."""
         if (self.environment or "").lower() != "live":
             return False, f"confirmation environment={self.environment!r} is not 'live'"
+        if not hasattr(adapter, "environment"):
+            return False, "adapter is missing required 'environment' attribute"
         adapter_env = getattr(adapter, "environment", None)
-        if adapter_env is not None and (adapter_env or "").lower() != "live":
+        if (adapter_env or "").lower() != "live":
             return False, (
                 f"adapter environment={adapter_env!r} does not match "
                 f"confirmation environment='live'"
             )
+        if not hasattr(adapter, "port"):
+            return False, "adapter is missing required 'port' attribute"
         adapter_port = getattr(adapter, "port", None)
-        if adapter_port is not None and adapter_port != self.port:
+        if adapter_port != self.port:
             return False, (
                 f"adapter port={adapter_port} does not match "
                 f"confirmation port={self.port}"
@@ -329,6 +333,21 @@ class OrderExecutor:
                 f"strength={getattr(signal.strength, 'value', signal.strength)}"
             ),
         )
+
+        adapter_env = (getattr(self.tws_adapter, "environment", "") or "").lower()
+        if adapter_env == "live" and not self.is_live_mode:
+            result = OrderResult.rejected(
+                RejectionReason.LIVE_ENV_MISMATCH,
+                signal,
+                "adapter environment='live' but executor is_live_mode=False",
+            )
+            self._record_order(result)
+            self._audit_log(result, strategy_name)
+            logger.error(
+                "❌ Live adapter configured while executor is in paper mode "
+                "(is_live_mode=False) — order rejected"
+            )
+            return result
 
         # === SAFETY CHECK 0: Live-mode environment / account / mode gate ===
         # Must precede every other check so a misconfigured live executor
@@ -727,20 +746,27 @@ class OrderExecutor:
         Keeps the audit trail complete for every signal-approval-risk-check
         decision, not only the final submit/reject outcome.
         """
-        log_file = Path('logs') / f'order_audit_{datetime.now().strftime("%Y%m%d")}.log'
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        mode_tag = "LIVE" if self.is_live_mode else "PAPER"
-        if self.dry_run:
-            mode_tag += "/DRY"
-        with open(log_file, 'a') as f:
-            f.write(f"{datetime.now().isoformat()} | ")
-            f.write(f"{strategy_name} | ")
-            f.write(f"EVENT:{event} | ")
-            f.write(f"{mode_tag} | ")
-            if signal is not None:
-                sig_type = getattr(signal.signal_type, "value", signal.signal_type)
-                f.write(f"{sig_type} | {signal.symbol} | ")
-            f.write(f"{detail}\n")
+        try:
+            log_file = Path('logs') / f'order_audit_{datetime.now().strftime("%Y%m%d")}.log'
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            mode_tag = "LIVE" if self.is_live_mode else "PAPER"
+            if self.dry_run:
+                mode_tag += "/DRY"
+            with open(log_file, 'a') as f:
+                f.write(f"{datetime.now().isoformat()} | ")
+                f.write(f"{strategy_name} | ")
+                f.write(f"EVENT:{event} | ")
+                f.write(f"{mode_tag} | ")
+                if signal is not None:
+                    sig_type = getattr(signal.signal_type, "value", signal.signal_type)
+                    f.write(f"{sig_type} | {signal.symbol} | ")
+                f.write(f"{detail}\n")
+        except OSError:
+            logger.exception(
+                "Audit event logging failed (event=%s, strategy=%s); continuing execution",
+                event,
+                strategy_name,
+            )
     
     def validate_manual_order(
         self,
