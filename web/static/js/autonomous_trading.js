@@ -343,6 +343,77 @@
     });
     card.appendChild(grid);
 
+    // ---- Trade Rationale: why this stock, why this many shares ----
+    const cand = (selected && selected.candidate) || selected || {};
+    const extras = cand.extras || {};
+    const rationaleItems = [];
+
+    if (cand.signal_label || cand.strength_score != null) {
+      const company = cand.company_name ? ' \u2014 ' + cand.company_name : '';
+      rationaleItems.push(
+        'Signal: ' + (cand.signal_label || '\u2014') +
+        (cand.strength_score != null ? ' (strength ' + cand.strength_score + ')' : '') +
+        company
+      );
+    }
+    if (extras.rsi_14 != null) {
+      const rsiDesc = {
+        rsi_oversold:   'oversold, below 30',
+        rsi_overbought: 'overbought, above 70',
+      }[extras.rsi_status] || (extras.rsi_status || '');
+      rationaleItems.push(
+        'RSI(14): ' + extras.rsi_14 + (rsiDesc ? ' \u2014 ' + rsiDesc : '')
+      );
+    }
+    if (extras.bollinger_status) {
+      const bollDesc = {
+        near_lower_band: 'near lower Bollinger band (price at downside extreme)',
+        near_upper_band: 'near upper Bollinger band',
+        inside_bands:    'inside Bollinger bands',
+      }[extras.bollinger_status] || extras.bollinger_status;
+      rationaleItems.push('Bollinger: ' + bollDesc);
+    }
+    if (extras.momentum_confirmation) {
+      const momDesc = {
+        confirmed_rebound: '2+ consecutive higher closes after oversold low',
+        no_rebound:        'no rebound confirmed yet',
+      }[extras.momentum_confirmation] || extras.momentum_confirmation;
+      rationaleItems.push('Momentum: ' + momDesc);
+    }
+    if (extras.quality_label) {
+      rationaleItems.push(
+        'Fundamentals: ' + extras.quality_label +
+        (extras.quality_score != null ? ' (score ' + extras.quality_score + ')' : '')
+      );
+    }
+    if (plan.quantity != null && plan.limit_price != null && decision.deployable_cash != null) {
+      const maxPct = (state.status && state.status.config &&
+        state.status.config.max_new_position_pct) || 0.10;
+      rationaleItems.push(
+        'Sizing: ' + plan.quantity + ' share' + (plan.quantity !== 1 ? 's' : '') +
+        ' \u00d7 ' + fmtMoney(plan.limit_price) + ' = ' + fmtMoney(plan.required_cash) +
+        ' (cap: ' + (maxPct * 100).toFixed(0) + '% equity;' +
+        ' ' + fmtMoney(decision.deployable_cash) + ' deployable)'
+      );
+    }
+    if (rationaleItems.length) {
+      const rh = document.createElement('p');
+      rh.className = 'proposal-section-title';
+      rh.textContent = 'Trade Rationale';
+      const rbox = document.createElement('div');
+      rbox.className = 'rationale-box';
+      const rul = document.createElement('ul');
+      rul.className = 'proposal-list';
+      rationaleItems.forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        rul.appendChild(li);
+      });
+      rbox.appendChild(rul);
+      card.appendChild(rh);
+      card.appendChild(rbox);
+    }
+
     if (plan.reason) {
       const h = document.createElement('p');
       h.className = 'proposal-section-title';

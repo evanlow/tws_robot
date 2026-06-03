@@ -221,6 +221,14 @@
   color: #e2e8f0;
 }
 
+.proposal-card .rationale-box {
+  background: #0d1f3c;
+  border-left: 3px solid #4299e1;
+  border-radius: 0 4px 4px 0;
+  padding: 0.45rem 0.75rem;
+  margin: 0.2rem 0 0.5rem;
+}
+
 /* ---- Modal ---- */
 .modal-overlay {
   position: fixed;
