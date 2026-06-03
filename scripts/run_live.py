@@ -211,8 +211,9 @@ Examples:
     
     args = parser.parse_args()
     
-    # Validation: Live trading requires explicit confirmation
-    if args.env == 'live' and not args.confirm_live:
+    # Validation: Live trading requires explicit confirmation (dry-run is exempt
+    # because OrderExecutor won't submit orders in that mode).
+    if args.env == 'live' and not args.confirm_live and not args.dry_run:
         parser.error("⚠️  Live trading requires --confirm-live flag for safety")
     
     return args

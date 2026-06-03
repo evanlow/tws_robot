@@ -121,6 +121,20 @@ class TwsTradingAdapter(EWrapper, EClient):
                 f"use a paper TWS/Gateway port (e.g. 7497/4002)"
             )
 
+        # Custom/unknown port: not in any of the well-known TWS/Gateway port
+        # sets.  Allowed for non-standard setups, but logged at WARNING level
+        # so the operator sees the non-standard configuration.
+        if port not in PAPER_PORTS and port not in LIVE_PORTS:
+            logger.warning(
+                "Non-standard port %d for %r environment; expected one of "
+                "paper ports %s or live ports %s — verify your TWS/Gateway "
+                "configuration before connecting.",
+                port,
+                env_normalized,
+                sorted(PAPER_PORTS),
+                sorted(LIVE_PORTS),
+            )
+
         EWrapper.__init__(self)
         EClient.__init__(self, wrapper=self)
 
