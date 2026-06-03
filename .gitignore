@@ -41,6 +41,7 @@ dist/
 # Logs
 *.log
 test_logs.log
+logs/
 
 # Temporary files
 *.tmp
