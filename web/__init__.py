@@ -32,11 +32,11 @@ def create_app(config_override: dict | None = None) -> "Flask":
 
     # Load .env so OPENAI_API_KEY and other secrets are available early.
     # Skip during tests to avoid non-deterministic behaviour from local .env files.
+    # Use override=True so .env values always win over stale shell env vars
+    # (e.g. env vars blanked out by a prior test run in the same terminal).
     if not (config_override or {}).get("TESTING"):
         from dotenv import load_dotenv
-        load_dotenv()
-
-    # Default configuration
+        load_dotenv(override=True)
     secret_from_env = os.environ.get("SECRET_KEY")
     if not app.config.get("SECRET_KEY"):
         app.config["SECRET_KEY"] = secret_from_env or _DEFAULT_SECRET
