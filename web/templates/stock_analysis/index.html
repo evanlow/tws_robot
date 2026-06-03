@@ -718,12 +718,20 @@ function renderQuality(q) {
   html += `<div style="margin-bottom:0.75rem;">${badge}</div>`;
 
   const reasons = q.quality_reasons || [];
+  const fails = q.quality_fails || [];
   const warnings = q.quality_warnings || [];
 
   if (reasons.length) {
     html += `<p style="color:#a0aec0;font-size:0.85rem;margin-bottom:0.25rem;font-weight:600;">Passing checks:</p>`;
     html += `<ul style="color:#68d391;font-size:0.85rem;line-height:1.7;margin:0 0 0.5rem 1.25rem;padding:0;">`;
     reasons.forEach(r => { html += `<li>${escapeHtml(r)}</li>`; });
+    html += `</ul>`;
+  }
+
+  if (fails.length) {
+    html += `<p style="color:#a0aec0;font-size:0.85rem;margin-bottom:0.25rem;font-weight:600;">Failing checks:</p>`;
+    html += `<ul style="color:#fc8181;font-size:0.85rem;line-height:1.7;margin:0 0 0.5rem 1.25rem;padding:0;">`;
+    fails.forEach(f => { html += `<li>&#10007; ${escapeHtml(f)}</li>`; });
     html += `</ul>`;
   }
 
@@ -734,9 +742,30 @@ function renderQuality(q) {
     html += `</ul>`;
   }
 
-  html += `<p style="color:#718096;font-size:0.8rem;margin-top:0.75rem;line-height:1.5;">Quality is a simplified fundamental screen (revenue growth, margins, ROE, debt, current ratio). It is not a complete business valuation and may be inaccurate when data is missing or stale.</p>`;
+  html += `<p style="color:#718096;font-size:0.8rem;margin-top:0.75rem;line-height:1.5;">Quality is a simplified fundamental screen (revenue growth, margins, ROE, debt, current ratio, operating cash flow). It is not a complete business valuation and may be inaccurate when data is missing or stale.</p>`;
+
+  if (q.data_fetched_at) {
+    const age = formatDataAge(q.data_fetched_at);
+    html += `<p style="color:#718096;font-size:0.75rem;margin-top:0.4rem;">Data source: yfinance &nbsp;·&nbsp; Fetched: ${escapeHtml(age)} &nbsp;·&nbsp; Cache TTL: 24 h — refresh the page to fetch latest if stale.</p>`;
+  }
+
   html += `</div>`;
 
   el.innerHTML = html;
+}
+
+function formatDataAge(isoStr) {
+  if (!isoStr) return 'unknown';
+  try {
+    const d = new Date(isoStr);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMins = Math.round(diffMs / 60000);
+    if (diffMins < 2) return 'just now';
+    if (diffMins < 60) return diffMins + ' min ago';
+    const diffHrs = Math.round(diffMins / 60);
+    if (diffHrs < 24) return diffHrs + ' hr ago';
+    return d.toLocaleString();
+  } catch (_) { return isoStr; }
 }</script>
 {% endblock %}

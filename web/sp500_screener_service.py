@@ -389,13 +389,16 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
     -------
     dict
         Keys: ``quality_score`` (int | None), ``quality_label`` (str),
-        ``quality_reasons`` (list[str]), ``quality_warnings`` (list[str]).
+        ``quality_reasons`` (list[str]), ``quality_fails`` (list[str]),
+        ``quality_warnings`` (list[str]), ``data_fetched_at`` (str | None).
     """
     _insufficient: Dict[str, Any] = {
         "quality_score": None,
         "quality_label": "Insufficient Data",
         "quality_reasons": [],
+        "quality_fails": [],
         "quality_warnings": [],
+        "data_fetched_at": fundamentals.get("fetched_at") if fundamentals else None,
     }
 
     if not fundamentals or "error" in fundamentals:
@@ -405,36 +408,61 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
 
     checks: List[bool] = []
     reasons: List[str] = []
+    fails: List[str] = []
     warnings: List[str] = []
 
-    def _check(value: Any, condition: bool, pass_reason: str, warn_label: str) -> None:
+    def _check(value: Any, condition: bool, pass_reason: str, fail_reason: str, warn_label: str) -> None:
         if value is None:
             warnings.append(f"{warn_label} unavailable")
         else:
             checks.append(condition)
             if condition:
                 reasons.append(pass_reason)
+            else:
+                fails.append(fail_reason)
 
     revenue_growth = fundamentals.get("revenue_growth")
-    _check(revenue_growth, (revenue_growth or 0) > 0, "Positive revenue growth", "Revenue growth")
+    _check(revenue_growth, (revenue_growth or 0) > 0, "Positive revenue growth", "Revenue growth negative or zero", "Revenue growth")
 
     earnings_growth = fundamentals.get("earnings_growth")
-    _check(earnings_growth, (earnings_growth or 0) > 0, "Positive earnings growth", "Earnings growth")
+    _check(earnings_growth, (earnings_growth or 0) > 0, "Positive earnings growth", "Earnings growth negative or zero", "Earnings growth")
 
-    profit_margin = fundamentals.get("profit_margin")
-    _check(profit_margin, (profit_margin or 0) > 0, "Positive profit margin", "Profit margin")
+    # Profit margin check — prefer multi-quarter history over single TTM value.
+    historical_margins = fundamentals.get("historical_profit_margins") or []
+    valid_margins = [
+        m["margin"] for m in historical_margins
+        if isinstance(m, dict) and isinstance(m.get("margin"), (int, float))
+    ]
+    if len(valid_margins) >= 3:
+        positive_q = sum(1 for m in valid_margins if m > 0)
+        total_q = len(valid_margins)
+        majority_profitable = positive_q >= (total_q + 1) // 2  # ceil(total/2)
+        latest_pct_sign = "+" if valid_margins[0] >= 0 else ""
+        latest_pct = f"{latest_pct_sign}{valid_margins[0] * 100:.1f}%"
+        _check(
+            1,  # value always "available" — we have the data
+            majority_profitable,
+            f"Profitable in {positive_q}/{total_q} recent quarters (latest: {latest_pct})",
+            f"Net loss in {total_q - positive_q}/{total_q} recent quarters (latest: {latest_pct})",
+            "Profit margin (multi-quarter)",
+        )
+    else:
+        # Fallback: single TTM margin from yfinance info
+        profit_margin = fundamentals.get("profit_margin")
+        _check(profit_margin, (profit_margin or 0) > 0, "Positive profit margin (TTM)", "Profit margin negative (TTM)", "Profit margin")
 
     operating_margin = fundamentals.get("operating_margin")
-    _check(operating_margin, (operating_margin or 0) > 0, "Positive operating margin", "Operating margin")
+    _check(operating_margin, (operating_margin or 0) > 0, "Positive operating margin", "Operating margin negative", "Operating margin")
 
     roe = fundamentals.get("roe")
-    _check(roe, (roe or 0) > 0, "Positive return on equity", "Return on equity")
+    _check(roe, (roe or 0) > 0, "Positive return on equity", "Negative return on equity", "Return on equity")
 
     debt_to_equity = fundamentals.get("debt_to_equity")
     _check(
         debt_to_equity,
         (debt_to_equity or 0) < _MAX_DEBT_TO_EQUITY,
         "Debt-to-equity within threshold",
+        f"Debt-to-equity too high (>{_MAX_DEBT_TO_EQUITY})",
         "Debt-to-equity",
     )
 
@@ -443,13 +471,24 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
         current_ratio,
         (current_ratio or 0) >= _MIN_CURRENT_RATIO,
         "Current ratio above 1",
+        f"Current ratio below {_MIN_CURRENT_RATIO}",
         "Current ratio",
+    )
+
+    operating_cashflow = fundamentals.get("operating_cashflow")
+    _check(
+        operating_cashflow,
+        (operating_cashflow or 0) > 0,
+        "Positive operating cash flow",
+        "Negative operating cash flow",
+        "Operating cash flow",
     )
 
     available = len(checks)
     if available < _MIN_QUALITY_CHECKS:
         result = dict(_insufficient)
         result["quality_reasons"] = reasons
+        result["quality_fails"] = fails
         result["quality_warnings"] = warnings
         return result
 
@@ -467,7 +506,9 @@ def compute_quality_score(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
         "quality_score": quality_score,
         "quality_label": quality_label,
         "quality_reasons": reasons,
+        "quality_fails": fails,
         "quality_warnings": warnings,
+        "data_fetched_at": fundamentals.get("fetched_at"),
     }
 
 

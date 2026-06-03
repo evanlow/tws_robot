@@ -27,6 +27,8 @@ _CACHE_TTL_SECONDS = 86400  # 24 hours
 # should be skipped by the numeric sanitizer.
 _STRING_KEYS = frozenset({
     "symbol", "fetched_at", "name", "sector", "industry", "recommendation_key",
+    # list fields — excluded from the scalar numeric sanitizer
+    "historical_profit_margins",
 })
 
 
@@ -121,6 +123,13 @@ def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
         "current_ratio": _safe_get(info, "currentRatio"),
         "book_value": _safe_get(info, "bookValue"),
 
+        # Cash flow
+        "operating_cashflow": _safe_get(info, "operatingCashflow"),
+        "free_cashflow": _safe_get(info, "freeCashflow"),
+
+        # Historical quarterly profit margins (list[dict] — populated below)
+        "historical_profit_margins": [],
+
         # Dividends
         "dividend_yield": _safe_get(info, "dividendYield"),
         "dividend_rate": _safe_get(info, "dividendRate"),
@@ -146,6 +155,38 @@ def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
         "avg_volume": _safe_get(info, "averageVolume"),
         "avg_volume_10d": _safe_get(info, "averageDailyVolume10Day"),
     }
+
+    # Historical quarterly profit margins — last 5 quarters, newest first.
+    # Fetched from quarterly_income_stmt; stored as
+    # [{"period": "2025-12-31", "margin": 0.142}, ...].
+    try:
+        import math as _math
+        qs = ticker.quarterly_income_stmt
+        if qs is not None and not qs.empty:
+            ni_row = next(
+                (r for r in ["Net Income", "Net Income Common Stockholders"] if r in qs.index),
+                None,
+            )
+            rev_row = next(
+                (r for r in ["Total Revenue", "Operating Revenue"] if r in qs.index),
+                None,
+            )
+            if ni_row and rev_row:
+                margins = []
+                for col in list(qs.columns)[:5]:
+                    try:
+                        ni_val = float(qs.loc[ni_row, col])
+                        rev_val = float(qs.loc[rev_row, col])
+                        if _math.isfinite(ni_val) and _math.isfinite(rev_val) and rev_val != 0:
+                            margins.append({
+                                "period": str(col)[:10],
+                                "margin": round(ni_val / rev_val, 6),
+                            })
+                    except (TypeError, ValueError):
+                        continue
+                result["historical_profit_margins"] = margins
+    except Exception:
+        pass  # Leave as empty list; scorer will fall back to TTM margin
 
     # Sanitize all numeric fields — yfinance may return placeholder strings
     # (e.g. "?"), Infinity, or NaN for unavailable data.
