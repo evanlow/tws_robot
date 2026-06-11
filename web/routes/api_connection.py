@@ -86,7 +86,9 @@ def connect():
             "message": error,  # Backward compatibility for existing clients.
         }), 503
 
-    actual = infer_account_type(getattr(svc, "connection_info", {}).get("account"))
+    actual = infer_account_type(
+        (getattr(svc, "connection_info", None) or {}).get("account")
+    )
     if actual is not None and actual != env:
         error = mismatch_message(env, actual)
         svc.disconnect_tws()

@@ -604,12 +604,11 @@
     setFeedback('Activating Autonomous Mode…');
     try {
       const body = await postJson('/api/autonomous/mode/activate', { trading_cycle: cycle });
-      const decision = body.run && body.run.decision;
+      const decision = body.run?.decision;
       if (decision) renderProposal(decision);
       const status = body.status || 'unknown';
       const kind = status === 'activated' ? 'success' : 'error';
-      const reason = (body.run && body.run.rejection_reason) ||
-        (decision && decision.rejection_reason) || '';
+      const reason = body.run?.rejection_reason || decision?.rejection_reason || '';
       setFeedback('Autonomous Mode result: ' + status + (reason ? ' — ' + reason : ''),
         kind);
       refreshStatus();
