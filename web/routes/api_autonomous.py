@@ -48,7 +48,7 @@ from autonomous.autonomous_mode import (
 )
 from autonomous.exit_manager import AutonomousExitManager
 from autonomous.runner_config import AutonomousRunnerConfig
-from autonomous.trade_store import FAILED, OPEN, TradeStore
+from autonomous.trade_store import CLOSED, EXIT_PENDING, FAILED, OPEN, TradeStore
 from autonomous.technical_analysis_signal_provider import (
     TechnicalAnalysisSignalProvider,
 )
@@ -317,11 +317,39 @@ def _audit_mode_event(event: str, payload: Dict[str, Any] | None = None) -> None
     })
 
 
+def _spy_price_from_yfinance() -> Dict[str, Any]:
+    """Fetch SPY day-open and current price via yfinance.
+
+    Fails closed: returns zero prices when data is unavailable,
+    which the engine treats as bearish (not suitable) and blocks trading.
+    """
+    try:
+        import yfinance as yf  # type: ignore[import]
+        ticker = yf.Ticker("SPY")
+        fast_info = ticker.fast_info
+        open_price = float(getattr(fast_info, "open", 0.0) or 0.0)
+        current_price = float(getattr(fast_info, "last_price", 0.0) or 0.0)
+        if open_price > 0 and current_price > 0:
+            return {"open": open_price, "current": current_price}
+        # Fall back to intraday history if fast_info returns zeros
+        hist = ticker.history(period="1d")
+        if not hist.empty:
+            open_price = float(hist["Open"].iloc[0])
+            current_price = float(hist["Close"].iloc[-1])
+            return {"open": open_price, "current": current_price}
+    except Exception:
+        logger.exception("Failed to fetch SPY price from yfinance")
+    # Fail closed: zero prices → engine classifies as Bearish / Not Suitable
+    return {"open": 0.0, "current": 0.0, "error": "SPY data unavailable — failing closed"}
+
+
 def _resolve_spy_price_provider():
     override = current_app.config.get("autonomous_spy_price_provider")
     if callable(override):
         return override
-    return None
+    # Default: always wire the yfinance provider so the SPY gate is never
+    # skipped in production.  Fails closed when market data is unavailable.
+    return _spy_price_from_yfinance
 
 
 def _connection_verification_payload(svc) -> Dict[str, Any]:
@@ -351,21 +379,31 @@ def _autonomous_status_payload() -> Dict[str, Any]:
     state = _mode_state()
     verification = _connection_verification_payload(svc)
     connected = bool(getattr(svc, "connected", False))
+    match_status = verification["paper_live_match_status"]
 
-    if (
-        state.is_on
-        and (not connected or verification["paper_live_match_status"] == "Mismatch"
-             or gates.emergency_stop_active)
+    if state.is_on and (
+        not connected
+        or match_status != "Verified"
+        or gates.emergency_stop_active
     ):
         state.turn_off(
             message="Autonomous Mode turned OFF by connection/safety state change.",
             status="Halted" if gates.emergency_stop_active else "Not Ready",
         )
 
+    # Advance Single Trade lifecycle: if all trades opened since activation
+    # have closed, turn Autonomous Mode OFF automatically.
+    if (
+        state.is_on
+        and state.cycles_started > 0
+        and state.trading_cycle == TradingCycle.SINGLE_TRADE
+    ):
+        _advance_single_trade_if_complete(state)
+
     readiness = state.readiness_status
     if not state.is_on and gates.emergency_stop_active:
         readiness = "Halted"
-    elif not state.is_on and gates.ready and verification["paper_live_match_status"] == "Verified":
+    elif not state.is_on and gates.ready and match_status == "Verified":
         readiness = "Ready"
     elif not state.is_on:
         readiness = "Not Ready"
@@ -385,6 +423,95 @@ def _autonomous_status_payload() -> Dict[str, Any]:
             "gates": gates.to_dict(),
         },
     }
+
+
+def _advance_single_trade_if_complete(state: "AutonomousModeState") -> None:
+    """Turn Autonomous Mode OFF if every trade opened since activation is closed.
+
+    Called only when mode is ON, cycles_started > 0, and trading_cycle is
+    SINGLE_TRADE.  Safe to call repeatedly; does nothing when active trades exist.
+    """
+    try:
+        activated_at_str = state.activated_at
+        if not activated_at_str:
+            return
+        activated_at = datetime.fromisoformat(activated_at_str)
+        store = _trade_store()
+        since_activation = [
+            t for t in store.list_all()
+            if t.entry_time >= activated_at
+        ]
+        if not since_activation:
+            return  # No trade placed yet in this activation
+        still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
+        if still_active:
+            return  # Trade lifecycle still in progress
+        # All trades since activation are CLOSED or FAILED → lifecycle done
+        state.turn_off(
+            message="Single Trade lifecycle completed. Autonomous Mode turned OFF.",
+            status="Ready",
+        )
+        _audit_mode_event("halt", {"reason": "single_trade_completed", "source": "lifecycle"})
+    except Exception:
+        logger.exception("Single trade completion check failed")
+
+
+def _maybe_advance_lifecycle() -> None:
+    """Advance Continuous Trading lifecycle after exits are evaluated.
+
+    Called from the evaluate-exits endpoint.  For Continuous Trading:
+    if every trade since activation is closed, rechecks the SPY gate and
+    starts the next cycle.  Turns mode OFF if SPY is bearish or an error
+    occurs.  For Single Trade, delegates to ``_advance_single_trade_if_complete``.
+    """
+    state = _mode_state()
+    if not state.is_on or state.cycles_started == 0:
+        return
+
+    try:
+        activated_at_str = state.activated_at
+        if not activated_at_str:
+            return
+        activated_at = datetime.fromisoformat(activated_at_str)
+        store = _trade_store()
+        since_activation = [
+            t for t in store.list_all()
+            if t.entry_time >= activated_at
+        ]
+        if not since_activation:
+            return  # No trade placed yet
+        still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
+        if still_active:
+            return  # Lifecycle still in progress
+
+        cycle = state.trading_cycle
+        if cycle == TradingCycle.SINGLE_TRADE:
+            _advance_single_trade_if_complete(state)
+        elif cycle == TradingCycle.CONTINUOUS:
+            # Recheck SPY gate and start next cycle
+            try:
+                result = _build_runner().run_once()
+                state.cycles_started += 1
+                _audit_mode_event(
+                    "continuous_cycle",
+                    {"cycles_started": state.cycles_started},
+                )
+                r_payload = result.to_dict()
+                decision = r_payload.get("decision") or {}
+                if decision.get("status") == "market_not_suitable":
+                    state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+                    _audit_mode_event(
+                        "halt",
+                        {"reason": BEARISH_SPY_MESSAGE, "source": "spy_gate_continuous"},
+                    )
+            except Exception:
+                logger.exception("Continuous lifecycle cycle failed")
+                state.turn_off(
+                    message="Continuous lifecycle error. Autonomous Mode turned OFF.",
+                    status="Halted",
+                )
+    except Exception:
+        logger.exception("Lifecycle advancement check failed")
 
 
 # ---------------------------------------------------------------------------
@@ -615,9 +742,22 @@ def autonomous_mode_status():
 
 @bp.route("/mode/activate", methods=["POST"])
 def autonomous_mode_activate():
-    """Turn Autonomous Mode ON after readiness checks and run one lifecycle."""
+    """Turn Autonomous Mode ON after readiness checks and run one lifecycle.
+
+    Requires ``{"confirm": true}`` in the request body to prevent accidental
+    activation via direct API calls.
+    """
 
     body = request.get_json(silent=True) or {}
+
+    # Explicit confirmation flag required — mirrors the confirm pattern used
+    # by /execute-paper to prevent accidental lifecycle invocation.
+    if body.get("confirm") is not True:
+        return jsonify({
+            "error": "confirm must be true to activate Autonomous Mode",
+            "status": "confirmation_required",
+        }), 400
+
     cycle = normalise_trading_cycle(body.get("trading_cycle"))
     if cycle is None:
         return jsonify({"error": "trading_cycle must be single_trade or continuous"}), 400
@@ -627,28 +767,44 @@ def autonomous_mode_activate():
     if connection["paper_live_match_status"] != "Verified":
         msg = "Paper/Live connection match is not verified."
         _mode_state().turn_off(message=msg, status="Not Ready")
-        return jsonify({"status": "rejected", "error": msg, **status_payload}), 409
+        # Re-fetch after state change so the response is not stale.
+        return jsonify({"status": "rejected", "error": msg,
+                        **_autonomous_status_payload()}), 409
 
     gates = status_payload["readiness"]["gates"]
     if not gates.get("ready"):
         msg = "; ".join(gates.get("reasons") or []) or "Autonomous readiness checks failed"
         _mode_state().turn_off(message=msg, status="Not Ready")
-        return jsonify({"status": "rejected", "error": msg, **status_payload}), 409
+        return jsonify({"status": "rejected", "error": msg,
+                        **_autonomous_status_payload()}), 409
 
     state = _mode_state()
     state.turn_on(cycle)
     _audit_mode_event("activate", {"trading_cycle": cycle.value})
 
-    result = _build_runner().run_once()
-    payload = result.to_dict()
-    decision = payload.get("decision") or {}
-    if decision.get("status") == "market_not_suitable":
-        state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
-        _audit_mode_event("halt", {"reason": BEARISH_SPY_MESSAGE, "source": "spy_gate"})
-    elif payload.get("status") == "no_trade" and cycle == TradingCycle.SINGLE_TRADE:
-        message = payload.get("rejection_reason") or "No trade. Autonomous Mode has been turned OFF."
-        state.turn_off(message=message, status="Not Ready")
-        _audit_mode_event("halt", {"reason": message, "source": "single_trade_no_trade"})
+    try:
+        result = _build_runner().run_once()
+        state.cycles_started += 1
+        payload = result.to_dict()
+        decision = payload.get("decision") or {}
+        if decision.get("status") == "market_not_suitable":
+            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+            _audit_mode_event("halt", {"reason": BEARISH_SPY_MESSAGE, "source": "spy_gate"})
+        elif payload.get("status") == "no_trade" and cycle == TradingCycle.SINGLE_TRADE:
+            message = (
+                payload.get("rejection_reason")
+                or "No trade. Autonomous Mode has been turned OFF."
+            )
+            state.turn_off(message=message, status="Not Ready")
+            _audit_mode_event("halt", {"reason": message, "source": "single_trade_no_trade"})
+    except Exception:
+        logger.exception("Autonomous lifecycle run failed after activation")
+        state.turn_off(
+            message="Lifecycle run failed. Autonomous Mode turned OFF.",
+            status="Halted",
+        )
+        _audit_mode_event("halt", {"reason": "lifecycle_run_exception", "source": "activate"})
+        payload = {}
 
     return jsonify({
         "status": "activated" if state.is_on else "halted",
@@ -666,6 +822,7 @@ def autonomous_mode_halt():
     _mode_state().turn_off(message=reason, status="Halted")
     _audit_mode_event("halt", {"reason": reason, "source": "operator"})
     return jsonify({"status": "halted", "autonomous_mode": _autonomous_status_payload()})
+
 
 def _runner_config() -> AutonomousRunnerConfig:
     """Return the active runner config.
@@ -777,7 +934,18 @@ def runner_status():
 
 @bp.route("/runner/run-once-paper", methods=["POST"])
 def runner_run_once_paper():
-    """Run one full paper-autonomous cycle.  Paper-only; never live."""
+    """Run one full paper-autonomous cycle.  Paper-only; never live.
+
+    Requires Autonomous Mode to be ON.  Autonomous execution must not be
+    possible while Autonomous Mode is OFF.
+    """
+    if not _mode_state().is_on:
+        return jsonify({
+            "status": "autonomous_mode_off",
+            "rejection_reason": (
+                "Autonomous Mode is OFF. Activate Autonomous Mode before running a lifecycle cycle."
+            ),
+        }), 409
     runner = _build_runner()
     result = runner.run_once()
     return jsonify(result.to_dict())
@@ -788,6 +956,9 @@ def runner_evaluate_exits():
     """Evaluate every open autonomous trade and submit paper SELL exits."""
     manager = _build_exit_manager()
     decisions = manager.evaluate_open_trades()
+    # Advance lifecycle after exits are evaluated: Single Trade turns OFF when
+    # complete; Continuous Trading starts the next cycle after SPY recheck.
+    _maybe_advance_lifecycle()
     return jsonify({
         "decisions": [d.to_dict() for d in decisions],
         "count": len(decisions),

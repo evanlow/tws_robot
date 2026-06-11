@@ -178,7 +178,12 @@ class TestRunnerStatus:
 
 class TestRunOncePaper:
     def test_executes_when_ready(self, app, client, tmp_path):
+        from autonomous.autonomous_mode import AutonomousModeState, TradingCycle
         store, adapter = _install_runner(app, tmp_path)
+        # run-once-paper requires Autonomous Mode ON
+        state = AutonomousModeState()
+        state.turn_on(TradingCycle.SINGLE_TRADE)
+        app.config["autonomous_mode_state"] = state
         resp = client.post("/api/autonomous/runner/run-once-paper", json={})
         assert resp.status_code == 200
         body = resp.get_json()
@@ -188,10 +193,23 @@ class TestRunOncePaper:
         assert len(adapter.calls) == 1
 
     def test_returns_clear_reason_when_gated(self, app, client, tmp_path):
+        from autonomous.autonomous_mode import AutonomousModeState, TradingCycle
         _install_runner(app, tmp_path, runner_enabled=False)
+        state = AutonomousModeState()
+        state.turn_on(TradingCycle.SINGLE_TRADE)
+        app.config["autonomous_mode_state"] = state
         body = client.post("/api/autonomous/runner/run-once-paper", json={}).get_json()
         assert body["status"] == "runner_disabled"
         assert body["rejection_reason"]
+
+    def test_rejects_when_autonomous_mode_off(self, app, client, tmp_path):
+        _install_runner(app, tmp_path)
+        # Mode is OFF by default
+        resp = client.post("/api/autonomous/runner/run-once-paper", json={})
+        assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["status"] == "autonomous_mode_off"
+        assert "Autonomous Mode is OFF" in body["rejection_reason"]
 
 
 class TestAutonomousMode:
@@ -206,6 +224,25 @@ class TestAutonomousMode:
         assert body["mode"]["trading_cycle"] == "single_trade"
         assert body["connection"]["paper_live_match_status"] == "Verified"
 
+    def test_activate_requires_confirm_flag(self, app, client, tmp_path):
+        _install_runner(app, tmp_path)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+        # Missing confirm flag
+        body = client.post(
+            "/api/autonomous/mode/activate",
+            json={"trading_cycle": "single_trade"},
+        ).get_json()
+        assert body["status"] == "confirmation_required"
+        # confirm=False also rejected
+        body = client.post(
+            "/api/autonomous/mode/activate",
+            json={"trading_cycle": "single_trade", "confirm": False},
+        ).get_json()
+        assert body["status"] == "confirmation_required"
+
     def test_activate_single_trade_runs_cycle(self, app, client, tmp_path):
         store, _adapter = _install_runner(app, tmp_path)
         app.config["services"].set_connected(
@@ -214,10 +251,11 @@ class TestAutonomousMode:
         )
         body = client.post(
             "/api/autonomous/mode/activate",
-            json={"trading_cycle": "single_trade"},
+            json={"trading_cycle": "single_trade", "confirm": True},
         ).get_json()
         assert body["status"] == "activated"
         assert body["autonomous_mode"]["mode"]["operating_state"] == "ON"
+        assert body["autonomous_mode"]["mode"]["cycles_started"] == 1
         assert len(store.list_open()) == 1
 
     def test_activate_halts_on_bearish_spy_gate(self, app, client, tmp_path):
@@ -232,11 +270,28 @@ class TestAutonomousMode:
         )
         body = client.post(
             "/api/autonomous/mode/activate",
-            json={"trading_cycle": "single_trade"},
+            json={"trading_cycle": "single_trade", "confirm": True},
         ).get_json()
         assert body["status"] == "halted"
         assert body["autonomous_mode"]["mode"]["operating_state"] == "OFF"
         assert "bearish market" in body["autonomous_mode"]["readiness"]["message"]
+
+    def test_activate_rejected_when_account_unknown(self, app, client, tmp_path):
+        """Activation must fail-closed when account type is Unknown."""
+        _install_runner(app, tmp_path)
+        # Connected but no account id populated yet → Unknown
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": ""},
+        )
+        resp = client.post(
+            "/api/autonomous/mode/activate",
+            json={"trading_cycle": "single_trade", "confirm": True},
+        )
+        assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["status"] == "rejected"
+        assert "not verified" in body["error"]
 
     def test_halt_turns_mode_off_without_closing_trades(self, app, client, tmp_path):
         seed = [AutonomousTrade(
@@ -280,6 +335,43 @@ class TestEvaluateExits:
         assert d["decision"] == "TAKE_PROFIT"
         # Trade is now EXIT_PENDING (no fake fill).
         assert store.get("t1").status == "EXIT_PENDING"
+
+    def test_single_trade_lifecycle_turns_off_after_exit(self, app, client, tmp_path):
+        """Single Trade: Autonomous Mode turns OFF after all lifecycle trades close."""
+        from autonomous.autonomous_mode import AutonomousModeState, TradingCycle
+        from autonomous.trade_store import CLOSED as CLOSED_STATUS
+
+        store, adapter = _install_runner(app, tmp_path)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+
+        # Activate in Single Trade mode
+        body = client.post(
+            "/api/autonomous/mode/activate",
+            json={"trading_cycle": "single_trade", "confirm": True},
+        ).get_json()
+        assert body["status"] == "activated"
+        assert len(store.list_open()) == 1
+        trade = store.list_open()[0]
+
+        # Simulate trade closing (manually mark as CLOSED)
+        store.update_trade(
+            trade.autonomous_trade_id,
+            status=CLOSED_STATUS,
+            exit_reason="TAKE_PROFIT",
+            exit_time=datetime.now(timezone.utc),
+        )
+
+        # evaluate-exits should detect no active trades and turn mode OFF
+        resp = client.post("/api/autonomous/runner/evaluate-exits", json={})
+        assert resp.status_code == 200
+
+        # Mode should now be OFF
+        mode_body = client.get("/api/autonomous/mode/status").get_json()
+        assert mode_body["mode"]["operating_state"] == "OFF"
+        assert "completed" in mode_body["mode"]["message"]
 
 
 class TestTrades:

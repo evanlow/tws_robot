@@ -563,22 +563,14 @@
     const cycle = selectedTradingCycle();
     const cycleLabel = cycle === 'continuous' ? 'Continuous Trading' : 'Single Trade';
     if (confirmText) {
-      if (accountType === 'LIVE') {
-        confirmText.textContent =
-          'Turn Autonomous Mode ON for LIVE account? The connected account is LIVE. ' +
-          'TWS Robot may place real orders that can result in real financial gains or losses. ' +
-          'Trading Cycle: ' + cycleLabel + '.';
-      } else {
-        confirmText.textContent =
-          'Turn Autonomous Mode ON? The connected account is ' + accountType +
-          '. TWS Robot may begin autonomous trading using this account context. ' +
-          'Trading Cycle: ' + cycleLabel + '.';
-      }
+      confirmText.textContent =
+        'Turn Autonomous Mode ON for ' + accountType + ' account? ' +
+        'TWS Robot will begin autonomous paper trading using this account context. ' +
+        'Only paper (simulated) orders are supported. No real orders will be placed. ' +
+        'Trading Cycle: ' + cycleLabel + '.';
     }
     if (confirmButton) {
-      confirmButton.textContent = accountType === 'LIVE'
-        ? 'Turn ON for Live Account'
-        : 'Turn ON';
+      confirmButton.textContent = 'Turn ON (Paper Mode)';
     }
     planEl.innerHTML = '';
     if (state.lastProposal && state.lastProposal.trade_plan) {
@@ -603,7 +595,7 @@
     const cycle = selectedTradingCycle();
     setFeedback('Activating Autonomous Mode…');
     try {
-      const body = await postJson('/api/autonomous/mode/activate', { trading_cycle: cycle });
+      const body = await postJson('/api/autonomous/mode/activate', { trading_cycle: cycle, confirm: true });
       const decision = body.run?.decision;
       if (decision) renderProposal(decision);
       const status = body.status || 'unknown';

@@ -38,6 +38,7 @@ class AutonomousModeState:
     message: Optional[str] = None
     last_status_refresh: Optional[str] = None
     activated_at: Optional[str] = None
+    cycles_started: int = 0  # Incremented each time run_once is called in this activation
 
     @property
     def is_on(self) -> bool:
@@ -51,6 +52,7 @@ class AutonomousModeState:
         self.readiness_status = status
         self.message = message
         self.activated_at = None
+        self.cycles_started = 0
         self.refresh()
 
     def turn_on(self, cycle: TradingCycle) -> None:
@@ -59,6 +61,7 @@ class AutonomousModeState:
         self.readiness_status = "Ready"
         self.message = None
         self.activated_at = datetime.now(timezone.utc).isoformat()
+        self.cycles_started = 0
         self.refresh()
 
     def to_dict(self) -> Dict[str, Any]:
