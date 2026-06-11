@@ -425,22 +425,35 @@ def _autonomous_status_payload() -> Dict[str, Any]:
     }
 
 
+def _trades_since_activation(state: "AutonomousModeState"):
+    """Return all trades opened at or after the current mode activation time.
+
+    Returns an empty list when ``activated_at`` is not set or the store
+    cannot be read.  Callers must guard against empty results.
+    """
+    activated_at_str = state.activated_at
+    if not activated_at_str:
+        return []
+    activated_at = datetime.fromisoformat(activated_at_str)
+    return [
+        t for t in _trade_store().list_all()
+        if t.entry_time >= activated_at
+    ]
+
+
 def _advance_single_trade_if_complete(state: "AutonomousModeState") -> None:
     """Turn Autonomous Mode OFF if every trade opened since activation is closed.
 
-    Called only when mode is ON, cycles_started > 0, and trading_cycle is
-    SINGLE_TRADE.  Safe to call repeatedly; does nothing when active trades exist.
+    Safe to call repeatedly; does nothing when:
+    - ``activated_at`` is not set
+    - no trade has been placed since activation
+    - at least one trade is still OPEN or EXIT_PENDING
+
+    Callers are responsible for ensuring mode is ON, ``cycles_started > 0``,
+    and ``trading_cycle == SINGLE_TRADE`` before calling this function.
     """
     try:
-        activated_at_str = state.activated_at
-        if not activated_at_str:
-            return
-        activated_at = datetime.fromisoformat(activated_at_str)
-        store = _trade_store()
-        since_activation = [
-            t for t in store.list_all()
-            if t.entry_time >= activated_at
-        ]
+        since_activation = _trades_since_activation(state)
         if not since_activation:
             return  # No trade placed yet in this activation
         still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
@@ -457,27 +470,24 @@ def _advance_single_trade_if_complete(state: "AutonomousModeState") -> None:
 
 
 def _maybe_advance_lifecycle() -> None:
-    """Advance Continuous Trading lifecycle after exits are evaluated.
+    """Advance the autonomous lifecycle after exit evaluation completes.
 
-    Called from the evaluate-exits endpoint.  For Continuous Trading:
-    if every trade since activation is closed, rechecks the SPY gate and
-    starts the next cycle.  Turns mode OFF if SPY is bearish or an error
-    occurs.  For Single Trade, delegates to ``_advance_single_trade_if_complete``.
+    Called from the evaluate-exits endpoint.  Does nothing when mode is OFF
+    or ``cycles_started == 0`` (no lifecycle has been started yet).
+
+    For Single Trade: delegates to ``_advance_single_trade_if_complete``,
+    which turns mode OFF once all trades are closed.
+
+    For Continuous Trading: if every trade since activation is closed,
+    rechecks the SPY gate and starts the next cycle.  Turns mode OFF if
+    SPY is bearish or the runner raises an error.
     """
     state = _mode_state()
     if not state.is_on or state.cycles_started == 0:
         return
 
     try:
-        activated_at_str = state.activated_at
-        if not activated_at_str:
-            return
-        activated_at = datetime.fromisoformat(activated_at_str)
-        store = _trade_store()
-        since_activation = [
-            t for t in store.list_all()
-            if t.entry_time >= activated_at
-        ]
+        since_activation = _trades_since_activation(state)
         if not since_activation:
             return  # No trade placed yet
         still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
