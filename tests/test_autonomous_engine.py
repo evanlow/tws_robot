@@ -44,6 +44,7 @@ def _make_engine(
     paper_adapter=None,
     risk_manager=None,
     symbols=None,
+    spy_price_provider=None,
 ):
     provider = StaticSignalProvider(signals or [])
     scanner = CandidateScanner(
@@ -66,6 +67,7 @@ def _make_engine(
         config=cfg,
         risk_manager=risk_manager,
         paper_adapter=paper_adapter,
+        spy_price_provider=spy_price_provider,
         audit_logger=audit,
     )
 
@@ -112,6 +114,35 @@ def test_no_matching_candidate_returns_no_candidate(tmp_path):
     assert d.deployable_cash > 0
 
 
+def test_spy_bearish_gate_blocks_before_scan(tmp_path):
+    class _ExplodingProvider:
+        def analyze(self, symbol):  # pragma: no cover - should not be called
+            raise AssertionError("candidate scan must not run when SPY is bearish")
+
+    scanner = CandidateScanner(
+        signal_provider=_ExplodingProvider(),
+        symbols=[{"symbol": "AAA", "security": "AAA", "sector": "X", "sub_industry": ""}],
+    )
+    cfg = AutonomousTradingConfig(
+        emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
+        audit_log_dir=str(tmp_path),
+    )
+    engine = AutonomousTradingEngine(
+        scanner=scanner,
+        cash_analyzer=CashAvailabilityAnalyzer(),
+        account_provider=lambda: {"cash_balance": 100_000, "equity": 100_000},
+        positions_provider=lambda: {},
+        config=cfg,
+        spy_price_provider=lambda: {"open": 500.0, "current": 499.0},
+        audit_logger=AuditLogger(log_dir=str(tmp_path)),
+    )
+    d = engine.run_once()
+    assert d.status is DecisionStatus.MARKET_NOT_SUITABLE
+    assert d.shortlist == []
+    assert "bearish market" in d.rejection_reason
+    assert d.market_gate["classification"] == "Bearish / Not Suitable"
+
+
 def test_recommend_only_never_places_orders(tmp_path):
     placed = []
 
@@ -131,6 +162,20 @@ def test_recommend_only_never_places_orders(tmp_path):
     # Best candidate is the highest-strength one.
     assert d.selected["candidate"]["symbol"] == "BBB"
     assert d.trade_plan["trade_type"] == "BUY_SHARES"
+    assert d.trade_plan["quantity"] == 90
+
+
+def test_trade_sizing_uses_ten_percent_of_deployable_cash(tmp_path):
+    engine = _make_engine(
+        tmp_path,
+        signals=[_make_signal("AAA", last_price=100.0)],
+        account={"cash_balance": 50_000, "equity": 1_000_000},
+    )
+    d = engine.run_once()
+    assert d.status is DecisionStatus.RECOMMENDED
+    # lower of 10% equity (100k) and 10% deployable cash after reserves.
+    assert d.trade_plan["quantity"] == int((d.deployable_cash * 0.10) // 100.0)
+    assert d.trade_plan["required_cash"] == d.trade_plan["quantity"] * 100.0
 
 
 def test_paper_execute_places_order_with_confirm(tmp_path):

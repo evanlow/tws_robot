@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 
 from web.disclaimer import RISK_DISCLAIMER_VERSION, is_accepted
 from web.services import get_services
+from autonomous.autonomous_mode import infer_account_type, mismatch_message
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,26 @@ def connect():
             "message": error,  # Backward compatibility for existing clients.
         }), 503
 
+    actual = infer_account_type(getattr(svc, "connection_info", {}).get("account"))
+    if actual is not None and actual != env:
+        error = mismatch_message(env, actual)
+        svc.disconnect_tws()
+        try:
+            from web.routes.api_autonomous import force_autonomous_mode_off
+
+            force_autonomous_mode_off(message=error, status="Error")
+        except Exception:  # pragma: no cover - best-effort safety notification
+            pass
+        logger.warning("Connection rejected: selected=%s actual=%s", env, actual)
+        return jsonify({
+            "status": "connection_rejected",
+            "connected": False,
+            "environment": env,
+            "actual_environment": actual,
+            "error": error,
+            "message": error,
+        }), 409
+
     logger.info("Connection initiated: env=%s host=%s port=%s",
                 env, cfg["host"], cfg["port"])
     return jsonify({
@@ -103,5 +124,14 @@ def disconnect():
         return jsonify({"error": "Not connected"}), 409
 
     svc.disconnect_tws()
+    try:
+        from web.routes.api_autonomous import force_autonomous_mode_off
+
+        force_autonomous_mode_off(
+            message="TWS disconnected. Autonomous Mode has been turned OFF.",
+            status="Not Ready",
+        )
+    except Exception:  # pragma: no cover - best-effort safety notification
+        pass
     logger.info("Disconnected from TWS")
     return jsonify({"status": "disconnected"})

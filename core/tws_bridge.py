@@ -110,6 +110,7 @@ class _BridgeApp(EWrapper, EClient):
 
     def updateAccountValue(self, key: str, val: str, currency: str,
                            accountName: str) -> None:
+        self._svc.update_connected_account(accountName)
         # -- Per-currency cash balances (all currencies, not only BASE) -----
         if key in self._PER_CURRENCY_KEYS and currency and currency != "BASE":
             with self._svc._lock:
@@ -207,6 +208,7 @@ class _BridgeApp(EWrapper, EClient):
 
     def accountDownloadEnd(self, accountName: str) -> None:
         logger.info("Account download complete for %s", accountName)
+        self._svc.update_connected_account(accountName)
         # Recompute strategy metrics once after the full position snapshot
         # has been received, rather than after every individual position
         # callback, to avoid O(N²) work during burst updates.

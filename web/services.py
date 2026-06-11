@@ -183,6 +183,16 @@ class ServiceManager:
             source="ServiceManager",
         ))
 
+    def update_connected_account(self, account: str) -> None:
+        """Update the active account id from a TWS account callback."""
+
+        account = str(account or "").strip()
+        if not account:
+            return
+        with self._lock:
+            if self._connected:
+                self._connection_info["account"] = account
+
     def set_disconnected(self) -> None:
         with self._lock:
             self._connected = False

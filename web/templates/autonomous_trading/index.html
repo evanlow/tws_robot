@@ -19,14 +19,30 @@
   </header>
 
   <!-- ============================================================
-       1. Status / Safety Control Panel
+       1. Autonomous Mode Control Panel
        ============================================================ -->
   <section class="panel" id="statusPanel" aria-labelledby="statusHeading">
-    <h2 id="statusHeading">Status &amp; Safety</h2>
+    <h2 id="statusHeading">Autonomous Mode</h2>
     <div class="badge-row" id="statusBadges">
       <span class="badge badge-muted">Loading status…</span>
     </div>
     <dl class="status-grid" id="statusGrid"></dl>
+    <div class="control-row autonomous-mode-controls">
+      <fieldset>
+        <legend>Trading Cycle:</legend>
+        <label>
+          <input type="radio" name="tradingCycle" value="single_trade" checked>
+          Single Trade
+        </label>
+        <label>
+          <input type="radio" name="tradingCycle" value="continuous">
+          Continuous Trading
+        </label>
+      </fieldset>
+      <button class="btn-primary" id="btnAutonomousModeToggle" type="button" disabled>
+        Activate Autonomous Mode
+      </button>
+    </div>
     <p class="provider-warning" id="providerWarning" style="display:none;"></p>
   </section>
 
@@ -69,16 +85,12 @@
       <button class="btn-secondary" id="btnPropose" type="button">
         Propose Trade
       </button>
-      <button class="btn-primary" id="btnExecutePaper" type="button" disabled
-              title="Disabled until a paper trading adapter is configured.">
-        Execute Paper Trade
-      </button>
       <button class="btn-emergency" id="btnEmergencyStop" type="button">
         🚨 Emergency Stop
       </button>
     </div>
     <p class="control-help">
-      Paper execution requires explicit confirmation. Emergency stop creates
+      Autonomous execution requires explicit confirmation. Emergency stop creates
       the <code>EMERGENCY_STOP</code> file which blocks all subsequent
       autonomous runs.
     </p>
@@ -140,14 +152,14 @@
   </section>
 
   <!-- ============================================================
-       6. Paper Robot Runner
+       6. Autonomous Trade Lifecycle
        ============================================================ -->
   <section class="panel" id="runnerPanel" aria-labelledby="runnerHeading">
-    <h2 id="runnerHeading">Paper Robot Runner</h2>
+    <h2 id="runnerHeading">Autonomous Trade Lifecycle</h2>
     <p class="panel-help">
-      Paper-only autonomous lifecycle controls. <strong>This section never
-      exposes live autonomous execution.</strong> The <em>Run Paper Robot
-      Once</em> button is disabled until every readiness gate passes.
+      Entry and exit lifecycle monitoring for trades opened by Autonomous
+      Mode. The <em>Run One Decision Cycle</em> button is disabled until every
+      readiness gate passes.
     </p>
     <div class="badge-row" id="runnerGates">
       <span class="badge badge-muted">Loading runner status…</span>
@@ -156,7 +168,7 @@
     <div class="control-row">
       <button class="btn-primary" id="btnRunPaperRobot" type="button" disabled
               title="Disabled until all readiness gates pass.">
-        Run Paper Robot Once
+        Run One Decision Cycle
       </button>
       <button class="btn-secondary" id="btnEvaluateExits" type="button">
         Evaluate Exits Now
@@ -246,19 +258,20 @@
 </div>
 
 <!-- ============================================================
-     Paper-execute confirmation modal
+     Autonomous Mode activation confirmation modal
      ============================================================ -->
 <div id="paperConfirmOverlay" class="modal-overlay" role="dialog"
      aria-modal="true" aria-labelledby="paperConfirmTitle" style="display:none;">
   <div class="modal-card">
-    <h3 id="paperConfirmTitle">Confirm paper execution</h3>
-    <p>You are about to call <code>/api/autonomous/execute-paper</code> with
-       <code>confirm=true</code>. This will route the trade through the
-       configured paper adapter. Review the plan below carefully.</p>
+    <h3 id="paperConfirmTitle">Turn Autonomous Mode ON?</h3>
+    <p id="autonomousConfirmText">
+       The connected account context will be used for autonomous trading.
+       Review the selected trading cycle carefully.
+    </p>
     <div id="paperConfirmPlan" class="proposal-card"></div>
     <div class="modal-actions">
       <button class="btn-secondary" id="paperConfirmCancel" type="button">Cancel</button>
-      <button class="btn-primary" id="paperConfirmGo" type="button">Yes, execute paper trade</button>
+      <button class="btn-primary" id="paperConfirmGo" type="button">Turn ON</button>
     </div>
   </div>
 </div>

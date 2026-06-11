@@ -139,7 +139,7 @@ class TradePlanner:
             and self.config.allow_short_put
             and option_hint is not None
         ):
-            put_plan = self._plan_short_put(candidate, deployable_cash, option_hint)
+            put_plan = self._plan_short_put(candidate, deployable_cash, equity, option_hint)
             if put_plan is not None:
                 return put_plan
 
@@ -162,8 +162,9 @@ class TradePlanner:
         if price <= 0:
             return None
 
-        # Position-size cap is min(deployable_cash, max_new_position_pct * equity).
-        cap = deployable_cash
+        # Position-size cap is the lower of the configured percentage of
+        # equity and the same percentage of deployable cash.
+        cap = deployable_cash * self.config.max_new_position_pct
         if equity > 0:
             cap = min(cap, equity * self.config.max_new_position_pct)
         if cap < price:
@@ -203,7 +204,7 @@ class TradePlanner:
             ),
             risk_notes=[
                 "Limit order only; never market.",
-                f"Sized to <= {self.config.max_new_position_pct:.0%} of equity.",
+                f"Sized to <= {self.config.max_new_position_pct:.0%} of equity and deployable cash.",
             ],
             exit_plan=(
                 "Exit on target_price or stop_price; "
@@ -219,6 +220,7 @@ class TradePlanner:
         self,
         candidate: CandidateSignal,
         deployable_cash: float,
+        equity: float,
         option_hint: OptionChainHint,
     ) -> Optional[TradePlan]:
         if option_hint.contracts_available <= 0:
@@ -241,7 +243,10 @@ class TradePlanner:
         if per_contract_cash <= 0:
             return None
 
-        max_contracts_by_cash = int(math.floor(deployable_cash / per_contract_cash))
+        cap = deployable_cash * self.config.max_new_position_pct
+        if equity > 0:
+            cap = min(cap, equity * self.config.max_new_position_pct)
+        max_contracts_by_cash = int(math.floor(cap / per_contract_cash))
         contracts = min(max_contracts_by_cash, option_hint.contracts_available)
         if contracts <= 0:
             return None

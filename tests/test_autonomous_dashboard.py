@@ -51,12 +51,14 @@ class TestPage:
         assert "Autonomous Trading" in body
         # Key sections must be present in the rendered HTML.
         for needle in (
-            "Status &amp; Safety",
+            "Autonomous Mode",
             "Deployable Cash",
             "Candidate Shortlist",
             "Trade Proposal",
             "Decision Timeline",
-            "Execute Paper Trade",
+            "Activate Autonomous Mode",
+            "Single Trade",
+            "Continuous Trading",
             "Emergency Stop",
             "autonomous_trading.js",
         ):
@@ -253,10 +255,10 @@ class TestStatusBadges:
         # The badge must be driven by the explicit boolean from /status.
         assert "signal_provider_ready" in src
 
-    def test_paper_adapter_badges_are_rendered(self):
+    def test_autonomous_mode_badges_are_rendered(self):
         src = self._js_source()
-        assert "PAPER ADAPTER READY" in src
-        assert "NO PAPER ADAPTER" in src
+        assert "AUTONOMOUS " in src
+        assert "MATCH " in src
 
     def test_disabled_button_uses_paper_adapter_reason(self):
         src = self._js_source()
@@ -264,3 +266,16 @@ class TestStatusBadges:
         # backend-supplied reason (e.g. "Connect to IBKR paper mode…")
         # rather than a hard-coded string.
         assert "paper_adapter_reason" in src
+
+    def test_autonomous_mode_panel_fields_are_rendered(self):
+        src = self._js_source()
+        for label in (
+            "Autonomous Mode status",
+            "TWS connection status",
+            "Selected connection type",
+            "Verified running TWS session/account type",
+            "Paper/Live match status",
+            "Latest autonomous readiness status",
+            "Last status refresh timestamp",
+        ):
+            assert label in src

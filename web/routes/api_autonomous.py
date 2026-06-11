@@ -35,9 +35,16 @@ from autonomous import (
     CandidateScanner,
     StaticSignalProvider,
 )
+from autonomous.audit import AuditLogger
 from autonomous.autonomous_runner import (
     AutonomousPaperRunner,
     NOT_CONNECTED,
+)
+from autonomous.autonomous_mode import (
+    AutonomousModeState,
+    TradingCycle,
+    infer_account_type,
+    normalise_trading_cycle,
 )
 from autonomous.exit_manager import AutonomousExitManager
 from autonomous.runner_config import AutonomousRunnerConfig
@@ -171,6 +178,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
         config=base_config,
         risk_manager=getattr(svc, "risk_manager", None),
         paper_adapter=paper_adapter,
+        spy_price_provider=_resolve_spy_price_provider(),
     )
 
 
@@ -256,6 +264,11 @@ SIGNAL_PROVIDER_WARNING = (
     "registered via current_app.config['autonomous_signal_provider']."
 )
 
+BEARISH_SPY_MESSAGE = (
+    "Autonomous Mode strategy doesn't work well in current bearish market. "
+    "Terminating Autonomous Mode."
+)
+
 
 def _provider_warning_if_default() -> Dict[str, Any]:
     """Return a ``{"warning": ...}`` dict when the active provider is the
@@ -271,6 +284,107 @@ def _provider_warning_if_default() -> Dict[str, Any]:
     if not isinstance(provider, StaticSignalProvider):
         return {}
     return {"warning": SIGNAL_PROVIDER_WARNING}
+
+
+def _mode_state() -> AutonomousModeState:
+    state = current_app.config.get("autonomous_mode_state")
+    if isinstance(state, AutonomousModeState):
+        return state
+    state = AutonomousModeState()
+    current_app.config["autonomous_mode_state"] = state
+    return state
+
+
+def force_autonomous_mode_off(message: str | None = None, status: str = "Not Ready") -> None:
+    """Public helper for connection routes to enforce default-OFF safety."""
+
+    try:
+        _mode_state().turn_off(message=message, status=status)
+    except RuntimeError:
+        # No Flask app context; callers without one cannot own dashboard state.
+        return
+
+
+def _audit_mode_event(event: str, payload: Dict[str, Any] | None = None) -> None:
+    log_dir = Path(
+        current_app.config.get("autonomous_audit_log_dir")
+        or AutonomousTradingConfig().audit_log_dir
+    )
+    AuditLogger(log_dir=str(log_dir)).log_decision({
+        "engine": "AutonomousModeController",
+        "event": event,
+        "payload": payload or {},
+    })
+
+
+def _resolve_spy_price_provider():
+    override = current_app.config.get("autonomous_spy_price_provider")
+    if callable(override):
+        return override
+    return None
+
+
+def _connection_verification_payload(svc) -> Dict[str, Any]:
+    selected = getattr(svc, "connection_env", None)
+    info = getattr(svc, "connection_info", {}) or {}
+    actual = (
+        current_app.config.get("autonomous_actual_account_type")
+        or infer_account_type(info.get("account"))
+    )
+    if not selected or not actual:
+        match = "Unknown"
+    elif selected == actual:
+        match = "Verified"
+    else:
+        match = "Mismatch"
+    return {
+        "selected_connection_type": selected,
+        "running_account_type": actual,
+        "paper_live_match_status": match,
+    }
+
+
+def _autonomous_status_payload() -> Dict[str, Any]:
+    svc = get_services()
+    runner = _build_runner()
+    gates = runner.evaluate_gates()
+    state = _mode_state()
+    verification = _connection_verification_payload(svc)
+    connected = bool(getattr(svc, "connected", False))
+
+    if (
+        state.is_on
+        and (not connected or verification["paper_live_match_status"] == "Mismatch"
+             or gates.emergency_stop_active)
+    ):
+        state.turn_off(
+            message="Autonomous Mode turned OFF by connection/safety state change.",
+            status="Halted" if gates.emergency_stop_active else "Not Ready",
+        )
+
+    readiness = state.readiness_status
+    if not state.is_on and gates.emergency_stop_active:
+        readiness = "Halted"
+    elif not state.is_on and gates.ready and verification["paper_live_match_status"] == "Verified":
+        readiness = "Ready"
+    elif not state.is_on:
+        readiness = "Not Ready"
+    state.readiness_status = readiness
+    state.refresh()
+
+    return {
+        "mode": state.to_dict(),
+        "connection": {
+            "connected": connected,
+            "status": "Connected" if connected else "Disconnected",
+            **verification,
+        },
+        "readiness": {
+            "status": readiness,
+            "message": state.message,
+            "gates": gates.to_dict(),
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +410,7 @@ def status():
         "connected": bool(getattr(svc, "connected", False)),
     }
     payload.update(_signal_provider_info(provider))
+    payload["autonomous_mode"] = _autonomous_status_payload()
 
     # Helpful reason string so the dashboard can explain why paper
     # execution is disabled even when the user hasn't tried clicking yet.
@@ -473,6 +588,12 @@ def emergency_stop():
             "error": "Failed to write emergency stop file",
         }), 500
 
+    force_autonomous_mode_off(
+        message="Emergency stop active. Autonomous Mode has been turned OFF.",
+        status="Halted",
+    )
+    _audit_mode_event("halt", {"reason": reason, "source": "emergency_stop"})
+
     return jsonify({
         "status": "halted",
         "emergency_stop_file": str(EMERGENCY_STOP_FILE),
@@ -483,6 +604,68 @@ def emergency_stop():
 # ---------------------------------------------------------------------------
 # Paper-only autonomous runner
 # ---------------------------------------------------------------------------
+
+
+@bp.route("/mode/status", methods=["GET"])
+def autonomous_mode_status():
+    """Return the binary user-facing Autonomous Mode status."""
+
+    return jsonify(_autonomous_status_payload())
+
+
+@bp.route("/mode/activate", methods=["POST"])
+def autonomous_mode_activate():
+    """Turn Autonomous Mode ON after readiness checks and run one lifecycle."""
+
+    body = request.get_json(silent=True) or {}
+    cycle = normalise_trading_cycle(body.get("trading_cycle"))
+    if cycle is None:
+        return jsonify({"error": "trading_cycle must be single_trade or continuous"}), 400
+
+    status_payload = _autonomous_status_payload()
+    connection = status_payload["connection"]
+    if connection["paper_live_match_status"] != "Verified":
+        msg = "Paper/Live connection match is not verified."
+        _mode_state().turn_off(message=msg, status="Not Ready")
+        return jsonify({"status": "rejected", "error": msg, **status_payload}), 409
+
+    gates = status_payload["readiness"]["gates"]
+    if not gates.get("ready"):
+        msg = "; ".join(gates.get("reasons") or []) or "Autonomous readiness checks failed"
+        _mode_state().turn_off(message=msg, status="Not Ready")
+        return jsonify({"status": "rejected", "error": msg, **status_payload}), 409
+
+    state = _mode_state()
+    state.turn_on(cycle)
+    _audit_mode_event("activate", {"trading_cycle": cycle.value})
+
+    result = _build_runner().run_once()
+    payload = result.to_dict()
+    decision = payload.get("decision") or {}
+    if decision.get("status") == "market_not_suitable":
+        state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+        _audit_mode_event("halt", {"reason": BEARISH_SPY_MESSAGE, "source": "spy_gate"})
+    elif payload.get("status") == "no_trade" and cycle == TradingCycle.SINGLE_TRADE:
+        message = payload.get("rejection_reason") or "No trade. Autonomous Mode has been turned OFF."
+        state.turn_off(message=message, status="Not Ready")
+        _audit_mode_event("halt", {"reason": message, "source": "single_trade_no_trade"})
+
+    return jsonify({
+        "status": "activated" if state.is_on else "halted",
+        "run": payload,
+        "autonomous_mode": _autonomous_status_payload(),
+    })
+
+
+@bp.route("/mode/halt", methods=["POST"])
+def autonomous_mode_halt():
+    """Turn Autonomous Mode OFF without liquidating positions."""
+
+    body = request.get_json(silent=True) or {}
+    reason = str(body.get("reason") or "Operator turned Autonomous Mode OFF")
+    _mode_state().turn_off(message=reason, status="Halted")
+    _audit_mode_event("halt", {"reason": reason, "source": "operator"})
+    return jsonify({"status": "halted", "autonomous_mode": _autonomous_status_payload()})
 
 def _runner_config() -> AutonomousRunnerConfig:
     """Return the active runner config.

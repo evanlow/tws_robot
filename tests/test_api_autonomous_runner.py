@@ -107,6 +107,7 @@ def _install_runner(app, tmp_path: Path, *, runner_enabled=True, with_signal=Tru
         positions_provider=lambda: {"AAA": {"current_price": 112.5}},
         config=engine_cfg,
         paper_adapter=adapter,
+        spy_price_provider=app.config.get("autonomous_spy_price_provider"),
         audit_logger=AuditLogger(log_dir=str(tmp_path)),
     )
 
@@ -191,6 +192,68 @@ class TestRunOncePaper:
         body = client.post("/api/autonomous/runner/run-once-paper", json={}).get_json()
         assert body["status"] == "runner_disabled"
         assert body["rejection_reason"]
+
+
+class TestAutonomousMode:
+    def test_mode_status_defaults_off(self, app, client, tmp_path):
+        _install_runner(app, tmp_path)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+        body = client.get("/api/autonomous/mode/status").get_json()
+        assert body["mode"]["operating_state"] == "OFF"
+        assert body["mode"]["trading_cycle"] == "single_trade"
+        assert body["connection"]["paper_live_match_status"] == "Verified"
+
+    def test_activate_single_trade_runs_cycle(self, app, client, tmp_path):
+        store, _adapter = _install_runner(app, tmp_path)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+        body = client.post(
+            "/api/autonomous/mode/activate",
+            json={"trading_cycle": "single_trade"},
+        ).get_json()
+        assert body["status"] == "activated"
+        assert body["autonomous_mode"]["mode"]["operating_state"] == "ON"
+        assert len(store.list_open()) == 1
+
+    def test_activate_halts_on_bearish_spy_gate(self, app, client, tmp_path):
+        app.config["autonomous_spy_price_provider"] = lambda: {
+            "open": 500.0,
+            "current": 499.0,
+        }
+        _install_runner(app, tmp_path)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+        body = client.post(
+            "/api/autonomous/mode/activate",
+            json={"trading_cycle": "single_trade"},
+        ).get_json()
+        assert body["status"] == "halted"
+        assert body["autonomous_mode"]["mode"]["operating_state"] == "OFF"
+        assert "bearish market" in body["autonomous_mode"]["readiness"]["message"]
+
+    def test_halt_turns_mode_off_without_closing_trades(self, app, client, tmp_path):
+        seed = [AutonomousTrade(
+            autonomous_trade_id="open1", symbol="AAA",
+            trade_type="buy_shares", status=OPEN, entry_order_id=1,
+            entry_time=datetime.now(timezone.utc),
+            entry_limit_price=100.0, quantity=10,
+        )]
+        store, _ = _install_runner(app, tmp_path, store_seed=seed)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+        body = client.post("/api/autonomous/mode/halt", json={"reason": "test"}).get_json()
+        assert body["status"] == "halted"
+        assert body["autonomous_mode"]["mode"]["operating_state"] == "OFF"
+        assert store.get("open1").status == OPEN
 
 
 class TestEvaluateExits:
@@ -316,8 +379,8 @@ class TestDashboardSafety:
         resp = client.get("/autonomous-trading/")
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
-        assert "Paper Robot Runner" in html
-        assert "Run Paper Robot Once" in html
+        assert "Autonomous Trade Lifecycle" in html
+        assert "Run One Decision Cycle" in html
         assert "Evaluate Exits Now" in html
 
     def test_dashboard_does_not_expose_live_runner(self, app, client):
