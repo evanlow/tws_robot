@@ -380,7 +380,8 @@ class TestStatusDisplayRefinement:
         css = self._css_source()
         assert ".readiness-item" in css
         # cursor:default conveys non-interactivity without blocking tooltip events
-        assert "cursor: default" in css
+        readiness_item_block = css.split(".readiness-item")[1].split("}")[0]
+        assert "cursor: default" in readiness_item_block
 
 
 class TestModeActivationButton:

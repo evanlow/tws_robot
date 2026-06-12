@@ -165,6 +165,10 @@
         modeChip.textContent = 'AUTONOMOUS ON';
         chipClass = 'mode-chip-on';
         descText = 'Autonomous lifecycle is active.';
+      } else if (readiness.status === 'Not Ready') {
+        modeChip.textContent = 'AUTONOMOUS OFF';
+        chipClass = 'mode-chip-not-ready';
+        descText = 'One or more readiness gates are failing. Activation is blocked.';
       } else {
         modeChip.textContent = 'AUTONOMOUS OFF';
         chipClass = 'mode-chip-off';
