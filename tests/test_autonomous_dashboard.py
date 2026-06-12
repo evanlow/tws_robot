@@ -368,3 +368,116 @@ class TestModeActivationButton:
         html = self._html_source(client)
         assert 'id="btnAutonomousModeToggle"' in html
         assert "disabled" in html
+
+
+class TestActivityLogPanel:
+    """The Autonomous Activity Log panel must exist and JS must drive it."""
+
+    def _js_source(self) -> str:
+        js_path = (
+            Path(__file__).resolve().parent.parent
+            / "web" / "static" / "js" / "autonomous_trading.js"
+        )
+        return js_path.read_text(encoding="utf-8")
+
+    def _html_source(self, client) -> str:
+        return client.get("/autonomous-trading/").get_data(as_text=True)
+
+    # ---- DOM existence ----
+
+    def test_activity_log_panel_exists(self, client):
+        """The #activityLogPanel section must be present in the rendered page."""
+        html = self._html_source(client)
+        assert 'id="activityLogPanel"' in html
+        assert 'id="activityLogList"' in html
+        assert "Autonomous Activity Log" in html
+        assert '<ul id="activityLogList"' in html
+
+    def test_activity_log_placed_before_cash_panel(self, client):
+        """The activity log must appear between Autonomous Mode and Deployable Cash."""
+        html = self._html_source(client)
+        log_pos = html.index('id="activityLogPanel"')
+        cash_pos = html.index('id="cashPanel"')
+        assert log_pos < cash_pos, (
+            "Activity Log panel must appear before the Cash panel"
+        )
+
+    # ---- JS source checks ----
+
+    def test_log_activity_function_exists(self):
+        """logActivity helper must be defined in the JS source."""
+        src = self._js_source()
+        assert "function logActivity(" in src
+
+    def test_activation_click_logs_event(self):
+        """Clicking Activate must produce an activity log entry."""
+        src = self._js_source()
+        assert "Operator clicked Activate Autonomous Mode" in src
+
+    def test_cancel_logs_event(self):
+        """Cancelling the modal must produce an activity log entry."""
+        src = self._js_source()
+        assert "Activation modal cancelled" in src
+
+    def test_no_trade_response_logs_valid_outcome(self):
+        """A no_trade response must be logged as a valid outcome, not an error."""
+        src = self._js_source()
+        assert "No Trade:" in src
+        # Must NOT be labelled as error — it's info level
+        assert "'info', 'No Trade:" in src
+
+    def test_no_trade_logs_mode_off(self):
+        """A no_trade outcome must log that Autonomous Mode was turned OFF."""
+        src = self._js_source()
+        assert "ended with NO TRADE; Autonomous Mode turned OFF" in src
+
+    def test_api_error_logs_error_entry(self):
+        """API errors during activation must be logged at error level."""
+        src = self._js_source()
+        assert "'error', 'Autonomous Mode activation failed:" in src
+
+    def test_halt_logs_filled_positions_note(self):
+        """Halt action must log that filled positions were not liquidated."""
+        src = self._js_source()
+        assert "Filled positions were not liquidated" in src
+
+    def test_emergency_stop_logs_event(self):
+        """Emergency stop must produce an activity log entry."""
+        src = self._js_source()
+        assert "Emergency stop clicked by operator" in src
+
+    def test_dashboard_loaded_logs_event(self):
+        """Page load must log a dashboard loaded event."""
+        src = self._js_source()
+        assert "Dashboard loaded" in src
+
+    def test_confirm_path_does_not_log_cancellation(self):
+        """confirmPaperExecute must not log 'Activation modal cancelled by operator'."""
+        src = self._js_source()
+        # confirmPaperExecute calls hidePaperConfirm (no log), not cancelPaperConfirm
+        assert "function confirmPaperExecute" in src
+        # Extract the confirmPaperExecute function body
+        start = src.index("async function confirmPaperExecute()")
+        # Find the cancellation log — it must NOT appear in confirmPaperExecute
+        assert "hidePaperConfirm()" in src[start:start + 200]
+        assert "cancelPaperConfirm()" not in src[start:start + 200]
+
+    def test_spy_gate_uses_market_gate_bullish(self):
+        """SPY gate logging must derive from decision.market_gate.bullish, not body.run.spy_gate_passed."""
+        src = self._js_source()
+        # Must reference market_gate.bullish for pass/fail logic
+        assert "market_gate" in src
+        assert "marketGate.bullish === true" in src
+        assert "marketGate.bullish === false" in src
+        # Must NOT reference the old spy_gate_passed field
+        assert "spy_gate_passed" not in src
+
+    def test_no_trade_feedback_not_error(self):
+        """A no_trade run status must not produce error-level feedback."""
+        src = self._js_source()
+        # no_trade should set kind to 'info' for either status source
+        assert "status === 'no_trade' || runStatus === 'no_trade'" in src
+        # Verify no_trade maps to 'info' kind
+        start = src.index("status === 'no_trade' || runStatus === 'no_trade'")
+        region = src[start - 60:start + 120]
+        assert "kind = 'info'" in region

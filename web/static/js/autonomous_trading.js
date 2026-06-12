@@ -18,6 +18,45 @@
     autonomousModeOn: false,
   };
 
+  /* ----------------------- activity log ----------------------- */
+
+  const ACTIVITY_LOG_MAX = 50;
+  const activityLog = [];
+
+  function logActivity(level, message, details) {
+    const validLevels = ['info', 'success', 'warning', 'error'];
+    const safeLevel = validLevels.indexOf(level) !== -1 ? level : 'info';
+    const safeMessage = (message || '').slice(0, 500);
+    const entry = {
+      timestamp: new Date().toLocaleTimeString(),
+      level: safeLevel,
+      message: safeMessage,
+      details: details || null,
+    };
+    activityLog.unshift(entry);
+    if (activityLog.length > ACTIVITY_LOG_MAX) activityLog.length = ACTIVITY_LOG_MAX;
+    renderActivityLog();
+  }
+
+  function renderActivityLog() {
+    const list = $('activityLogList');
+    if (!list) return;
+    list.innerHTML = '';
+    activityLog.forEach(function (entry) {
+      const li = document.createElement('li');
+      li.className = 'activity-entry activity-' + entry.level;
+      const time = document.createElement('span');
+      time.className = 'activity-time';
+      time.textContent = entry.timestamp;
+      const msg = document.createElement('span');
+      msg.className = 'activity-msg';
+      msg.textContent = ' — ' + entry.message;
+      li.appendChild(time);
+      li.appendChild(msg);
+      list.appendChild(li);
+    });
+  }
+
   /* ------------------------- formatting helpers ------------------------- */
 
   function fmtMoney(value) {
@@ -593,9 +632,11 @@
 
   function openPaperConfirm() {
     if (state.autonomousModeOn) {
+      logActivity('info', 'Operator clicked Turn Autonomous Mode OFF');
       haltAutonomousMode();
       return;
     }
+    logActivity('info', 'Operator clicked Activate Autonomous Mode');
     const overlay = $('paperConfirmOverlay');
     const planEl = $('paperConfirmPlan');
     const confirmText = $('autonomousConfirmText');
@@ -629,27 +670,67 @@
     overlay.style.display = 'flex';
   }
 
-  function closePaperConfirm() {
+  function hidePaperConfirm() {
     $('paperConfirmOverlay').style.display = 'none';
   }
 
+  function cancelPaperConfirm() {
+    logActivity('info', 'Activation modal cancelled by operator');
+    hidePaperConfirm();
+  }
+
   async function confirmPaperExecute() {
-    closePaperConfirm();
+    hidePaperConfirm();
     const cycle = selectedTradingCycle();
+    const cycleLabel = cycle === 'continuous' ? 'Continuous Trading' : 'Single Trade';
+    logActivity('info', 'Activation confirmed: ' + cycleLabel + ' / Paper account');
     setFeedback('Activating Autonomous Mode…');
     try {
       const body = await postJson('/api/autonomous/mode/activate', { trading_cycle: cycle, confirm: true });
       const decision = body.run?.decision;
       if (decision) renderProposal(decision);
       const status = body.status || 'unknown';
-      const kind = status === 'activated' ? 'success' : 'error';
+      const runStatus = body.run?.status;
       const reason = body.run?.rejection_reason || decision?.rejection_reason || '';
+      let kind = 'error';
+      if (status === 'activated') {
+        kind = 'success';
+      } else if (status === 'no_trade' || runStatus === 'no_trade') {
+        kind = 'info';
+      } else if (decision?.status === 'market_not_suitable') {
+        kind = 'warning';
+      }
+
+      // Log detailed activity entries based on the response
+      const marketGate = decision?.market_gate;
+      if (marketGate && marketGate.bullish === true) {
+        logActivity('success', 'SPY gate passed: current price above opening price');
+      } else if (marketGate && marketGate.bullish === false) {
+        logActivity('warning', 'SPY gate failed: current price <= opening price');
+      }
+
+      if (status === 'activated' && !reason) {
+        logActivity('success', 'Autonomous Mode activated successfully');
+      } else if (status === 'no_trade' || runStatus === 'no_trade') {
+        logActivity('info', 'No Trade: ' + (reason || 'no qualifying candidates found'));
+        logActivity('info', cycleLabel + ' ended with NO TRADE; Autonomous Mode turned OFF');
+      } else if (reason) {
+        logActivity('warning', 'Autonomous Mode result: ' + status + ' — ' + reason);
+        if (body.run?.mode_turned_off) {
+          logActivity('info', 'Autonomous Mode turned OFF');
+        }
+      } else {
+        logActivity(kind, 'Autonomous Mode result: ' + status);
+      }
+
       setFeedback('Autonomous Mode result: ' + status + (reason ? ' — ' + reason : ''),
         kind);
       refreshStatus();
       refreshAudit();
     } catch (err) {
-      setFeedback('Autonomous Mode activation failed: ' + err.message, 'error');
+      const errMsg = (err && err.message) || String(err);
+      logActivity('error', 'Autonomous Mode activation failed: ' + errMsg);
+      setFeedback('Autonomous Mode activation failed: ' + errMsg, 'error');
     }
   }
 
@@ -659,16 +740,20 @@
   }
 
   async function haltAutonomousMode() {
+    logActivity('info', 'Operator requested Autonomous Mode OFF');
     setFeedback('Turning Autonomous Mode OFF…');
     try {
       await postJson('/api/autonomous/mode/halt', {
         reason: 'Operator turned Autonomous Mode OFF from dashboard',
       });
+      logActivity('success', 'Autonomous Mode turned OFF. Filled positions were not liquidated.');
       setFeedback('Autonomous Mode is OFF.', 'success');
       refreshStatus();
       refreshAudit();
     } catch (err) {
-      setFeedback('Failed to halt Autonomous Mode: ' + err.message, 'error');
+      const errMsg = (err && err.message) || String(err);
+      logActivity('error', 'Failed to halt Autonomous Mode: ' + errMsg);
+      setFeedback('Failed to halt Autonomous Mode: ' + errMsg, 'error');
     }
   }
 
@@ -678,15 +763,19 @@
       'block all subsequent autonomous trading runs.\n\nProceed?')) {
       return;
     }
+    logActivity('warning', 'Emergency stop clicked by operator');
     setFeedback('Triggering emergency stop…');
     try {
       await postJson('/api/autonomous/emergency-stop',
         { reason: 'Manual halt from autonomous trading dashboard' });
+      logActivity('error', 'Emergency stop activated. All autonomous trading blocked.');
       setFeedback('Emergency stop activated.', 'success');
       refreshStatus();
       refreshAudit();
     } catch (err) {
-      setFeedback('Emergency stop failed: ' + err.message, 'error');
+      const errMsg = (err && err.message) || String(err);
+      logActivity('error', 'Emergency stop failed: ' + errMsg);
+      setFeedback('Emergency stop failed: ' + errMsg, 'error');
     }
   }
 
@@ -919,12 +1008,13 @@
   /* ------------------------- wire up ------------------------- */
 
   document.addEventListener('DOMContentLoaded', () => {
+    logActivity('info', 'Dashboard loaded; refreshing status');
     $('btnRefreshStatus').addEventListener('click', refreshStatus);
     $('btnScan').addEventListener('click', runScan);
     $('btnPropose').addEventListener('click', runPropose);
     $('btnAutonomousModeToggle').addEventListener('click', openPaperConfirm);
     $('btnEmergencyStop').addEventListener('click', triggerEmergencyStop);
-    $('paperConfirmCancel').addEventListener('click', closePaperConfirm);
+    $('paperConfirmCancel').addEventListener('click', cancelPaperConfirm);
     $('paperConfirmGo').addEventListener('click', confirmPaperExecute);
 
     const btnRunRobot = $('btnRunPaperRobot');

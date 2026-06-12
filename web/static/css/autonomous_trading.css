@@ -348,3 +348,47 @@
   gap: 0.5rem;
   margin-top: 1rem;
 }
+
+/* ---- Activity Log ---- */
+
+.activity-log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.activity-entry {
+  padding: 0.25rem 0.5rem;
+  border-left: 3px solid #4a5568;
+  margin-bottom: 2px;
+  border-radius: 2px;
+}
+
+.activity-entry.activity-info {
+  border-left-color: #4299e1;
+}
+
+.activity-entry.activity-success {
+  border-left-color: #48bb78;
+}
+
+.activity-entry.activity-warning {
+  border-left-color: #ecc94b;
+}
+
+.activity-entry.activity-error {
+  border-left-color: #fc8181;
+}
+
+.activity-time {
+  color: #a0aec0;
+  font-family: monospace;
+}
+
+.activity-msg {
+  color: #e2e8f0;
+}
