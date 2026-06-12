@@ -409,9 +409,9 @@ def _autonomous_status_payload() -> Dict[str, Any]:
             off_status = "Not Ready"
             off_message = "Autonomous Mode turned OFF by connection/safety state change."
         else:
-            reasons = "; ".join(gates.reasons()) or "Infrastructure readiness gate failed"
+            failure_reason = "; ".join(gates.reasons()) or "Infrastructure readiness gate failed"
             off_status = "Not Ready"
-            off_message = f"Autonomous Mode turned OFF: {reasons}"
+            off_message = f"Autonomous Mode turned OFF: {failure_reason}"
         state.turn_off(message=off_message, status=off_status)
 
     # Advance Single Trade lifecycle: if all trades opened since activation

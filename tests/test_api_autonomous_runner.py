@@ -530,35 +530,22 @@ class TestSpyGateFailClosed:
         Zero prices → engine classifies SPY as Bearish / Not Suitable → trading blocked.
         This test verifies the fail-closed contract without a live network call.
         """
-        import sys
-        import importlib
+        import builtins
+        real_import = builtins.__import__
 
-        # Simulate yfinance not being installed by temporarily removing it from sys.modules
-        # and injecting a broken importer.
-        original_yfinance = sys.modules.pop("yfinance", None)
-
-        class _BrokenYFinanceFinder:
-            @staticmethod
-            def find_module(name, path=None):
-                if name == "yfinance":
-                    return _BrokenYFinanceFinder
-                return None
-
-            @staticmethod
-            def load_module(name):
+        def _blocked_import(name, *args, **kwargs):
+            if name == "yfinance" or name.startswith("yfinance."):
                 raise ImportError(f"No module named '{name}'")
+            return real_import(name, *args, **kwargs)
 
-        sys.meta_path.insert(0, _BrokenYFinanceFinder)
-        try:
-            # Force the lazy import inside _spy_price_from_yfinance to fail.
-            import web.routes.api_autonomous as mod
-            result = mod._spy_price_from_yfinance()
-            assert result["open"] == 0.0, "open must be 0 when yfinance unavailable"
-            assert result["current"] == 0.0, "current must be 0 when yfinance unavailable"
-            assert "error" in result, "error key should indicate data unavailability"
-        finally:
-            sys.meta_path.remove(_BrokenYFinanceFinder)
-            if original_yfinance is not None:
-                sys.modules["yfinance"] = original_yfinance
-            elif "yfinance" in sys.modules:
-                del sys.modules["yfinance"]
+        import web.routes.api_autonomous as mod
+        monkeypatch.setattr(builtins, "__import__", _blocked_import)
+        # yfinance may already be cached in sys.modules; remove it so the
+        # patched importer is exercised on the next lazy import inside the
+        # function under test.
+        monkeypatch.delitem(__import__("sys").modules, "yfinance", raising=False)
+
+        result = mod._spy_price_from_yfinance()
+        assert result["open"] == 0.0, "open must be 0 when yfinance unavailable"
+        assert result["current"] == 0.0, "current must be 0 when yfinance unavailable"
+        assert "error" in result, "error key should indicate data unavailability"
