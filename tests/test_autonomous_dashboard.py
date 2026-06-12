@@ -391,6 +391,7 @@ class TestActivityLogPanel:
         assert 'id="activityLogPanel"' in html
         assert 'id="activityLogList"' in html
         assert "Autonomous Activity Log" in html
+        assert '<ul id="activityLogList"' in html
 
     def test_activity_log_placed_before_cash_panel(self, client):
         """The activity log must appear between Autonomous Mode and Deployable Cash."""
@@ -474,10 +475,9 @@ class TestActivityLogPanel:
     def test_no_trade_feedback_not_error(self):
         """A no_trade run status must not produce error-level feedback."""
         src = self._js_source()
-        # runStatus === 'no_trade' should set kind to 'info', not 'error'
-        assert "runStatus === 'no_trade'" in src
-        # Verify that no_trade maps to 'info' kind
-        start = src.index("runStatus === 'no_trade'")
-        # The line should assign kind = 'info'
-        region = src[start - 50:start + 80]
+        # no_trade should set kind to 'info' for either status source
+        assert "status === 'no_trade' || runStatus === 'no_trade'" in src
+        # Verify no_trade maps to 'info' kind
+        start = src.index("status === 'no_trade' || runStatus === 'no_trade'")
+        region = src[start - 60:start + 120]
         assert "kind = 'info'" in region

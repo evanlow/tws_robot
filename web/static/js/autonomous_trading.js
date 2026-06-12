@@ -24,10 +24,10 @@
   const activityLog = [];
 
   function logActivity(level, message, details) {
-    var validLevels = ['info', 'success', 'warning', 'error'];
-    var safeLevel = validLevels.indexOf(level) !== -1 ? level : 'info';
-    var safeMessage = (message || '').slice(0, 500);
-    var entry = {
+    const validLevels = ['info', 'success', 'warning', 'error'];
+    const safeLevel = validLevels.indexOf(level) !== -1 ? level : 'info';
+    const safeMessage = (message || '').slice(0, 500);
+    const entry = {
       timestamp: new Date().toLocaleTimeString(),
       level: safeLevel,
       message: safeMessage,
@@ -695,7 +695,7 @@
       let kind = 'error';
       if (status === 'activated') {
         kind = 'success';
-      } else if (runStatus === 'no_trade') {
+      } else if (status === 'no_trade' || runStatus === 'no_trade') {
         kind = 'info';
       } else if (decision?.status === 'market_not_suitable') {
         kind = 'warning';
@@ -728,8 +728,9 @@
       refreshStatus();
       refreshAudit();
     } catch (err) {
-      logActivity('error', 'Autonomous Mode activation failed: ' + err.message);
-      setFeedback('Autonomous Mode activation failed: ' + err.message, 'error');
+      const errMsg = (err && err.message) || String(err);
+      logActivity('error', 'Autonomous Mode activation failed: ' + errMsg);
+      setFeedback('Autonomous Mode activation failed: ' + errMsg, 'error');
     }
   }
 
@@ -750,8 +751,9 @@
       refreshStatus();
       refreshAudit();
     } catch (err) {
-      logActivity('error', 'Failed to halt Autonomous Mode: ' + err.message);
-      setFeedback('Failed to halt Autonomous Mode: ' + err.message, 'error');
+      const errMsg = (err && err.message) || String(err);
+      logActivity('error', 'Failed to halt Autonomous Mode: ' + errMsg);
+      setFeedback('Failed to halt Autonomous Mode: ' + errMsg, 'error');
     }
   }
 
@@ -771,8 +773,9 @@
       refreshStatus();
       refreshAudit();
     } catch (err) {
-      logActivity('error', 'Emergency stop failed: ' + err.message);
-      setFeedback('Emergency stop failed: ' + err.message, 'error');
+      const errMsg = (err && err.message) || String(err);
+      logActivity('error', 'Emergency stop failed: ' + errMsg);
+      setFeedback('Emergency stop failed: ' + errMsg, 'error');
     }
   }
 
