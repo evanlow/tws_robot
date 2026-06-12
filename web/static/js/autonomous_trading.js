@@ -90,7 +90,8 @@
     const readiness = auto.readiness || {};
     const gates = readiness.gates || {};
     // Derive halted from the mode payload's emergency_stop gate (authoritative
-    // source when modePayload is present); fall back to the top-level flag.
+    // source when modePayload is present). Falls back to the top-level flag
+    // when the /mode/status fetch failed and only the outer payload is available.
     const halted = modePayload ? !!gates.emergency_stop_active
       : !!payload.emergency_stop_file_exists;
     state.paperAdapterConfigured = !!payload.paper_adapter_configured;
@@ -180,8 +181,12 @@
           let reasonText;
           if (gates.ready && !ready) {
             // Backend gates pass but mode-level check is still blocking.
-            const extra = halted ? 'Emergency stop is active.'
-              : (matchStatus !== 'Verified' ? `Connection not verified (${matchStatus}).` : '');
+            let extra = '';
+            if (halted) {
+              extra = 'Emergency stop is active.';
+            } else if (matchStatus !== 'Verified') {
+              extra = `Connection not verified (${matchStatus}).`;
+            }
             reasonText = 'UI readiness mismatch: backend gates are ready but activation is blocked.'
               + (extra ? ' ' + extra : '');
           } else {

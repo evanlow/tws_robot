@@ -602,8 +602,8 @@ class TestModeStatusReadiness:
         assert body["readiness"]["gates"]["ready"] is False
         reasons = body["readiness"]["gates"]["reasons"]
         assert len(reasons) > 0, "reasons must be non-empty when a gate fails"
-        assert any("runner" in r.lower() or "disabled" in r.lower() for r in reasons), (
-            "reasons must mention the failing gate"
+        assert any("Runner disabled in config" in r for r in reasons), (
+            "reasons must mention 'Runner disabled in config'"
         )
 
     def test_mode_status_not_ready_when_not_connected(self, app, client, tmp_path):
