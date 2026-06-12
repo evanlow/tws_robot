@@ -38,7 +38,7 @@
     renderActivityLog();
   }
 
-  var SEVERITY_META = {
+  const SEVERITY_META = {
     info:    { icon: '\u2139\uFE0F',  label: 'Info' },
     success: { icon: '\u2705', label: 'Success' },
     warning: { icon: '\u26A0\uFE0F',  label: 'Warning' },
