@@ -470,3 +470,14 @@ class TestActivityLogPanel:
         assert "marketGate.bullish === false" in src
         # Must NOT reference the old spy_gate_passed field
         assert "spy_gate_passed" not in src
+
+    def test_no_trade_feedback_not_error(self):
+        """A no_trade run status must not produce error-level feedback."""
+        src = self._js_source()
+        # runStatus === 'no_trade' should set kind to 'info', not 'error'
+        assert "runStatus === 'no_trade'" in src
+        # Verify that no_trade maps to 'info' kind
+        start = src.index("runStatus === 'no_trade'")
+        # The line should assign kind = 'info'
+        region = src[start - 50:start + 80]
+        assert "kind = 'info'" in region

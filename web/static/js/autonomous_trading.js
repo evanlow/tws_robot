@@ -690,8 +690,16 @@
       const decision = body.run?.decision;
       if (decision) renderProposal(decision);
       const status = body.status || 'unknown';
-      const kind = status === 'activated' ? 'success' : 'error';
+      const runStatus = body.run?.status;
       const reason = body.run?.rejection_reason || decision?.rejection_reason || '';
+      let kind = 'error';
+      if (status === 'activated') {
+        kind = 'success';
+      } else if (runStatus === 'no_trade') {
+        kind = 'info';
+      } else if (decision?.status === 'market_not_suitable') {
+        kind = 'warning';
+      }
 
       // Log detailed activity entries based on the response
       const marketGate = decision?.market_gate;
@@ -703,7 +711,7 @@
 
       if (status === 'activated' && !reason) {
         logActivity('success', 'Autonomous Mode activated successfully');
-      } else if (status === 'no_trade' || body.run?.status === 'no_trade') {
+      } else if (status === 'no_trade' || runStatus === 'no_trade') {
         logActivity('info', 'No Trade: ' + (reason || 'no qualifying candidates found'));
         logActivity('info', cycleLabel + ' ended with NO TRADE; Autonomous Mode turned OFF');
       } else if (reason) {
