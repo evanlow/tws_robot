@@ -507,7 +507,7 @@ class TestActivityLogPanel:
         """Each log entry must set an aria-label for accessibility."""
         src = self._js_source()
         assert "aria-label" in src
-        assert "meta.label + ': ' + entry.message" in src
+        assert "meta.label + ': ' + entry.timestamp + ' — ' + entry.message" in src
 
     def _css_source(self) -> str:
         css_path = (
@@ -524,7 +524,7 @@ class TestActivityLogPanel:
     def test_css_severity_colors_per_level(self):
         """CSS must define per-level colours for severity badges."""
         css = self._css_source()
-        assert ".activity-info .activity-severity" in css
-        assert ".activity-success .activity-severity" in css
-        assert ".activity-warning .activity-severity" in css
-        assert ".activity-error .activity-severity" in css
+        assert ".activity-info .activity-severity { color: #4299e1; }" in css
+        assert ".activity-success .activity-severity { color: #48bb78; }" in css
+        assert ".activity-warning .activity-severity { color: #ecc94b; }" in css
+        assert ".activity-error .activity-severity { color: #fc8181; }" in css

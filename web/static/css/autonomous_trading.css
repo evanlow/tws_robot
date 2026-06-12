@@ -393,9 +393,9 @@
   vertical-align: baseline;
 }
 
-.activity-info .activity-severity { color: #63b3ed; }
-.activity-success .activity-severity { color: #68d391; }
-.activity-warning .activity-severity { color: #f6e05e; }
+.activity-info .activity-severity { color: #4299e1; }
+.activity-success .activity-severity { color: #48bb78; }
+.activity-warning .activity-severity { color: #ecc94b; }
 .activity-error .activity-severity { color: #fc8181; }
 
 .activity-time {

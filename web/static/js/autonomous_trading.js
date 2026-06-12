@@ -42,7 +42,7 @@
     info:    { icon: '\u2139\uFE0F',  label: 'Info' },
     success: { icon: '\u2705', label: 'Success' },
     warning: { icon: '\u26A0\uFE0F',  label: 'Warning' },
-    error:   { icon: '\uD83D\uDED1', label: 'Error' },
+    error:   { icon: '\u{1F6D1}', label: 'Error' },
   };
 
   function renderActivityLog() {
@@ -53,7 +53,7 @@
       const meta = SEVERITY_META[entry.level] || SEVERITY_META.info;
       const li = document.createElement('li');
       li.className = 'activity-entry activity-' + entry.level;
-      li.setAttribute('aria-label', meta.label + ': ' + entry.message);
+      li.setAttribute('aria-label', meta.label + ': ' + entry.timestamp + ' — ' + entry.message);
       const badge = document.createElement('span');
       badge.className = 'activity-severity';
       badge.setAttribute('aria-hidden', 'true');
