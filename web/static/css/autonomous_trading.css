@@ -105,7 +105,6 @@
   font-weight: 500;
   cursor: default;
   user-select: none;
-  pointer-events: none;
 }
 
 .readiness-pass    { color: #68d391; }

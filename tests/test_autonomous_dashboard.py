@@ -376,10 +376,10 @@ class TestStatusDisplayRefinement:
         )
 
     def test_readiness_item_has_non_button_cursor(self):
-        """Readiness items must use cursor:default and pointer-events:none."""
+        """Readiness items must use cursor:default (they are not clickable)."""
         css = self._css_source()
         assert ".readiness-item" in css
-        assert "pointer-events: none" in css
+        # cursor:default conveys non-interactivity without blocking tooltip events
         assert "cursor: default" in css
 
 
