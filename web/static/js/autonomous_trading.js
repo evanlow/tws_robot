@@ -670,13 +670,17 @@
     overlay.style.display = 'flex';
   }
 
-  function closePaperConfirm() {
-    logActivity('info', 'Activation modal cancelled by operator');
+  function hidePaperConfirm() {
     $('paperConfirmOverlay').style.display = 'none';
   }
 
+  function cancelPaperConfirm() {
+    logActivity('info', 'Activation modal cancelled by operator');
+    hidePaperConfirm();
+  }
+
   async function confirmPaperExecute() {
-    closePaperConfirm();
+    hidePaperConfirm();
     const cycle = selectedTradingCycle();
     const cycleLabel = cycle === 'continuous' ? 'Continuous Trading' : 'Single Trade';
     logActivity('info', 'Activation confirmed: ' + cycleLabel + ' / Paper account');
@@ -690,9 +694,10 @@
       const reason = body.run?.rejection_reason || decision?.rejection_reason || '';
 
       // Log detailed activity entries based on the response
-      if (body.run?.spy_gate_passed === true) {
+      const marketGate = decision?.market_gate;
+      if (marketGate && marketGate.bullish === true) {
         logActivity('success', 'SPY gate passed: current price above opening price');
-      } else if (body.run?.spy_gate_passed === false) {
+      } else if (marketGate && marketGate.bullish === false) {
         logActivity('warning', 'SPY gate failed: current price <= opening price');
       }
 
@@ -998,7 +1003,7 @@
     $('btnPropose').addEventListener('click', runPropose);
     $('btnAutonomousModeToggle').addEventListener('click', openPaperConfirm);
     $('btnEmergencyStop').addEventListener('click', triggerEmergencyStop);
-    $('paperConfirmCancel').addEventListener('click', closePaperConfirm);
+    $('paperConfirmCancel').addEventListener('click', cancelPaperConfirm);
     $('paperConfirmGo').addEventListener('click', confirmPaperExecute);
 
     const btnRunRobot = $('btnRunPaperRobot');

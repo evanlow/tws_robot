@@ -449,3 +449,24 @@ class TestActivityLogPanel:
         """Page load must log a dashboard loaded event."""
         src = self._js_source()
         assert "Dashboard loaded" in src
+
+    def test_confirm_path_does_not_log_cancellation(self):
+        """confirmPaperExecute must not log 'Activation modal cancelled by operator'."""
+        src = self._js_source()
+        # confirmPaperExecute calls hidePaperConfirm (no log), not cancelPaperConfirm
+        assert "function confirmPaperExecute" in src
+        # Extract the confirmPaperExecute function body
+        start = src.index("async function confirmPaperExecute()")
+        # Find the cancellation log — it must NOT appear in confirmPaperExecute
+        assert "hidePaperConfirm()" in src[start:start + 200]
+        assert "cancelPaperConfirm()" not in src[start:start + 200]
+
+    def test_spy_gate_uses_market_gate_bullish(self):
+        """SPY gate logging must derive from decision.market_gate.bullish, not body.run.spy_gate_passed."""
+        src = self._js_source()
+        # Must reference market_gate.bullish for pass/fail logic
+        assert "market_gate" in src
+        assert "marketGate.bullish === true" in src
+        assert "marketGate.bullish === false" in src
+        # Must NOT reference the old spy_gate_passed field
+        assert "spy_gate_passed" not in src
