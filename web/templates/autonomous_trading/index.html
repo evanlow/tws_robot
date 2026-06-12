@@ -23,11 +23,28 @@
        ============================================================ -->
   <section class="panel" id="statusPanel" aria-labelledby="statusHeading">
     <h2 id="statusHeading">Autonomous Mode</h2>
-    <div class="badge-row" id="statusBadges">
-      <span class="badge badge-muted">Loading status…</span>
+
+    <!-- Current mode state — passive indicator, not a button -->
+    <div class="mode-status-section">
+      <p class="section-mini-label">Current status</p>
+      <div class="mode-state-row">
+        <span id="modeStateChip" class="mode-state-chip mode-chip-off">AUTONOMOUS OFF</span>
+        <span id="modeStateDesc" class="mode-state-desc">Robot is not currently allowed to open autonomous trades.</span>
+      </div>
     </div>
+
+    <!-- Readiness checks — passive indicators, not buttons -->
+    <div class="readiness-section">
+      <p class="section-mini-label">Readiness checks</p>
+      <div class="readiness-list" id="readinessList">
+        <span class="readiness-loading">Loading…</span>
+      </div>
+    </div>
+
     <dl class="status-grid" id="statusGrid"></dl>
 
+    <!-- Trading cycle selector -->
+    <p class="section-mini-label cycle-selector-label">Choose trading cycle before activation</p>
     <div class="cycle-selector" id="tradingCycleSelector">
       <label class="cycle-option" id="cycleSingleTrade">
         <input type="radio" name="tradingCycle" value="single_trade" checked>

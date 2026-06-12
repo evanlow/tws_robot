@@ -150,40 +150,54 @@
     state.paperAdapterConfigured = !!payload.paper_adapter_configured;
     state.autonomousModeOn = modeState.operating_state === 'ON';
 
-    const badges = [];
-    badges.push([
-      'AUTONOMOUS ' + (state.autonomousModeOn ? 'ON' : 'OFF'),
-      state.autonomousModeOn ? 'badge-danger' : 'badge-safe',
-    ]);
-
-    if (halted) {
-      badges.push(['EMERGENCY STOP', 'badge-danger']);
-    }
-
     const matchStatus = connection.paper_live_match_status || 'Unknown';
-    badges.push([
-      'MATCH ' + matchStatus.toUpperCase(),
-      matchStatus === 'Verified' ? 'badge-safe' :
-        (matchStatus === 'Mismatch' ? 'badge-danger' : 'badge-warn'),
-    ]);
 
-    // Signal provider readiness. Prefer the explicit boolean from the
-    // status payload; fall back to "warning present" for old responses.
-    const providerReady = payload.signal_provider_ready === true;
-    if (providerReady) {
-      badges.push(['SIGNAL PROVIDER READY', 'badge-safe']);
-    } else if (payload.warning || payload.signal_provider_ready === false) {
-      badges.push(['STATIC PROVIDER', 'badge-warn']);
+    // --- Mode state chip (non-interactive status indicator) ---
+    const modeChip = $('modeStateChip');
+    const modeDescEl = $('modeStateDesc');
+    if (modeChip) {
+      let chipClass, descText;
+      if (halted) {
+        modeChip.textContent = 'AUTONOMOUS BLOCKED';
+        chipClass = 'mode-chip-blocked';
+        descText = 'Emergency stop is active. Autonomous mode cannot be activated.';
+      } else if (state.autonomousModeOn) {
+        modeChip.textContent = 'AUTONOMOUS ON';
+        chipClass = 'mode-chip-on';
+        descText = 'Autonomous lifecycle is active.';
+      } else {
+        modeChip.textContent = 'AUTONOMOUS OFF';
+        chipClass = 'mode-chip-off';
+        descText = 'Robot is not currently allowed to open autonomous trades.';
+      }
+      modeChip.className = 'mode-state-chip ' + chipClass;
+      if (modeDescEl) modeDescEl.textContent = descText;
     }
 
-    const badgeRow = $('statusBadges');
-    badgeRow.innerHTML = '';
-    badges.forEach(([label, cls]) => {
-      const span = document.createElement('span');
-      span.className = 'badge ' + cls;
-      span.textContent = label;
-      badgeRow.appendChild(span);
-    });
+    // --- Readiness checks (passive indicators, not buttons) ---
+    const readinessList = $('readinessList');
+    if (readinessList) {
+      readinessList.innerHTML = '';
+      const matchLabel = 'MATCH ' + matchStatus.toUpperCase();
+      const matchOk = matchStatus === 'Verified';
+      const matchCls = matchOk ? 'pass' : (matchStatus === 'Mismatch' ? 'fail' : 'warn');
+      const providerReady = payload.signal_provider_ready === true;
+      const readinessChecks = [
+        { label: 'TWS connected', ok: connection.status === 'Connected', cls: null },
+        { label: matchLabel, ok: matchOk, cls: matchCls },
+      ];
+      if (providerReady) {
+        readinessChecks.push({ label: 'SIGNAL PROVIDER READY', ok: true, cls: null });
+      } else if (payload.warning || payload.signal_provider_ready === false) {
+        readinessChecks.push({ label: 'STATIC PROVIDER', ok: false, cls: 'warn' });
+      }
+      readinessChecks.forEach(function (chk) {
+        const item = document.createElement('span');
+        item.className = 'readiness-item readiness-' + (chk.cls || (chk.ok ? 'pass' : 'fail'));
+        item.textContent = (chk.ok ? '\u2713 ' : '\u2717 ') + chk.label;
+        readinessList.appendChild(item);
+      });
+    }
 
     const grid = $('statusGrid');
     grid.innerHTML = '';
