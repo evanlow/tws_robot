@@ -24,10 +24,13 @@
   const activityLog = [];
 
   function logActivity(level, message, details) {
-    const entry = {
+    var validLevels = ['info', 'success', 'warning', 'error'];
+    var safeLevel = validLevels.indexOf(level) !== -1 ? level : 'info';
+    var safeMessage = (message || '').slice(0, 500);
+    var entry = {
       timestamp: new Date().toLocaleTimeString(),
-      level: level || 'info',
-      message: message || '',
+      level: safeLevel,
+      message: safeMessage,
       details: details || null,
     };
     activityLog.unshift(entry);
@@ -697,7 +700,7 @@
         logActivity('success', 'Autonomous Mode activated successfully');
       } else if (status === 'no_trade' || body.run?.status === 'no_trade') {
         logActivity('info', 'No Trade: ' + (reason || 'no qualifying candidates found'));
-        logActivity('info', 'Single Trade ended with NO TRADE; Autonomous Mode turned OFF');
+        logActivity('info', cycleLabel + ' ended with NO TRADE; Autonomous Mode turned OFF');
       } else if (reason) {
         logActivity('warning', 'Autonomous Mode result: ' + status + ' — ' + reason);
         if (body.run?.mode_turned_off) {

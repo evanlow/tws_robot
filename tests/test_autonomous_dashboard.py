@@ -425,6 +425,11 @@ class TestActivityLogPanel:
         # Must NOT be labelled as error — it's info level
         assert "'info', 'No Trade:" in src
 
+    def test_no_trade_logs_mode_off(self):
+        """A no_trade outcome must log that Autonomous Mode was turned OFF."""
+        src = self._js_source()
+        assert "ended with NO TRADE; Autonomous Mode turned OFF" in src
+
     def test_api_error_logs_error_entry(self):
         """API errors during activation must be logged at error level."""
         src = self._js_source()
