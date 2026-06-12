@@ -70,13 +70,13 @@ def test_short_put_reserves_strike_times_100_times_contracts():
     # Support at 95 ⇒ strike 90 is at-or-below support ⇒ allowed.
     plan = TradePlanner(cfg).plan(
         _candidate(last_price=100.0, support_price=95.0),
-        deployable_cash=50_000.0,
-        equity=100_000.0,
+        deployable_cash=500_000.0,
+        equity=1_000_000.0,
         option_hint=hint,
     )
     assert plan is not None
     assert plan.trade_type == TradeType.SELL_CASH_SECURED_PUT
-    # 50_000 / (90 * 100) = 5.55 → cap at 5 (or the hint's 5).
+    # Lower of 10% deployable cash and 10% equity leaves room for 5 contracts.
     assert plan.contracts == 5
     assert plan.required_cash == 90.0 * 100 * 5
     assert plan.strike == 90.0

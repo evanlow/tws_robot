@@ -900,7 +900,7 @@ Before running autonomous trading in any mode:
 
 ---
 
-### 11.6 Quick Start: Your First Autonomous Paper Trade
+### 11.6 Quick Start: Autonomous Mode
 
 This walkthrough gets you to your first recommended trade in about 10 minutes using `recommend_only` mode (no orders placed).
 
@@ -930,14 +930,14 @@ Click **Propose Trade**. This runs the full pipeline including the trade planner
 
 Review the plan carefully. The plan is a recommendation only; nothing has been submitted to your broker.
 
-#### Step 6 — Enable paper execution (optional)
+#### Step 6 — Activate Autonomous Mode (optional)
 
 When you are comfortable with the recommendations after several cycles:
 
-1. On the **Autonomous Trading** dashboard, confirm you are connected to the IBKR paper account and the paper adapter is ready.
-2. Click **Execute Paper Trade**. The dashboard shows a confirmation modal and then calls `POST /api/autonomous/execute-paper`, which submits through the configured paper adapter.
-3. If you want the extra runner gates (`runner_enabled`, open-trade limit, etc.), enable `AUTONOMOUS_RUNNER_ENABLED=true` and use the separate **Paper Robot Runner** controls.
-4. Monitor the trade on the **Autonomous Trades** panel — status will progress from `OPEN` through to `CLOSED` as the exit manager evaluates your position each cycle.
+1. On the **Autonomous Trading** dashboard, confirm the **Autonomous Mode** panel shows the selected Paper/Live connection type matches the verified running TWS account type.
+2. Choose **Single Trade** or **Continuous Trading**. The default is **Single Trade**.
+3. Click **Activate Autonomous Mode** and confirm. The backend runs readiness checks, including connection verification, cash/account data availability, emergency stop, and runner gates, before any autonomous lifecycle starts.
+4. Monitor the trade lifecycle panel — turning Autonomous Mode OFF stops new autonomous trades but does not liquidate filled positions.
 
 ---
 
@@ -953,7 +953,7 @@ These settings control the trading engine's behaviour. They can be supplied as J
 | `allow_live_execution` | `false` | Master switch for live order submission. Must be `true` before `assisted_live` mode can place orders. |
 | `require_user_confirmation` | `true` | When `true`, `assisted_live` calls must pass `confirm: true` in the request body |
 | `max_trades_per_day` | `1` | Maximum number of new autonomous positions opened per calendar day (enforced via the audit log, persists across restarts) |
-| `max_new_position_pct` | `0.10` | Maximum fraction of account equity for any single new position (e.g. `0.10` = 10%) |
+| `max_new_position_pct` | `0.10` | Maximum fraction used for a single new position; sizing uses the lower of this percentage of account equity and this percentage of deployable cash |
 | `min_deployable_cash` | `1000.0` | Minimum deployable cash (USD) required before any trade is proposed |
 | `min_signal_strength` | `100` | Minimum `strength_score` a candidate must carry to pass the ranker |
 | `required_signal_label` | `Confirmed Rebound` | The exact signal label required; currently only `Confirmed Rebound` qualifies |
@@ -970,7 +970,7 @@ These settings control the trading engine's behaviour. They can be supplied as J
 
 #### Runner Configuration (`AutonomousRunnerConfig`)
 
-These settings control the paper-only runner that wraps the engine with additional safety gates.
+These settings control the guarded runner that wraps the engine with additional safety gates.
 
 | Parameter | Default | Environment Variable | Description |
 |-----------|---------|---------------------|-------------|
@@ -985,13 +985,13 @@ These settings control the paper-only runner that wraps the engine with addition
 | `avoid_last_minutes_before_close` | `15` | — | Reserved: minutes before market close to skip |
 | `trade_store_path` | `logs/autonomous_trades.jsonl` | — | Path to the trade lifecycle store (JSONL) |
 
-**To enable the Paper Robot Runner**, add this to your `.env`:
+**To allow Autonomous Mode to open a guarded lifecycle**, add this to your `.env`:
 
 ```bash
 AUTONOMOUS_RUNNER_ENABLED=true
 ```
 
-Restart the web server for the change to take effect. This opt-in gates `/api/autonomous/runner/*` only; a confirmed `POST /api/autonomous/execute-paper` call can still execute a paper trade without it. All other defaults remain safely conservative.
+Restart the web server for the change to take effect. Autonomous Mode still defaults to **OFF** on startup/reconnect/error and must be activated explicitly from the dashboard. All other defaults remain safely conservative.
 
 ---
 
@@ -1141,21 +1141,9 @@ GET /api/autonomous/runner/trades
 
 Navigate to **Autonomous Trading** in the left navigation bar to access the full dashboard. It has four panels:
 
-#### Status Panel
+#### Autonomous Mode Panel
 
-Shows a real-time snapshot of the system's readiness:
-
-| Indicator | Green ✅ | Red ❌ |
-|-----------|---------|-------|
-| Connected | IBKR connection is active | Not connected |
-| Paper Mode | Connected to paper account | Connected to live, or not connected |
-| Paper Adapter Ready | Adapter wired and operational | Adapter not available |
-| Signal Provider Ready | Production `TechnicalAnalysisSignalProvider` active | Using stub `StaticSignalProvider` |
-| Emergency Stop | Not active | `EMERGENCY_STOP` file exists |
-| Runner Enabled | `runner_enabled = True` | Runner disabled in config |
-| Open Trades | Below `max_open_autonomous_trades` | At or above limit |
-
-A single ❌ gate prevents paper execution from proceeding. The reasons list tells you exactly what to fix.
+Shows the binary Autonomous Mode state (`OFF` / `ON`), TWS connection state, selected Paper/Live connection type, verified running account type, Paper/Live match status, readiness status, latest message, and last refresh timestamp. A Paper/Live mismatch keeps Autonomous Mode OFF and prevents setup from proceeding.
 
 #### Scan & Propose Panel
 
@@ -1163,7 +1151,7 @@ A single ❌ gate prevents paper execution from proceeding. The reasons list tel
 |--------|-------------|
 | **Scan Universe** | Runs a full recommend-only engine pass; the response returns ranked candidates and rejected symbols with reasons. A trade plan may still be computed internally, but no order is placed and the `/scan` response does not include the plan. |
 | **Propose Trade** | Runs the full pipeline (scan → rank → plan); returns a complete `TradePlan`. No order placed. |
-| **Execute Paper Trade** | Runs the full pipeline and submits the order to your IBKR paper account through `/api/autonomous/execute-paper` after a confirmation modal. It requires a paper connection and configured paper adapter, but does **not** enforce the separate Paper Robot Runner gates. |
+| **Activate Autonomous Mode** | Runs readiness checks and starts one autonomous lifecycle using the verified connected account context. **Single Trade** runs one lifecycle; **Continuous Trading** repeats only while Autonomous Mode remains ON and all gates pass. |
 
 #### Open Trades Panel
 
@@ -1506,7 +1494,7 @@ Without `confirm=True`, the engine returns `rejected` even in `assisted_live` mo
 
 ### 11.15 Troubleshooting
 
-#### "All gates show green but Execute Paper Trade returns `runner_disabled`"
+#### "Activate Autonomous Mode returns `runner_disabled`"
 
 The runner requires `AUTONOMOUS_RUNNER_ENABLED=true` in the environment. Check your `.env` file and restart the web server.
 
@@ -1883,4 +1871,3 @@ TWS Robot communicates with IB's TWS desktop application, which runs locally on 
 ---
 
 *TWS Robot is experimental open-source software provided as-is, without warranties. Always paper trade first. Never trade with money you cannot afford to lose.*
-

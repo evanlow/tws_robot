@@ -15,6 +15,7 @@
     status: null,
     lastProposal: null,
     paperAdapterConfigured: false,
+    autonomousModeOn: false,
   };
 
   /* ------------------------- formatting helpers ------------------------- */
@@ -76,39 +77,42 @@
 
   /* ------------------------- status panel ------------------------- */
 
-  function renderStatus(payload) {
+  // renderStatus accepts an optional modePayload from /api/autonomous/mode/status.
+  // When supplied it is used for the Autonomous Mode panel instead of the nested
+  // autonomous_mode field from /api/autonomous/status, ensuring the panel always
+  // reads from the correct source of truth and cannot diverge.
+  function renderStatus(payload, modePayload) {
     state.status = payload;
     const cfg = (payload && payload.config) || {};
-    const halted = !!payload.emergency_stop_file_exists;
+    const auto = modePayload || (payload && payload.autonomous_mode) || {};
+    const modeState = auto.mode || {};
+    const connection = auto.connection || {};
+    const readiness = auto.readiness || {};
+    const gates = readiness.gates || {};
+    // Derive halted from the mode payload's emergency_stop gate (authoritative
+    // source when modePayload is present). Falls back to the top-level flag
+    // when the /mode/status fetch failed and only the outer payload is available.
+    const halted = modePayload ? !!gates.emergency_stop_active
+      : !!payload.emergency_stop_file_exists;
     state.paperAdapterConfigured = !!payload.paper_adapter_configured;
+    state.autonomousModeOn = modeState.operating_state === 'ON';
 
     const badges = [];
-    const mode = cfg.mode || 'recommend_only';
-    if (mode === 'recommend_only') {
-      badges.push(['RECOMMEND ONLY', 'badge-safe']);
-    } else if (mode === 'paper_execute') {
-      badges.push(['PAPER EXECUTE', 'badge-warn']);
-    } else if (mode === 'assisted_live') {
-      badges.push(['ASSISTED LIVE', 'badge-danger']);
-    } else {
-      badges.push([mode.toUpperCase(), 'badge-info']);
-    }
-
-    if (cfg.allow_live_execution) {
-      badges.push(['LIVE ALLOWED', 'badge-danger']);
-    } else {
-      badges.push(['LIVE DISABLED', 'badge-info']);
-    }
+    badges.push([
+      'AUTONOMOUS ' + (state.autonomousModeOn ? 'ON' : 'OFF'),
+      state.autonomousModeOn ? 'badge-danger' : 'badge-safe',
+    ]);
 
     if (halted) {
       badges.push(['EMERGENCY STOP', 'badge-danger']);
     }
 
-    if (!state.paperAdapterConfigured) {
-      badges.push(['NO PAPER ADAPTER', 'badge-warn']);
-    } else {
-      badges.push(['PAPER ADAPTER READY', 'badge-safe']);
-    }
+    const matchStatus = connection.paper_live_match_status || 'Unknown';
+    badges.push([
+      'MATCH ' + matchStatus.toUpperCase(),
+      matchStatus === 'Verified' ? 'badge-safe' :
+        (matchStatus === 'Mismatch' ? 'badge-danger' : 'badge-warn'),
+    ]);
 
     // Signal provider readiness. Prefer the explicit boolean from the
     // status payload; fall back to "warning present" for old responses.
@@ -131,20 +135,14 @@
     const grid = $('statusGrid');
     grid.innerHTML = '';
     const rows = [
-      ['Mode', cfg.mode || '—'],
-      ['Live execution allowed', cfg.allow_live_execution ? 'yes' : 'no'],
-      ['Require user confirmation', cfg.require_user_confirmation ? 'yes' : 'no'],
-      ['Max trades per day', fmtNumber(cfg.max_trades_per_day, 0)],
-      ['Min signal strength', fmtNumber(cfg.min_signal_strength, 0)],
-      ['Required signal label', cfg.required_signal_label || '—'],
-      ['Min deployable cash', fmtMoney(cfg.min_deployable_cash)],
-      ['Emergency stop file', payload.emergency_stop_file || '—'],
-      ['Emergency stop active', halted ? 'YES' : 'no'],
-      ['Paper adapter configured', state.paperAdapterConfigured ? 'yes' : 'no'],
-      ['Paper adapter reason', payload.paper_adapter_reason || '—'],
-      ['Signal provider', payload.signal_provider || '—'],
-      ['Signal provider ready', payload.signal_provider_ready ? 'yes' : 'no'],
-      ['Connection environment', payload.connection_env || '—'],
+      ['Autonomous Mode status', modeState.operating_state || 'OFF'],
+      ['TWS connection status', connection.status || (payload.connected ? 'Connected' : 'Disconnected')],
+      ['Selected connection type', connection.selected_connection_type || '—'],
+      ['Verified running TWS session/account type', connection.running_account_type || '—'],
+      ['Paper/Live match status', matchStatus],
+      ['Latest autonomous readiness status', readiness.status || 'Not Ready'],
+      ['Latest warning/error message', readiness.message || payload.paper_adapter_reason || payload.warning || '—'],
+      ['Last status refresh timestamp', fmtTimestamp(modeState.last_status_refresh)],
     ];
     for (const [label, value] of rows) {
       const dt = document.createElement('dt');
@@ -164,25 +162,59 @@
       warnEl.style.display = 'none';
     }
 
-    const btnExec = $('btnExecutePaper');
-    if (btnExec) {
-      const disable = !state.paperAdapterConfigured || halted;
-      btnExec.disabled = disable;
-      if (!state.paperAdapterConfigured) {
-        btnExec.title = payload.paper_adapter_reason ||
-          'Disabled: no paper trading adapter is configured.';
-      } else if (halted) {
-        btnExec.title = 'Disabled: emergency stop is active.';
-      } else {
-        btnExec.title = 'Run /api/autonomous/execute-paper after confirmation.';
+    const modeBtn = $('btnAutonomousModeToggle');
+    const modeGateReasons = $('modeGateReasons');
+    if (modeBtn) {
+      modeBtn.textContent = state.autonomousModeOn
+        ? 'Turn Autonomous Mode OFF'
+        : 'Activate Autonomous Mode';
+      const ready = readiness.status === 'Ready' && matchStatus === 'Verified' && !halted;
+      modeBtn.disabled = !state.autonomousModeOn && !ready;
+      modeBtn.title = state.autonomousModeOn
+        ? 'Halt autonomous trading. Filled positions are not liquidated.'
+        : (ready ? 'Turn Autonomous Mode ON.' :
+          'Disabled: ' + ((gates.reasons || []).join('; ') || readiness.message || 'not ready'));
+
+      // Show gate reasons visibly in the panel when the button is disabled.
+      if (modeGateReasons) {
+        if (!state.autonomousModeOn && !ready) {
+          let reasonText;
+          if (gates.ready && !ready) {
+            // Backend gates pass but mode-level check is still blocking.
+            let extra = '';
+            if (halted) {
+              extra = 'Emergency stop is active.';
+            } else if (matchStatus !== 'Verified') {
+              extra = `Connection not verified (${matchStatus}).`;
+            }
+            reasonText = 'UI readiness mismatch: backend gates are ready but activation is blocked.'
+              + (extra ? ' ' + extra : '');
+          } else {
+            const reasons = gates.reasons || [];
+            reasonText = reasons.length
+              ? reasons.join(' · ')
+              : (readiness.message || 'Not ready — check connection and readiness gates.');
+          }
+          modeGateReasons.textContent = reasonText;
+          modeGateReasons.hidden = false;
+        } else {
+          modeGateReasons.textContent = '';
+          modeGateReasons.hidden = true;
+        }
       }
     }
   }
 
   async function refreshStatus() {
     try {
-      const data = await getJson('/api/autonomous/status');
-      renderStatus(data);
+      // Fetch general status and mode status in parallel.  The mode panel
+      // reads exclusively from /api/autonomous/mode/status so it cannot
+      // diverge from what the backend actually computed.
+      const [data, modeData] = await Promise.all([
+        getJson('/api/autonomous/status'),
+        getJson('/api/autonomous/mode/status'),
+      ]);
+      renderStatus(data, modeData);
       if (data.cash_snapshot) renderCashSnapshot(data.cash_snapshot);
       setFeedback('Status refreshed.', 'success');
     } catch (err) {
@@ -560,12 +592,29 @@
   /* ---- paper-execute confirmation modal ---- */
 
   function openPaperConfirm() {
-    if (!state.paperAdapterConfigured) {
-      setFeedback('Cannot execute: no paper adapter configured.', 'error');
+    if (state.autonomousModeOn) {
+      haltAutonomousMode();
       return;
     }
     const overlay = $('paperConfirmOverlay');
     const planEl = $('paperConfirmPlan');
+    const confirmText = $('autonomousConfirmText');
+    const confirmButton = $('paperConfirmGo');
+    const conn = (state.status && state.status.autonomous_mode &&
+      state.status.autonomous_mode.connection) || {};
+    const accountType = (conn.running_account_type || 'unknown').toUpperCase();
+    const cycle = selectedTradingCycle();
+    const cycleLabel = cycle === 'continuous' ? 'Continuous Trading' : 'Single Trade';
+    if (confirmText) {
+      confirmText.textContent =
+        'Turn Autonomous Mode ON for ' + accountType + ' account? ' +
+        'TWS Robot will begin autonomous paper trading using this account context. ' +
+        'Only paper (simulated) orders are supported. No real orders will be placed. ' +
+        'Trading Cycle: ' + cycleLabel + '.';
+    }
+    if (confirmButton) {
+      confirmButton.textContent = 'Turn ON (Paper Mode)';
+    }
     planEl.innerHTML = '';
     if (state.lastProposal && state.lastProposal.trade_plan) {
       // Re-render the most recent proposal inside the confirmation card
@@ -586,18 +635,40 @@
 
   async function confirmPaperExecute() {
     closePaperConfirm();
-    setFeedback('Executing paper trade…');
+    const cycle = selectedTradingCycle();
+    setFeedback('Activating Autonomous Mode…');
     try {
-      const decision = await postJson('/api/autonomous/execute-paper', { confirm: true });
-      renderProposal(decision);
-      const status = decision.status || 'unknown';
-      const kind = status === 'paper_executed' ? 'success' : 'error';
-      setFeedback('Paper execution result: ' + status +
-        (decision.rejection_reason ? ' — ' + decision.rejection_reason : ''),
+      const body = await postJson('/api/autonomous/mode/activate', { trading_cycle: cycle, confirm: true });
+      const decision = body.run?.decision;
+      if (decision) renderProposal(decision);
+      const status = body.status || 'unknown';
+      const kind = status === 'activated' ? 'success' : 'error';
+      const reason = body.run?.rejection_reason || decision?.rejection_reason || '';
+      setFeedback('Autonomous Mode result: ' + status + (reason ? ' — ' + reason : ''),
         kind);
+      refreshStatus();
       refreshAudit();
     } catch (err) {
-      setFeedback('Paper execute failed: ' + err.message, 'error');
+      setFeedback('Autonomous Mode activation failed: ' + err.message, 'error');
+    }
+  }
+
+  function selectedTradingCycle() {
+    const selected = document.querySelector('input[name="tradingCycle"]:checked');
+    return selected ? selected.value : 'single_trade';
+  }
+
+  async function haltAutonomousMode() {
+    setFeedback('Turning Autonomous Mode OFF…');
+    try {
+      await postJson('/api/autonomous/mode/halt', {
+        reason: 'Operator turned Autonomous Mode OFF from dashboard',
+      });
+      setFeedback('Autonomous Mode is OFF.', 'success');
+      refreshStatus();
+      refreshAudit();
+    } catch (err) {
+      setFeedback('Failed to halt Autonomous Mode: ' + err.message, 'error');
     }
   }
 
@@ -851,7 +922,7 @@
     $('btnRefreshStatus').addEventListener('click', refreshStatus);
     $('btnScan').addEventListener('click', runScan);
     $('btnPropose').addEventListener('click', runPropose);
-    $('btnExecutePaper').addEventListener('click', openPaperConfirm);
+    $('btnAutonomousModeToggle').addEventListener('click', openPaperConfirm);
     $('btnEmergencyStop').addEventListener('click', triggerEmergencyStop);
     $('paperConfirmCancel').addEventListener('click', closePaperConfirm);
     $('paperConfirmGo').addEventListener('click', confirmPaperExecute);

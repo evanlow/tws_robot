@@ -445,6 +445,27 @@ class TestConnectionAPI:
         assert status_resp.status_code == 200
         assert status_data["connected"] is False
 
+    def test_connect_rejects_paper_live_mismatch(self, client, services):
+        def _connect_mismatch(env, cfg, timeout=10):
+            services.set_connected(env, {
+                "host": cfg["host"],
+                "port": cfg["port"],
+                "client_id": cfg["client_id"],
+                "account": "U1234567",
+            })
+            return True
+
+        with patch.object(ServiceManager, "connect_tws", side_effect=_connect_mismatch):
+            resp = client.post("/api/connection/connect", json={"environment": "paper"})
+
+        data = resp.get_json()
+        assert resp.status_code == 409
+        assert data["status"] == "connection_rejected"
+        assert data["connected"] is False
+        assert data["actual_environment"] == "live"
+        assert "set to PAPER" in data["error"]
+        assert services.connected is False
+
     def test_connect_already_connected(self, client, services):
         services.set_connected("paper", self.PAPER_CONNECTION_INFO)
         resp = client.post("/api/connection/connect",
