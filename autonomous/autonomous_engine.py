@@ -224,10 +224,27 @@ class AutonomousTradingEngine:
     def _check_spy_gate(self) -> Optional[Dict[str, Any]]:
         """Return SPY intraday gate payload when a provider is configured.
 
-        ``None`` means no provider was supplied, preserving existing
-        recommend-only behaviour for deployments/tests that have not wired
-        market-data plumbing yet.  When supplied, the provider must return
-        ``{"open": ..., "current": ...}``; current > open is bullish.
+        ``None`` means no provider was supplied.  This only occurs for
+        recommend-only calls and unit tests that construct the engine directly
+        without a provider.  All order-opening production routes build the
+        engine via :func:`_build_engine`, which always supplies the yfinance-
+        backed provider returned by :func:`_resolve_spy_price_provider` (or an
+        explicit test override).  A ``None`` return therefore cannot occur on
+        any order-opening path in production.
+
+        When supplied, the provider must return ``{"open": ..., "current": ...}``;
+        ``current > open`` is classified as *Bullish*; any other result
+        (including zero prices from a failed fetch) is *Bearish / Not Suitable*,
+        which blocks the trade.
+
+        .. note::
+
+           The default provider uses **yfinance**, a third-party data source
+           that may differ slightly from TWS/IBKR broker market data.  For
+           production use, wiring this provider to the TWS real-time market-
+           data feed (via a ``reqMktData`` snapshot) is preferred.  yfinance
+           is used here as a reliable, zero-configuration default while a
+           TWS-backed provider is not yet implemented.
         """
 
         if self.spy_price_provider is None:

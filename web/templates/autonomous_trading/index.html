@@ -43,6 +43,13 @@
         Activate Autonomous Mode
       </button>
     </div>
+    <p class="panel-help" id="tradingCycleHelp">
+      <strong>Single Trade:</strong> Autonomous Mode turns OFF automatically once all trades opened
+      since activation are closed. &nbsp;
+      <strong>Continuous Trading:</strong> after each completed exit, the next cycle begins when
+      <em>Evaluate Exits Now</em> is called and the SPY gate passes. Continuous Trading advances
+      only on explicit evaluate-exits calls — it does not loop in the background.
+    </p>
     <p class="provider-warning" id="providerWarning" style="display:none;"></p>
   </section>
 

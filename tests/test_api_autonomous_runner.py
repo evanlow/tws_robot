@@ -310,6 +310,37 @@ class TestAutonomousMode:
         assert body["autonomous_mode"]["mode"]["operating_state"] == "OFF"
         assert store.get("open1").status == OPEN
 
+    def test_status_poll_forces_off_when_runner_disabled_after_activation(
+        self, app, client, tmp_path
+    ):
+        """Mode must turn OFF when the runner is disabled while mode is ON.
+
+        This covers the gap where Autonomous Mode was ON but infrastructure
+        readiness gates (runner_enabled, paper_adapter_ready, signal_provider_ready)
+        later fail — previously only disconnect/mismatch/emergency-stop caused
+        a force-OFF.
+        """
+        from autonomous.autonomous_mode import AutonomousModeState, TradingCycle
+
+        _install_runner(app, tmp_path, runner_enabled=False)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+
+        # Manually force mode ON to simulate a state where mode was activated
+        # before the runner was subsequently disabled.
+        state = AutonomousModeState()
+        state.turn_on(TradingCycle.SINGLE_TRADE)
+        app.config["autonomous_mode_state"] = state
+
+        # A status poll should detect runner_enabled=False and turn mode OFF.
+        body = client.get("/api/autonomous/mode/status").get_json()
+        assert body["mode"]["operating_state"] == "OFF", (
+            "Mode should be forced OFF when the runner gate is no longer passing"
+        )
+        assert body["mode"]["message"], "A reason message should be set"
+
 
 class TestEvaluateExits:
     def test_take_profit_evaluation(self, app, client, tmp_path):
@@ -480,3 +511,54 @@ class TestDashboardSafety:
         # The dashboard must never expose a live autonomous runner control.
         assert "Run Live Robot" not in html
         assert "Live Robot Runner" not in html
+
+    def test_dashboard_explains_continuous_trading_is_poll_driven(self, app, client):
+        """Dashboard must explain that Continuous Trading advances on evaluate-exits calls."""
+        html = client.get("/autonomous-trading/").get_data(as_text=True)
+        assert "Evaluate Exits Now" in html
+        # Help text must clarify the poll-driven design so operators don't
+        # assume background looping.
+        assert "does not loop in the background" in html
+
+
+class TestSpyGateFailClosed:
+    """SPY gate must fail closed when yfinance is unavailable."""
+
+    def test_spy_price_from_yfinance_returns_zeros_on_import_error(self, monkeypatch):
+        """When yfinance cannot be imported, _spy_price_from_yfinance returns zeros.
+
+        Zero prices → engine classifies SPY as Bearish / Not Suitable → trading blocked.
+        This test verifies the fail-closed contract without a live network call.
+        """
+        import sys
+        import importlib
+
+        # Simulate yfinance not being installed by temporarily removing it from sys.modules
+        # and injecting a broken importer.
+        original_yfinance = sys.modules.pop("yfinance", None)
+
+        class _BrokenYFinanceFinder:
+            @staticmethod
+            def find_module(name, path=None):
+                if name == "yfinance":
+                    return _BrokenYFinanceFinder
+                return None
+
+            @staticmethod
+            def load_module(name):
+                raise ImportError(f"No module named '{name}'")
+
+        sys.meta_path.insert(0, _BrokenYFinanceFinder)
+        try:
+            # Force the lazy import inside _spy_price_from_yfinance to fail.
+            import web.routes.api_autonomous as mod
+            result = mod._spy_price_from_yfinance()
+            assert result["open"] == 0.0, "open must be 0 when yfinance unavailable"
+            assert result["current"] == 0.0, "current must be 0 when yfinance unavailable"
+            assert "error" in result, "error key should indicate data unavailability"
+        finally:
+            sys.meta_path.remove(_BrokenYFinanceFinder)
+            if original_yfinance is not None:
+                sys.modules["yfinance"] = original_yfinance
+            elif "yfinance" in sys.modules:
+                del sys.modules["yfinance"]

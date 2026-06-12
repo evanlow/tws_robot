@@ -349,6 +349,12 @@ def _resolve_spy_price_provider():
         return override
     # Default: always wire the yfinance provider so the SPY gate is never
     # skipped in production.  Fails closed when market data is unavailable.
+    #
+    # NOTE: yfinance is a third-party source and may differ slightly from
+    # TWS/IBKR broker data.  It is used here as a reliable, zero-config
+    # default.  Wiring the provider to a TWS reqMktData snapshot is preferred
+    # for production and can be done by registering an override via
+    # ``current_app.config['autonomous_spy_price_provider']``.
     return _spy_price_from_yfinance
 
 
@@ -381,15 +387,32 @@ def _autonomous_status_payload() -> Dict[str, Any]:
     connected = bool(getattr(svc, "connected", False))
     match_status = verification["paper_live_match_status"]
 
+    # Force mode OFF for any safety-critical gate failure while mode is ON.
+    # Handled explicitly per-case so that max_open_trades_reached (a normal
+    # operational state during an active trade lifecycle) does NOT trigger a
+    # spurious shutdown.
+    _infrastructure_gate_failed = (
+        not gates.runner_enabled
+        or not gates.paper_adapter_ready
+        or not gates.signal_provider_ready
+    )
     if state.is_on and (
         not connected
         or match_status != "Verified"
         or gates.emergency_stop_active
+        or _infrastructure_gate_failed
     ):
-        state.turn_off(
-            message="Autonomous Mode turned OFF by connection/safety state change.",
-            status="Halted" if gates.emergency_stop_active else "Not Ready",
-        )
+        if gates.emergency_stop_active:
+            off_status = "Halted"
+            off_message = "Autonomous Mode turned OFF: emergency stop active."
+        elif not connected or match_status != "Verified":
+            off_status = "Not Ready"
+            off_message = "Autonomous Mode turned OFF by connection/safety state change."
+        else:
+            reasons = "; ".join(gates.reasons()) or "Infrastructure readiness gate failed"
+            off_status = "Not Ready"
+            off_message = f"Autonomous Mode turned OFF: {reasons}"
+        state.turn_off(message=off_message, status=off_status)
 
     # Advance Single Trade lifecycle: if all trades opened since activation
     # have closed, turn Autonomous Mode OFF automatically.
@@ -472,8 +495,15 @@ def _advance_single_trade_if_complete(state: "AutonomousModeState") -> None:
 def _maybe_advance_lifecycle() -> None:
     """Advance the autonomous lifecycle after exit evaluation completes.
 
-    Called from the evaluate-exits endpoint.  Does nothing when mode is OFF
-    or ``cycles_started == 0`` (no lifecycle has been started yet).
+    **This function is poll/evaluate-driven, not a background loop.**  It is
+    called exclusively from the ``/runner/evaluate-exits`` endpoint.  The
+    operator (or a scheduler) must call that endpoint periodically to advance
+    the lifecycle.  Continuous Trading does *not* loop on its own; each new
+    cycle begins only after an explicit evaluate-exits call returns with all
+    prior trades closed.
+
+    Does nothing when mode is OFF or ``cycles_started == 0`` (no lifecycle
+    has been started yet).
 
     For Single Trade: delegates to ``_advance_single_trade_if_complete``,
     which turns mode OFF once all trades are closed.
