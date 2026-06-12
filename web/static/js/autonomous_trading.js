@@ -38,19 +38,33 @@
     renderActivityLog();
   }
 
+  var SEVERITY_META = {
+    info:    { icon: '\u2139\uFE0F',  label: 'Info' },
+    success: { icon: '\u2705', label: 'Success' },
+    warning: { icon: '\u26A0\uFE0F',  label: 'Warning' },
+    error:   { icon: '\uD83D\uDED1', label: 'Error' },
+  };
+
   function renderActivityLog() {
     const list = $('activityLogList');
     if (!list) return;
     list.innerHTML = '';
     activityLog.forEach(function (entry) {
+      const meta = SEVERITY_META[entry.level] || SEVERITY_META.info;
       const li = document.createElement('li');
       li.className = 'activity-entry activity-' + entry.level;
+      li.setAttribute('aria-label', meta.label + ': ' + entry.message);
+      const badge = document.createElement('span');
+      badge.className = 'activity-severity';
+      badge.setAttribute('aria-hidden', 'true');
+      badge.textContent = meta.icon + ' ' + meta.label;
       const time = document.createElement('span');
       time.className = 'activity-time';
       time.textContent = entry.timestamp;
       const msg = document.createElement('span');
       msg.className = 'activity-msg';
       msg.textContent = ' — ' + entry.message;
+      li.appendChild(badge);
       li.appendChild(time);
       li.appendChild(msg);
       list.appendChild(li);

@@ -481,3 +481,50 @@ class TestActivityLogPanel:
         start = src.index("status === 'no_trade' || runStatus === 'no_trade'")
         region = src[start - 60:start + 120]
         assert "kind = 'info'" in region
+
+    # ---- Severity visual cues ----
+
+    def test_severity_meta_mapping_exists(self):
+        """SEVERITY_META must map info/success/warning/error to label+icon."""
+        src = self._js_source()
+        assert "SEVERITY_META" in src
+        assert "info:" in src
+        assert "success:" in src
+        assert "warning:" in src
+        assert "error:" in src
+
+    def test_render_creates_severity_badge(self):
+        """renderActivityLog must create an element with class activity-severity."""
+        src = self._js_source()
+        assert "'activity-severity'" in src
+
+    def test_severity_badge_has_aria_hidden(self):
+        """The severity badge icon must have aria-hidden for screen readers."""
+        src = self._js_source()
+        assert "aria-hidden" in src
+
+    def test_entry_has_aria_label(self):
+        """Each log entry must set an aria-label for accessibility."""
+        src = self._js_source()
+        assert "aria-label" in src
+        assert "meta.label + ': ' + entry.message" in src
+
+    def _css_source(self) -> str:
+        css_path = (
+            Path(__file__).resolve().parent.parent
+            / "web" / "static" / "css" / "autonomous_trading.css"
+        )
+        return css_path.read_text(encoding="utf-8")
+
+    def test_css_has_severity_class(self):
+        """CSS must define .activity-severity styling."""
+        css = self._css_source()
+        assert ".activity-severity" in css
+
+    def test_css_severity_colors_per_level(self):
+        """CSS must define per-level colours for severity badges."""
+        css = self._css_source()
+        assert ".activity-info .activity-severity" in css
+        assert ".activity-success .activity-severity" in css
+        assert ".activity-warning .activity-severity" in css
+        assert ".activity-error .activity-severity" in css

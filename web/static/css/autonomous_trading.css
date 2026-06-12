@@ -384,6 +384,20 @@
   border-left-color: #fc8181;
 }
 
+.activity-severity {
+  display: inline-block;
+  min-width: 5.5em;
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-right: 0.4em;
+  vertical-align: baseline;
+}
+
+.activity-info .activity-severity { color: #63b3ed; }
+.activity-success .activity-severity { color: #68d391; }
+.activity-warning .activity-severity { color: #f6e05e; }
+.activity-error .activity-severity { color: #fc8181; }
+
 .activity-time {
   color: #a0aec0;
   font-family: monospace;
