@@ -279,3 +279,92 @@ class TestStatusBadges:
             "Last status refresh timestamp",
         ):
             assert label in src
+
+
+class TestModeActivationButton:
+    """The dashboard must correctly enable/disable the activation button based on
+    the mode status payload and display visible gate reasons to the operator."""
+
+    def _js_source(self) -> str:
+        js_path = (
+            Path(__file__).resolve().parent.parent
+            / "web" / "static" / "js" / "autonomous_trading.js"
+        )
+        return js_path.read_text(encoding="utf-8")
+
+    def _html_source(self, client) -> str:
+        return client.get("/autonomous-trading/").get_data(as_text=True)
+
+    # ---- JS source checks ----
+
+    def test_refresh_status_fetches_mode_status_directly(self):
+        """refreshStatus() must fetch /api/autonomous/mode/status directly so the
+        mode panel always reads from the correct source of truth."""
+        src = self._js_source()
+        assert "/api/autonomous/mode/status" in src, (
+            "refreshStatus() must call /api/autonomous/mode/status directly"
+        )
+
+    def test_render_status_uses_mode_payload_parameter(self):
+        """renderStatus must accept a modePayload argument and use it for mode data."""
+        src = self._js_source()
+        assert "modePayload" in src, (
+            "renderStatus must accept modePayload to avoid divergence from autonomous_mode nesting"
+        )
+
+    def test_button_enable_condition_checks_readiness_status(self):
+        """The button enable logic must check readiness.status === 'Ready'."""
+        src = self._js_source()
+        assert "readiness.status === 'Ready'" in src, (
+            "modeBtn.disabled must be driven by readiness.status"
+        )
+
+    def test_gate_reasons_element_is_populated(self):
+        """When button is disabled, gate reasons must be written to the DOM element."""
+        src = self._js_source()
+        assert "modeGateReasons" in src, (
+            "JS must write gate reasons to the #modeGateReasons DOM element"
+        )
+        # The reasons text must come from gates.reasons array.
+        assert "gates.reasons" in src, (
+            "gate reasons text must be derived from the gates.reasons array"
+        )
+
+    def test_mismatch_diagnostic_shown_when_gates_ready_but_blocked(self):
+        """When gates.ready is true but the button is still disabled, the JS must
+        show a 'UI readiness mismatch' diagnostic rather than an empty reason."""
+        src = self._js_source()
+        assert "readiness mismatch" in src, (
+            "JS must show a mismatch diagnostic when gates.ready is true but activation is blocked"
+        )
+
+    # ---- HTML structure checks ----
+
+    def test_mode_gate_reasons_element_exists(self, client):
+        """The #modeGateReasons element must be present for JS to populate."""
+        html = self._html_source(client)
+        assert 'id="modeGateReasons"' in html, (
+            "#modeGateReasons element must be present in the template"
+        )
+
+    def test_trading_cycle_rendered_as_option_cards(self, client):
+        """Trading Cycle controls must use the option-card layout, not a cramped fieldset."""
+        html = self._html_source(client)
+        assert "cycle-option" in html, (
+            "Trading Cycle must use the .cycle-option card layout"
+        )
+        assert "cycle-selector" in html, (
+            "Trading Cycle container must use .cycle-selector"
+        )
+
+    def test_trading_cycle_options_present(self, client):
+        """Both Single Trade and Continuous Trading options must be present."""
+        html = self._html_source(client)
+        assert 'value="single_trade"' in html
+        assert 'value="continuous"' in html
+
+    def test_activate_button_present_and_initially_disabled(self, client):
+        """The #btnAutonomousModeToggle must be present and start disabled."""
+        html = self._html_source(client)
+        assert 'id="btnAutonomousModeToggle"' in html
+        assert "disabled" in html

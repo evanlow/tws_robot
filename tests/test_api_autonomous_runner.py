@@ -549,3 +549,74 @@ class TestSpyGateFailClosed:
         assert result["open"] == 0.0, "open must be 0 when yfinance unavailable"
         assert result["current"] == 0.0, "current must be 0 when yfinance unavailable"
         assert "error" in result, "error key should indicate data unavailability"
+
+
+class TestModeStatusReadiness:
+    """Verify /api/autonomous/mode/status returns the correct readiness payload.
+
+    These tests cover the two key UI states that drive whether the dashboard
+    activation button is enabled or disabled:
+    - Ready: all gates pass, match Verified, no emergency stop → button enabled.
+    - Not Ready: a gate fails → readiness.status is Not Ready, reasons present.
+    """
+
+    def test_mode_status_ready_when_all_gates_pass(self, app, client, tmp_path):
+        """readiness.status must be 'Ready' when all infrastructure gates pass.
+
+        This is the 'button enabled' path: the dashboard reads this field from
+        /api/autonomous/mode/status to decide whether to enable #btnAutonomousModeToggle.
+        """
+        app.config["autonomous_spy_price_provider"] = lambda: {
+            "open": 500.0, "current": 510.0,
+        }
+        _install_runner(app, tmp_path)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+        body = client.get("/api/autonomous/mode/status").get_json()
+        assert body["readiness"]["status"] == "Ready", (
+            "readiness.status must be 'Ready' when all gates pass and match is Verified; "
+            "the dashboard uses this to enable the activation button"
+        )
+        assert body["readiness"]["gates"]["ready"] is True
+        assert body["readiness"]["gates"]["reasons"] == []
+        assert body["connection"]["paper_live_match_status"] == "Verified"
+        assert body["mode"]["operating_state"] == "OFF"
+
+    def test_mode_status_not_ready_when_runner_disabled(self, app, client, tmp_path):
+        """readiness.status must be 'Not Ready' and reasons non-empty when a gate fails.
+
+        This is the 'button disabled' path: the dashboard reads reasons from
+        readiness.gates.reasons and displays them visibly in #modeGateReasons.
+        """
+        _install_runner(app, tmp_path, runner_enabled=False)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+        body = client.get("/api/autonomous/mode/status").get_json()
+        assert body["readiness"]["status"] == "Not Ready", (
+            "readiness.status must be 'Not Ready' when runner_enabled=False"
+        )
+        assert body["readiness"]["gates"]["ready"] is False
+        reasons = body["readiness"]["gates"]["reasons"]
+        assert len(reasons) > 0, "reasons must be non-empty when a gate fails"
+        assert any("runner" in r.lower() or "disabled" in r.lower() for r in reasons), (
+            "reasons must mention the failing gate"
+        )
+
+    def test_mode_status_not_ready_when_not_connected(self, app, client, tmp_path):
+        """readiness.status must be 'Not Ready' when IBKR account is not verified.
+
+        The runner factory in tests always reports gates ready; the key verification
+        is that an unresolved account (no set_connected call) gives match_status
+        'Unknown', which prevents the readiness from advancing to 'Ready'.
+        """
+        _install_runner(app, tmp_path)
+        # No set_connected call → service is disconnected; account type unknown
+        body = client.get("/api/autonomous/mode/status").get_json()
+        assert body["readiness"]["status"] == "Not Ready"
+        assert body["connection"]["paper_live_match_status"] != "Verified", (
+            "Unknown account type must not be treated as Verified"
+        )

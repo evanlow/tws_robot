@@ -27,29 +27,30 @@
       <span class="badge badge-muted">Loading status…</span>
     </div>
     <dl class="status-grid" id="statusGrid"></dl>
-    <div class="control-row autonomous-mode-controls">
-      <fieldset>
-        <legend>Trading Cycle:</legend>
-        <label>
-          <input type="radio" name="tradingCycle" value="single_trade" checked>
-          Single Trade
-        </label>
-        <label>
-          <input type="radio" name="tradingCycle" value="continuous">
-          Continuous Trading
-        </label>
-      </fieldset>
+
+    <div class="cycle-selector" id="tradingCycleSelector">
+      <label class="cycle-option" id="cycleSingleTrade">
+        <input type="radio" name="tradingCycle" value="single_trade" checked>
+        <div class="cycle-option-content">
+          <span class="cycle-option-title">Single Trade</span>
+          <span class="cycle-option-desc">One complete trade lifecycle, then Autonomous Mode turns OFF automatically.</span>
+        </div>
+      </label>
+      <label class="cycle-option" id="cycleContinuous">
+        <input type="radio" name="tradingCycle" value="continuous">
+        <div class="cycle-option-content">
+          <span class="cycle-option-title">Continuous Trading</span>
+          <span class="cycle-option-desc">Repeats after each exit when Evaluate Exits is called and SPY gate passes. Advances only on evaluate-exits calls — does not loop in the background.</span>
+        </div>
+      </label>
+    </div>
+
+    <div class="mode-action-row">
       <button class="btn-primary" id="btnAutonomousModeToggle" type="button" disabled>
         Activate Autonomous Mode
       </button>
+      <p class="mode-gate-reasons" id="modeGateReasons" hidden></p>
     </div>
-    <p class="panel-help" id="tradingCycleHelp">
-      <strong>Single Trade:</strong> Autonomous Mode turns OFF automatically once all trades opened
-      since activation are closed. &nbsp;
-      <strong>Continuous Trading:</strong> after each completed exit, the next cycle begins when
-      <em>Evaluate Exits Now</em> is called and the SPY gate passes. Continuous Trading advances
-      only on explicit evaluate-exits calls — it does not loop in the background.
-    </p>
     <p class="provider-warning" id="providerWarning" style="display:none;"></p>
   </section>
 

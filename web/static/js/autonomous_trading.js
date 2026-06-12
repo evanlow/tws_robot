@@ -77,14 +77,22 @@
 
   /* ------------------------- status panel ------------------------- */
 
-  function renderStatus(payload) {
+  // renderStatus accepts an optional modePayload from /api/autonomous/mode/status.
+  // When supplied it is used for the Autonomous Mode panel instead of the nested
+  // autonomous_mode field from /api/autonomous/status, ensuring the panel always
+  // reads from the correct source of truth and cannot diverge.
+  function renderStatus(payload, modePayload) {
     state.status = payload;
     const cfg = (payload && payload.config) || {};
-    const halted = !!payload.emergency_stop_file_exists;
-    const auto = (payload && payload.autonomous_mode) || {};
+    const auto = modePayload || (payload && payload.autonomous_mode) || {};
     const modeState = auto.mode || {};
     const connection = auto.connection || {};
     const readiness = auto.readiness || {};
+    const gates = readiness.gates || {};
+    // Derive halted from the mode payload's emergency_stop gate (authoritative
+    // source when modePayload is present); fall back to the top-level flag.
+    const halted = modePayload ? !!gates.emergency_stop_active
+      : !!payload.emergency_stop_file_exists;
     state.paperAdapterConfigured = !!payload.paper_adapter_configured;
     state.autonomousModeOn = modeState.operating_state === 'ON';
 
@@ -154,24 +162,54 @@
     }
 
     const modeBtn = $('btnAutonomousModeToggle');
+    const modeGateReasons = $('modeGateReasons');
     if (modeBtn) {
       modeBtn.textContent = state.autonomousModeOn
         ? 'Turn Autonomous Mode OFF'
         : 'Activate Autonomous Mode';
-      const gates = readiness.gates || {};
       const ready = readiness.status === 'Ready' && matchStatus === 'Verified' && !halted;
       modeBtn.disabled = !state.autonomousModeOn && !ready;
       modeBtn.title = state.autonomousModeOn
         ? 'Halt autonomous trading. Filled positions are not liquidated.'
         : (ready ? 'Turn Autonomous Mode ON.' :
           'Disabled: ' + ((gates.reasons || []).join('; ') || readiness.message || 'not ready'));
+
+      // Show gate reasons visibly in the panel when the button is disabled.
+      if (modeGateReasons) {
+        if (!state.autonomousModeOn && !ready) {
+          let reasonText;
+          if (gates.ready && !ready) {
+            // Backend gates pass but mode-level check is still blocking.
+            const extra = halted ? 'Emergency stop is active.'
+              : (matchStatus !== 'Verified' ? `Connection not verified (${matchStatus}).` : '');
+            reasonText = 'UI readiness mismatch: backend gates are ready but activation is blocked.'
+              + (extra ? ' ' + extra : '');
+          } else {
+            const reasons = gates.reasons || [];
+            reasonText = reasons.length
+              ? reasons.join(' · ')
+              : (readiness.message || 'Not ready — check connection and readiness gates.');
+          }
+          modeGateReasons.textContent = reasonText;
+          modeGateReasons.hidden = false;
+        } else {
+          modeGateReasons.textContent = '';
+          modeGateReasons.hidden = true;
+        }
+      }
     }
   }
 
   async function refreshStatus() {
     try {
-      const data = await getJson('/api/autonomous/status');
-      renderStatus(data);
+      // Fetch general status and mode status in parallel.  The mode panel
+      // reads exclusively from /api/autonomous/mode/status so it cannot
+      // diverge from what the backend actually computed.
+      const [data, modeData] = await Promise.all([
+        getJson('/api/autonomous/status'),
+        getJson('/api/autonomous/mode/status'),
+      ]);
+      renderStatus(data, modeData);
       if (data.cash_snapshot) renderCashSnapshot(data.cash_snapshot);
       setFeedback('Status refreshed.', 'success');
     } catch (err) {
