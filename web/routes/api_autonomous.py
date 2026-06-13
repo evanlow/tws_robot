@@ -36,18 +36,29 @@ from autonomous import (
     StaticSignalProvider,
 )
 from autonomous.audit import AuditLogger
+from autonomous.autonomous_live_runner import (
+    AutonomousLiveRunner,
+    EXECUTED as LIVE_EXECUTED,
+    DRY_RUN_EXECUTED,
+    NOT_CONNECTED as LIVE_NOT_CONNECTED,
+    NOT_LIVE_MODE,
+    LIVE_DISABLED,
+    LIVE_CONTINUOUS_DISABLED,
+)
 from autonomous.autonomous_runner import (
     AutonomousPaperRunner,
     NOT_CONNECTED,
 )
 from autonomous.autonomous_mode import (
+    AccountMode,
+    AutonomousDisplayMode,
     AutonomousModeState,
     TradingCycle,
     infer_account_type,
     normalise_trading_cycle,
 )
 from autonomous.exit_manager import AutonomousExitManager
-from autonomous.runner_config import AutonomousRunnerConfig
+from autonomous.runner_config import AutonomousRunnerConfig, AutonomousLiveRunnerConfig
 from autonomous.trade_store import CLOSED, EXIT_PENDING, FAILED, OPEN, TradeStore
 from autonomous.technical_analysis_signal_provider import (
     TechnicalAnalysisSignalProvider,
@@ -819,8 +830,8 @@ def autonomous_mode_activate():
                         **_autonomous_status_payload()}), 409
 
     state = _mode_state()
-    state.turn_on(cycle)
-    _audit_mode_event("activate", {"trading_cycle": cycle.value})
+    state.turn_on(cycle, AccountMode.PAPER)
+    _audit_mode_event("activate", {"trading_cycle": cycle.value, "account_mode": "paper"})
 
     try:
         result = _build_runner().run_once()
@@ -1083,6 +1094,480 @@ def runner_cancel_entry():
 def runner_trades():
     """Return open and recently-closed autonomous trades."""
     store = _trade_store()
+    trades = store.list_all()
+    open_trades = [t.to_dict() for t in trades if t.status == "OPEN"]
+    exit_pending = [t.to_dict() for t in trades if t.status == "EXIT_PENDING"]
+    closed = [t.to_dict() for t in trades if t.status in ("CLOSED", "FAILED")]
+    return jsonify({
+        "open": open_trades,
+        "exit_pending": exit_pending,
+        "closed": closed,
+        "counts": {
+            "open": len(open_trades),
+            "exit_pending": len(exit_pending),
+            "closed": len(closed),
+            "total": len(trades),
+        },
+    })
+
+
+# ---------------------------------------------------------------------------
+# Live autonomous runner helpers
+# ---------------------------------------------------------------------------
+
+
+def _live_runner_config() -> AutonomousLiveRunnerConfig:
+    """Return the active live runner config.
+
+    Tests / operators can register a fully constructed
+    :class:`AutonomousLiveRunnerConfig` via
+    ``current_app.config['autonomous_live_runner_config']``.  The default
+    config has ``live_enabled=False`` which the runner enforces.
+    """
+    cfg = current_app.config.get("autonomous_live_runner_config")
+    if isinstance(cfg, AutonomousLiveRunnerConfig):
+        return cfg
+    return AutonomousLiveRunnerConfig.from_env()
+
+
+def _live_trade_store() -> TradeStore:
+    """Return a shared live-trades :class:`TradeStore` instance."""
+    store = current_app.config.get("autonomous_live_trade_store")
+    if isinstance(store, TradeStore):
+        return store
+    store = TradeStore(path=_live_runner_config().trade_store_path)
+    current_app.config["autonomous_live_trade_store"] = store
+    return store
+
+
+def _build_live_runner(
+    live_config: AutonomousLiveRunnerConfig,
+    *,
+    continuous_mode: bool = False,
+) -> AutonomousLiveRunner:
+    """Construct an :class:`AutonomousLiveRunner` wired to the live app.
+
+    The runner uses the real :class:`execution.order_executor.OrderExecutor`
+    (or a test override registered via
+    ``current_app.config['autonomous_live_order_executor']``).
+    """
+    override = current_app.config.get("autonomous_live_runner_factory")
+    if callable(override):
+        return override(live_config, continuous_mode=continuous_mode)
+
+    svc = get_services()
+
+    def _connected() -> bool:
+        return bool(getattr(svc, "connected", False))
+
+    def _env():
+        return getattr(svc, "connection_env", None)
+
+    def _account_id() -> Optional[str]:
+        info = getattr(svc, "connection_info", {}) or {}
+        return info.get("account") or None
+
+    def _provider():
+        return _resolve_signal_provider()
+
+    def _estop() -> bool:
+        try:
+            return EMERGENCY_STOP_FILE.exists()
+        except OSError:  # pragma: no cover - defensive
+            return False
+
+    def _deployable_cash() -> float:
+        try:
+            cash_analyzer = CashAvailabilityAnalyzer()
+            result = cash_analyzer.analyze(
+                account_summary=svc.get_account_summary(),
+                positions=svc.get_positions(),
+                orders=svc.get_orders(),
+            )
+            return float(result.deployable_cash)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to calculate deployable cash for live runner")
+            return 0.0
+
+    # Build engine in ASSISTED_LIVE mode (the runner overrides this before run)
+    engine = _build_engine({"mode": AutonomousMode.ASSISTED_LIVE.value})
+
+    # Resolve OrderExecutor: prefer the test/operator override.
+    executor = current_app.config.get("autonomous_live_order_executor")
+    if executor is None:
+        # Build a live executor.  In production, the operator should
+        # supply a pre-built executor (with proper live_confirmation etc.)
+        # via current_app.config['autonomous_live_order_executor'].
+        # The default here is a dry-run executor that never actually
+        # submits orders unless explicitly configured.
+        try:
+            from execution.order_executor import OrderExecutor
+            from risk.risk_manager import RiskManager
+            tws_adapter = getattr(svc, "_tws_bridge", None) or getattr(svc, "tws_adapter", None)
+            risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
+            executor = OrderExecutor(
+                tws_adapter=tws_adapter,
+                risk_manager=risk_manager,
+                is_live_mode=True,
+                dry_run=live_config.live_dry_run,
+                live_trading_enabled=live_config.live_enabled,
+            )
+        except Exception:
+            logger.exception("Failed to build default live OrderExecutor")
+            executor = None
+
+    return AutonomousLiveRunner(
+        engine=engine,
+        trade_store=_live_trade_store(),
+        live_config=live_config,
+        order_executor=executor,
+        connected_provider=_connected,
+        connection_env_provider=_env,
+        account_id_provider=_account_id,
+        signal_provider_provider=_provider,
+        emergency_stop_provider=_estop,
+        deployable_cash_provider=_deployable_cash,
+        continuous_mode=continuous_mode,
+    )
+
+
+def _live_mode_state() -> AutonomousModeState:
+    """Return (or create) the autonomous live-mode state object."""
+    state = current_app.config.get("autonomous_live_mode_state")
+    if isinstance(state, AutonomousModeState):
+        return state
+    state = AutonomousModeState()
+    current_app.config["autonomous_live_mode_state"] = state
+    return state
+
+
+def _maybe_advance_live_lifecycle() -> None:
+    """Advance the live autonomous lifecycle after exit evaluation.
+
+    Mirror of ``_maybe_advance_lifecycle`` but for the live runner.
+    Called from the live evaluate-exits endpoint.
+    """
+    state = _live_mode_state()
+    if not state.is_on or state.cycles_started == 0:
+        return
+
+    try:
+        activated_at_str = state.activated_at
+        if not activated_at_str:
+            return
+        activated_at = datetime.fromisoformat(activated_at_str)
+        live_store = _live_trade_store()
+        since_activation = [
+            t for t in live_store.list_all()
+            if t.entry_time >= activated_at
+        ]
+        if not since_activation:
+            return
+        still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
+        if still_active:
+            return
+
+        cycle = state.trading_cycle
+        if cycle == TradingCycle.SINGLE_TRADE:
+            state.turn_off(
+                message="Live Single Trade lifecycle completed. Autonomous Mode turned OFF.",
+                status="Ready",
+            )
+            _audit_mode_event(
+                "halt",
+                {"reason": "live_single_trade_completed", "source": "lifecycle", "account_mode": "live"},
+            )
+        elif cycle == TradingCycle.CONTINUOUS:
+            # Start next live cycle.
+            live_config = _live_runner_config()
+            try:
+                runner = _build_live_runner(live_config, continuous_mode=True)
+                result = runner.run_once()
+                state.cycles_started += 1
+                _audit_mode_event(
+                    "live_continuous_cycle",
+                    {"cycles_started": state.cycles_started, "result_status": result.status},
+                )
+                if result.decision:
+                    decision_status = (result.decision or {}).get("status")
+                    if decision_status == "market_not_suitable":
+                        state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+                        _audit_mode_event(
+                            "halt",
+                            {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate_continuous"},
+                        )
+            except Exception:
+                logger.exception("Live continuous lifecycle cycle failed")
+                state.turn_off(
+                    message="Live continuous lifecycle error. Autonomous Mode turned OFF.",
+                    status="Halted",
+                )
+    except Exception:
+        logger.exception("Live lifecycle advancement check failed")
+
+
+# ---------------------------------------------------------------------------
+# Live autonomous runner endpoints
+# ---------------------------------------------------------------------------
+
+
+@bp.route("/live/status", methods=["GET"])
+def live_runner_status():
+    """Return live runner config and current readiness gates."""
+    live_config = _live_runner_config()
+    try:
+        runner = _build_live_runner(live_config, continuous_mode=False)
+        gates = runner.evaluate_gates()
+    except Exception:
+        logger.exception("Failed to build live runner for status check")
+        return jsonify({
+            "error": "Failed to evaluate live runner gates",
+            "live_runner_config": live_config.to_dict(),
+        }), 500
+
+    state = _live_mode_state()
+    return jsonify({
+        "live_runner_config": live_config.to_dict(),
+        "gates": gates.to_dict(),
+        "autonomous_live_mode": {
+            **state.to_dict(),
+            "display_mode": state.display_mode.value,
+        },
+    })
+
+
+@bp.route("/live/activate", methods=["POST"])
+def live_activate():
+    """Activate Full Live Continuous Autonomous Mode.
+
+    Request body (all fields required unless noted):
+
+    .. code-block:: json
+
+        {
+            "confirm": true,
+            "account_mode": "live",
+            "trading_cycle": "continuous",
+            "live_trading_enabled": true,
+            "confirmed_by": "Operator",
+            "expected_account_id": "U1234567",
+            "dry_run": false
+        }
+
+    Activation is rejected when:
+
+    * ``confirm`` is not ``true``,
+    * ``account_mode`` is not ``"live"``,
+    * the TWS connection is not a live account,
+    * the account ID does not match ``expected_account_id``,
+    * ``AUTONOMOUS_LIVE_ENABLED`` is ``false``,
+    * ``AUTONOMOUS_LIVE_CONTINUOUS_ENABLED`` is ``false`` (for continuous),
+    * emergency stop is active,
+    * signal provider is not ready,
+    * deployable cash is below the configured minimum.
+    """
+    body = request.get_json(silent=True) or {}
+
+    # 1. Explicit confirmation required.
+    if body.get("confirm") is not True:
+        return jsonify({
+            "error": "confirm must be true to activate Live Autonomous Mode",
+            "status": "confirmation_required",
+        }), 400
+
+    # 2. account_mode must be "live".
+    account_mode_raw = str(body.get("account_mode") or "").lower().strip()
+    if account_mode_raw != "live":
+        return jsonify({
+            "error": "account_mode must be 'live' to activate Live Autonomous Mode",
+            "status": "rejected",
+        }), 400
+
+    # 3. trading_cycle validation.
+    cycle = normalise_trading_cycle(body.get("trading_cycle"))
+    if cycle is None:
+        return jsonify({"error": "trading_cycle must be single_trade or continuous"}), 400
+
+    # 4. Build live runner config, applying request overrides where allowed.
+    live_config = _live_runner_config()
+
+    # Allow operator to supply expected_account_id and dry_run per-request.
+    expected_account_id = str(body.get("expected_account_id") or "").strip() or None
+    if expected_account_id:
+        live_config.expected_account_id = expected_account_id
+
+    if body.get("dry_run") is True:
+        live_config.live_dry_run = True
+
+    continuous_mode = (cycle == TradingCycle.CONTINUOUS)
+
+    # 5. Build the runner and evaluate gates.
+    try:
+        runner = _build_live_runner(live_config, continuous_mode=continuous_mode)
+    except Exception:
+        logger.exception("Failed to build AutonomousLiveRunner")
+        return jsonify({
+            "error": "Failed to construct live runner",
+            "status": "rejected",
+        }), 500
+
+    gates = runner.evaluate_gates()
+    if not gates.ready:
+        msg = "; ".join(gates.reasons()) or "Live runner readiness checks failed"
+        return jsonify({
+            "status": "rejected",
+            "error": msg,
+            "gates": gates.to_dict(),
+        }), 409
+
+    # 6. Activate live mode state.
+    state = _live_mode_state()
+    state.turn_on(cycle, AccountMode.LIVE)
+    _audit_mode_event(
+        "live_activate",
+        {
+            "trading_cycle": cycle.value,
+            "account_mode": "live",
+            "dry_run": live_config.live_dry_run,
+            "expected_account_id": expected_account_id,
+            "confirmed_by": str(body.get("confirmed_by") or ""),
+        },
+    )
+
+    # 7. Run the first live cycle.
+    payload: Dict[str, Any] = {}
+    try:
+        result = runner.run_once()
+        state.cycles_started += 1
+        payload = result.to_dict()
+
+        # Check for market gate failure.
+        decision = payload.get("decision") or {}
+        if decision.get("status") == "market_not_suitable":
+            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+            _audit_mode_event(
+                "halt",
+                {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate"},
+            )
+        elif payload.get("status") == NO_TRADE and cycle == TradingCycle.SINGLE_TRADE:
+            message = (
+                payload.get("rejection_reason")
+                or "No live trade. Autonomous Mode has been turned OFF."
+            )
+            state.turn_off(message=message, status="Not Ready")
+            _audit_mode_event(
+                "halt",
+                {"reason": message, "source": "live_single_trade_no_trade"},
+            )
+    except Exception:
+        logger.exception("Live autonomous lifecycle run failed after activation")
+        state.turn_off(
+            message="Live lifecycle run failed. Autonomous Mode turned OFF.",
+            status="Halted",
+        )
+        _audit_mode_event(
+            "halt",
+            {"reason": "live_lifecycle_run_exception", "source": "live_activate"},
+        )
+        payload = {}
+
+    return jsonify({
+        "status": "activated" if state.is_on else "halted",
+        "run": payload,
+        "autonomous_live_mode": {
+            **state.to_dict(),
+            "display_mode": state.display_mode.value,
+        },
+    })
+
+
+@bp.route("/live/halt", methods=["POST"])
+def live_halt():
+    """Turn Live Autonomous Mode OFF without liquidating positions."""
+    body = request.get_json(silent=True) or {}
+    reason = str(body.get("reason") or "Operator turned Live Autonomous Mode OFF")
+    _live_mode_state().turn_off(message=reason, status="Halted")
+    _audit_mode_event(
+        "live_halt",
+        {"reason": reason, "source": "operator"},
+    )
+    state = _live_mode_state()
+    return jsonify({
+        "status": "halted",
+        "autonomous_live_mode": {
+            **state.to_dict(),
+            "display_mode": state.display_mode.value,
+        },
+    })
+
+
+@bp.route("/live/run-once", methods=["POST"])
+def live_run_once():
+    """Run one full live-autonomous cycle.  Requires Live Mode to be ON.
+
+    This endpoint is intended for manual triggering or for use by an
+    external scheduler.  It does not start a background loop.
+    """
+    state = _live_mode_state()
+    if not state.is_on:
+        return jsonify({
+            "status": "live_mode_off",
+            "rejection_reason": (
+                "Live Autonomous Mode is OFF. Activate it before running a lifecycle cycle."
+            ),
+        }), 409
+
+    live_config = _live_runner_config()
+    continuous_mode = (state.trading_cycle == TradingCycle.CONTINUOUS)
+    try:
+        runner = _build_live_runner(live_config, continuous_mode=continuous_mode)
+    except Exception:
+        logger.exception("Failed to build AutonomousLiveRunner for run-once")
+        return jsonify({
+            "status": "error",
+            "error": "Failed to construct live runner",
+        }), 500
+
+    result = runner.run_once()
+    state.cycles_started += 1
+    return jsonify(result.to_dict())
+
+
+@bp.route("/live/evaluate-exits", methods=["POST"])
+def live_evaluate_exits():
+    """Evaluate open live autonomous trades and advance lifecycle."""
+    live_config = _live_runner_config()
+    svc = get_services()
+    from autonomous.exit_manager import AutonomousExitManager
+
+    # Use the live trade store for exit evaluation.
+    live_store = _live_trade_store()
+
+    # Build exit manager using live adapter when available.
+    override = current_app.config.get("autonomous_live_exit_manager_factory")
+    if callable(override):
+        manager = override()
+    else:
+        manager = AutonomousExitManager(
+            trade_store=live_store,
+            paper_adapter=None,  # Live exits route through OrderExecutor (future work)
+            positions_provider=svc.get_positions,
+            risk_manager=getattr(svc, "risk_manager", None),
+            emergency_stop_file=str(EMERGENCY_STOP_FILE),
+        )
+
+    decisions = manager.evaluate_open_trades()
+    _maybe_advance_live_lifecycle()
+    return jsonify({
+        "decisions": [d.to_dict() for d in decisions],
+        "count": len(decisions),
+    })
+
+
+@bp.route("/live/trades", methods=["GET"])
+def live_trades():
+    """Return open and recently-closed live autonomous trades."""
+    store = _live_trade_store()
     trades = store.list_all()
     open_trades = [t.to_dict() for t in trades if t.status == "OPEN"]
     exit_pending = [t.to_dict() for t in trades if t.status == "EXIT_PENDING"]
