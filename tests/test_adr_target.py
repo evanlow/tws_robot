@@ -236,6 +236,10 @@ class TestComputeADRTargetPrice:
         result = compute_adr_target_price(entry_price=100.0, adr=3.0, target_fraction=-0.5)
         assert result is None
 
+    def test_zero_fraction_returns_none(self):
+        result = compute_adr_target_price(entry_price=100.0, adr=3.0, target_fraction=0.0)
+        assert result is None
+
     def test_target_always_above_entry(self):
         """Target price is always above entry price for valid inputs."""
         target = compute_adr_target_price(
