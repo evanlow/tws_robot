@@ -83,7 +83,7 @@ PositionsProvider = Callable[[], Dict[str, Dict[str, Any]]]
 
 
 class AutonomousExitManager:
-    """Evaluate open autonomous trades and place paper SELL orders.
+    """Evaluate open autonomous trades and place SELL orders.
 
     Parameters
     ----------
@@ -92,9 +92,10 @@ class AutonomousExitManager:
     paper_adapter:
         Object exposing ``sell(symbol, quantity, order_type, limit_price)``
         compatible with :class:`execution.autonomous_paper_adapter.AutonomousPaperAdapter`.
-        May be ``None``; in that case no exit orders are placed and each
-        evaluated trade returns a ``NO_EXIT`` decision with a
-        ``no paper_adapter configured`` reason.
+        May be ``None`` when ``order_executor`` is supplied; in all other
+        cases (both ``None``) no exit orders are placed and each evaluated
+        trade returns a ``NO_EXIT`` decision with a ``no adapter configured``
+        reason.
     positions_provider:
         Callable returning ``ServiceManager.get_positions()``.  Used to
         read the live ``current_price`` for the trade's symbol.
@@ -106,6 +107,12 @@ class AutonomousExitManager:
     audit_logger:
         Optional; receives one JSONL entry per exit decision (executed
         or not).
+    order_executor:
+        Optional :class:`execution.order_executor.OrderExecutor`.  When
+        supplied (and ``paper_adapter`` is ``None``), exit SELL orders are
+        routed through this executor using a SELL signal with
+        ``target_price`` set to the current live price.  This is the
+        correct path for live account exits.
     """
 
     def __init__(
@@ -116,6 +123,7 @@ class AutonomousExitManager:
         risk_manager: Any = None,
         emergency_stop_file: str = "EMERGENCY_STOP",
         audit_logger: Optional[AuditLogger] = None,
+        order_executor: Any = None,
     ) -> None:
         self._store = trade_store
         self._paper_adapter = paper_adapter
@@ -123,6 +131,7 @@ class AutonomousExitManager:
         self._risk_manager = risk_manager
         self._emergency_stop_file = Path(emergency_stop_file)
         self._audit = audit_logger
+        self._order_executor = order_executor
 
     # ------------------------------------------------------------------
     # Public
@@ -301,7 +310,7 @@ class AutonomousExitManager:
         reason_text: str,
         price: Optional[float],
     ) -> ExitDecision:
-        """Submit a paper SELL limit order and mark the trade EXIT_PENDING.
+        """Submit a SELL limit order and mark the trade EXIT_PENDING.
 
         ``price`` is the current live price for the symbol and is
         **required**.  We deliberately do not fall back to
@@ -310,20 +319,15 @@ class AutonomousExitManager:
         when no live quote is known so that we never submit a SELL
         LIMIT at a stale anchor.
 
-        If the paper adapter is not configured, no order is submitted —
-        the decision is still returned so the dashboard / audit log can
-        surface the reason.
+        When ``paper_adapter`` is configured, exits are routed through it
+        (paper account path).  When ``order_executor`` is configured
+        instead, exits are routed through
+        :meth:`execution.order_executor.OrderExecutor.execute_signal` using
+        a SELL signal with ``target_price`` set to the current live price
+        (live account path).  If neither is configured, no order is
+        submitted — the decision is still returned so the dashboard /
+        audit log can surface the reason.
         """
-        if self._paper_adapter is None:
-            return ExitDecision(
-                autonomous_trade_id=trade.autonomous_trade_id,
-                symbol=trade.symbol,
-                decision=NO_EXIT,
-                reason="no paper_adapter configured; cannot exit",
-                price=price,
-                notes=[f"would_exit:{reason_code}", reason_text],
-            )
-
         if price is None or price <= 0:
             # Defensive: callers should already have returned
             # NO_PRICE_AVAILABLE; refuse to guess if they did not.
@@ -337,6 +341,36 @@ class AutonomousExitManager:
             )
         limit_price = float(price)
 
+        # --- Paper adapter path -------------------------------------------
+        if self._paper_adapter is not None:
+            return self._submit_exit_via_paper_adapter(
+                trade, reason_code, reason_text, limit_price
+            )
+
+        # --- OrderExecutor path (live exits) ---------------------------------
+        if self._order_executor is not None:
+            return self._submit_exit_via_order_executor(
+                trade, reason_code, reason_text, limit_price
+            )
+
+        # --- No adapter configured -------------------------------------------
+        return ExitDecision(
+            autonomous_trade_id=trade.autonomous_trade_id,
+            symbol=trade.symbol,
+            decision=NO_EXIT,
+            reason="no paper_adapter or order_executor configured; cannot exit",
+            price=limit_price,
+            notes=[f"would_exit:{reason_code}", reason_text],
+        )
+
+    def _submit_exit_via_paper_adapter(
+        self,
+        trade: AutonomousTrade,
+        reason_code: str,
+        reason_text: str,
+        limit_price: float,
+    ) -> ExitDecision:
+        """Place a paper SELL limit order via paper_adapter."""
         try:
             order_id = self._paper_adapter.sell(
                 symbol=trade.symbol,
@@ -351,19 +385,84 @@ class AutonomousExitManager:
                 symbol=trade.symbol,
                 decision=NO_EXIT,
                 reason=f"paper adapter raised: {exc}",
-                price=price,
+                price=limit_price,
                 notes=[f"would_exit:{reason_code}", reason_text],
             )
 
-        # Mark trade as EXIT_PENDING — do NOT fake the fill.  Real fill
-        # information will be reconciled separately when available.
+        return self._mark_exit_pending(trade, reason_code, reason_text, limit_price, order_id)
+
+    def _submit_exit_via_order_executor(
+        self,
+        trade: AutonomousTrade,
+        reason_code: str,
+        reason_text: str,
+        limit_price: float,
+    ) -> ExitDecision:
+        """Place a live SELL limit order via order_executor."""
+        try:
+            from strategies.signal import Signal, SignalType, SignalStrength
+            from datetime import datetime, timezone as _tz
+            sell_signal = Signal(
+                symbol=trade.symbol,
+                signal_type=SignalType.SELL,
+                strength=SignalStrength.STRONG,
+                timestamp=datetime.now(_tz.utc),
+                quantity=int(trade.quantity),
+                target_price=limit_price,
+            )
+            result = self._order_executor.execute_signal(
+                strategy_name="AutonomousExitManager:LIVE_EXIT",
+                signal=sell_signal,
+                current_equity=0.0,
+                positions={},
+            )
+        except Exception as exc:
+            logger.exception(
+                "order_executor.execute_signal raised for live exit %s",
+                trade.symbol,
+            )
+            return ExitDecision(
+                autonomous_trade_id=trade.autonomous_trade_id,
+                symbol=trade.symbol,
+                decision=NO_EXIT,
+                reason=f"order_executor raised: {exc}",
+                price=limit_price,
+                notes=[f"would_exit:{reason_code}", reason_text],
+            )
+
+        from execution.order_executor import OrderStatus
+        if result.status not in (OrderStatus.SUBMITTED, OrderStatus.DRY_RUN):
+            return ExitDecision(
+                autonomous_trade_id=trade.autonomous_trade_id,
+                symbol=trade.symbol,
+                decision=NO_EXIT,
+                reason=f"order_executor rejected exit: {result.reason}",
+                price=limit_price,
+                notes=[f"would_exit:{reason_code}", reason_text],
+            )
+
+        order_id = result.order_id
+        return self._mark_exit_pending(trade, reason_code, reason_text, limit_price, order_id)
+
+    def _mark_exit_pending(
+        self,
+        trade: AutonomousTrade,
+        reason_code: str,
+        reason_text: str,
+        limit_price: float,
+        order_id: Optional[int],
+    ) -> ExitDecision:
+        """Mark trade EXIT_PENDING after a successful order submission."""
+        # Do NOT fake the fill.  Real fill information will be reconciled
+        # separately when available.
+        from datetime import datetime, timezone as _tz
         try:
             self._store.update_trade(
                 trade.autonomous_trade_id,
                 status=EXIT_PENDING,
                 exit_order_id=int(order_id) if order_id is not None else None,
                 exit_reason=reason_code,
-                exit_time=datetime.now(timezone.utc),
+                exit_time=datetime.now(_tz.utc),
             )
         except Exception:  # pragma: no cover - defensive
             logger.exception(
@@ -376,7 +475,7 @@ class AutonomousExitManager:
             symbol=trade.symbol,
             decision=reason_code,
             reason=reason_text,
-            price=price,
+            price=limit_price,
             exit_order_id=int(order_id) if order_id is not None else None,
         )
 

@@ -55,6 +55,7 @@ class DecisionStatus(str, Enum):
     NO_TRADE_PLAN = "no_trade_plan"
     RISK_REJECTED = "risk_rejected"
     LIVE_BLOCKED = "live_blocked"
+    LIVE_PLAN_READY = "live_plan_ready"
     CONFIRMATION_REQUIRED = "confirmation_required"
     DAILY_LIMIT_REACHED = "daily_limit_reached"
     MARKET_NOT_SUITABLE = "market_not_suitable"
@@ -463,13 +464,12 @@ class AutonomousTradingEngine:
                     "already reached for today"
                 )
                 return self._emit(decision)
-            # Live execution is intentionally not implemented in this
-            # MVP; we record the intent and stop before placing any
-            # order.  Operators must wire a real broker path explicitly.
-            decision.status = DecisionStatus.LIVE_BLOCKED
-            decision.rejection_reason = (
-                "live execution path not implemented in MVP; "
-                "wire OrderExecutor explicitly to enable"
+            # Trade plan is ready; signal the runner to execute via OrderExecutor.
+            # LIVE_PLAN_READY means all engine-level checks have passed and the
+            # trade plan is safe to submit through the wired live executor.
+            decision.status = DecisionStatus.LIVE_PLAN_READY
+            decision.notes.append(
+                "live_plan_ready — AutonomousLiveRunner must submit via OrderExecutor"
             )
             return self._emit(decision)
 

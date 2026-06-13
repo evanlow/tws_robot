@@ -285,3 +285,105 @@ def test_non_buy_shares_trade_is_skipped(store, tmp_path):
     assert "BUY_SHARES" in d.reason
     assert adapter.calls == []
     assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+# ---------------------------------------------------------------------------
+# Fix #1: Live exit via order_executor
+# ---------------------------------------------------------------------------
+
+
+class _SubmittingOrderExecutor:
+    """Stub OrderExecutor that always returns SUBMITTED for any signal."""
+
+    def __init__(self, order_id: int = 5555) -> None:
+        self._order_id = order_id
+        self.calls: list = []
+
+    def execute_signal(self, strategy_name, signal, current_equity, positions):
+        from execution.order_executor import OrderResult, OrderStatus
+        self.calls.append({"symbol": signal.symbol, "price": signal.target_price})
+        return OrderResult(
+            status=OrderStatus.SUBMITTED,
+            order_id=self._order_id,
+            signal=signal,
+            quantity=signal.quantity or 1,
+            price=signal.target_price or 0.0,
+            reason=f"Order {self._order_id} submitted",
+        )
+
+
+class _RejectingOrderExecutor:
+    """Stub OrderExecutor that always returns REJECTED."""
+
+    def execute_signal(self, strategy_name, signal, current_equity, positions):
+        from execution.order_executor import OrderResult, OrderStatus, RejectionReason
+        return OrderResult(
+            status=OrderStatus.REJECTED,
+            order_id=None,
+            signal=signal,
+            quantity=signal.quantity or 1,
+            price=0.0,
+            reason="Rejected by test stub",
+            rejection_reason=RejectionReason.PRICE_SANITY_FAILED,
+        )
+
+
+def test_order_executor_exit_submits_sell_and_marks_exit_pending(store, tmp_path):
+    """When paper_adapter=None and order_executor is provided, a triggered exit
+    must call execute_signal on the executor and mark the trade EXIT_PENDING."""
+    trade = _open_trade()  # target=110, stop=95, last_price will trigger at 112
+    store.record_trade(trade)
+    executor = _SubmittingOrderExecutor(order_id=7777)
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=None,
+        order_executor=executor,
+        positions_provider=lambda: {"AAA": {"current_price": 112.0}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+    assert len(decisions) == 1
+    d = decisions[0]
+    assert d.decision == TAKE_PROFIT
+    assert len(executor.calls) == 1
+    assert executor.calls[0]["symbol"] == "AAA"
+    assert executor.calls[0]["price"] == 112.0
+    assert store.get(trade.autonomous_trade_id).status == "EXIT_PENDING"
+
+
+def test_order_executor_exit_rejected_leaves_trade_open(store, tmp_path):
+    """When the order_executor rejects the exit order, trade must stay OPEN."""
+    trade = _open_trade()
+    store.record_trade(trade)
+    executor = _RejectingOrderExecutor()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=None,
+        order_executor=executor,
+        positions_provider=lambda: {"AAA": {"current_price": 112.0}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+    d = decisions[0]
+    # Rejection → NO_EXIT returned, trade remains OPEN
+    assert d.decision == NO_EXIT
+    assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+def test_no_paper_adapter_and_no_order_executor_records_no_exit(store, tmp_path):
+    """When neither paper_adapter nor order_executor is set, the manager must
+    return NO_EXIT with an explanatory reason (not raise)."""
+    trade = _open_trade()
+    store.record_trade(trade)
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=None,
+        order_executor=None,
+        positions_provider=lambda: {"AAA": {"current_price": 112.0}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+    d = decisions[0]
+    assert d.decision == NO_EXIT
+    assert "no paper_adapter" in d.reason or "order_executor" in d.reason
+    assert store.get(trade.autonomous_trade_id).status == "OPEN"

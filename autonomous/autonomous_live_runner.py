@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from autonomous.autonomous_config import AutonomousMode
@@ -66,6 +66,7 @@ ACCOUNT_ID_UNVERIFIED = "account_id_unverified"
 SIGNAL_PROVIDER_NOT_READY = "signal_provider_not_ready"
 EMERGENCY_STOP_ACTIVE = "emergency_stop_active"
 MAX_OPEN_TRADES = "max_open_autonomous_trades_reached"
+DAILY_LIVE_TRADE_LIMIT_REACHED = "daily_live_trade_limit_reached"
 DEPLOYABLE_CASH_BELOW_MINIMUM = "deployable_cash_below_minimum"
 EXECUTED = "executed"
 DRY_RUN_EXECUTED = "dry_run_executed"
@@ -92,6 +93,8 @@ class LiveReadinessGates:
     emergency_stop_active: bool = False
     open_live_trades: int = 0
     max_open_live_trades: int = 1
+    live_trades_today: int = 0
+    max_live_trades_per_day: int = 1
     deployable_cash: float = 0.0
     min_deployable_cash: float = 1000.0
     # Set only when ``live_continuous_enabled`` check is skipped
@@ -109,6 +112,7 @@ class LiveReadinessGates:
             and self.signal_provider_ready
             and not self.emergency_stop_active
             and self.open_live_trades < self.max_open_live_trades
+            and self.live_trades_today < self.max_live_trades_per_day
             and self.deployable_cash >= self.min_deployable_cash
         )
         if self.continuous_mode_required:
@@ -143,6 +147,11 @@ class LiveReadinessGates:
                 f"Max open live autonomous trades reached "
                 f"({self.open_live_trades}/{self.max_open_live_trades})"
             )
+        if self.live_trades_today >= self.max_live_trades_per_day:
+            out.append(
+                f"Daily live trade limit reached "
+                f"({self.live_trades_today}/{self.max_live_trades_per_day})"
+            )
         if self.deployable_cash < self.min_deployable_cash:
             out.append(
                 f"Deployable cash {self.deployable_cash:.2f} is below the "
@@ -161,6 +170,8 @@ class LiveReadinessGates:
             "emergency_stop_active": self.emergency_stop_active,
             "open_live_trades": self.open_live_trades,
             "max_open_live_trades": self.max_open_live_trades,
+            "live_trades_today": self.live_trades_today,
+            "max_live_trades_per_day": self.max_live_trades_per_day,
             "deployable_cash": round(self.deployable_cash, 2),
             "min_deployable_cash": self.min_deployable_cash,
             "continuous_mode_required": self.continuous_mode_required,
@@ -293,6 +304,11 @@ class AutonomousLiveRunner:
     def continuous_mode(self) -> bool:
         return self._continuous_mode
 
+    @property
+    def order_executor(self) -> Any:
+        """The :class:`execution.order_executor.OrderExecutor` wired to this runner."""
+        return self._executor
+
     # ------------------------------------------------------------------
     # Readiness
     # ------------------------------------------------------------------
@@ -345,6 +361,8 @@ class AutonomousLiveRunner:
             emergency_stop_active=estop,
             open_live_trades=self._store.count_open(),
             max_open_live_trades=self._config.max_open_live_trades,
+            live_trades_today=self._count_live_trades_today(),
+            max_live_trades_per_day=self._config.max_live_trades_per_day,
             deployable_cash=deployable_cash,
             min_deployable_cash=self._config.min_deployable_cash,
             continuous_mode_required=self._continuous_mode,
@@ -435,9 +453,26 @@ class AutonomousLiveRunner:
                 dry_run=self._config.live_dry_run,
             )
 
-        # Engine reached the ASSISTED_LIVE path — we now own order placement.
-        # The engine intentionally does NOT submit the order in ASSISTED_LIVE
-        # mode; the runner submits it through OrderExecutor.
+        # Only proceed when the engine explicitly signals the plan is ready
+        # for live execution.  Any other status (including LIVE_BLOCKED or
+        # CONFIRMATION_REQUIRED) is treated as a hard rejection — this
+        # ensures the runner cannot bypass an explicit engine-level safety
+        # block by accident.
+        if decision.status != DecisionStatus.LIVE_PLAN_READY:
+            return AutonomousLiveRunResult(
+                status=ENGINE_REJECTED,
+                gates=gates,
+                rejection_reason=(
+                    f"engine returned {decision.status.value!r}; "
+                    "only LIVE_PLAN_READY is executable by the live runner"
+                ),
+                decision=decision_payload,
+                dry_run=self._config.live_dry_run,
+            )
+
+        # Engine reached the LIVE_PLAN_READY path — we now own order placement.
+        # The engine has completed all its checks (cash, scan, rank, risk) and
+        # set trade_plan.  The runner submits through OrderExecutor.
         plan = decision.trade_plan
         if not plan:
             return AutonomousLiveRunResult(
@@ -571,6 +606,34 @@ class AutonomousLiveRunner:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _count_live_trades_today(self, today: Optional[date] = None) -> int:
+        """Count live trades with entry_time on ``today`` (UTC date).
+
+        Uses the trade store as the source of truth so a process restart
+        cannot reset the counter.  Both OPEN and non-OPEN (EXIT_PENDING,
+        CLOSED, FAILED) entries are counted — we want to know how many
+        entry orders were submitted today, not just how many are still open.
+        """
+        today_date = today or datetime.now(timezone.utc).date()
+        count = 0
+        try:
+            for trade in self._store.list_all():
+                entry_time = trade.entry_time
+                if isinstance(entry_time, str):
+                    try:
+                        entry_time = datetime.fromisoformat(entry_time)
+                    except ValueError:
+                        continue
+                if entry_time is None:
+                    continue
+                if entry_time.tzinfo is None:
+                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+                if entry_time.date() == today_date:
+                    count += 1
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to count live trades for today")
+        return count
+
     @staticmethod
     def _first_gate_status(gates: LiveReadinessGates) -> str:
         if not gates.connected:
@@ -589,6 +652,8 @@ class AutonomousLiveRunner:
             return EMERGENCY_STOP_ACTIVE
         if gates.open_live_trades >= gates.max_open_live_trades:
             return MAX_OPEN_TRADES
+        if gates.live_trades_today >= gates.max_live_trades_per_day:
+            return DAILY_LIVE_TRADE_LIMIT_REACHED
         if gates.deployable_cash < gates.min_deployable_cash:
             return DEPLOYABLE_CASH_BELOW_MINIMUM
         return ENGINE_REJECTED

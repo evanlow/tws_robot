@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import MagicMock
@@ -32,12 +33,14 @@ from autonomous.autonomous_live_runner import (
     DEPLOYABLE_CASH_BELOW_MINIMUM,
     NO_TRADE,
     EXECUTION_FAILED,
+    DAILY_LIVE_TRADE_LIMIT_REACHED,
+    ENGINE_REJECTED,
 )
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 # OPEN / CLOSED / FAILED are trade-lifecycle status strings (trade_store).
 # EXECUTED / DRY_RUN_EXECUTED / NO_TRADE / EXECUTION_FAILED are runner-result
 # status strings (autonomous_live_runner) — two distinct namespaces.
-from autonomous.trade_store import TradeStore, OPEN, CLOSED, FAILED
+from autonomous.trade_store import TradeStore, AutonomousTrade, OPEN, CLOSED, FAILED
 from data.cash_availability import CashAvailabilityAnalyzer
 from execution.order_executor import OrderResult, OrderStatus
 
@@ -353,10 +356,7 @@ def test_successful_live_execution(tmp_path):
     """Full live execution path: engine finds a trade, executor submits it."""
     runner = _runner(tmp_path, signal=_signal(), executor=_SubmittingExecutor(order_id=42))
     result = runner.run_once()
-    # The engine hits ASSISTED_LIVE path which returns LIVE_BLOCKED for
-    # "live execution path not implemented in MVP" — our runner overrides this
-    # by calling execute_signal directly.  Check that the runner itself
-    # produced a valid result (EXECUTED or NO_TRADE based on engine plan).
+    # Engine returns LIVE_PLAN_READY; runner submits via OrderExecutor.
     assert result.status in (EXECUTED, NO_TRADE)
     assert result.gates.ready
 
@@ -556,3 +556,159 @@ def test_mode_state_to_dict_includes_display_mode():
     assert "display_mode" in d
     assert d["display_mode"] == "LIVE CONTINUOUS"
     assert d["account_mode"] == "live"
+
+
+# ---------------------------------------------------------------------------
+# Fix #5: Engine status safety — only LIVE_PLAN_READY is executable
+# ---------------------------------------------------------------------------
+
+
+def test_runner_rejects_live_blocked_engine_status(tmp_path):
+    """Runner returns ENGINE_REJECTED when the engine unexpectedly returns
+    LIVE_BLOCKED (e.g. the engine is mocked to simulate a future safety gate
+    that the runner does not know about)."""
+    from autonomous.autonomous_engine import AutonomousDecision, DecisionStatus
+    from autonomous.autonomous_live_runner import ENGINE_REJECTED
+
+    store = TradeStore(path=str(tmp_path / "t.jsonl"))
+    live_cfg = AutonomousLiveRunnerConfig(
+        live_enabled=True,
+        live_continuous_enabled=True,
+        expected_account_id="U1234567",
+        trade_store_path=str(tmp_path / "t.jsonl"),
+    )
+
+    # Stub engine that always returns LIVE_BLOCKED regardless of what the
+    # runner sets on it.
+    class _BlockingEngine:
+        config = MagicMock()  # absorbs attribute sets
+
+        def run_once(self, **kwargs):
+            return AutonomousDecision(
+                status=DecisionStatus.LIVE_BLOCKED,
+                mode=AutonomousMode.ASSISTED_LIVE,
+                rejection_reason="forced block",
+            )
+
+    runner = AutonomousLiveRunner(
+        engine=_BlockingEngine(),
+        trade_store=store,
+        live_config=live_cfg,
+        order_executor=_SubmittingExecutor(),
+        connected_provider=lambda: True,
+        connection_env_provider=lambda: "live",
+        account_id_provider=lambda: "U1234567",
+        signal_provider_provider=lambda: _RealProvider(),
+        emergency_stop_provider=lambda: False,
+        deployable_cash_provider=lambda: 50_000.0,
+    )
+    result = runner.run_once()
+    assert result.status == ENGINE_REJECTED
+    assert result.trade is None
+
+
+# ---------------------------------------------------------------------------
+# Fix #6: Daily live trade cap
+# ---------------------------------------------------------------------------
+
+
+def test_daily_live_trade_limit_blocks_run(tmp_path):
+    """When max_live_trades_per_day trades have already been recorded today,
+    further run_once calls are rejected."""
+    cfg = AutonomousLiveRunnerConfig(
+        live_enabled=True,
+        live_continuous_enabled=True,
+        expected_account_id="U1234567",
+        max_live_trades_per_day=1,
+        max_open_live_trades=5,  # don't block on open-trade cap
+        trade_store_path=str(tmp_path / "t.jsonl"),
+    )
+    store = TradeStore(path=str(tmp_path / "t.jsonl"))
+    # Record a CLOSED trade entered today — it counts in the daily cap but
+    # does not trigger the max_open_trades gate.
+    today_trade = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol="AAA",
+        trade_type="BUY_SHARES",
+        status=CLOSED,
+        entry_order_id=42,
+        entry_time=datetime.now(timezone.utc),
+        entry_limit_price=100.0,
+        quantity=5,
+    )
+    store.record_trade(today_trade)
+
+    engine = _build_engine(tmp_path, signal=_signal())
+    runner = AutonomousLiveRunner(
+        engine=engine,
+        trade_store=store,
+        live_config=cfg,
+        order_executor=_SubmittingExecutor(),
+        connected_provider=lambda: True,
+        connection_env_provider=lambda: "live",
+        account_id_provider=lambda: "U1234567",
+        signal_provider_provider=lambda: _RealProvider(),
+        emergency_stop_provider=lambda: False,
+        deployable_cash_provider=lambda: 50_000.0,
+    )
+    result = runner.run_once()
+    assert result.status == DAILY_LIVE_TRADE_LIMIT_REACHED
+    assert not result.gates.ready
+    assert any("Daily live trade limit" in r for r in result.gates.reasons())
+
+
+def test_daily_cap_not_triggered_when_trades_from_yesterday(tmp_path):
+    """Trades from yesterday do not count against today's cap."""
+    from datetime import timedelta
+    cfg = AutonomousLiveRunnerConfig(
+        live_enabled=True,
+        live_continuous_enabled=True,
+        expected_account_id="U1234567",
+        max_live_trades_per_day=1,
+        max_open_live_trades=5,  # don't block on open-trade cap
+        trade_store_path=str(tmp_path / "t.jsonl"),
+    )
+    store = TradeStore(path=str(tmp_path / "t.jsonl"))
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    old_trade = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol="AAA",
+        trade_type="BUY_SHARES",
+        status=CLOSED,  # closed yesterday — doesn't consume open cap
+        entry_order_id=10,
+        entry_time=yesterday,
+        entry_limit_price=100.0,
+        quantity=5,
+    )
+    store.record_trade(old_trade)
+
+    engine = _build_engine(tmp_path, signal=_signal())
+    runner = AutonomousLiveRunner(
+        engine=engine,
+        trade_store=store,
+        live_config=cfg,
+        order_executor=_SubmittingExecutor(),
+        connected_provider=lambda: True,
+        connection_env_provider=lambda: "live",
+        account_id_provider=lambda: "U1234567",
+        signal_provider_provider=lambda: _RealProvider(),
+        emergency_stop_provider=lambda: False,
+        deployable_cash_provider=lambda: 50_000.0,
+    )
+    gates = runner.evaluate_gates()
+    assert gates.live_trades_today == 0
+    assert gates.ready  # yesterday's trade should not block today
+
+
+def test_gates_to_dict_includes_daily_trade_fields(tmp_path):
+    runner = _runner(tmp_path)
+    gates = runner.evaluate_gates()
+    d = gates.to_dict()
+    assert "live_trades_today" in d
+    assert "max_live_trades_per_day" in d
+
+
+def test_order_executor_property(tmp_path):
+    executor = _SubmittingExecutor()
+    runner = _runner(tmp_path, executor=executor)
+    assert runner.order_executor is executor

@@ -194,8 +194,9 @@ def test_live_mode_passes_when_all_safeguards_satisfied(
     )
     result = executor.execute_signal("s", buy_signal, 100_000.0, {})
     assert result.status == OrderStatus.SUBMITTED
+    # buy_signal has target_price=150.0, so Fix #2 selects LIMIT (not MARKET)
     mock_adapter.buy.assert_called_once_with(
-        symbol="AAPL", quantity=10, order_type="MARKET"
+        symbol="AAPL", quantity=10, order_type="LIMIT", limit_price=150.0
     )
 
 
@@ -270,3 +271,97 @@ def test_dry_run_still_blocks_on_emergency_stop(
     # Emergency stop overrides dry-run: must surface as REJECTED, not DRY_RUN.
     assert result.status == OrderStatus.REJECTED
     assert "Emergency stop" in result.reason
+
+
+# ---------------------------------------------------------------------------
+# Fix #2: LIMIT-only enforcement in OrderExecutor
+# ---------------------------------------------------------------------------
+
+
+def test_limit_orders_only_rejects_signal_without_target_price(
+    mock_adapter, risk_manager, tmp_path, monkeypatch
+):
+    """When limit_orders_only=True, a signal with no target_price must be
+    rejected immediately without contacting TWS."""
+    monkeypatch.chdir(tmp_path)
+    confirmation = _make_confirmation()
+    executor = OrderExecutor(
+        tws_adapter=mock_adapter,
+        risk_manager=risk_manager,
+        is_live_mode=True,
+        require_confirmation=False,
+        live_trading_enabled=True,
+        live_confirmation=confirmation,
+        limit_orders_only=True,
+    )
+    no_price_signal = Signal(
+        timestamp=datetime.now(),
+        symbol="SPY",
+        signal_type=SignalType.BUY,
+        strength=SignalStrength.STRONG,
+        target_price=None,   # no price
+        quantity=5,
+        confidence=0.9,
+        reason="test",
+    )
+    result = executor.execute_signal("live-strategy", no_price_signal, 100_000.0, {})
+    assert result.status == OrderStatus.REJECTED
+    assert RejectionReason.PRICE_SANITY_FAILED.value in result.reason
+    mock_adapter.buy.assert_not_called()
+    mock_adapter.sell.assert_not_called()
+
+
+def test_limit_orders_only_uses_limit_order_type_when_price_present(
+    mock_adapter, risk_manager, buy_signal, tmp_path, monkeypatch
+):
+    """When limit_orders_only=True and target_price is set, the adapter's buy
+    method must receive order_type='LIMIT' and the limit_price."""
+    monkeypatch.chdir(tmp_path)
+    confirmation = _make_confirmation()
+    mock_adapter.buy.return_value = 99
+    executor = OrderExecutor(
+        tws_adapter=mock_adapter,
+        risk_manager=risk_manager,
+        is_live_mode=True,
+        require_confirmation=False,
+        live_trading_enabled=True,
+        live_confirmation=confirmation,
+        limit_orders_only=True,
+    )
+    result = executor.execute_signal("live-strategy", buy_signal, 100_000.0, {})
+    assert result.status == OrderStatus.SUBMITTED
+    mock_adapter.buy.assert_called_once()
+    call_kwargs = mock_adapter.buy.call_args[1]
+    assert call_kwargs.get("order_type") == "LIMIT"
+    assert call_kwargs.get("limit_price") == buy_signal.target_price
+
+
+def test_without_limit_orders_only_signal_without_price_uses_market_order(
+    mock_adapter, risk_manager, tmp_path, monkeypatch
+):
+    """Without limit_orders_only, a signal with no target_price falls back
+    to a MARKET order (preserving backward-compatible paper-mode behaviour)."""
+    monkeypatch.chdir(tmp_path)
+    mock_adapter.environment = "paper"
+    mock_adapter.port = 7497
+    mock_adapter.buy.return_value = 100
+    executor = OrderExecutor(
+        tws_adapter=mock_adapter,
+        risk_manager=risk_manager,
+        is_live_mode=False,
+        limit_orders_only=False,
+    )
+    no_price_signal = Signal(
+        timestamp=datetime.now(),
+        symbol="MSFT",
+        signal_type=SignalType.BUY,
+        strength=SignalStrength.STRONG,
+        target_price=None,
+        quantity=3,
+        confidence=0.8,
+        reason="test",
+    )
+    result = executor.execute_signal("paper-strategy", no_price_signal, 50_000.0, {})
+    assert result.status == OrderStatus.SUBMITTED
+    call_kwargs = mock_adapter.buy.call_args[1]
+    assert call_kwargs.get("order_type") == "MARKET"

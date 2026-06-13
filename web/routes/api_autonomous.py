@@ -24,7 +24,7 @@ import os
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from flask import Blueprint, current_app, jsonify, request
 
@@ -1123,11 +1123,22 @@ def _live_runner_config() -> AutonomousLiveRunnerConfig:
     :class:`AutonomousLiveRunnerConfig` via
     ``current_app.config['autonomous_live_runner_config']``.  The default
     config has ``live_enabled=False`` which the runner enforces.
+
+    When an ``expected_account_id`` was persisted at activation time
+    (stored in ``current_app.config['autonomous_live_expected_account_id']``),
+    it is applied to the returned config so subsequent lifecycle calls
+    use the same account confirmed at activation — even when the config
+    is re-built from env.
     """
     cfg = current_app.config.get("autonomous_live_runner_config")
     if isinstance(cfg, AutonomousLiveRunnerConfig):
         return cfg
-    return AutonomousLiveRunnerConfig.from_env()
+    cfg = AutonomousLiveRunnerConfig.from_env()
+    # Apply the activation-time expected_account_id so it persists across calls.
+    persisted_account_id = current_app.config.get("autonomous_live_expected_account_id")
+    if persisted_account_id and not cfg.expected_account_id:
+        cfg.expected_account_id = persisted_account_id
+    return cfg
 
 
 def _live_trade_store() -> TradeStore:
@@ -1198,19 +1209,50 @@ def _build_live_runner(
         # Build a live executor.  In production, the operator should
         # supply a pre-built executor (with proper live_confirmation etc.)
         # via current_app.config['autonomous_live_order_executor'].
-        # The default here is a dry-run executor that never actually
-        # submits orders unless explicitly configured.
+        # The default here builds an executor with the confirmed live
+        # session when one is available (persisted at activation time),
+        # or falls back to a configuration-invalid executor that will log
+        # the error and reject orders until the session is confirmed.
         try:
-            from execution.order_executor import OrderExecutor
+            from execution.order_executor import OrderExecutor, LiveTradingConfirmation
             from risk.risk_manager import RiskManager
             tws_adapter = getattr(svc, "_tws_bridge", None)
             risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
+
+            # Retrieve the LiveTradingConfirmation persisted at activation.
+            live_confirmation: Optional[LiveTradingConfirmation] = current_app.config.get(
+                "autonomous_live_confirmation"
+            )
+
+            # If no confirmation was persisted yet, try to build one from
+            # the current connection state and the expected_account_id.
+            if live_confirmation is None and not live_config.live_dry_run:
+                account_id = live_config.expected_account_id
+                connection_info = getattr(svc, "connection_info", None) or {}
+                port = int(connection_info.get("port") or 7496)
+                env = getattr(svc, "connection_env", "") or ""
+                if account_id and env.lower() == "live":
+                    live_confirmation = LiveTradingConfirmation(
+                        environment="live",
+                        account_id=account_id,
+                        port=port,
+                        confirmed_by="system:auto",
+                    )
+                    logger.info(
+                        "Built auto LiveTradingConfirmation for account=%s port=%d",
+                        account_id,
+                        port,
+                    )
+
             executor = OrderExecutor(
                 tws_adapter=tws_adapter,
                 risk_manager=risk_manager,
                 is_live_mode=True,
                 dry_run=live_config.live_dry_run,
                 live_trading_enabled=live_config.live_enabled,
+                live_confirmation=live_confirmation,
+                expected_account_id=live_config.expected_account_id,
+                limit_orders_only=live_config.live_limit_orders_only,
             )
         except Exception:
             logger.exception("Failed to build default live OrderExecutor")
@@ -1417,9 +1459,43 @@ def live_activate():
             "gates": gates.to_dict(),
         }), 409
 
-    # 6. Activate live mode state.
+    # 6. Activate live mode state and persist session context.
     state = _live_mode_state()
     state.turn_on(cycle, AccountMode.LIVE)
+    confirmed_by = str(body.get("confirmed_by") or "operator")
+
+    # Persist expected_account_id so all subsequent lifecycle calls use the
+    # same account confirmed at activation, even when the config is re-built
+    # from env.
+    if expected_account_id:
+        current_app.config["autonomous_live_expected_account_id"] = expected_account_id
+
+    # Build and persist a LiveTradingConfirmation for the session so that the
+    # OrderExecutor can verify the account/environment on every live order.
+    if expected_account_id and not live_config.live_dry_run:
+        try:
+            from execution.order_executor import LiveTradingConfirmation as LTC
+            svc = get_services()
+            connection_info = getattr(svc, "connection_info", None) or {}
+            port = int(connection_info.get("port") or 7496)
+            env = getattr(svc, "connection_env", "") or ""
+            if env.lower() == "live":
+                confirmation = LTC(
+                    environment="live",
+                    account_id=expected_account_id,
+                    port=port,
+                    confirmed_by=confirmed_by,
+                )
+                current_app.config["autonomous_live_confirmation"] = confirmation
+                logger.info(
+                    "LiveTradingConfirmation persisted for account=%s port=%d confirmed_by=%r",
+                    expected_account_id,
+                    port,
+                    confirmed_by,
+                )
+        except Exception:
+            logger.exception("Failed to build/persist LiveTradingConfirmation at activation")
+
     _audit_mode_event(
         "live_activate",
         {
@@ -1427,7 +1503,7 @@ def live_activate():
             "account_mode": "live",
             "dry_run": live_config.live_dry_run,
             "expected_account_id": expected_account_id,
-            "confirmed_by": str(body.get("confirmed_by") or ""),
+            "confirmed_by": confirmed_by,
         },
     )
 
@@ -1539,18 +1615,30 @@ def live_evaluate_exits():
     if callable(override):
         manager = override()
     else:
+        # Resolve the live OrderExecutor (same as used for entries) so that
+        # exit orders are submitted through the same safety gates as entries.
+        # When no executor is available (e.g. TWS not connected), exits fall
+        # back to evaluation-only mode and the dashboard shows would_exit notes.
+        live_executor = current_app.config.get("autonomous_live_order_executor")
+        if live_executor is None:
+            try:
+                live_executor = _build_live_runner(
+                    live_config, continuous_mode=False
+                ).order_executor
+            except Exception:
+                logger.warning(
+                    "Could not resolve live OrderExecutor for exit manager; "
+                    "exits will be evaluation-only"
+                )
+                live_executor = None
+
         manager = AutonomousExitManager(
             trade_store=live_store,
-            # Live exits currently use AutonomousExitManager for evaluation
-            # only (no order submission through this path).  Actual exit orders
-            # must be placed explicitly by the operator or via a future
-            # OrderExecutor-backed exit handler.  paper_adapter=None is safe
-            # because AutonomousExitManager does not submit orders when
-            # paper_adapter is None; it only evaluates and marks trade state.
             paper_adapter=None,
             positions_provider=svc.get_positions,
             risk_manager=getattr(svc, "risk_manager", None),
             emergency_stop_file=str(EMERGENCY_STOP_FILE),
+            order_executor=live_executor,
         )
 
     decisions = manager.evaluate_open_trades()

@@ -434,3 +434,76 @@ class TestLiveEvaluateExits:
         body = resp.get_json()
         assert "decisions" in body
         assert "count" in body
+
+
+# ---------------------------------------------------------------------------
+# Fix #3/#4: Session confirmation + expected_account_id persistence
+# ---------------------------------------------------------------------------
+
+
+class TestActivationPersistence:
+    def test_activate_persists_expected_account_id_in_app_config(
+        self, app, client, tmp_path
+    ):
+        """After a successful activation, expected_account_id must be stored
+        in app.config so subsequent runner rebuilds use it."""
+        _install_live_runner(app, tmp_path, expected_account_id="U1234567")
+        with app.app_context():
+            resp = client.post(
+                "/api/autonomous/live/activate",
+                json={
+                    "confirm": True,
+                    "account_mode": "live",
+                    "trading_cycle": "continuous",
+                    "expected_account_id": "U1234567",
+                    "confirmed_by": "TestOperator",
+                },
+            )
+            assert resp.status_code == 200
+            assert (
+                app.config.get("autonomous_live_expected_account_id") == "U1234567"
+            )
+
+    def test_activate_dry_run_does_not_persist_live_confirmation(
+        self, app, client, tmp_path
+    ):
+        """dry_run=True should NOT persist a LiveTradingConfirmation (safe path)."""
+        _install_live_runner(app, tmp_path, dry_run=True)
+        with app.app_context():
+            resp = client.post(
+                "/api/autonomous/live/activate",
+                json={
+                    "confirm": True,
+                    "account_mode": "live",
+                    "trading_cycle": "continuous",
+                    "expected_account_id": "U1234567",
+                    "dry_run": True,
+                },
+            )
+            assert resp.status_code == 200
+            # dry_run=True → no live confirmation persisted
+            assert app.config.get("autonomous_live_confirmation") is None
+
+
+# ---------------------------------------------------------------------------
+# Fix #1 (API layer): live evaluate-exits uses an order executor
+# ---------------------------------------------------------------------------
+
+
+class TestLiveEvaluateExitsWithExecutor:
+    def test_evaluate_exits_uses_app_config_override_executor(
+        self, app, client, tmp_path
+    ):
+        """When autonomous_live_order_executor is pre-set in app.config, the
+        evaluate-exits endpoint must use it (not crash when factory is absent)."""
+        from autonomous.trade_store import TradeStore
+        store = TradeStore(path=str(tmp_path / "t.jsonl"))
+        app.config["autonomous_live_trade_store"] = store
+        # Override executor directly — no live runner factory needed
+        executor = _SubmittingExecutor()
+        app.config["autonomous_live_order_executor"] = executor
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert "decisions" in body
