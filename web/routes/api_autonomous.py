@@ -1225,6 +1225,11 @@ def _build_broker_positions(svc) -> Dict[str, Any]:
                 if qty != 0:
                     break
         avg_cost = 0.0
+        # "entry_price" is the key used by TWSBridge.updatePortfolio (the
+        # primary live source).  The remaining keys are fallbacks for other
+        # adapters or position snapshot formats that may spell the field
+        # differently (e.g. paper-adapter snapshots use "average_cost",
+        # while raw IBKR API data may use the camelCase "avgCost").
         for key in ("entry_price", "average_cost", "avg_cost", "avgCost"):
             raw = pos_data.get(key)
             if raw is not None:

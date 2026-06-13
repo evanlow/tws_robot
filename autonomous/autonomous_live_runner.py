@@ -556,6 +556,14 @@ class AutonomousLiveRunner:
                 if self._broker_positions_provider is not None
                 else {}
             )
+            if not broker_positions and not self._config.live_dry_run:
+                logger.warning(
+                    "AutonomousLiveRunner: broker_positions is empty for live "
+                    "execution of %s — OrderExecutor reconciliation will reject "
+                    "the order if the account holds any TWS positions; ensure "
+                    "broker_positions_provider is correctly wired",
+                    symbol,
+                )
             result = self._executor.execute_signal(
                 strategy_name="AutonomousLiveRunner",
                 signal=signal,
