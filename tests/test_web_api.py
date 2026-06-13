@@ -1930,6 +1930,7 @@ class TestRiskAIEndpoints:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["cached"] is True
+        mock_explain_not_called.assert_not_called()
 
     def test_risk_alert_digest_default(self, client):
         with patch("web.routes.risk.generate_alert_summary", return_value="Daily digest text"):
@@ -2015,17 +2016,20 @@ class TestBacktestAPIExtended:
 
     def test_run_backtest_accepts_valid_request(self, client):
         """POST /api/backtest/run with all required fields returns 202."""
-        resp = client.post("/api/backtest/run", json={
-            "strategy": "MovingAverageCross",
-            "symbols": ["AAPL"],
-            "start_date": "2023-01-01",
-            "end_date": "2023-12-31",
-            "initial_capital": 50000,
-        })
+        with patch("web.routes.api_backtest.threading.Thread") as mock_thread:
+            mock_thread.return_value.start.return_value = None
+            resp = client.post("/api/backtest/run", json={
+                "strategy": "MovingAverageCross",
+                "symbols": ["AAPL"],
+                "start_date": "2023-01-01",
+                "end_date": "2023-12-31",
+                "initial_capital": 50000,
+            })
         assert resp.status_code == 202
         data = resp.get_json()
         assert "run_id" in data
         assert data["status"] == "running"
+        mock_thread.return_value.start.assert_called_once()
 
     def test_backtest_status_for_running_run(self, client, services):
         """GET /api/backtest/<id>/status returns running status."""
@@ -2144,12 +2148,14 @@ class TestEventAPIExtended:
         assert "events" in data
         assert "count" in data
 
-    def test_event_history_limit_clamped_to_200(self, client):
+    def test_event_history_limit_clamped_to_200(self, client, services):
         """Limit is capped at 200 regardless of query param."""
-        resp = client.get("/api/events/history?limit=9999")
+        with patch.object(services.event_bus, "get_history", return_value=[]) as mock_gh:
+            resp = client.get("/api/events/history?limit=9999")
         assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["count"] <= 200
+        mock_gh.assert_called_once()
+        _, kwargs = mock_gh.call_args
+        assert kwargs.get("limit") == 200
 
     def test_event_history_default_returns_json(self, client):
         """Baseline: event history returns 200 with events list."""
@@ -2218,39 +2224,27 @@ class TestLogsViolationsEndpoint:
 
     def test_violations_no_log_file(self, client, tmp_path, monkeypatch):
         """Returns empty lines list when violations log does not exist."""
-        import web.routes.logs as logs_mod
-        monkeypatch.setattr(
-            logs_mod,
-            "Path",
-            lambda *a, **kw: tmp_path / "nonexistent.log",
-        )
+        fake_logs_py = str(tmp_path / "web" / "routes" / "logs.py")
+        monkeypatch.setattr("web.routes.logs.__file__", fake_logs_py)
         resp = client.get("/logs/violations")
-        # Path mock may not work cleanly; just verify 200 and structure
         assert resp.status_code == 200
         data = resp.get_json()
-        assert "lines" in data
-        assert "count" in data
+        assert data["lines"] == []
+        assert data["count"] == 0
 
-    def test_violations_with_log_file(self, client, tmp_path):
-        """Returns last 100 lines when violations log exists (written to standard path)."""
-        import web.routes.logs as logs_mod
+    def test_violations_with_log_file(self, client, tmp_path, monkeypatch):
+        """Returns last 100 lines when violations log exists."""
+        fake_logs_py = str(tmp_path / "web" / "routes" / "logs.py")
+        monkeypatch.setattr("web.routes.logs.__file__", fake_logs_py)
         log_content = "\n".join(f"violation {i}" for i in range(10))
-        # Patch the resolved path that the route builds at call-time
-        fake_path = tmp_path / "prime_directive_violations.log"
-        fake_path.write_text(log_content)
-        with patch.object(logs_mod, "Path") as mock_path_cls:
-            mock_instance = mock_path_cls.return_value
-            mock_instance.__truediv__ = lambda self, other: fake_path
-            mock_instance.resolve.return_value = mock_instance
-            # Chain: Path(__file__).resolve().parent.parent.parent / "prime_directive_violations.log"
-            mock_instance.parent = mock_instance
-            mock_resolve = mock_instance
-            mock_path_cls.return_value = mock_instance
-            resp = client.get("/logs/violations")
+        log_path = tmp_path / "prime_directive_violations.log"
+        log_path.write_text(log_content)
+        resp = client.get("/logs/violations")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert "lines" in data
-        assert "count" in data
+        assert data["count"] == 10
+        assert data["lines"][0] == "violation 0"
+        assert data["lines"][-1] == "violation 9"
 
 
 # ==============================================================================
@@ -2263,11 +2257,14 @@ class TestSystemAPIExtended:
 
     def test_test_connection_unreachable(self, client):
         """POST /api/diagnostics/test-connection returns reachable=false for closed port."""
-        resp = client.post("/api/diagnostics/test-connection", json={
-            "host": "127.0.0.1",
-            "port": 1,
-            "timeout": 0.1,
-        })
+        with patch("web.routes.api_system.socket.socket") as mock_sock_cls:
+            mock_sock = mock_sock_cls.return_value
+            mock_sock.connect_ex.return_value = 111  # ECONNREFUSED
+            resp = client.post("/api/diagnostics/test-connection", json={
+                "host": "127.0.0.1",
+                "port": 1,
+                "timeout": 0.1,
+            })
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["host"] == "127.0.0.1"
@@ -2276,11 +2273,17 @@ class TestSystemAPIExtended:
         assert "tested_at" in data
 
     def test_test_connection_default_params(self, client):
-        """POST /api/diagnostics/test-connection works with no body."""
-        resp = client.post("/api/diagnostics/test-connection", json={})
+        """POST /api/diagnostics/test-connection uses default host/port when none provided."""
+        with patch("web.routes.api_system.socket.socket") as mock_sock_cls:
+            mock_sock = mock_sock_cls.return_value
+            mock_sock.connect_ex.return_value = 111  # ECONNREFUSED
+            resp = client.post("/api/diagnostics/test-connection", json={})
         assert resp.status_code == 200
         data = resp.get_json()
+        assert data["host"] == "127.0.0.1"
+        assert data["port"] == 7497
         assert "reachable" in data
+        mock_sock.connect_ex.assert_called_once_with(("127.0.0.1", 7497))
 
     def test_init_db_import_error(self, client, monkeypatch):
         """POST /api/system/init-db handles missing database module gracefully."""
