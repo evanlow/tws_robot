@@ -430,7 +430,6 @@ class AutonomousExitManager:
 
             # Build a positions dict containing the autonomous trade so
             # portfolio reconciliation can match it against TWS state.
-            from risk.risk_manager import Position as RiskPosition
             exit_positions: Dict[str, Any] = {
                 trade.symbol: RiskPosition(
                     symbol=trade.symbol,
