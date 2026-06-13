@@ -66,6 +66,15 @@ class AutonomousTradingConfig:
     # ---- Earnings avoidance ------------------------------------------
     avoid_earnings_within_days: int = 7
 
+    # ---- Exit target mode ---------------------------------------------
+    exit_target_mode: str = "resistance"  # "resistance" | "percent" | "adr_intraday"
+    take_profit_pct: float = 0.08  # fallback percent target
+    adr_lookback_days: int = 14
+    adr_target_fraction: float = 0.50
+    adr_max_target_pct: float = 0.03
+    adr_min_target_pct: float = 0.005
+    adr_respect_resistance_cap: bool = True
+
     # ---- Order style --------------------------------------------------
     use_limit_orders_only: bool = True
 
@@ -122,6 +131,13 @@ class AutonomousTradingConfig:
             "allow_share_buy": self.allow_share_buy,
             "allow_short_put": self.allow_short_put,
             "avoid_earnings_within_days": self.avoid_earnings_within_days,
+            "exit_target_mode": self.exit_target_mode,
+            "take_profit_pct": self.take_profit_pct,
+            "adr_lookback_days": self.adr_lookback_days,
+            "adr_target_fraction": self.adr_target_fraction,
+            "adr_max_target_pct": self.adr_max_target_pct,
+            "adr_min_target_pct": self.adr_min_target_pct,
+            "adr_respect_resistance_cap": self.adr_respect_resistance_cap,
             "use_limit_orders_only": self.use_limit_orders_only,
             "emergency_stop_file": self.emergency_stop_file,
             "audit_log_dir": self.audit_log_dir,

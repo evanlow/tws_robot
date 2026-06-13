@@ -64,8 +64,9 @@ planning can engage automatically.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
+from autonomous.adr_calculator import ADRResult, calculate_adr
 from autonomous.candidate_scanner import CandidateSignal
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,13 @@ class TechnicalAnalysisSignalProvider:
         Optional callable returning ``List[Dict[str, Any]]`` of screener
         rows.  Provided as an explicit injection point for tests that
         prefer not to construct a screener-service stub.
+    adr_lookback_days:
+        Number of trading days to use for ADR calculation.  Set to 0
+        or ``None`` to disable ADR computation during scanning.
+    price_history_fetcher:
+        Callable ``(symbol: str, period: str, interval: str) → List[Dict]``
+        for retrieving daily bars.  Defaults to
+        :func:`data.fundamentals.fetch_price_history`.
     """
 
     def __init__(
@@ -105,6 +113,8 @@ class TechnicalAnalysisSignalProvider:
         screener_service: Any = None,
         refresh_on_first_call: bool = True,
         rows_loader: Optional[Callable[[], Any]] = None,
+        adr_lookback_days: int = 14,
+        price_history_fetcher: Optional[Callable[..., List[Dict[str, Any]]]] = None,
     ) -> None:
         if screener_service is None and rows_loader is None:
             # Import lazily so importing this module does not pull in
@@ -114,6 +124,8 @@ class TechnicalAnalysisSignalProvider:
         self._screener_service = screener_service
         self._rows_loader = rows_loader
         self._refresh_on_first_call = refresh_on_first_call
+        self._adr_lookback_days = adr_lookback_days or 0
+        self._price_history_fetcher = price_history_fetcher
 
         # Lazily-populated symbol → row index.  ``None`` means "not yet
         # loaded"; an empty dict means "loaded but no rows available".
@@ -151,13 +163,24 @@ class TechnicalAnalysisSignalProvider:
         if row.get("bollinger_status") == "insufficient_data":
             return None
         try:
-            return self._row_to_signal(symbol, row)
+            signal = self._row_to_signal(symbol, row)
         except Exception:  # pragma: no cover - defensive: never raise
             logger.exception(
                 "TechnicalAnalysisSignalProvider failed mapping row for %s",
                 symbol,
             )
             return None
+
+        # Compute ADR during scanning if configured
+        if signal is not None and self._adr_lookback_days > 0:
+            adr_result = self._compute_adr_for_symbol(symbol, signal.last_price)
+            if adr_result is not None:
+                signal.extras["adr"] = adr_result.adr
+                signal.extras["adr_pct"] = adr_result.adr_pct
+                signal.extras["adr_lookback_days_used"] = adr_result.lookback_days_used
+                signal.extras["adr_valid"] = adr_result.valid
+
+        return signal
 
     # ------------------------------------------------------------------
     # Internals
@@ -188,6 +211,42 @@ class TechnicalAnalysisSignalProvider:
             if sym:
                 out[sym] = row
         return out
+
+    def _compute_adr_for_symbol(
+        self, symbol: str, last_price: float
+    ) -> Optional[ADRResult]:
+        """Fetch daily bars and compute ADR for *symbol*.
+
+        Returns ``None`` on any failure — the caller treats missing ADR
+        as a graceful degradation (fall back to resistance/percent target).
+        """
+        if last_price <= 0:
+            return None
+        fetcher = self._price_history_fetcher
+        if fetcher is None:
+            try:
+                from data.fundamentals import fetch_price_history
+                fetcher = fetch_price_history
+            except ImportError:
+                logger.debug("Cannot import fetch_price_history for ADR")
+                return None
+        try:
+            # Request enough days of history to cover the lookback
+            # (add margin for weekends/holidays)
+            period_days = self._adr_lookback_days * 2
+            period = f"{period_days}d" if period_days <= 60 else "3mo"
+            bars = fetcher(symbol, period=period, interval="1d")
+        except Exception:
+            logger.debug("ADR price history fetch failed for %s", symbol)
+            return None
+        if not bars:
+            return None
+        result = calculate_adr(
+            daily_bars=bars,
+            reference_price=last_price,
+            lookback_days=self._adr_lookback_days,
+        )
+        return result if result.valid else None
 
     @staticmethod
     def _row_to_signal(symbol: str, row: Dict[str, Any]) -> CandidateSignal:
