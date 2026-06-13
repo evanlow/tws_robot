@@ -27,8 +27,8 @@ TWS Robot's primary capability is its **autonomous trading pipeline** — a full
 │  S&P 500  │ Hard     │ BUY_     │ Cash check  │ Paper adapter  │
 │  universe │ filters  │ SHARES   │ Risk check  │ Live adapter   │
 │  +        │ Scoring  │   or     │ Daily limit │   (future)     │
-│  Signal   │ Ranking  │ SHORT_   │ Emergency   │                │
-│  provider │          │ PUT      │   stop gate │                │
+│  Signal   │ Ranking  │ SELL_    │ Emergency   │                │
+│  provider │          │ CSP      │   stop gate │                │
 └──────────┴──────────┴──────────┴─────────────┴────────────────┘
 ```
 
@@ -176,7 +176,7 @@ graph LR
     C -->|No| D[🔧 Adjust Config]
     D --> A
     C -->|Yes| E[📄 Paper Execute]
-    E --> F{30+ Days Good?}
+    E --> F{Proven Results?}
     F -->|No| D
     F -->|Yes| G[💰 Assisted Live]
     
@@ -213,7 +213,7 @@ tws_robot/
 │   ├── exit_manager.py       # Automated exit management
 │   ├── autonomous_runner.py  # Paper trading runner loop
 │   └── audit.py              # JSONL audit logging
-├── web/                   # Web dashboard (primary user interface)
+├── web/                   # Web dashboard (user interface)
 │   ├── routes/               # One Blueprint per menu section
 │   ├── templates/            # Jinja2 HTML templates
 │   └── static/               # CSS, JavaScript assets
@@ -746,12 +746,12 @@ tws_robot/
 │   ├── autonomous_engine.py  # Top-level pipeline orchestrator
 │   ├── candidate_scanner.py  # S&P 500 universe scanning
 │   ├── candidate_ranker.py   # Hard filters + scoring
-│   ├── trade_planner.py      # BUY_SHARES / SHORT_PUT planning
+│   ├── trade_planner.py      # BUY_SHARES / SELL_CSP planning
 │   ├── signal_provider.py    # Signal provider interface
 │   ├── exit_manager.py       # TP/SL/duration exit logic
 │   ├── autonomous_runner.py  # Paper runner loop
 │   └── audit.py              # JSONL decision audit log
-├── web/                 # Flask web UI (primary user interface)
+├── web/                 # Flask web UI (user interface)
 │   ├── app.py           #   Application entry point
 │   ├── routes/          #   One Blueprint per menu section
 │   ├── templates/       #   Jinja2 HTML templates
