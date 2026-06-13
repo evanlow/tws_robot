@@ -1925,7 +1925,7 @@ class TestRiskAIEndpoints:
         with patch("web.routes.risk.explain_emergency_event", return_value="first") as mock_explain:
             client.get("/risk/alerts/alert-cache/ai-explanation")
         # Second call should use cache (explain_emergency_event not called again)
-        with patch("web.routes.risk.explain_emergency_event", return_value="second") as mock_explain2:
+        with patch("web.routes.risk.explain_emergency_event", return_value="second") as mock_explain_not_called:
             resp = client.get("/risk/alerts/alert-cache/ai-explanation")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -2458,9 +2458,12 @@ class TestScreenerAPIExtended:
         assert "count" in data
 
     def test_screener_handles_service_exception(self, client, monkeypatch):
+        def _raise_fetch_error(refresh=False):
+            raise RuntimeError("fetch failed")
+
         monkeypatch.setattr(
             "web.sp500_screener_service.sp500_screener_service.get_screener_data",
-            lambda refresh=False: (_ for _ in ()).throw(RuntimeError("fetch failed")),
+            _raise_fetch_error,
         )
         resp = client.get("/api/stocks/sp500/screener")
         assert resp.status_code == 500
