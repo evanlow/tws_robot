@@ -401,12 +401,11 @@ class AutonomousExitManager:
         """Place a live SELL limit order via order_executor."""
         try:
             from strategies.signal import Signal, SignalType, SignalStrength
-            from datetime import datetime, timezone as _tz
             sell_signal = Signal(
                 symbol=trade.symbol,
                 signal_type=SignalType.SELL,
                 strength=SignalStrength.STRONG,
-                timestamp=datetime.now(_tz.utc),
+                timestamp=datetime.now(timezone.utc),
                 quantity=int(trade.quantity),
                 target_price=limit_price,
             )
@@ -455,14 +454,13 @@ class AutonomousExitManager:
         """Mark trade EXIT_PENDING after a successful order submission."""
         # Do NOT fake the fill.  Real fill information will be reconciled
         # separately when available.
-        from datetime import datetime, timezone as _tz
         try:
             self._store.update_trade(
                 trade.autonomous_trade_id,
                 status=EXIT_PENDING,
                 exit_order_id=int(order_id) if order_id is not None else None,
                 exit_reason=reason_code,
-                exit_time=datetime.now(_tz.utc),
+                exit_time=datetime.now(timezone.utc),
             )
         except Exception:  # pragma: no cover - defensive
             logger.exception(

@@ -1474,13 +1474,13 @@ def live_activate():
     # OrderExecutor can verify the account/environment on every live order.
     if expected_account_id and not live_config.live_dry_run:
         try:
-            from execution.order_executor import LiveTradingConfirmation as LTC
+            from execution.order_executor import LiveTradingConfirmation
             svc = get_services()
             connection_info = getattr(svc, "connection_info", None) or {}
             port = int(connection_info.get("port") or 7496)
             env = getattr(svc, "connection_env", "") or ""
             if env.lower() == "live":
-                confirmation = LTC(
+                confirmation = LiveTradingConfirmation(
                     environment="live",
                     account_id=expected_account_id,
                     port=port,
