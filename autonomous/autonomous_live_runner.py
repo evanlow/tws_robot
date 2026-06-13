@@ -47,6 +47,8 @@ from autonomous.trade_store import (
     AutonomousTrade,
     TradeStore,
 )
+from execution.order_executor import OrderStatus
+from strategies.signal import Signal, SignalType, SignalStrength
 
 logger = logging.getLogger(__name__)
 
@@ -486,9 +488,6 @@ class AutonomousLiveRunner:
             )
 
         # Submit via OrderExecutor.
-        from datetime import datetime, timezone
-        from strategies.signal import Signal, SignalType, SignalStrength
-
         symbol = str(plan.get("symbol") or "")
         signal = Signal(
             symbol=symbol,
@@ -520,8 +519,6 @@ class AutonomousLiveRunner:
                 decision=decision_payload,
                 dry_run=self._config.live_dry_run,
             )
-
-        from execution.order_executor import OrderStatus
 
         if result.status == OrderStatus.DRY_RUN:
             # Dry-run: record the would-be trade and return.

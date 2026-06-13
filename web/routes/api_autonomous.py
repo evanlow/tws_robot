@@ -1164,7 +1164,7 @@ def _build_live_runner(
         return getattr(svc, "connection_env", None)
 
     def _account_id() -> Optional[str]:
-        info = getattr(svc, "connection_info", {}) or {}
+        info = getattr(svc, "connection_info", None) or {}
         return info.get("account") or None
 
     def _provider():
@@ -1329,10 +1329,7 @@ def live_runner_status():
     return jsonify({
         "live_runner_config": live_config.to_dict(),
         "gates": gates.to_dict(),
-        "autonomous_live_mode": {
-            **state.to_dict(),
-            "display_mode": state.display_mode.value,
-        },
+        "autonomous_live_mode": state.to_dict(),
     })
 
 
@@ -1474,10 +1471,7 @@ def live_activate():
     return jsonify({
         "status": "activated" if state.is_on else "halted",
         "run": payload,
-        "autonomous_live_mode": {
-            **state.to_dict(),
-            "display_mode": state.display_mode.value,
-        },
+        "autonomous_live_mode": state.to_dict(),
     })
 
 
@@ -1494,10 +1488,7 @@ def live_halt():
     state = _live_mode_state()
     return jsonify({
         "status": "halted",
-        "autonomous_live_mode": {
-            **state.to_dict(),
-            "display_mode": state.display_mode.value,
-        },
+        "autonomous_live_mode": state.to_dict(),
     })
 
 
