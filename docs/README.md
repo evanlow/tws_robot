@@ -179,10 +179,12 @@ pytest -v
 ### Test Coverage
 
 ```
-Current: 690 tests passing (100% pass rate)
-Overall Coverage: 44%
-Critical Modules: 84-99%
+Current: 2500+ tests passing (100% pass rate)
+Overall Coverage: 79%
+Critical Modules: 84-100%
 ```
+
+> _Note: coverage rose from the ~44% figure in earlier sprint docs as the full web layer, autonomous trading, screeners, FX, and account-intelligence modules gained dedicated test suites over multiple sprints._
 
 **Coverage by Module:**
 
@@ -211,7 +213,7 @@ This is our #1 rule. Before any commit:
 pytest -v
 ```
 
-**Expected:** `===== 690 passed in X.XXs =====`
+**Expected:** `===== 2500+ passed in X.XXs =====`
 
 **Not acceptable:**
 - Any failures

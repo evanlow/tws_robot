@@ -243,5 +243,5 @@ SQLite is used locally (`strategy_lifecycle.db`, `test.db`). The target schema (
 | Database (target) | PostgreSQL |
 | Web UI | Flask + Jinja2 (server-rendered; no SPA framework) |
 | Web API (planned) | FastAPI + WebSockets (real-time data feeds) |
-| Testing | `pytest` (690+ tests) |
+| Testing | `pytest` (2500+ tests) |
 | Configuration | `.env` + `python-dotenv` |

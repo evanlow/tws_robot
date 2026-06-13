@@ -24,11 +24,11 @@ This is non-negotiable. Every commit, every change, every new feature must maint
 pytest -v
 
 # Expected output:
-# ===== 690 passed in 12.34s =====
+# ===== 2500+ passed in X.XXs =====
 # 
 # ❌ NOT ACCEPTABLE:
-# ===== 689 passed, 1 failed =====
-# ===== 690 passed, 1 warning =====
+# ===== 2549 passed, 1 failed =====
+# ===== 2550 passed, 1 warning =====
 ```
 
 If tests fail or warn, **DO NOT COMMIT**. Fix the issue first.

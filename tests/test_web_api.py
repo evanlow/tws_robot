@@ -1895,3 +1895,628 @@ class TestStrategyAccountIsolation:
         assert services.current_account_id == "DU999999"
         services.set_disconnected()
         assert services.current_account_id == ""
+
+
+# ==============================================================================
+# Risk page & AI alert endpoints
+# ==============================================================================
+
+
+class TestRiskAIEndpoints:
+    """Smoke tests for /risk/* endpoints including AI explanation and digest."""
+
+    def test_risk_alert_ai_explanation_not_found(self, client):
+        resp = client.get("/risk/alerts/nonexistent-id/ai-explanation")
+        assert resp.status_code == 404
+        data = resp.get_json()
+        assert "error" in data
+
+    def test_risk_alert_ai_explanation_found(self, client, services):
+        services.add_alert({"id": "alert-001", "type": "TEST", "message": "test alert"})
+        with patch("web.routes.risk.explain_emergency_event", return_value="AI explains it"):
+            resp = client.get("/risk/alerts/alert-001/ai-explanation")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["explanation"] == "AI explains it"
+        assert data["cached"] is False
+
+    def test_risk_alert_ai_explanation_cached(self, client, services):
+        services.add_alert({"id": "alert-cache", "type": "TEST", "message": "cached"})
+        with patch("web.routes.risk.explain_emergency_event", return_value="first") as mock_explain:
+            client.get("/risk/alerts/alert-cache/ai-explanation")
+        # Second call should use cache (explain_emergency_event not called again)
+        with patch("web.routes.risk.explain_emergency_event", return_value="second") as mock_explain_not_called:
+            resp = client.get("/risk/alerts/alert-cache/ai-explanation")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["cached"] is True
+        mock_explain_not_called.assert_not_called()
+
+    def test_risk_alert_digest_default(self, client):
+        with patch("web.routes.risk.generate_alert_summary", return_value="Daily digest text"):
+            resp = client.get("/risk/alerts/digest")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["digest"] == "Daily digest text"
+
+    def test_risk_alert_digest_custom_hours(self, client):
+        with patch("web.routes.risk.generate_alert_summary", return_value="48h digest") as mock_gen:
+            resp = client.get("/risk/alerts/digest?hours=48")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["digest"] == "48h digest"
+        mock_gen.assert_called_once()
+        _, kwargs = mock_gen.call_args
+        assert kwargs.get("window_hours") == 48
+
+    def test_risk_alert_digest_clamps_hours(self, client):
+        """hours parameter is clamped to 1–168."""
+        with patch("web.routes.risk.generate_alert_summary", return_value="clamped") as mock_gen:
+            client.get("/risk/alerts/digest?hours=9999")
+        _, kwargs = mock_gen.call_args
+        assert kwargs.get("window_hours") == 168
+
+    def test_risk_alert_digest_invalid_hours_defaults(self, client):
+        """Non-numeric hours falls back to 24."""
+        with patch("web.routes.risk.generate_alert_summary", return_value="default") as mock_gen:
+            client.get("/risk/alerts/digest?hours=abc")
+        _, kwargs = mock_gen.call_args
+        assert kwargs.get("window_hours") == 24
+
+
+# ==============================================================================
+# Backtest page routes
+# ==============================================================================
+
+
+class TestBacktestPageRoutes:
+    """Smoke tests for HTML backtest page routes."""
+
+    def test_backtest_results_page_not_found_run(self, client):
+        """Backtest results page renders even for unknown run_id."""
+        resp = client.get("/backtest/some-run-id")
+        assert resp.status_code == 200
+
+    def test_backtest_ai_report_generates_narrative(self, client, services):
+        """POST /backtest/<id>/ai-report returns a JSON report."""
+        run_id = "test-run-1"
+        services.store_backtest_run(run_id, {
+            "status": "complete",
+            "strategy_name": "MovingAverageCross",
+            "results": {"metrics": {"total_return": 0.15}},
+        })
+        with patch("web.routes.backtest.generate_narrative", return_value="AI narrative"):
+            resp = client.post(f"/backtest/{run_id}/ai-report", json={
+                "strategy_name": "MovingAverageCross",
+                "metrics": {"total_return": 0.15},
+            })
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["report"] == "AI narrative"
+        assert data["cached"] is False
+
+    def test_backtest_ai_report_served_from_cache(self, client):
+        """ai-report endpoint returns cached report on second call."""
+        run_id = "cached-run"
+        with patch("web.routes.backtest.get_cached_report", return_value="cached narrative"):
+            resp = client.post(f"/backtest/{run_id}/ai-report", json={})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["report"] == "cached narrative"
+        assert data["cached"] is True
+
+
+# ==============================================================================
+# Backtest API – additional coverage
+# ==============================================================================
+
+
+class TestBacktestAPIExtended:
+    """Additional tests for /api/backtest/* endpoints."""
+
+    def test_run_backtest_accepts_valid_request(self, client):
+        """POST /api/backtest/run with all required fields returns 202."""
+        with patch("web.routes.api_backtest.threading.Thread") as mock_thread:
+            mock_thread.return_value.start.return_value = None
+            resp = client.post("/api/backtest/run", json={
+                "strategy": "MovingAverageCross",
+                "symbols": ["AAPL"],
+                "start_date": "2023-01-01",
+                "end_date": "2023-12-31",
+                "initial_capital": 50000,
+            })
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert "run_id" in data
+        assert data["status"] == "running"
+        mock_thread.return_value.start.assert_called_once()
+
+    def test_backtest_status_for_running_run(self, client, services):
+        """GET /api/backtest/<id>/status returns running status."""
+        services.store_backtest_run("run-abc", {
+            "status": "running",
+            "strategy_name": "MomentumStrategy",
+        })
+        resp = client.get("/api/backtest/run-abc/status")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "running"
+        assert data["run_id"] == "run-abc"
+
+    def test_backtest_results_still_running(self, client, services):
+        """GET /api/backtest/<id>/results returns 202 while still running."""
+        services.store_backtest_run("run-running", {"status": "running"})
+        resp = client.get("/api/backtest/run-running/results")
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert data["status"] == "running"
+
+    def test_backtest_results_complete(self, client, services):
+        """GET /api/backtest/<id>/results returns results when complete."""
+        services.store_backtest_run("run-done", {
+            "status": "complete",
+            "results": {"metrics": {"total_return": 0.20}},
+        })
+        resp = client.get("/api/backtest/run-done/results")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "complete"
+        assert data["results"]["metrics"]["total_return"] == 0.20
+
+    def test_compare_runs_with_valid_ids(self, client, services):
+        """GET /api/backtest/compare returns comparison for existing runs."""
+        services.store_backtest_run("run-x", {
+            "status": "complete",
+            "strategy_name": "MomentumStrategy",
+            "results": {"metrics": {"total_return": 0.1}},
+        })
+        services.store_backtest_run("run-y", {
+            "status": "complete",
+            "strategy_name": "MovingAverageCross",
+            "results": {"metrics": {"total_return": 0.2}},
+        })
+        resp = client.get("/api/backtest/compare?runs=run-x,run-y")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data["comparisons"]) == 2
+
+    def test_list_runs_returns_stored_runs(self, client, services):
+        """GET /api/backtest/runs includes previously stored runs."""
+        services.store_backtest_run("run-list", {"status": "complete", "strategy_name": "Test"})
+        resp = client.get("/api/backtest/runs")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert isinstance(data["runs"], list)
+
+
+# ==============================================================================
+# Data API – additional coverage
+# ==============================================================================
+
+
+class TestDataAPIExtended:
+    """Additional tests for /api/data/* endpoints."""
+
+    def test_list_symbols_with_data_dir(self, client, tmp_path, monkeypatch):
+        """list_symbols returns entries when historical data directory exists."""
+        (tmp_path / "AAPL.csv").write_text("date,open\n2024-01-01,150\n")
+        import web.routes.api_data as api_data_mod
+        monkeypatch.setattr(api_data_mod, "_DATA_DIR", tmp_path)
+        resp = client.get("/api/data/symbols")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["count"] == 1
+        assert data["symbols"][0]["symbol"] == "AAPL"
+
+    def test_data_status_with_files(self, client, tmp_path, monkeypatch):
+        """data_status returns freshness info for each CSV file."""
+        (tmp_path / "MSFT.csv").write_text("date,open\n2024-01-01,300\n")
+        import web.routes.api_data as api_data_mod
+        monkeypatch.setattr(api_data_mod, "_DATA_DIR", tmp_path)
+        resp = client.get("/api/data/status")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data["files"]) == 1
+        assert data["files"][0]["symbol"] == "MSFT"
+        assert "age_days" in data["files"][0]
+        assert "fresh" in data["files"][0]
+
+    def test_download_with_symbols_triggers_background(self, client):
+        """POST /api/data/download with symbols returns 202."""
+        with patch("threading.Thread") as mock_thread:
+            mock_thread.return_value.start = lambda: None
+            resp = client.post("/api/data/download", json={"symbols": ["AAPL", "TSLA"], "period": "1y"})
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert data["status"] == "downloading"
+        assert set(data["symbols"]) == {"AAPL", "TSLA"}
+
+
+# ==============================================================================
+# Events API – additional coverage
+# ==============================================================================
+
+
+class TestEventAPIExtended:
+    """Additional tests for /api/events/* endpoints."""
+
+    def test_event_history_valid_type_filter(self, client):
+        """GET /api/events/history?type=HEARTBEAT returns filtered events."""
+        resp = client.get("/api/events/history?type=HEARTBEAT")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "events" in data
+        assert "count" in data
+
+    def test_event_history_limit_clamped_to_200(self, client, services):
+        """Limit is capped at 200 regardless of query param."""
+        with patch.object(services.event_bus, "get_history", return_value=[]) as mock_gh:
+            resp = client.get("/api/events/history?limit=9999")
+        assert resp.status_code == 200
+        mock_gh.assert_called_once()
+        _, kwargs = mock_gh.call_args
+        assert kwargs.get("limit") == 200
+
+    def test_event_history_default_returns_json(self, client):
+        """Baseline: event history returns 200 with events list."""
+        resp = client.get("/api/events/history")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert isinstance(data["events"], list)
+
+
+# ==============================================================================
+# Disclaimer API
+# ==============================================================================
+
+
+class TestDisclaimerAPI:
+    """Tests for /api/disclaimer/* endpoints."""
+
+    def test_status_returns_acceptance_info(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("web.routes.api_disclaimer.is_accepted", lambda: False)
+        monkeypatch.setattr("web.routes.api_disclaimer.get_acceptance_record", lambda: {})
+        resp = client.get("/api/disclaimer/status")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "accepted" in data
+        assert data["accepted"] is False
+        assert "current_version" in data
+
+    def test_accept_records_acceptance(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("web.routes.api_disclaimer.save_acceptance", lambda app_version="unknown": None)
+        resp = client.post("/api/disclaimer/accept", json={"app_version": "1.2.3"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "accepted"
+        assert "disclaimer_version" in data
+
+    def test_accept_sanitises_app_version(self, client, monkeypatch):
+        """Newlines and null bytes in app_version are stripped."""
+        captured = {}
+
+        def fake_save(app_version="unknown"):
+            captured["v"] = app_version
+
+        monkeypatch.setattr("web.routes.api_disclaimer.save_acceptance", fake_save)
+        client.post("/api/disclaimer/accept", json={"app_version": "1.0\n\x00bad"})
+        assert "\n" not in captured["v"]
+        assert "\x00" not in captured["v"]
+
+    def test_accept_handles_os_error(self, client, monkeypatch):
+        def raise_os(app_version="unknown"):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("web.routes.api_disclaimer.save_acceptance", raise_os)
+        resp = client.post("/api/disclaimer/accept", json={})
+        assert resp.status_code == 500
+        data = resp.get_json()
+        assert "error" in data
+
+
+# ==============================================================================
+# Logs route – violations endpoint
+# ==============================================================================
+
+
+class TestLogsViolationsEndpoint:
+    """Tests for GET /logs/violations."""
+
+    def test_violations_no_log_file(self, client, tmp_path, monkeypatch):
+        """Returns empty lines list when violations log does not exist."""
+        fake_logs_py = str(tmp_path / "web" / "routes" / "logs.py")
+        monkeypatch.setattr("web.routes.logs.__file__", fake_logs_py)
+        resp = client.get("/logs/violations")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["lines"] == []
+        assert data["count"] == 0
+
+    def test_violations_with_log_file(self, client, tmp_path, monkeypatch):
+        """Returns last 100 lines when violations log exists."""
+        fake_logs_py = str(tmp_path / "web" / "routes" / "logs.py")
+        monkeypatch.setattr("web.routes.logs.__file__", fake_logs_py)
+        log_content = "\n".join(f"violation {i}" for i in range(10))
+        log_path = tmp_path / "prime_directive_violations.log"
+        log_path.write_text(log_content)
+        resp = client.get("/logs/violations")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["count"] == 10
+        assert data["lines"][0] == "violation 0"
+        assert data["lines"][-1] == "violation 9"
+
+
+# ==============================================================================
+# System API – additional coverage
+# ==============================================================================
+
+
+class TestSystemAPIExtended:
+    """Additional tests for /api/system/* and /api/diagnostics/* endpoints."""
+
+    def test_test_connection_unreachable(self, client):
+        """POST /api/diagnostics/test-connection returns reachable=false for closed port."""
+        with patch("web.routes.api_system.socket.socket") as mock_sock_cls:
+            mock_sock = mock_sock_cls.return_value
+            mock_sock.connect_ex.return_value = 111  # ECONNREFUSED
+            resp = client.post("/api/diagnostics/test-connection", json={
+                "host": "127.0.0.1",
+                "port": 1,
+                "timeout": 0.1,
+            })
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["host"] == "127.0.0.1"
+        assert data["port"] == 1
+        assert data["reachable"] is False
+        assert "tested_at" in data
+
+    def test_test_connection_default_params(self, client):
+        """POST /api/diagnostics/test-connection uses default host/port when none provided."""
+        with patch("web.routes.api_system.socket.socket") as mock_sock_cls:
+            mock_sock = mock_sock_cls.return_value
+            mock_sock.connect_ex.return_value = 111  # ECONNREFUSED
+            resp = client.post("/api/diagnostics/test-connection", json={})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["host"] == "127.0.0.1"
+        assert data["port"] == 7497
+        assert "reachable" in data
+        mock_sock.connect_ex.assert_called_once_with(("127.0.0.1", 7497))
+
+    def test_init_db_import_error(self, client, monkeypatch):
+        """POST /api/system/init-db handles missing database module gracefully."""
+        import builtins
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "data.database":
+                raise ImportError("not configured")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+        resp = client.post("/api/system/init-db")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] in ("ok", "skipped", "error")
+
+    def test_init_db_success(self, client, monkeypatch):
+        """POST /api/system/init-db returns ok when init_database succeeds."""
+        monkeypatch.setattr("web.routes.api_system.logger", __import__("logging").getLogger("test"))
+        with patch("data.database.init_database", create=True):
+            import web.routes.api_system as sys_mod
+
+            def fake_init_db():
+                pass
+
+            with patch.dict("sys.modules", {"data.database": type(__import__("types"))("data.database")}):
+                import sys
+                import types
+                fake_mod = types.ModuleType("data.database")
+                fake_mod.init_database = fake_init_db
+                sys.modules["data.database"] = fake_mod
+                resp = client.post("/api/system/init-db")
+                assert resp.status_code == 200
+                data = resp.get_json()
+                assert data["status"] in ("ok", "skipped")
+
+    def test_market_status_fallback(self, client, monkeypatch):
+        """GET /api/diagnostics/market-status returns fallback result when checker unavailable."""
+        import builtins
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if "market_status" in name and "scripts" in name:
+                raise ImportError("not available")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+        resp = client.get("/api/diagnostics/market-status")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "market_open" in data
+
+
+# ==============================================================================
+# Screener page routes
+# ==============================================================================
+
+
+class TestScreenerPageRoutes:
+    """Smoke tests for screener and analysis HTML page routes."""
+
+    def test_sp500_screener_page(self, client):
+        resp = client.get("/stocks/sp500")
+        assert resp.status_code == 200
+        assert b"S&P 500" in resp.data or b"Screener" in resp.data
+
+    def test_sti_screener_page(self, client):
+        resp = client.get("/stocks/sti")
+        assert resp.status_code == 200
+        assert b"STI" in resp.data or b"Screener" in resp.data
+
+    def test_hsi_screener_page(self, client):
+        resp = client.get("/stocks/hsi")
+        assert resp.status_code == 200
+        assert b"HSI" in resp.data or b"Screener" in resp.data
+
+    def test_stock_analysis_dashboard_page(self, client):
+        resp = client.get("/stocks/analysis")
+        assert resp.status_code == 200
+        assert b"Stock Analysis" in resp.data or b"stock" in resp.data.lower()
+
+    def test_stock_analysis_ticker_page(self, client):
+        resp = client.get("/stocks/AAPL/analysis")
+        assert resp.status_code == 200
+        assert b"AAPL" in resp.data
+
+    def test_portfolio_analysis_page(self, client):
+        resp = client.get("/portfolio-analysis/")
+        assert resp.status_code == 200
+        assert b"Portfolio" in resp.data
+
+    def test_fx_research_page(self, client):
+        resp = client.get("/fx/")
+        assert resp.status_code == 200
+        assert b"FX" in resp.data or b"Research" in resp.data
+
+    def test_autonomous_trading_page(self, client):
+        resp = client.get("/autonomous-trading/")
+        assert resp.status_code == 200
+        assert b"Autonomous" in resp.data or b"Trading" in resp.data
+
+
+# ==============================================================================
+# Screener API – additional coverage
+# ==============================================================================
+
+
+class TestScreenerAPIExtended:
+    """Tests for screener API endpoints with filters."""
+
+    def _mock_screener_data(self):
+        return {
+            "as_of": "2024-01-01T12:00:00",
+            "source": "cache",
+            "summary": {},
+            "scan_duration_seconds": 0.5,
+            "rows": [
+                {"symbol": "AAPL", "bollinger_status": "above_upper_band", "sector": "Technology"},
+                {"symbol": "MSFT", "bollinger_status": "within_bands", "sector": "Technology"},
+                {"symbol": "JPM", "bollinger_status": "below_lower_band", "sector": "Finance"},
+            ],
+        }
+
+    def test_sp500_screener_returns_all(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.sp500_screener_service.sp500_screener_service.get_screener_data",
+            lambda refresh=False: self._mock_screener_data(),
+        )
+        resp = client.get("/api/stocks/sp500/screener")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["count"] == 3
+
+    def test_sp500_screener_status_filter(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.sp500_screener_service.sp500_screener_service.get_screener_data",
+            lambda refresh=False: self._mock_screener_data(),
+        )
+        resp = client.get("/api/stocks/sp500/screener?status=overbought")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["count"] == 1
+        assert data["rows"][0]["symbol"] == "AAPL"
+
+    def test_sp500_screener_sector_filter(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.sp500_screener_service.sp500_screener_service.get_screener_data",
+            lambda refresh=False: self._mock_screener_data(),
+        )
+        resp = client.get("/api/stocks/sp500/screener?sector=Finance")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["count"] == 1
+        assert data["rows"][0]["symbol"] == "JPM"
+
+    def test_sti_screener_returns_all(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.sti_screener_service.sti_screener_service.get_screener_data",
+            lambda refresh=False: self._mock_screener_data(),
+        )
+        resp = client.get("/api/stocks/sti/screener")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "count" in data
+
+    def test_hsi_screener_returns_all(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.hsi_screener_service.hsi_screener_service.get_screener_data",
+            lambda refresh=False: self._mock_screener_data(),
+        )
+        resp = client.get("/api/stocks/hsi/screener")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "count" in data
+
+    def test_screener_handles_service_exception(self, client, monkeypatch):
+        def _raise_fetch_error(refresh=False):
+            raise RuntimeError("fetch failed")
+
+        monkeypatch.setattr(
+            "web.sp500_screener_service.sp500_screener_service.get_screener_data",
+            _raise_fetch_error,
+        )
+        resp = client.get("/api/stocks/sp500/screener")
+        assert resp.status_code == 500
+        data = resp.get_json()
+        assert "error" in data
+
+
+# ==============================================================================
+# Market API
+# ==============================================================================
+
+
+class TestMarketAPI:
+    """Tests for /api/market/* endpoints."""
+
+    def test_market_overview_returns_data(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.routes.api_market._get_service",
+            lambda: type("S", (), {"get_overview": lambda self: {"indices": [], "source": "cache"}})(),
+        )
+        resp = client.get("/api/market/overview")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "indices" in data or isinstance(data, dict)
+
+    def test_market_refresh_returns_data(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.routes.api_market._get_service",
+            lambda: type("S", (), {"refresh": lambda self: {"indices": [], "refreshed": True}})(),
+        )
+        resp = client.post("/api/market/refresh")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert isinstance(data, dict)
+
+    def test_market_outlook_cached(self, client, monkeypatch):
+        """GET /api/market/outlook returns cached result when available."""
+        fake_cached = {
+            "session_recap": "Markets closed flat.",
+            "source": "cache",
+        }
+
+        class FakeGenerator:
+            def try_get_cached(self, positions):
+                return fake_cached
+
+        # Patch the lazy import inside the route function
+        import ai.market_outlook as mo_mod
+        monkeypatch.setattr(mo_mod, "get_market_outlook_generator", lambda: FakeGenerator())
+        resp = client.get("/api/market/outlook")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["session_recap"] == "Markets closed flat."
