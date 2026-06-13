@@ -110,6 +110,29 @@ def _sanitize_config_overrides(overrides: Dict[str, Any]) -> Dict[str, Any]:
         elif key == "required_signal_label":
             if isinstance(value, str):
                 cleaned[key] = value
+        elif key == "exit_target_mode":
+            if isinstance(value, str) and value in (
+                "resistance", "percent", "adr_intraday"
+            ):
+                cleaned[key] = value
+        elif key in {
+            "take_profit_pct",
+            "adr_target_fraction",
+            "adr_max_target_pct",
+            "adr_min_target_pct",
+        }:
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and float(value) > 0
+            ):
+                cleaned[key] = float(value)
+        elif key == "adr_lookback_days":
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                cleaned[key] = value
+        elif key == "adr_respect_resistance_cap":
+            if isinstance(value, bool):
+                cleaned[key] = value
     return cleaned
 
 
@@ -146,7 +169,42 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
         return factory(config_overrides or {})
 
     svc = get_services()
-    base_config = AutonomousTradingConfig()
+
+    # --- Read ADR / exit-target settings from environment ----------------
+    env_config_kwargs: Dict[str, Any] = {}
+    _exit_mode = os.environ.get("AUTONOMOUS_EXIT_TARGET_MODE", "").strip().lower()
+    if _exit_mode in ("resistance", "percent", "adr_intraday"):
+        env_config_kwargs["exit_target_mode"] = _exit_mode
+
+    for env_key, config_key, converter, default in [
+        ("AUTONOMOUS_TAKE_PROFIT_PCT", "take_profit_pct", float, None),
+        ("AUTONOMOUS_ADR_LOOKBACK_DAYS", "adr_lookback_days", int, None),
+        ("AUTONOMOUS_ADR_TARGET_FRACTION", "adr_target_fraction", float, None),
+        ("AUTONOMOUS_ADR_MAX_TARGET_PCT", "adr_max_target_pct", float, None),
+        ("AUTONOMOUS_ADR_MIN_TARGET_PCT", "adr_min_target_pct", float, None),
+    ]:
+        raw = os.environ.get(env_key, "").strip()
+        if raw:
+            try:
+                val = converter(raw)
+                if val > 0:
+                    env_config_kwargs[config_key] = val
+            except (ValueError, TypeError):
+                pass  # Invalid env value — use dataclass default
+
+    _adr_resist_raw = os.environ.get(
+        "AUTONOMOUS_ADR_RESPECT_RESISTANCE_CAP", ""
+    ).strip().lower()
+    if _adr_resist_raw in ("true", "1", "yes", "on"):
+        env_config_kwargs["adr_respect_resistance_cap"] = True
+    elif _adr_resist_raw in ("false", "0", "no", "off"):
+        env_config_kwargs["adr_respect_resistance_cap"] = False
+
+    base_config = AutonomousTradingConfig(
+        emergency_stop_file=str(EMERGENCY_STOP_FILE),
+        **env_config_kwargs,
+    )
+
     if config_overrides:
         # Only allow whitelisted overrides from HTTP requests — operators
         # can switch mode and live-flag through the dashboard, but the
@@ -160,6 +218,13 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
             "min_deployable_cash",
             "min_signal_strength",
             "required_signal_label",
+            "exit_target_mode",
+            "take_profit_pct",
+            "adr_lookback_days",
+            "adr_target_fraction",
+            "adr_max_target_pct",
+            "adr_min_target_pct",
+            "adr_respect_resistance_cap",
         }
         kwargs = base_config.to_dict()
         for k, v in _sanitize_config_overrides(config_overrides).items():
@@ -172,10 +237,6 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
             "audit_log_dir": AutonomousTradingConfig().audit_log_dir,
             "emergency_stop_file": str(EMERGENCY_STOP_FILE),
         })
-    else:
-        base_config = AutonomousTradingConfig(
-            emergency_stop_file=str(EMERGENCY_STOP_FILE),
-        )
 
     scanner = CandidateScanner(signal_provider=_resolve_signal_provider())
     cash_analyzer = CashAvailabilityAnalyzer()

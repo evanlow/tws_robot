@@ -387,3 +387,126 @@ def test_no_paper_adapter_and_no_order_executor_records_no_exit(store, tmp_path)
     assert d.decision == NO_EXIT
     assert "no paper_adapter" in d.reason or "order_executor" in d.reason
     assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+# ---------------------------------------------------------------------------
+# Live exit via OrderExecutor with realistic equity/positions
+# ---------------------------------------------------------------------------
+
+
+class _CapturingOrderExecutor:
+    """Stub OrderExecutor that captures the equity/positions passed in and
+    returns SUBMITTED if quantity matches, or REJECTED otherwise."""
+
+    def __init__(self, tws_quantity: int = 10) -> None:
+        self._tws_quantity = tws_quantity
+        self.calls: list = []
+
+    def execute_signal(self, strategy_name, signal, current_equity, positions):
+        from execution.order_executor import OrderResult, OrderStatus, RejectionReason
+        self.calls.append({
+            "symbol": signal.symbol,
+            "price": signal.target_price,
+            "quantity": signal.quantity,
+            "current_equity": current_equity,
+            "positions": positions,
+        })
+        # Simulate quantity check: if the signal quantity exceeds TWS
+        # position size, reject the exit (mirrors what a real executor's
+        # reconciliation would do).
+        if signal.quantity > self._tws_quantity:
+            return OrderResult(
+                status=OrderStatus.REJECTED,
+                order_id=None,
+                signal=signal,
+                quantity=signal.quantity,
+                price=0.0,
+                reason=(
+                    f"SELL qty {signal.quantity} exceeds TWS position "
+                    f"qty {self._tws_quantity}"
+                ),
+            )
+        return OrderResult(
+            status=OrderStatus.SUBMITTED,
+            order_id=9999,
+            signal=signal,
+            quantity=signal.quantity,
+            price=signal.target_price or 0.0,
+            reason="Order 9999 submitted",
+        )
+
+
+def test_live_exit_passes_realistic_equity_and_positions(store, tmp_path):
+    """A TAKE_PROFIT live exit must supply current_equity > 0 and a positions
+    dict containing the trade's symbol/quantity so OrderExecutor sanity checks
+    and portfolio reconciliation can pass."""
+    trade = _open_trade()  # qty=10, entry_limit_price=100
+    store.record_trade(trade)
+    executor = _CapturingOrderExecutor(tws_quantity=10)
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=None,
+        order_executor=executor,
+        positions_provider=lambda: {"AAA": {"current_price": 112.0}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+    assert len(decisions) == 1
+    d = decisions[0]
+    assert d.decision == TAKE_PROFIT
+    assert store.get(trade.autonomous_trade_id).status == "EXIT_PENDING"
+
+    # Verify realistic values were passed to the executor
+    call = executor.calls[0]
+    assert call["current_equity"] > 0.0, "equity must not be zero"
+    assert call["current_equity"] >= call["price"], (
+        "equity must be >= limit price for sanity check"
+    )
+    positions = call["positions"]
+    assert trade.symbol in positions
+    pos = positions[trade.symbol]
+    assert pos.quantity == trade.quantity
+
+
+def test_live_exit_rejected_when_tws_position_insufficient(store, tmp_path):
+    """If TWS has fewer shares than the exit order quantity, the executor must
+    reject the exit and the trade stays OPEN."""
+    trade = _open_trade()  # qty=10
+    store.record_trade(trade)
+    # TWS only has 5 shares — exit of 10 should be rejected
+    executor = _CapturingOrderExecutor(tws_quantity=5)
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=None,
+        order_executor=executor,
+        positions_provider=lambda: {"AAA": {"current_price": 112.0}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+    d = decisions[0]
+    assert d.decision == NO_EXIT
+    assert "exceeds TWS position" in d.reason or "rejected" in d.reason
+    assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+def test_live_stop_loss_exit_submitted_with_realistic_equity(store, tmp_path):
+    """A STOP_LOSS live exit also gets realistic equity/positions and is
+    actually submitted (not just evaluated)."""
+    trade = _open_trade()  # stop=95
+    store.record_trade(trade)
+    executor = _CapturingOrderExecutor(tws_quantity=10)
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=None,
+        order_executor=executor,
+        positions_provider=lambda: {"AAA": {"current_price": 90.0}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+    d = decisions[0]
+    assert d.decision == STOP_LOSS
+    assert store.get(trade.autonomous_trade_id).status == "EXIT_PENDING"
+    call = executor.calls[0]
+    assert call["current_equity"] > 0.0
+    assert call["quantity"] == 10
+    assert trade.symbol in call["positions"]

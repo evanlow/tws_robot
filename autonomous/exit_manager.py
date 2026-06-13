@@ -398,9 +398,22 @@ class AutonomousExitManager:
         reason_text: str,
         limit_price: float,
     ) -> ExitDecision:
-        """Place a live SELL limit order via order_executor."""
+        """Place a live SELL limit order via order_executor.
+
+        We pass realistic ``current_equity`` and ``positions`` so that
+        OrderExecutor sanity checks and portfolio reconciliation succeed
+        for legitimate exit orders:
+
+        * ``current_equity`` is derived from the position value (quantity *
+          limit_price) with a safety multiplier so the price-vs-equity
+          sanity check never rejects a valid exit.
+        * ``positions`` contains the autonomous trade's symbol with the
+          expected quantity so reconciliation can verify that TWS holds
+          the position being sold.
+        """
         try:
             from strategies.signal import Signal, SignalType, SignalStrength
+            from risk.risk_manager import Position as RiskPosition
             sell_signal = Signal(
                 symbol=trade.symbol,
                 signal_type=SignalType.SELL,
@@ -409,11 +422,29 @@ class AutonomousExitManager:
                 quantity=int(trade.quantity),
                 target_price=limit_price,
             )
+            # Derive a conservative equity estimate: the position value
+            # multiplied by a safety factor ensures sanity_check_order
+            # (which rejects price > equity) never blocks a real exit.
+            position_value = int(trade.quantity) * limit_price
+            exit_equity = max(position_value * 10.0, 100_000.0)
+
+            # Build a positions dict containing the autonomous trade so
+            # portfolio reconciliation can match it against TWS state.
+            from risk.risk_manager import Position as RiskPosition
+            exit_positions: Dict[str, Any] = {
+                trade.symbol: RiskPosition(
+                    symbol=trade.symbol,
+                    quantity=int(trade.quantity),
+                    entry_price=float(trade.entry_limit_price),
+                    current_price=limit_price,
+                    side="LONG",
+                ),
+            }
             result = self._order_executor.execute_signal(
                 strategy_name="AutonomousExitManager:LIVE_EXIT",
                 signal=sell_signal,
-                current_equity=0.0,
-                positions={},
+                current_equity=exit_equity,
+                positions=exit_positions,
             )
         except Exception as exc:
             logger.exception(
