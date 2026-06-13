@@ -95,6 +95,13 @@ class AutonomousModeState:
         cycle: TradingCycle,
         account_mode: AccountMode = AccountMode.PAPER,
     ) -> None:
+        """Activate autonomous mode for the given cycle and account mode.
+
+        ``account_mode`` defaults to :attr:`AccountMode.PAPER` so that
+        existing paper-trading callers that omit the parameter continue to
+        work without modification.  Live callers must explicitly pass
+        ``AccountMode.LIVE``.
+        """
         self.operating_state = AutonomousOperatingState.ON
         self.trading_cycle = cycle
         self.account_mode = account_mode

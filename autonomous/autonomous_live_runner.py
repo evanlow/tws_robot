@@ -498,10 +498,10 @@ class AutonomousLiveRunner:
             target_price=limit_price,
         )
 
-        # Limit-orders-only enforcement.
+        # Limit-orders-only enforcement: mark strategy name so callers / logs
+        # can distinguish this signal from non-limit autonomous signals.
         if self._config.live_limit_orders_only:
-            # Signal.strategy_name is used to pass order type info to executor
-            signal.strategy_name = "AutonomousLiveRunner:LIMIT"  # type: ignore[attr-defined]
+            signal.strategy_name = "AutonomousLiveRunner:LIMIT"
 
         try:
             result = self._executor.execute_signal(

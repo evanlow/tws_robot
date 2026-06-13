@@ -34,7 +34,7 @@ from autonomous.autonomous_live_runner import (
     EXECUTION_FAILED,
 )
 from autonomous.runner_config import AutonomousLiveRunnerConfig
-from autonomous.trade_store import TradeStore, OPEN
+from autonomous.trade_store import TradeStore, OPEN, CLOSED, FAILED
 from data.cash_availability import CashAvailabilityAnalyzer
 from execution.order_executor import OrderResult, OrderStatus
 

@@ -258,6 +258,22 @@ class TestAutonomousMode:
         assert body["autonomous_mode"]["mode"]["cycles_started"] == 1
         assert len(store.list_open()) == 1
 
+    def test_activate_paper_sets_paper_account_mode(self, app, client, tmp_path):
+        """Paper activation should default to PAPER account_mode (backward compat)."""
+        _install_runner(app, tmp_path)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+        body = client.post(
+            "/api/autonomous/mode/activate",
+            json={"trading_cycle": "single_trade", "confirm": True},
+        ).get_json()
+        assert body["status"] == "activated"
+        # display_mode comes from to_dict() which derives it from account_mode
+        assert body["autonomous_mode"]["mode"].get("account_mode") == "paper"
+        assert body["autonomous_mode"]["mode"].get("display_mode") == "PAPER"
+
     def test_activate_halts_on_bearish_spy_gate(self, app, client, tmp_path):
         app.config["autonomous_spy_price_provider"] = lambda: {
             "open": 500.0,
