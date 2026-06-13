@@ -226,6 +226,7 @@ class OrderExecutor:
         live_trading_enabled: bool = False,
         live_confirmation: Optional["LiveTradingConfirmation"] = None,
         expected_account_id: Optional[str] = None,
+        limit_orders_only: bool = False,
     ):
         """
         Initialize order executor.
@@ -251,6 +252,11 @@ class OrderExecutor:
             expected_account_id: Optional account ID that must match
                 ``live_confirmation.account_id`` when supplied (used by
                 callers that resolve the account from environment config).
+            limit_orders_only: When ``True``, every order must carry a
+                positive ``target_price``; signals without one are rejected
+                with :data:`RejectionReason.PRICE_SANITY_FAILED`.  Always
+                ``True`` for live autonomous execution so MARKET orders can
+                never reach TWS through this executor.
         """
         self.tws_adapter = tws_adapter
         self.risk_manager = risk_manager
@@ -261,6 +267,7 @@ class OrderExecutor:
         self.live_trading_enabled = bool(live_trading_enabled)
         self.live_confirmation = live_confirmation
         self.expected_account_id = expected_account_id
+        self.limit_orders_only = bool(limit_orders_only)
 
         # Pre-validate the live-confirmation tuple at construction time so
         # configuration errors surface before the first signal arrives.
@@ -662,24 +669,69 @@ class OrderExecutor:
         Returns:
             OrderResult
         """
+        # Determine order type and limit price.
+        # Use LIMIT when target_price is available (anchors the order to a
+        # specific price and avoids slippage).  When limit_orders_only is True
+        # (always the case for live autonomous execution), reject the order
+        # outright if no limit price is provided — we never send MARKET orders
+        # on the live path.
+        limit_price: Optional[float] = None
+        if signal.target_price is not None and signal.target_price > 0:
+            order_type = "LIMIT"
+            limit_price = float(signal.target_price)
+        elif self.limit_orders_only:
+            result = OrderResult.rejected(
+                RejectionReason.PRICE_SANITY_FAILED,
+                signal,
+                "limit_orders_only is True but signal has no valid target_price; "
+                "MARKET orders are not permitted on this executor",
+            )
+            self._record_order(result)
+            self._audit_log(result, strategy_name)
+            logger.error(
+                "❌ No limit price on signal for %s — MARKET order rejected "
+                "(limit_orders_only=True)",
+                signal.symbol,
+            )
+            return result
+        else:
+            order_type = "MARKET"
+
         try:
             # Convert signal to order
             if signal.signal_type == SignalType.BUY:
                 order_id = self.tws_adapter.buy(
                     symbol=signal.symbol,
                     quantity=signal.quantity,
-                    order_type='MARKET',  # TODO: Support limit orders
+                    order_type=order_type,
+                    limit_price=limit_price,
                 )
             elif signal.signal_type == SignalType.SELL:
                 order_id = self.tws_adapter.sell(
                     symbol=signal.symbol,
                     quantity=signal.quantity,
-                    order_type='MARKET',
+                    order_type=order_type,
+                    limit_price=limit_price,
                 )
             elif signal.signal_type == SignalType.CLOSE:
+                if order_type == "LIMIT":
+                    result = OrderResult.rejected(
+                        RejectionReason.PRICE_SANITY_FAILED,
+                        signal,
+                        "LIMIT order type is not supported for CLOSE signals; "
+                        "express closes as BUY/SELL with a limit_price instead",
+                    )
+                    self._record_order(result)
+                    self._audit_log(result, strategy_name)
+                    logger.error(
+                        "❌ LIMIT CLOSE signal rejected for %s — "
+                        "use BUY/SELL with limit_price to close with a limit order",
+                        signal.symbol,
+                    )
+                    return result
                 order_id = self.tws_adapter.close_position(
                     symbol=signal.symbol,
-                    order_type='MARKET'
+                    order_type=order_type,
                 )
             else:
                 raise ValueError(f"Unsupported signal type: {signal.signal_type}")
@@ -694,7 +746,15 @@ class OrderExecutor:
             self._record_order(result)
             self.orders_submitted += 1
             
-            logger.info(f"✅ Order submitted: #{order_id} {signal.signal_type.value} {signal.quantity} {signal.symbol}")
+            logger.info(
+                "✅ Order submitted: #%s %s %s x%s @ %s (%s)",
+                order_id,
+                signal.signal_type.value,
+                signal.symbol,
+                signal.quantity,
+                signal.target_price,
+                order_type,
+            )
             
             # Log to audit trail
             self._audit_log(result, strategy_name)

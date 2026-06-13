@@ -340,10 +340,11 @@ def test_max_trades_per_day_blocks_second_execution(tmp_path):
     assert len(placed) == 1  # adapter NOT called a second time
 
 
-def test_live_execution_remains_blocked_even_when_allow_live_true_and_confirmed(
+def test_live_execution_returns_live_plan_ready_when_allow_live_true_and_confirmed(
     tmp_path,
 ):
-    """MVP live path is a deliberate blocked stub even when fully enabled."""
+    """ASSISTED_LIVE with allow_live_execution=True and confirm=True returns
+    LIVE_PLAN_READY so the runner knows the plan is safe to execute via OrderExecutor."""
     cfg = AutonomousTradingConfig(
         mode=AutonomousMode.ASSISTED_LIVE,
         allow_live_execution=True,
@@ -354,5 +355,6 @@ def test_live_execution_remains_blocked_even_when_allow_live_true_and_confirmed(
     )
     engine = _make_engine(tmp_path, signals=[_make_signal("AAA")], config=cfg)
     d = engine.run_once(confirm=True)
-    assert d.status is DecisionStatus.LIVE_BLOCKED
-    assert "not implemented" in (d.rejection_reason or "")
+    assert d.status is DecisionStatus.LIVE_PLAN_READY
+    assert d.trade_plan is not None
+    assert "live_plan_ready" in (d.notes[0] if d.notes else "")

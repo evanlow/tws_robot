@@ -20,6 +20,7 @@ from datetime import date
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from autonomous.adr_calculator import compute_adr_target_price
 from autonomous.autonomous_config import AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
 
@@ -75,6 +76,11 @@ class TradePlan:
     reason: str = ""
     risk_notes: List[str] = field(default_factory=list)
     exit_plan: str = ""
+    # ADR target metadata (populated when exit_target_mode=adr_intraday)
+    target_mode: str = ""
+    adr: Optional[float] = None
+    adr_pct: Optional[float] = None
+    adr_target_fraction: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -93,6 +99,10 @@ class TradePlan:
             "reason": self.reason,
             "risk_notes": list(self.risk_notes),
             "exit_plan": self.exit_plan,
+            "target_mode": self.target_mode,
+            "adr": round(self.adr, 4) if self.adr is not None else None,
+            "adr_pct": round(self.adr_pct, 6) if self.adr_pct is not None else None,
+            "adr_target_fraction": self.adr_target_fraction,
         }
 
 
@@ -178,11 +188,11 @@ class TradePlanner:
         # Conservative limit price: do not chase — cap at last_price.
         limit_price = round(price, 2)
 
-        target_price = (
-            round(candidate.resistance_price, 2)
-            if candidate.resistance_price and candidate.resistance_price > price
-            else None
+        # --- Target price calculation based on exit_target_mode ---
+        target_price, target_mode, adr_val, adr_pct_val, adr_frac = (
+            self._compute_target(candidate, price)
         )
+
         stop_price = (
             round(candidate.support_price * 0.97, 2)
             if candidate.support_price and candidate.support_price > 0
@@ -198,6 +208,10 @@ class TradePlanner:
             target_price=target_price,
             stop_price=stop_price,
             required_cash=required_cash,
+            target_mode=target_mode,
+            adr=adr_val,
+            adr_pct=adr_pct_val,
+            adr_target_fraction=adr_frac,
             reason=(
                 f"{candidate.signal_label} (strength={candidate.strength_score}); "
                 f"buy {quantity} shares at limit {limit_price}"
@@ -207,10 +221,97 @@ class TradePlanner:
                 f"Sized to <= {self.config.max_new_position_pct:.0%} of equity and deployable cash.",
             ],
             exit_plan=(
-                "Exit on target_price or stop_price; "
+                f"Exit on target_price ({target_mode}) or stop_price; "
                 "review on next Strong(100) re-evaluation."
             ),
         )
+
+    # ------------------------------------------------------------------
+    # Target price computation
+    # ------------------------------------------------------------------
+
+    def _compute_target(
+        self,
+        candidate: CandidateSignal,
+        entry_price: float,
+    ) -> tuple:
+        """Compute target price based on configured exit_target_mode.
+
+        Returns (target_price, target_mode, adr, adr_pct, adr_target_fraction).
+        """
+        mode = self.config.exit_target_mode
+
+        if mode == "adr_intraday":
+            adr_val = candidate.extras.get("adr")
+            adr_pct_val = candidate.extras.get("adr_pct")
+            adr_valid = candidate.extras.get("adr_valid", False)
+
+            if adr_valid and adr_val and adr_val > 0:
+                target = compute_adr_target_price(
+                    entry_price=entry_price,
+                    adr=adr_val,
+                    target_fraction=self.config.adr_target_fraction,
+                    min_target_pct=self.config.adr_min_target_pct,
+                    max_target_pct=self.config.adr_max_target_pct,
+                    resistance_price=(
+                        candidate.resistance_price
+                        if candidate.resistance_price
+                        and candidate.resistance_price > entry_price
+                        else None
+                    ),
+                    respect_resistance_cap=self.config.adr_respect_resistance_cap,
+                )
+                if target is not None and target > entry_price:
+                    return (
+                        target,
+                        "adr_intraday",
+                        adr_val,
+                        adr_pct_val,
+                        self.config.adr_target_fraction,
+                    )
+
+            # ADR data unavailable — fall back to resistance then percent
+            return self._fallback_target(candidate, entry_price)
+
+        if mode == "percent":
+            target = round(entry_price * (1.0 + self.config.take_profit_pct), 2)
+            return (target, "percent", None, None, None)
+
+        # Default: resistance mode
+        return self._resistance_target(candidate, entry_price)
+
+    def _resistance_target(
+        self, candidate: CandidateSignal, entry_price: float
+    ) -> tuple:
+        """Resistance-based target (original behaviour)."""
+        if candidate.resistance_price and candidate.resistance_price > entry_price:
+            return (
+                round(candidate.resistance_price, 2),
+                "resistance",
+                None,
+                None,
+                None,
+            )
+        return (None, "resistance", None, None, None)
+
+    def _fallback_target(
+        self, candidate: CandidateSignal, entry_price: float
+    ) -> tuple:
+        """Fallback when ADR data is unavailable: try resistance, then percent."""
+        # Try resistance first
+        if candidate.resistance_price and candidate.resistance_price > entry_price:
+            return (
+                round(candidate.resistance_price, 2),
+                "resistance_fallback",
+                None,
+                None,
+                None,
+            )
+        # Final fallback: configured percent target
+        if self.config.take_profit_pct > 0:
+            target = round(entry_price * (1.0 + self.config.take_profit_pct), 2)
+            return (target, "percent_fallback", None, None, None)
+        return (None, "none", None, None, None)
 
     # ------------------------------------------------------------------
     # Sell cash-secured OTM put

@@ -645,14 +645,14 @@ def test_sell_order_placement(executor_paper, sample_positions):
 
 
 def test_close_order_placement(executor_paper, sample_positions):
-    """Test CLOSE signal converts to close_position order"""
+    """Test CLOSE signal converts to close_position MARKET order"""
     from strategies.signal import SignalStrength
     signal = Signal(
         timestamp=datetime.now(),
         symbol='AAPL',
         signal_type=SignalType.CLOSE,
         strength=SignalStrength.STRONG,
-        target_price=150.0,
+        target_price=None,
         quantity=100
     )
     
@@ -665,6 +665,30 @@ def test_close_order_placement(executor_paper, sample_positions):
     
     assert result.status == OrderStatus.SUBMITTED
     assert executor_paper.tws_adapter.close_position.called
+
+
+def test_limit_close_signal_rejected(executor_paper, sample_positions):
+    """Test CLOSE signal with a target_price (LIMIT) is rejected — use BUY/SELL instead."""
+    from strategies.signal import SignalStrength
+    from execution.order_executor import RejectionReason
+    signal = Signal(
+        timestamp=datetime.now(),
+        symbol='AAPL',
+        signal_type=SignalType.CLOSE,
+        strength=SignalStrength.STRONG,
+        target_price=150.0,
+        quantity=100
+    )
+
+    result = executor_paper.execute_signal(
+        strategy_name='TestStrategy',
+        signal=signal,
+        current_equity=100000.0,
+        positions=sample_positions
+    )
+
+    assert result.status == OrderStatus.REJECTED
+    assert RejectionReason.PRICE_SANITY_FAILED.value in result.reason
 
 
 # =============================================================================

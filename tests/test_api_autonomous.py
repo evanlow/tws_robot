@@ -302,3 +302,89 @@ class TestConfigOverrideValidation:
     def test_non_boolean_confirmation_flag_is_ignored(self):
         cleaned = _sanitize_config_overrides({"require_user_confirmation": "false"})
         assert "require_user_confirmation" not in cleaned
+
+    def test_exit_target_mode_accepted(self):
+        cleaned = _sanitize_config_overrides({"exit_target_mode": "adr_intraday"})
+        assert cleaned["exit_target_mode"] == "adr_intraday"
+
+    def test_invalid_exit_target_mode_rejected(self):
+        cleaned = _sanitize_config_overrides({"exit_target_mode": "bad_mode"})
+        assert "exit_target_mode" not in cleaned
+
+    def test_adr_numeric_overrides_accepted(self):
+        cleaned = _sanitize_config_overrides({
+            "take_profit_pct": 0.05,
+            "adr_lookback_days": 20,
+            "adr_target_fraction": 0.60,
+            "adr_max_target_pct": 0.04,
+            "adr_min_target_pct": 0.003,
+        })
+        assert cleaned["take_profit_pct"] == 0.05
+        assert cleaned["adr_lookback_days"] == 20
+        assert cleaned["adr_target_fraction"] == 0.60
+        assert cleaned["adr_max_target_pct"] == 0.04
+        assert cleaned["adr_min_target_pct"] == 0.003
+
+    def test_adr_zero_or_negative_pct_rejected(self):
+        cleaned = _sanitize_config_overrides({
+            "take_profit_pct": 0.0,
+            "adr_target_fraction": -0.1,
+        })
+        assert "take_profit_pct" not in cleaned
+        assert "adr_target_fraction" not in cleaned
+
+    def test_adr_respect_resistance_cap_boolean(self):
+        cleaned = _sanitize_config_overrides({"adr_respect_resistance_cap": True})
+        assert cleaned["adr_respect_resistance_cap"] is True
+        cleaned = _sanitize_config_overrides({"adr_respect_resistance_cap": "yes"})
+        assert "adr_respect_resistance_cap" not in cleaned
+
+
+class TestADREnvConfig:
+    """Tests proving env vars affect the built engine config."""
+
+    def test_env_vars_applied_to_engine_config(self, monkeypatch, app):
+        """AUTONOMOUS_* env vars should flow into the engine config."""
+        monkeypatch.setenv("AUTONOMOUS_EXIT_TARGET_MODE", "adr_intraday")
+        monkeypatch.setenv("AUTONOMOUS_TAKE_PROFIT_PCT", "0.06")
+        monkeypatch.setenv("AUTONOMOUS_ADR_LOOKBACK_DAYS", "20")
+        monkeypatch.setenv("AUTONOMOUS_ADR_TARGET_FRACTION", "0.60")
+        monkeypatch.setenv("AUTONOMOUS_ADR_MAX_TARGET_PCT", "0.04")
+        monkeypatch.setenv("AUTONOMOUS_ADR_MIN_TARGET_PCT", "0.003")
+        monkeypatch.setenv("AUTONOMOUS_ADR_RESPECT_RESISTANCE_CAP", "false")
+
+        from web.routes.api_autonomous import _build_engine
+        with app.app_context():
+            engine = _build_engine()
+        cfg = engine.config
+        assert cfg.exit_target_mode == "adr_intraday"
+        assert cfg.take_profit_pct == 0.06
+        assert cfg.adr_lookback_days == 20
+        assert cfg.adr_target_fraction == 0.60
+        assert cfg.adr_max_target_pct == 0.04
+        assert cfg.adr_min_target_pct == 0.003
+        assert cfg.adr_respect_resistance_cap is False
+
+    def test_invalid_env_vars_use_defaults(self, monkeypatch, app):
+        """Invalid env values should not crash — defaults apply."""
+        monkeypatch.setenv("AUTONOMOUS_EXIT_TARGET_MODE", "bad_mode")
+        monkeypatch.setenv("AUTONOMOUS_TAKE_PROFIT_PCT", "not_a_number")
+        monkeypatch.setenv("AUTONOMOUS_ADR_LOOKBACK_DAYS", "-5")
+
+        from web.routes.api_autonomous import _build_engine
+        with app.app_context():
+            engine = _build_engine()
+        cfg = engine.config
+        # Invalid mode not applied — default
+        assert cfg.exit_target_mode == "resistance"
+        # Invalid float not applied — default
+        assert cfg.take_profit_pct == 0.08
+        # Negative int not applied — default
+        assert cfg.adr_lookback_days == 0
+
+    def test_api_override_changes_target_mode(self, monkeypatch, app):
+        """HTTP config override for exit_target_mode flows through."""
+        from web.routes.api_autonomous import _build_engine
+        with app.app_context():
+            engine = _build_engine({"exit_target_mode": "percent"})
+        assert engine.config.exit_target_mode == "percent"
