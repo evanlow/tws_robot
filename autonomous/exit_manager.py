@@ -553,7 +553,7 @@ class AutonomousExitManager:
         if self._broker_positions_provider is not None:
             try:
                 broker_positions = self._broker_positions_provider()
-                if broker_positions is not None and len(broker_positions) >= 0:
+                if broker_positions is not None:
                     return ("broker_positions", broker_positions)
             except Exception:
                 logger.warning(
