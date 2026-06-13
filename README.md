@@ -299,7 +299,7 @@ pytest test_backtest_engine.py -v
 ---
 ## 📊 Performance Benchmarks
 
-**Test Environment:** Windows 11, Python 3.12.10, 690 tests passing
+**Test Environment:** Windows 11, Python 3.12.10, 2500+ tests passing
 
 ### Strategy Backtest Performance (2022-2023)
 
@@ -315,7 +315,7 @@ pytest test_backtest_engine.py -v
 
 - **Backtest Speed:** 2 years of daily data processed in ~8 seconds
 - **Data Processing:** 500+ bars/second
-- **Test Suite:** All 690 tests complete in ~45 seconds
+- **Test Suite:** All 2500+ tests complete in ~140 seconds
 - **Memory Usage:** ~500MB for typical backtest
 - **Order Execution:** < 100ms latency to TWS (paper/live)
 
