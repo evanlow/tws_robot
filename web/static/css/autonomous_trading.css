@@ -39,7 +39,80 @@
   line-height: 1.5;
 }
 
-/* ---- Badges ---- */
+/* ---- Mode status section ---- */
+.mode-status-section,
+.readiness-section {
+  margin-bottom: 0.75rem;
+}
+
+.section-mini-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #718096;
+  margin: 0 0 0.35rem;
+}
+
+.cycle-selector-label {
+  margin-top: 0.75rem;
+}
+
+.mode-state-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.mode-state-chip {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: default;
+  user-select: none;
+}
+
+/* OFF: neutral grey-blue — inactive, safe, not trading */
+.mode-chip-off      { background: #2d3748; color: #a0aec0; border: 1px solid #4a5568; }
+/* ON: blue-green active state — autonomous lifecycle is active */
+.mode-chip-on       { background: #1a3a2a; color: #9ae6b4; border: 1px solid #276749; }
+/* BLOCKED: red — emergency stop or safety block */
+.mode-chip-blocked  { background: #742a2a; color: #fed7d7; border: 1px solid #c53030; }
+/* NOT READY: amber — cannot activate yet */
+.mode-chip-not-ready { background: #5f3e00; color: #fbd38d; border: 1px solid #975a16; }
+
+.mode-state-desc {
+  color: #718096;
+  font-size: 0.85rem;
+}
+
+/* ---- Readiness list (passive check indicators, not buttons) ---- */
+.readiness-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+}
+
+.readiness-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: default;
+  user-select: none;
+}
+
+.readiness-pass    { color: #68d391; }
+.readiness-fail    { color: #fc8181; }
+.readiness-warn    { color: #ecc94b; }
+.readiness-loading { color: #718096; font-style: italic; font-size: 0.82rem; }
+
+/* ---- Badges (used in runner gates panel) ---- */
 .badge-row {
   display: flex;
   flex-wrap: wrap;

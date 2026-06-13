@@ -281,6 +281,109 @@ class TestStatusBadges:
             assert label in src
 
 
+class TestStatusDisplayRefinement:
+    """Verify that the Autonomous Mode panel uses non-button status indicators.
+
+    The mode state chip must be a passive display element (not styled like a
+    button), readiness checks must be grouped under a clear label, and the
+    trading cycle selector must be labelled as a selectable choice — so
+    operators can immediately distinguish status from actions.
+    """
+
+    def _js_source(self) -> str:
+        js_path = (
+            Path(__file__).resolve().parent.parent
+            / "web" / "static" / "js" / "autonomous_trading.js"
+        )
+        return js_path.read_text(encoding="utf-8")
+
+    def _html_source(self, client) -> str:
+        return client.get("/autonomous-trading/").get_data(as_text=True)
+
+    def _css_source(self) -> str:
+        css_path = (
+            Path(__file__).resolve().parent.parent
+            / "web" / "static" / "css" / "autonomous_trading.css"
+        )
+        return css_path.read_text(encoding="utf-8")
+
+    # ---- HTML structure ----
+
+    def test_mode_state_chip_element_exists(self, client):
+        """The #modeStateChip element must be present for mode state display."""
+        html = self._html_source(client)
+        assert 'id="modeStateChip"' in html
+
+    def test_readiness_list_element_exists(self, client):
+        """The #readinessList element must be present for readiness check items."""
+        html = self._html_source(client)
+        assert 'id="readinessList"' in html
+
+    def test_readiness_section_label_exists(self, client):
+        """A 'Readiness checks' label must group the passive readiness indicators."""
+        html = self._html_source(client)
+        assert "Readiness checks" in html
+
+    def test_cycle_selector_label_exists(self, client):
+        """A label must make the trading cycle options clearly selectable choices."""
+        html = self._html_source(client)
+        assert "Choose trading cycle before activation" in html
+
+    # ---- JS logic ----
+
+    def test_mode_chip_shows_all_state_texts(self):
+        """JS must set modeStateChip text for OFF, ON, and BLOCKED states."""
+        src = self._js_source()
+        assert "AUTONOMOUS OFF" in src
+        assert "AUTONOMOUS ON" in src
+        assert "AUTONOMOUS BLOCKED" in src
+
+    def test_mode_chip_uses_neutral_class_for_off_state(self):
+        """OFF state must use a neutral chip class, not the green badge-safe."""
+        src = self._js_source()
+        assert "mode-chip-off" in src
+        assert "mode-chip-on" in src
+        assert "mode-chip-blocked" in src
+
+    def test_readiness_list_renders_match_and_provider(self):
+        """JS must populate #readinessList with MATCH and provider check items."""
+        src = self._js_source()
+        assert "readinessList" in src
+        assert "'MATCH ' + matchStatus.toUpperCase()" in src
+        assert "SIGNAL PROVIDER READY" in src
+
+    def test_mode_chip_updates_description_text(self):
+        """JS must update the #modeStateDesc element alongside the chip class."""
+        src = self._js_source()
+        assert "modeStateDesc" in src
+        assert "modeDescEl" in src
+
+    # ---- CSS non-button styling ----
+
+    def test_css_has_mode_state_chip_classes(self):
+        """CSS must define mode-chip-off/on/blocked with distinct colours."""
+        css = self._css_source()
+        assert ".mode-chip-off" in css
+        assert ".mode-chip-on" in css
+        assert ".mode-chip-blocked" in css
+
+    def test_mode_chip_off_not_green(self):
+        """OFF chip must NOT use the green badge-safe background (#22543d)."""
+        css = self._css_source()
+        off_block = css.split(".mode-chip-off")[1].split("}")[0]
+        assert "#22543d" not in off_block, (
+            "mode-chip-off must use a neutral colour, not the green badge-safe colour"
+        )
+
+    def test_readiness_item_has_non_button_cursor(self):
+        """Readiness items must use cursor:default (they are not clickable)."""
+        css = self._css_source()
+        assert ".readiness-item" in css
+        # cursor:default conveys non-interactivity without blocking tooltip events
+        readiness_item_block = css.split(".readiness-item")[1].split("}")[0]
+        assert "cursor: default" in readiness_item_block
+
+
 class TestModeActivationButton:
     """The dashboard must correctly enable/disable the activation button based on
     the mode status payload and display visible gate reasons to the operator."""
