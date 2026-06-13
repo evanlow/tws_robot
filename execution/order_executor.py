@@ -714,6 +714,21 @@ class OrderExecutor:
                     limit_price=limit_price,
                 )
             elif signal.signal_type == SignalType.CLOSE:
+                if order_type == "LIMIT":
+                    result = OrderResult.rejected(
+                        RejectionReason.PRICE_SANITY_FAILED,
+                        signal,
+                        "LIMIT order type is not supported for CLOSE signals; "
+                        "express closes as BUY/SELL with a limit_price instead",
+                    )
+                    self._record_order(result)
+                    self._audit_log(result, strategy_name)
+                    logger.error(
+                        "❌ LIMIT CLOSE signal rejected for %s — "
+                        "use BUY/SELL with limit_price to close with a limit order",
+                        signal.symbol,
+                    )
+                    return result
                 order_id = self.tws_adapter.close_position(
                     symbol=signal.symbol,
                     order_type=order_type,

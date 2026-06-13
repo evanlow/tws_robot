@@ -380,7 +380,7 @@ class TestADREnvConfig:
         # Invalid float not applied — default
         assert cfg.take_profit_pct == 0.08
         # Negative int not applied — default
-        assert cfg.adr_lookback_days == 14
+        assert cfg.adr_lookback_days == 0
 
     def test_api_override_changes_target_mode(self, monkeypatch, app):
         """HTTP config override for exit_target_mode flows through."""

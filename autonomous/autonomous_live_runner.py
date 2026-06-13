@@ -219,6 +219,7 @@ AccountIdProvider = Callable[[], Optional[str]]
 EmergencyStopProvider = Callable[[], bool]
 SignalProviderProvider = Callable[[], Any]
 DeployableCashProvider = Callable[[], float]
+BrokerPositionsProvider = Callable[[], Dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +257,13 @@ class AutonomousLiveRunner:
         Callable returning ``True`` when emergency stop is active.
     deployable_cash_provider:
         Callable returning current deployable cash (float).
+    broker_positions_provider:
+        Callable returning the current broker positions as a
+        ``Dict[symbol, Position]`` for portfolio reconciliation.
+        When ``None``, an empty dict is passed to
+        :meth:`execution.order_executor.OrderExecutor.execute_signal`,
+        which will cause reconciliation to reject any execution when the
+        broker holds open positions.
     continuous_mode:
         When ``True``, the ``AUTONOMOUS_LIVE_CONTINUOUS_ENABLED`` gate
         is also checked.  Set to ``True`` for continuous live cycles.
@@ -274,6 +282,7 @@ class AutonomousLiveRunner:
         signal_provider_provider: SignalProviderProvider,
         emergency_stop_provider: EmergencyStopProvider,
         deployable_cash_provider: DeployableCashProvider,
+        broker_positions_provider: Optional[BrokerPositionsProvider] = None,
         continuous_mode: bool = False,
     ) -> None:
         self._engine = engine
@@ -286,6 +295,7 @@ class AutonomousLiveRunner:
         self._signal_provider_provider = signal_provider_provider
         self._emergency_stop_provider = emergency_stop_provider
         self._deployable_cash_provider = deployable_cash_provider
+        self._broker_positions_provider = broker_positions_provider
         self._continuous_mode = continuous_mode
 
     # ------------------------------------------------------------------
@@ -541,11 +551,16 @@ class AutonomousLiveRunner:
             signal.strategy_name = "AutonomousLiveRunner:LIMIT"
 
         try:
+            broker_positions: Dict[str, Any] = (
+                self._broker_positions_provider()
+                if self._broker_positions_provider is not None
+                else {}
+            )
             result = self._executor.execute_signal(
                 strategy_name="AutonomousLiveRunner",
                 signal=signal,
                 current_equity=gates.deployable_cash,
-                positions={},
+                positions=broker_positions,
             )
         except Exception:
             logger.exception("OrderExecutor.execute_signal raised")

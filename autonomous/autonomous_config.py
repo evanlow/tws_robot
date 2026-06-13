@@ -69,7 +69,7 @@ class AutonomousTradingConfig:
     # ---- Exit target mode ---------------------------------------------
     exit_target_mode: str = "resistance"  # "resistance" | "percent" | "adr_intraday"
     take_profit_pct: float = 0.08  # fallback percent target
-    adr_lookback_days: int = 14
+    adr_lookback_days: int = 0
     adr_target_fraction: float = 0.50
     adr_max_target_pct: float = 0.03
     adr_min_target_pct: float = 0.005

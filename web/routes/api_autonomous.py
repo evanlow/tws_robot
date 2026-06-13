@@ -1225,7 +1225,7 @@ def _build_broker_positions(svc) -> Dict[str, Any]:
                 if qty != 0:
                     break
         avg_cost = 0.0
-        for key in ("average_cost", "avg_cost", "avgCost"):
+        for key in ("entry_price", "average_cost", "avg_cost", "avgCost"):
             raw = pos_data.get(key)
             if raw is not None:
                 try:
@@ -1323,16 +1323,17 @@ def _build_live_runner(
     executor = current_app.config.get("autonomous_live_order_executor")
     if executor is None:
         # Build a live executor.  In production, the operator should
-        # supply a pre-built executor (with proper live_confirmation etc.)
-        # via current_app.config['autonomous_live_order_executor'].
-        # The default here builds an executor with the confirmed live
-        # session when one is available (persisted at activation time),
-        # or falls back to a configuration-invalid executor that will log
-        # the error and reject orders until the session is confirmed.
+        # supply a pre-built executor (with a proper TwsTradingAdapter and
+        # live_confirmation) via current_app.config['autonomous_live_order_executor'].
+        # The default here builds a configuration-invalid executor that will
+        # reject all non-dry-run orders until a proper TwsTradingAdapter is
+        # wired.  ServiceManager._tws_bridge is a core.TWSBridge instance and
+        # does NOT implement the adapter contract (buy/sell/close_position/
+        # get_all_positions/environment/port), so we intentionally leave
+        # tws_adapter=None here to avoid silent failures.
         try:
             from execution.order_executor import OrderExecutor, LiveTradingConfirmation
             from risk.risk_manager import RiskManager
-            tws_adapter = getattr(svc, "_tws_bridge", None)
             risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
 
             # Retrieve the LiveTradingConfirmation persisted at activation.
@@ -1361,7 +1362,7 @@ def _build_live_runner(
                     )
 
             executor = OrderExecutor(
-                tws_adapter=tws_adapter,
+                tws_adapter=None,
                 risk_manager=risk_manager,
                 is_live_mode=True,
                 dry_run=live_config.live_dry_run,
@@ -1385,6 +1386,7 @@ def _build_live_runner(
         signal_provider_provider=_provider,
         emergency_stop_provider=_estop,
         deployable_cash_provider=_deployable_cash,
+        broker_positions_provider=lambda: _build_broker_positions(svc),
         continuous_mode=continuous_mode,
     )
 
@@ -1577,7 +1579,7 @@ def live_activate():
 
     # 6. Activate live mode state and persist session context.
     state = _live_mode_state()
-    state.turn_on(cycle, AccountMode.LIVE)
+    state.turn_on(cycle, AccountMode.LIVE, dry_run=live_config.live_dry_run)
     confirmed_by = str(body.get("confirmed_by") or "operator")
 
     # Persist expected_account_id so all subsequent lifecycle calls use the

@@ -43,13 +43,15 @@ class AutonomousDisplayMode(str, Enum):
     Values:
         OFF — mode is inactive.
         PAPER — paper-trading continuous or single-trade mode.
-        LIVE_DRY_RUN — live account, full lifecycle, no orders sent to TWS.
+        LIVE_DRY_RUN — live account, dry-run flag set (no orders sent to TWS).
+        LIVE_SINGLE — live account, single-trade cycle, real orders enabled.
         LIVE_CONTINUOUS — full live continuous autonomous trading.
     """
 
     OFF = "OFF"
     PAPER = "PAPER"
     LIVE_DRY_RUN = "LIVE DRY-RUN"
+    LIVE_SINGLE = "LIVE SINGLE"
     LIVE_CONTINUOUS = "LIVE CONTINUOUS"
 
 
@@ -63,6 +65,7 @@ class AutonomousModeState:
     last_status_refresh: Optional[str] = None
     activated_at: Optional[str] = None
     cycles_started: int = 0  # Incremented each time run_once is called in this activation
+    dry_run: bool = False  # True when the live runner is operating in dry-run mode
 
     @property
     def is_on(self) -> bool:
@@ -70,13 +73,15 @@ class AutonomousModeState:
 
     @property
     def display_mode(self) -> AutonomousDisplayMode:
-        """Dashboard display label: OFF / PAPER / LIVE DRY-RUN / LIVE CONTINUOUS."""
+        """Dashboard display label: OFF / PAPER / LIVE DRY-RUN / LIVE SINGLE / LIVE CONTINUOUS."""
         if not self.is_on:
             return AutonomousDisplayMode.OFF
         if self.account_mode == AccountMode.LIVE:
+            if self.dry_run:
+                return AutonomousDisplayMode.LIVE_DRY_RUN
             if self.trading_cycle == TradingCycle.CONTINUOUS:
                 return AutonomousDisplayMode.LIVE_CONTINUOUS
-            return AutonomousDisplayMode.LIVE_DRY_RUN
+            return AutonomousDisplayMode.LIVE_SINGLE
         return AutonomousDisplayMode.PAPER
 
     def refresh(self) -> None:
@@ -88,12 +93,14 @@ class AutonomousModeState:
         self.message = message
         self.activated_at = None
         self.cycles_started = 0
+        self.dry_run = False
         self.refresh()
 
     def turn_on(
         self,
         cycle: TradingCycle,
         account_mode: AccountMode = AccountMode.PAPER,
+        dry_run: bool = False,
     ) -> None:
         """Activate autonomous mode for the given cycle and account mode.
 
@@ -101,10 +108,15 @@ class AutonomousModeState:
         existing paper-trading callers that omit the parameter continue to
         work without modification.  Live callers must explicitly pass
         ``AccountMode.LIVE``.
+
+        ``dry_run`` should be set to ``True`` when the live runner is
+        operating in dry-run mode (no real orders sent to TWS) so that
+        :attr:`display_mode` reflects this accurately on the dashboard.
         """
         self.operating_state = AutonomousOperatingState.ON
         self.trading_cycle = cycle
         self.account_mode = account_mode
+        self.dry_run = dry_run
         self.readiness_status = "Ready"
         self.message = None
         self.activated_at = datetime.now(timezone.utc).isoformat()

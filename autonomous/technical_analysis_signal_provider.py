@@ -100,8 +100,13 @@ class TechnicalAnalysisSignalProvider:
         rows.  Provided as an explicit injection point for tests that
         prefer not to construct a screener-service stub.
     adr_lookback_days:
-        Number of trading days to use for ADR calculation.  Set to 0
-        or ``None`` to disable ADR computation during scanning.
+        Number of trading days to use for ADR calculation.  Defaults to 0
+        (ADR computation disabled).  Set to a positive integer (e.g. 14) to
+        enable ADR calculation — note that this triggers a
+        :func:`data.fundamentals.fetch_price_history` call for every symbol
+        in the scan universe, which is slow and rate-limit prone for large
+        universes such as the S&P 500.  Only enable when the engine/config
+        explicitly requires ADR-based exit targets.
     price_history_fetcher:
         Callable ``(symbol: str, period: str, interval: str) → List[Dict]``
         for retrieving daily bars.  Defaults to
@@ -113,7 +118,7 @@ class TechnicalAnalysisSignalProvider:
         screener_service: Any = None,
         refresh_on_first_call: bool = True,
         rows_loader: Optional[Callable[[], Any]] = None,
-        adr_lookback_days: int = 14,
+        adr_lookback_days: int = 0,
         price_history_fetcher: Optional[Callable[..., List[Dict[str, Any]]]] = None,
     ) -> None:
         if screener_service is None and rows_loader is None:
@@ -124,7 +129,7 @@ class TechnicalAnalysisSignalProvider:
         self._screener_service = screener_service
         self._rows_loader = rows_loader
         self._refresh_on_first_call = refresh_on_first_call
-        self._adr_lookback_days = adr_lookback_days or 0
+        self._adr_lookback_days = adr_lookback_days
         self._price_history_fetcher = price_history_fetcher
 
         # Lazily-populated symbol → row index.  ``None`` means "not yet

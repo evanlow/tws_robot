@@ -544,8 +544,15 @@ def test_mode_state_display_mode_live_continuous():
 def test_mode_state_display_mode_live_dry_run():
     from autonomous.autonomous_mode import AutonomousModeState, AutonomousDisplayMode, TradingCycle, AccountMode
     state = AutonomousModeState()
-    state.turn_on(TradingCycle.SINGLE_TRADE, AccountMode.LIVE)
+    state.turn_on(TradingCycle.SINGLE_TRADE, AccountMode.LIVE, dry_run=True)
     assert state.display_mode == AutonomousDisplayMode.LIVE_DRY_RUN
+
+
+def test_mode_state_display_mode_live_single():
+    from autonomous.autonomous_mode import AutonomousModeState, AutonomousDisplayMode, TradingCycle, AccountMode
+    state = AutonomousModeState()
+    state.turn_on(TradingCycle.SINGLE_TRADE, AccountMode.LIVE)
+    assert state.display_mode == AutonomousDisplayMode.LIVE_SINGLE
 
 
 def test_mode_state_to_dict_includes_display_mode():
