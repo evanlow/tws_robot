@@ -1202,6 +1202,61 @@ def _live_runner_config() -> AutonomousLiveRunnerConfig:
     return cfg
 
 
+def _build_broker_positions(svc) -> Dict[str, Any]:
+    """Convert ServiceManager positions to RiskPosition dict for reconciliation.
+
+    Returns ALL broker positions (not just autonomous ones) so that
+    ``OrderExecutor._reconcile_portfolio()`` does not reject live exits
+    merely because the account holds other, unrelated positions.
+    """
+    from risk.risk_manager import Position as RiskPosition
+
+    positions_raw = svc.get_positions() or {}
+    result: Dict[str, Any] = {}
+    for symbol, pos_data in positions_raw.items():
+        qty = 0
+        for key in ("quantity", "position", "shares"):
+            raw = pos_data.get(key)
+            if raw is not None:
+                try:
+                    qty = int(float(raw))
+                except (TypeError, ValueError):
+                    pass
+                if qty != 0:
+                    break
+        avg_cost = 0.0
+        for key in ("average_cost", "avg_cost", "avgCost"):
+            raw = pos_data.get(key)
+            if raw is not None:
+                try:
+                    avg_cost = float(raw)
+                except (TypeError, ValueError):
+                    pass
+                if avg_cost > 0:
+                    break
+        current_price = 0.0
+        for key in ("current_price", "market_price", "last_price"):
+            raw = pos_data.get(key)
+            if raw is not None:
+                try:
+                    current_price = float(raw)
+                except (TypeError, ValueError):
+                    pass
+                if current_price > 0:
+                    break
+        side = "LONG" if qty >= 0 else "SHORT"
+        if qty == 0:
+            continue  # Skip zero-quantity entries
+        result[symbol] = RiskPosition(
+            symbol=symbol,
+            quantity=abs(qty),
+            entry_price=avg_cost if avg_cost > 0 else current_price,
+            current_price=current_price,
+            side=side,
+        )
+    return result
+
+
 def _live_trade_store() -> TradeStore:
     """Return a shared live-trades :class:`TradeStore` instance."""
     store = current_app.config.get("autonomous_live_trade_store")
@@ -1700,6 +1755,10 @@ def live_evaluate_exits():
             risk_manager=getattr(svc, "risk_manager", None),
             emergency_stop_file=str(EMERGENCY_STOP_FILE),
             order_executor=live_executor,
+            account_equity_provider=lambda: (
+                svc.get_account_summary().get("equity")
+            ),
+            broker_positions_provider=lambda: _build_broker_positions(svc),
         )
 
     decisions = manager.evaluate_open_trades()
