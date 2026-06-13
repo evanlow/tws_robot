@@ -613,6 +613,9 @@ class AutonomousLiveRunner:
         cannot reset the counter.  Both OPEN and non-OPEN (EXIT_PENDING,
         CLOSED, FAILED) entries are counted — we want to know how many
         entry orders were submitted today, not just how many are still open.
+
+        On any store access error the method returns ``max_live_trades_per_day``
+        so the gate fails closed rather than silently allowing trades through.
         """
         today_date = today or datetime.now(timezone.utc).date()
         count = 0
@@ -631,7 +634,12 @@ class AutonomousLiveRunner:
                 if entry_time.date() == today_date:
                     count += 1
         except Exception:  # pragma: no cover - defensive
-            logger.exception("failed to count live trades for today")
+            logger.exception(
+                "failed to count live trades for today; failing closed "
+                "(returning max_live_trades_per_day=%d)",
+                self._config.max_live_trades_per_day,
+            )
+            return self._config.max_live_trades_per_day
         return count
 
     @staticmethod

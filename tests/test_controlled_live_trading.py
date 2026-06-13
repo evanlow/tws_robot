@@ -365,3 +365,26 @@ def test_without_limit_orders_only_signal_without_price_uses_market_order(
     assert result.status == OrderStatus.SUBMITTED
     call_kwargs = mock_adapter.buy.call_args[1]
     assert call_kwargs.get("order_type") == "MARKET"
+
+
+def test_limit_order_used_when_target_price_set_regardless_of_limit_orders_only(
+    mock_adapter, risk_manager, buy_signal, tmp_path, monkeypatch
+):
+    """When target_price is available the executor always uses LIMIT order type,
+    even without limit_orders_only=True (backward-compatible non-enforced mode)."""
+    monkeypatch.chdir(tmp_path)
+    mock_adapter.environment = "paper"
+    mock_adapter.port = 7497
+    mock_adapter.buy.return_value = 101
+    executor = OrderExecutor(
+        tws_adapter=mock_adapter,
+        risk_manager=risk_manager,
+        is_live_mode=False,
+        limit_orders_only=False,
+    )
+    # buy_signal has target_price=150.0
+    result = executor.execute_signal("paper-strategy", buy_signal, 50_000.0, {})
+    assert result.status == OrderStatus.SUBMITTED
+    call_kwargs = mock_adapter.buy.call_args[1]
+    assert call_kwargs.get("order_type") == "LIMIT"
+    assert call_kwargs.get("limit_price") == buy_signal.target_price
