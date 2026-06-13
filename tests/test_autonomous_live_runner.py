@@ -34,6 +34,9 @@ from autonomous.autonomous_live_runner import (
     EXECUTION_FAILED,
 )
 from autonomous.runner_config import AutonomousLiveRunnerConfig
+# OPEN / CLOSED / FAILED are trade-lifecycle status strings (trade_store).
+# EXECUTED / DRY_RUN_EXECUTED / NO_TRADE / EXECUTION_FAILED are runner-result
+# status strings (autonomous_live_runner) — two distinct namespaces.
 from autonomous.trade_store import TradeStore, OPEN, CLOSED, FAILED
 from data.cash_availability import CashAvailabilityAnalyzer
 from execution.order_executor import OrderResult, OrderStatus

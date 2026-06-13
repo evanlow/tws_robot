@@ -451,8 +451,10 @@ class AutonomousLiveRunner:
         # Apply deployable-cash cap.
         deployable_cash = gates.deployable_cash
         max_trade_value = deployable_cash * self._config.max_deployable_cash_pct
-        limit_price = float(plan.get("limit_price") or 0.0)
-        quantity = int(plan.get("quantity") or 0)
+        raw_limit_price = plan.get("limit_price")
+        raw_quantity = plan.get("quantity")
+        limit_price = float(raw_limit_price) if raw_limit_price is not None else 0.0
+        quantity = int(raw_quantity) if raw_quantity is not None else 0
 
         if limit_price > 0 and quantity > 0:
             proposed_value = limit_price * quantity

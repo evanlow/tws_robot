@@ -182,10 +182,13 @@ class AutonomousLiveRunnerConfig:
     expected_account_id: Optional[str] = None
 
     def __post_init__(self) -> None:
+        # max_deployable_cash_pct must be in the range (0, 1].
+        # Values above 0 and up to and including 1.0 (100%) are intentionally
+        # allowed; the default of 0.10 (10%) is recommended for safety.
         if not (0 < self.max_deployable_cash_pct <= 1):
             raise ValueError(
-                "max_deployable_cash_pct must be in (0, 1]; got "
-                f"{self.max_deployable_cash_pct!r}"
+                "max_deployable_cash_pct must be in (0, 1] (exclusive of 0, "
+                f"inclusive of 1.0); got {self.max_deployable_cash_pct!r}"
             )
         if self.min_deployable_cash < 0:
             raise ValueError(

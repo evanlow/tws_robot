@@ -1203,7 +1203,7 @@ def _build_live_runner(
         try:
             from execution.order_executor import OrderExecutor
             from risk.risk_manager import RiskManager
-            tws_adapter = getattr(svc, "_tws_bridge", None) or getattr(svc, "tws_adapter", None)
+            tws_adapter = getattr(svc, "_tws_bridge", None)
             risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
             executor = OrderExecutor(
                 tws_adapter=tws_adapter,
@@ -1541,7 +1541,13 @@ def live_evaluate_exits():
     else:
         manager = AutonomousExitManager(
             trade_store=live_store,
-            paper_adapter=None,  # Live exits route through OrderExecutor (future work)
+            # Live exits currently use AutonomousExitManager for evaluation
+            # only (no order submission through this path).  Actual exit orders
+            # must be placed explicitly by the operator or via a future
+            # OrderExecutor-backed exit handler.  paper_adapter=None is safe
+            # because AutonomousExitManager does not submit orders when
+            # paper_adapter is None; it only evaluates and marks trade state.
+            paper_adapter=None,
             positions_provider=svc.get_positions,
             risk_manager=getattr(svc, "risk_manager", None),
             emergency_stop_file=str(EMERGENCY_STOP_FILE),
