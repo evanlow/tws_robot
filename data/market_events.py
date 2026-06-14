@@ -230,7 +230,7 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
         # Strategy: find all <h4>YEAR</h4> blocks, then find date spans within each block.
         # The Fed page uses headings like <h4 id="2026">2026 FOMC Meetings</h4>
         # so we allow extra text after the 4-digit year.
-        year_sections = re.split(r'<h[34][^>]*>\s*(\d{4})\b[^<]*</h[34]>', html_text)
+        year_sections = re.split(r'<h[34][^>]*>\s*(\d{4})\b[^<]{0,100}</h[34]>', html_text)
 
         # year_sections alternates: [pre-text, year, block, year, block, ...]
         for i in range(1, len(year_sections) - 1, 2):
@@ -274,7 +274,7 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
                 )
                 # Strip trailing ", 2026: FOMC Meeting" or similar suffixes
                 date_matches = [
-                    re.sub(r'[,:]?\s*\d{4}\b[^<]*', '', d).strip()
+                    re.sub(r'[,:]?\s*\d{4}\b[^<]{0,50}', '', d).strip()
                     for d in date_matches
                 ]
             if not date_matches:
