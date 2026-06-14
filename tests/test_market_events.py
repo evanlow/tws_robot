@@ -161,6 +161,41 @@ class TestFetchFomcDates:
 
         assert len(events) >= 1
 
+    def test_parses_split_month_and_day_spans(self):
+        """Fed page uses separate spans for month and day range."""
+        yr = self._year()
+        html = f"""
+        <html><body>
+        <h4 id="{yr}">{yr} FOMC Meetings</h4>
+        <div class="fomc-meeting__row">
+          <span class="fomc-meeting__month">January</span>
+          <span class="fomc-meeting__day">28-29</span>
+        </div>
+        <div class="fomc-meeting__row">
+          <span class="fomc-meeting__month">March</span>
+          <span class="fomc-meeting__day">18-19</span>
+        </div>
+        <div class="fomc-meeting__row">
+          <span class="fomc-meeting__month">April</span>
+          <span class="fomc-meeting__day">29-30</span>
+        </div>
+        <div class="fomc-meeting__row">
+          <span class="fomc-meeting__month">June</span>
+          <span class="fomc-meeting__day">17-18</span>
+        </div>
+        </body></html>
+        """
+
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.return_value = self._mock_urlopen(html)
+            events = _fetch_fomc_dates()
+
+        assert len(events) == 4
+        assert events[0]["event_date"] == datetime(yr, 1, 29)
+        assert events[1]["event_date"] == datetime(yr, 3, 19)
+        assert events[2]["event_date"] == datetime(yr, 4, 30)
+        assert events[3]["event_date"] == datetime(yr, 6, 18)
+
     def test_network_error_returns_empty_list(self):
         with patch("urllib.request.urlopen", side_effect=OSError("timeout")):
             events = _fetch_fomc_dates()

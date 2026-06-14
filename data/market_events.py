@@ -206,7 +206,6 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     try:
         import urllib.request
-        import html.parser
 
         url = (
             "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
@@ -250,6 +249,22 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
                 r'<[^>]+class="[^"]*fomc-meeting__date[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
                 block,
             )
+            if not date_matches:
+                # The Fed page often splits month and day into separate spans:
+                #   <span class="fomc-meeting__month">January</span>
+                #   <span class="fomc-meeting__day">27-28</span>
+                months = re.findall(
+                    r'<[^>]+class="[^"]*fomc-meeting__month[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
+                    block,
+                )
+                days = re.findall(
+                    r'<[^>]+class="[^"]*fomc-meeting__day[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
+                    block,
+                )
+                if months and days:
+                    date_matches = [
+                        f"{m.strip()} {d.strip()}" for m, d in zip(months, days)
+                    ]
             if not date_matches:
                 # Fallback: panel-title format like
                 # <h5 class="panel-title">January 27-28, 2026: FOMC Meeting</h5>
