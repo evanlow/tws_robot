@@ -206,7 +206,6 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     try:
         import urllib.request
-        import html.parser
 
         url = (
             "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
@@ -229,7 +228,9 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
 
         # Find all occurrences of date strings adjacent to year headings.
         # Strategy: find all <h4>YEAR</h4> blocks, then find date spans within each block.
-        year_sections = re.split(r'<h[34][^>]*>\s*(\d{4})\s*</h[34]>', html_text)
+        # The Fed page uses headings like <h4 id="2026">2026 FOMC Meetings</h4>
+        # so we allow extra text after the 4-digit year.
+        year_sections = re.split(r'<h[34][^>]*>\s*(\d{4})\b[^<]{0,100}</h[34]>', html_text)
 
         # year_sections alternates: [pre-text, year, block, year, block, ...]
         for i in range(1, len(year_sections) - 1, 2):
@@ -249,7 +250,35 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
                 block,
             )
             if not date_matches:
-                # Fallback: grab raw date text near "meeting" keywords
+                # The Fed page often splits month and day into separate spans:
+                #   <span class="fomc-meeting__month">January</span>
+                #   <span class="fomc-meeting__day">27-28</span>
+                months = re.findall(
+                    r'<[^>]+class="[^"]*fomc-meeting__month[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
+                    block,
+                )
+                days = re.findall(
+                    r'<[^>]+class="[^"]*fomc-meeting__day[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
+                    block,
+                )
+                if months and days and len(months) == len(days):
+                    date_matches = [
+                        f"{m.strip()} {d.strip()}" for m, d in zip(months, days)
+                    ]
+            if not date_matches:
+                # Fallback: panel-title format like
+                # <h5 class="panel-title">January 27-28, 2026: FOMC Meeting</h5>
+                date_matches = re.findall(
+                    r'<[^>]+class="[^"]*panel-title[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
+                    block,
+                )
+                # Strip trailing ", 2026: FOMC Meeting" or similar suffixes
+                date_matches = [
+                    re.sub(r'[,:]?\s*\d{4}\b[^<]{0,50}', '', d).strip()
+                    for d in date_matches
+                ]
+            if not date_matches:
+                # Last resort: grab raw date text with month names
                 date_matches = re.findall(
                     r'(?:January|February|March|April|May|June|July|August|'
                     r'September|October|November|December)\s+\d[\d\-\s,]*',
