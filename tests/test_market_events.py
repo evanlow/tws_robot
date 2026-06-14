@@ -1,8 +1,9 @@
 """Targeted tests for market events parsing/model behavior."""
 
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
-from data.market_events import MarketEventsService, _parse_fomc_date_range
+from data.market_events import MarketEventsService, _parse_fomc_date_range, _fetch_fomc_dates
 from data.models import MarketEvent
 
 
@@ -79,3 +80,88 @@ class TestMarketEventsServiceStaleness:
         svc = MarketEventsService(database=object())
         svc._last_fetched["FOMC"] = datetime.now() - timedelta(hours=25)
         assert svc.is_stale("FOMC") is True
+
+
+class TestFetchFomcDates:
+    """Validate _fetch_fomc_dates correctly parses realistic Fed page HTML."""
+
+    def _mock_urlopen(self, html_text):
+        """Create a mock urlopen context manager returning html_text."""
+        from unittest.mock import MagicMock
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = html_text.encode("utf-8")
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = lambda s, *a: None
+        return mock_resp
+
+    def _year(self):
+        return datetime.now().year
+
+    def test_parses_fomc_meeting_date_class(self):
+        yr = self._year()
+        html = f"""
+        <html><body>
+        <h4 id="{yr}">{yr} FOMC Meetings</h4>
+        <div class="panel panel-default">
+          <span class="fomc-meeting__date">January 27-28</span>
+        </div>
+        <div class="panel panel-default">
+          <span class="fomc-meeting__date">March 17-18</span>
+        </div>
+        <div class="panel panel-default">
+          <span class="fomc-meeting__date">April 28-29 *</span>
+        </div>
+        </body></html>
+        """
+
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.return_value = self._mock_urlopen(html)
+            events = _fetch_fomc_dates()
+
+        assert len(events) == 3
+        assert events[0]["event_date"] == datetime(yr, 1, 28)
+        assert events[1]["event_date"] == datetime(yr, 3, 18)
+        assert events[2]["event_date"] == datetime(yr, 4, 29)
+
+    def test_parses_panel_title_format(self):
+        yr = self._year()
+        html = f"""
+        <html><body>
+        <h4 id="{yr}">{yr} FOMC Meetings</h4>
+        <div class="panel panel-default">
+          <h5 class="panel-title">January 27-28, {yr}: FOMC Meeting</h5>
+        </div>
+        <div class="panel panel-default">
+          <h5 class="panel-title">March 17-18, {yr}: FOMC Meeting</h5>
+        </div>
+        </body></html>
+        """
+
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.return_value = self._mock_urlopen(html)
+            events = _fetch_fomc_dates()
+
+        assert len(events) == 2
+        assert events[0]["event_date"] == datetime(yr, 1, 28)
+        assert events[1]["event_date"] == datetime(yr, 3, 18)
+
+    def test_falls_back_to_raw_date_extraction(self):
+        yr = self._year()
+        html = f"""
+        <html><body>
+        <h4 id="{yr}">{yr} FOMC Meetings</h4>
+        <p>Next meeting: January 27-28 and March 17-18</p>
+        </body></html>
+        """
+
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.return_value = self._mock_urlopen(html)
+            events = _fetch_fomc_dates()
+
+        assert len(events) >= 1
+
+    def test_network_error_returns_empty_list(self):
+        with patch("urllib.request.urlopen", side_effect=OSError("timeout")):
+            events = _fetch_fomc_dates()
+        assert events == []

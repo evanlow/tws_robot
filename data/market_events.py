@@ -229,7 +229,9 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
 
         # Find all occurrences of date strings adjacent to year headings.
         # Strategy: find all <h4>YEAR</h4> blocks, then find date spans within each block.
-        year_sections = re.split(r'<h[34][^>]*>\s*(\d{4})\s*</h[34]>', html_text)
+        # The Fed page uses headings like <h4 id="2026">2026 FOMC Meetings</h4>
+        # so we allow extra text after the 4-digit year.
+        year_sections = re.split(r'<h[34][^>]*>\s*(\d{4})\b[^<]*</h[34]>', html_text)
 
         # year_sections alternates: [pre-text, year, block, year, block, ...]
         for i in range(1, len(year_sections) - 1, 2):
@@ -249,7 +251,19 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
                 block,
             )
             if not date_matches:
-                # Fallback: grab raw date text near "meeting" keywords
+                # Fallback: panel-title format like
+                # <h5 class="panel-title">January 27-28, 2026: FOMC Meeting</h5>
+                date_matches = re.findall(
+                    r'<[^>]+class="[^"]*panel-title[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
+                    block,
+                )
+                # Strip trailing year and context like ": FOMC Meeting"
+                date_matches = [
+                    re.sub(r'[,:]?\s*\d{4}\b.*', '', d).strip()
+                    for d in date_matches
+                ]
+            if not date_matches:
+                # Last resort: grab raw date text with month names
                 date_matches = re.findall(
                     r'(?:January|February|March|April|May|June|July|August|'
                     r'September|October|November|December)\s+\d[\d\-\s,]*',
