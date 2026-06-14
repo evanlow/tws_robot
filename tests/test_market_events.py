@@ -159,7 +159,9 @@ class TestFetchFomcDates:
             mock_open.return_value = self._mock_urlopen(html)
             events = _fetch_fomc_dates()
 
-        assert len(events) >= 1
+        event_dates = {event["event_date"] for event in events}
+        assert datetime(yr, 1, 28) in event_dates
+        assert datetime(yr, 3, 18) in event_dates
 
     def test_parses_split_month_and_day_spans(self):
         """Fed page uses separate spans for month and day range."""

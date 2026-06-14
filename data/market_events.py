@@ -261,7 +261,7 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
                     r'<[^>]+class="[^"]*fomc-meeting__day[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
                     block,
                 )
-                if months and days:
+                if months and days and len(months) == len(days):
                     date_matches = [
                         f"{m.strip()} {d.strip()}" for m, d in zip(months, days)
                     ]
