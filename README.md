@@ -4,7 +4,7 @@
 
 **Autonomous stock trading with a safety-first architecture — scan, rank, plan, and execute trades automatically.**
 
-TWS Robot is an **autonomous trading system** that scans the S&P 500 universe, ranks candidates using technical analysis, builds trade plans, and executes them on your Interactive Brokers paper account — all with multiple layers of safety gates. Start in recommend-only mode to review what the system would trade, then graduate to paper execution when you're confident in the pipeline.
+TWS Robot is an **autonomous trading system** that scans the S&P 500 universe, ranks candidates using technical analysis, builds trade plans, and executes them — all with multiple layers of safety gates. By default it runs in recommend-only mode so you can review every decision before any order is placed. Graduate to paper execution once you're confident in the pipeline.
 
 ---
 
@@ -26,8 +26,8 @@ TWS Robot's primary capability is its **autonomous trading pipeline** — a full
 │           │          │          │  (Gating)   │  (Execution)   │
 │  S&P 500  │ Hard     │ BUY_     │ Cash check  │ Paper adapter  │
 │  universe │ filters  │ SHARES   │ Risk check  │ Live adapter   │
-│  +        │ Scoring  │   or     │ Daily limit │   (future)     │
-│  Signal   │ Ranking  │ SELL_    │ Emergency   │                │
+│  +        │ Scoring  │   or     │ Daily limit │  (disabled by  │
+│  Signal   │ Ranking  │ SELL_    │ Emergency   │   default)     │
 │  provider │          │ CSP      │   stop gate │                │
 └──────────┴──────────┴──────────┴─────────────┴────────────────┘
 ```
@@ -36,7 +36,7 @@ TWS Robot's primary capability is its **autonomous trading pipeline** — a full
 |-------|-------------|
 | **Scanner** | Scans the S&P 500 universe using the `TechnicalAnalysisSignalProvider` to identify candidates with actionable signals. |
 | **Ranker** | Applies hard filters (signal strength, volume, trend, earnings proximity, concentration limits), then scores and sorts survivors. |
-| **Planner** | Builds a `TradePlan` — either `BUY_SHARES` (limit order) or `SELL_CASH_SECURED_PUT` (if option data is available) — with exact quantities, limit price, target, and stop. |
+| **Planner** | Builds a `TradePlan` — `BUY_SHARES` (limit order) by default. `SELL_CASH_SECURED_PUT` is supported but requires an option-chain hint provider and support-price data wired into the engine (not configured by default). |
 | **Engine** | Validates against safety gates: emergency stop, daily trade limit, deployable cash, equity checks, and the optional RiskManager. |
 | **Adapter** | In Paper Execute mode, sends the order to your IBKR paper account. In Recommend-Only mode, returns the plan without executing. |
 
@@ -46,7 +46,7 @@ TWS Robot's primary capability is its **autonomous trading pipeline** — a full
 |------|---------------|-------------|
 | **Recommend Only** (default) | ❌ Never | Runs the full pipeline and returns a trade plan for your review. Safe to run anytime. |
 | **Paper Execute** | ✅ Paper only | Executes trades on your IBKR paper account. Requires active paper connection. |
-| **Assisted Live** | ✅ Live (opt-in) | Live execution requires explicit config flag + caller confirmation. Not exposed via HTTP. |
+| **Assisted Live** | ✅ Live (opt-in) | Live execution requires explicit config flag + caller confirmation. HTTP endpoints exist (`/api/autonomous/live/*`) but are disabled by default and not surfaced in the main dashboard UI. |
 
 ### Safety Architecture
 
@@ -247,7 +247,7 @@ tws_robot/
 ## ❓ Frequently Asked Questions
 
 ### Can I use this for live trading right now?
-The autonomous trading engine supports **paper execution** out of the box — it will scan, rank, plan, and execute trades on your IBKR paper account. Live execution (`assisted_live` mode) exists but is intentionally disabled by default and not exposed via HTTP endpoints. Start with recommend-only mode, graduate to paper, and paper trade for at least 30 days before considering live.
+The autonomous trading engine supports **paper execution** out of the box — it will scan, rank, plan, and execute trades on your IBKR paper account. Live execution (`assisted_live` mode) has HTTP endpoints (`/api/autonomous/live/*`) and a live runner, but is intentionally disabled by default and not surfaced in the main dashboard UI. Start with recommend-only mode, graduate to paper, and paper trade for at least 30 days before considering live.
 
 ### Which strategy should I start with?
 1. **Autonomous trading?** Open the web dashboard → Autonomous Trading page → click "Scan Universe" to see what the system recommends
