@@ -1,10 +1,10 @@
-# TWS Robot - Your Automated Trading Assistant
+# TWS Robot - Autonomous Trading System
 
 [![CI](https://github.com/evanlow/tws_robot/actions/workflows/ci.yml/badge.svg)](https://github.com/evanlow/tws_robot/actions/workflows/ci.yml)
 
-**Test trading strategies, automate execution, manage risk — all from your browser.**
+**Autonomous stock trading with a safety-first architecture — scan, rank, plan, and execute trades automatically.**
 
-Transform your trading ideas into automated strategies. Test them on historical data, validate with paper trading, then deploy them live. TWS Robot's **web dashboard** handles the execution, risk management, and monitoring so you can focus on strategy — no terminal experience required.
+TWS Robot is an **autonomous trading system** that scans the S&P 500 universe, ranks candidates using technical analysis, builds trade plans, and executes them — all with multiple layers of safety gates. By default it runs in recommend-only mode so you can review every decision before any order is placed. Graduate to paper execution once you're confident in the pipeline.
 
 ---
 
@@ -14,43 +14,86 @@ TWS Robot is experimental open-source software for use with Interactive Brokers 
 
 ---
 
-## 🎯 What Can TWS Robot Do For You?
+## 🤖 Autonomous Trading — The Core Feature
 
-### For New Algorithmic Traders
-- 🌐 **Web dashboard** - Point-and-click interface for managing everything from your browser
-- 📚 **Learn by doing** - Run pre-built strategies and see how they work
-- 🧪 **Test without risk** - Backtest on historical data before risking real money
-- 🎓 **Start simple** - Interactive guides walk you through your first strategy
-- 🛡️ **Built-in safety** - Risk management prevents catastrophic losses
+TWS Robot's primary capability is its **autonomous trading pipeline** — a fully automated system that finds, evaluates, and executes trades without manual intervention.
 
-### For Active Traders
-- 🤖 **Automate execution** - Let the bot execute your strategy 24/7
-- 📊 **Multiple strategies** - Run Moving Average, Mean Reversion, Momentum simultaneously
-- ⚡ **Paper trading** - Validate strategies with real-time data before going live
-- 📈 **Performance tracking** - See what's working with Sharpe ratio, win rate, drawdown
-- 🏢 **Company name display** - See "Apple Inc." not just "AAPL" across all pages (supports international stocks: HK, JP, UK, AU, etc.)
-- 📰 **AI Market Outlook** - Daily market briefing with session recap, portfolio-relevant insights, and actionable recommendations
-- 🎯 **AI Portfolio Intelligence** - Auto-detect your trading strategies from positions:
-  - 📍 Covered calls, protective puts, and collars
-  - 📐 Bull/bear spreads, iron condors, straddles, strangles
-  - 🎚️ Automatic profit targets, stop losses, and risk metrics
-  - 🧠 Confidence scores and actionable insights for each position
-  - 💬 AI-generated narrative insights explaining strategy status and next actions
-- 🧠 **Account Intelligence Suite** - 8 advanced portfolio management modules:
-  - 💚 **Account Health** - Composite health scoring, margin analysis, diversification metrics
-  - 💰 **Cash Management** - Reserve optimization, cash flow forecasting, idle cash detection
-  - 🎯 **Opportunity Detector** - Sector gap analysis, rebalancing suggestions, dividend screening
-  - 📊 **Performance Benchmarking** - Compare against SPY/QQQ/IWM, calculate alpha/beta, track fees
-  - ⚠️ **Risk Intelligence** - Monte Carlo simulation (10k scenarios), stress testing, liquidity analysis
-  - 📋 **Report Generator** - Automated daily/weekly/monthly reports with threshold alerts
-  - 🏢 **Multi-Account Manager** - Aggregate views, cross-account risk, duplicate position detection
-  - ⚡ **Execution Quality** - Fill analysis, slippage tracking, rejection monitoring
-### For Quantitative Developers
-- 🏗️ **Professional architecture** - Event-driven design, modular components
-- 🧬 **Extensible framework** - Build custom strategies on proven infrastructure
-- 📊 **Advanced analytics** - Comprehensive backtesting with realistic market simulation (Moving Average, Mean Reversion, Momentum templates included)
-- 🔧 **Full control** - Customize risk profiles, position sizing, and execution logic
-- 🤖 **Live trading ready** - Bollinger Bands strategy available for paper/live trading
+### How It Works
+
+```
+┌──────────┬──────────┬──────────┬─────────────┬────────────────┐
+│  Scanner  │  Ranker  │ Planner  │   Engine    │    Adapter     │
+│           │          │          │  (Gating)   │  (Execution)   │
+│  S&P 500  │ Hard     │ BUY_     │ Cash check  │ Paper adapter  │
+│  universe │ filters  │ SHARES   │ Risk check  │ Live adapter   │
+│  +        │ Scoring  │   or     │ Daily limit │  (disabled by  │
+│  Signal   │ Ranking  │ SELL_    │ Emergency   │   default)     │
+│  provider │          │ CSP      │   stop gate │                │
+└──────────┴──────────┴──────────┴─────────────┴────────────────┘
+```
+
+| Stage | What It Does |
+|-------|-------------|
+| **Scanner** | Scans the S&P 500 universe using the `TechnicalAnalysisSignalProvider` to identify candidates with actionable signals. |
+| **Ranker** | Applies hard filters (signal strength, volume, trend, earnings proximity, concentration limits), then scores and sorts survivors. |
+| **Planner** | Builds a `TradePlan` — `BUY_SHARES` (limit order) by default. `SELL_CASH_SECURED_PUT` is supported but requires an option-chain hint provider and support-price data wired into the engine (not configured by default). |
+| **Engine** | Validates against safety gates: emergency stop, daily trade limit, deployable cash, equity checks, and the optional RiskManager. |
+| **Adapter** | In Paper Execute mode, sends the order to your IBKR paper account. In Recommend-Only mode, returns the plan without executing. |
+
+### Operating Modes
+
+| Mode | Orders Placed? | Description |
+|------|---------------|-------------|
+| **Recommend Only** (default) | ❌ Never | Runs the full pipeline and returns a trade plan for your review. Safe to run anytime. |
+| **Paper Execute** | ✅ Paper only | Executes trades on your IBKR paper account. Requires active paper connection. |
+| **Assisted Live** | ✅ Live (opt-in) | Live execution requires explicit config flag + caller confirmation. HTTP endpoints exist (`/api/autonomous/live/*`) but are disabled by default and not surfaced in the main dashboard UI. |
+
+### Safety Architecture
+
+Multiple independent layers must all pass before any order is placed:
+
+1. **Emergency Stop** — A single `EMERGENCY_STOP` file halts the system instantly
+2. **Runner Gates** — Connection verified, paper adapter ready, trade limits enforced
+3. **Engine Validation** — Deployable cash sufficient, position sizing within limits, risk manager approval
+4. **Mode Gate** — Recommend-Only never executes; Paper requires paper connection; Live requires explicit opt-in + confirmation
+5. **Audit Trail** — Every decision (including rejections) written to append-only JSONL log
+
+### Autonomous Dashboard
+
+The web dashboard provides a dedicated **Autonomous Trading** page where you can:
+- **Scan Universe** — Run a full recommend-only pass and see ranked candidates with rejection reasons
+- **Propose Trade** — Run the full pipeline and review the trade plan before execution
+- **Execute Paper Trade** — Submit the proposed trade to your paper account
+- **Paper Robot Runner** — Continuous autonomous trading loop (configurable interval)
+- **Exit Manager** — Monitors open positions for take-profit, stop-loss, and max holding duration
+
+---
+
+## 🎯 Additional Features
+
+### Web Dashboard
+- 🌐 **Point-and-click interface** for managing everything from your browser
+- 📊 **Real-time positions and P&L** tracking
+- 🧪 **Backtesting** — Test strategies on historical data before risking money
+- 🛡️ **Risk monitoring** with emergency stop button always visible
+- 📈 **Performance tracking** — Sharpe ratio, win rate, drawdown metrics
+
+### Strategy Backtesting
+- 📊 Moving Average, Mean Reversion, and Momentum strategy templates
+- ⚡ Paper trading validation with real-time data
+- 🔧 Risk profiles: Conservative, Balanced, Aggressive
+
+### Portfolio Analysis
+- 🏢 Company name display (supports international stocks: HK, JP, UK, AU, etc.)
+- 📰 AI Market Outlook with session recap and actionable recommendations
+- 🎯 AI Portfolio Intelligence — auto-detect strategies from positions (covered calls, spreads, iron condors)
+- 🧠 Account Intelligence modules — health scoring, cash management, risk analysis, performance benchmarking
+
+### For Developers
+- 🏗️ Event-driven architecture with modular components
+- 🧬 Extensible framework — build custom signal providers and strategies
+- 📊 Comprehensive backtesting with realistic market simulation
+- 🔧 Full control over risk profiles, position sizing, and execution logic
 
 ---
 
@@ -88,9 +131,9 @@ python scripts/run_web.py
 ```
 
 From the dashboard you can:
+- 🤖 **Autonomous Trading** - Scan, propose, and execute trades automatically
 - 📊 **View positions and P&L** on the Dashboard page
 - 🧪 **Run backtests** from the Backtest page
-- 🤖 **Manage strategies** on the Strategies page
 - 🛡️ **Monitor risk** on the Risk page
 - ⚙️ **Configure settings** on the Settings page
 - 🚨 **Emergency stop** with one click from the top bar
@@ -128,14 +171,14 @@ python examples/example_strategy_templates.py
 
 ```mermaid
 graph LR
-    A[📥 Historical Data] --> B[🧪 Backtest]
-    B --> C{Good Results?}
-    C -->|No| D[🔧 Adjust Strategy]
-    D --> B
-    C -->|Yes| E[📄 Paper Trade]
-    E --> F{Still Good?}
+    A[🤖 Autonomous Scan] --> B[📊 Review Recommendations]
+    B --> C{Confident?}
+    C -->|No| D[🔧 Adjust Config]
+    D --> A
+    C -->|Yes| E[📄 Paper Execute]
+    E --> F{Proven Results?}
     F -->|No| D
-    F -->|Yes| G[💰 Live Trade]
+    F -->|Yes| G[💰 Assisted Live]
     
     style A fill:#e1f5ff
     style B fill:#fff3cd
@@ -143,7 +186,7 @@ graph LR
     style G fill:#f8d7da
 ```
 
-**Never skip steps!** Every successful strategy follows this path.
+**Start in recommend-only mode.** Review several cycles of recommendations before enabling paper execution.
 
 ### 4. Learn More
 
@@ -161,17 +204,24 @@ Understanding the codebase:
 
 ```
 tws_robot/
-├── web/                   # ⭐ Web dashboard (primary user interface)
+├── autonomous/            # ⭐ Autonomous trading engine (core feature)
+│   ├── autonomous_engine.py  # Top-level orchestrator
+│   ├── candidate_scanner.py  # S&P 500 universe scanning
+│   ├── candidate_ranker.py   # Signal filtering and scoring
+│   ├── trade_planner.py      # Trade plan generation (shares/puts)
+│   ├── signal_provider.py    # Signal provider interface
+│   ├── exit_manager.py       # Automated exit management
+│   ├── autonomous_runner.py  # Paper trading runner loop
+│   └── audit.py              # JSONL audit logging
+├── web/                   # Web dashboard (user interface)
 │   ├── routes/               # One Blueprint per menu section
 │   ├── templates/            # Jinja2 HTML templates
 │   └── static/               # CSS, JavaScript assets
 ├── backtest/              # Historical testing engine
 │   ├── strategy_templates.py  # Pre-built strategies (MA, MeanReversion, Momentum)
 │   ├── engine.py             # Backtesting engine
-│   ├── data_manager.py       # Historical data handling
 │   └── profiles.py           # Risk profiles (Conservative, Moderate, Aggressive)
 ├── strategies/            # Live trading strategies
-│   └── bollinger_bands.py    # Production-ready Bollinger Bands strategy
 ├── risk/                  # Risk management system
 │   ├── risk_manager.py       # Position sizing, drawdown control
 │   └── position_sizer.py     # Calculate position sizes
@@ -186,23 +236,23 @@ tws_robot/
 ```
 
 **🎯 Quick Navigation:**
+- **Autonomous trading?** → `autonomous/autonomous_engine.py` or web dashboard Autonomous Trading page
 - **Want to use the dashboard?** → `python scripts/run_web.py` then open http://127.0.0.1:5000
 - **Want to backtest?** → `backtest/strategy_templates.py`
-- **Want to live trade?** → `strategies/bollinger_bands.py`
 - **Need risk controls?** → `risk/risk_manager.py`
-- **Building custom strategy?** → `docs/runbooks/adding-new-strategy.md`
+- **Building custom signal provider?** → `autonomous/signal_provider.py`
 
 ---
 
 ## ❓ Frequently Asked Questions
 
 ### Can I use this for live trading right now?
-Yes, but limited. The **BollingerBands strategy** is production-ready for paper/live trading. Other strategies (Moving Average, Mean Reversion, Momentum) are backtest-only currently.
+The autonomous trading engine supports **paper execution** out of the box — it will scan, rank, plan, and execute trades on your IBKR paper account. Live execution (`assisted_live` mode) has HTTP endpoints (`/api/autonomous/live/*`) and a live runner, but is intentionally disabled by default and not surfaced in the main dashboard UI. Start with recommend-only mode, graduate to paper, and paper trade for at least 30 days before considering live.
 
 ### Which strategy should I start with?
-1. **New to algo trading?** Start with `python scripts/strategy_selector.py` for guided selection
-2. **Want proven results?** Backtest all strategies: `python examples/example_strategy_templates.py`
-3. **Ready to trade?** Use BollingerBands with conservative risk profile
+1. **Autonomous trading?** Open the web dashboard → Autonomous Trading page → click "Scan Universe" to see what the system recommends
+2. **Manual backtesting?** Run `python scripts/strategy_selector.py` for guided selection
+3. **Want to compare?** Backtest all strategies: `python examples/example_strategy_templates.py`
 
 ### Do I need Interactive Brokers TWS running?
 - **For backtesting:** No, works offline with historical data
@@ -278,6 +328,7 @@ pytest test_backtest_engine.py -v
 - ⭐ **[Your First 30 Minutes](docs/GETTING_STARTED_30MIN.md) - Complete beginner tutorial**
 - [README](README.md) - Quick start and overview (you are here)
 - [User Guide](docs/USER_GUIDE.md) - Learn strategies and workflows
+- [Autonomous Trading (USER_GUIDE §11)](docs/USER_GUIDE.md#11-autonomous-trading) - Full autonomous pipeline documentation
 - [Examples Guide](docs/EXAMPLES_GUIDE.md) - Working code examples
 - [Quick Reference](docs/QUICK_REFERENCE.md) - Commands and configs cheat sheet
 
@@ -331,29 +382,28 @@ pytest test_backtest_engine.py -v
 ---
 ## 🎓 What You'll Learn
 
-### Module 1: Your First Strategy
-- Run a backtest and interpret results
-- Understand Sharpe ratio, drawdown, win rate
-- Test strategies on different stocks
-- Choose a risk profile (Conservative/Balanced/Aggressive)
+### Module 1: Autonomous Trading Basics
+- Understand the scan → rank → plan → execute pipeline
+- Run in recommend-only mode and review trade proposals
+- Read the audit log to understand why candidates were selected or rejected
 
-### Module 2: Paper Trading
+### Module 2: Paper Execution
 - Connect to Interactive Brokers paper account
-- Run strategies with real-time data (fake money)
-- Monitor performance daily
-- Learn when a strategy stops working
+- Enable paper execute mode and run autonomous cycles
+- Use the Paper Robot Runner for continuous operation
+- Monitor the Exit Manager handling take-profit and stop-loss
 
 ### Module 3: Risk Management
 - Set position sizes based on account size
-- Implement stop losses and take profits
-- Use circuit breakers to prevent disasters
-- Build a diversified strategy portfolio
+- Configure daily trade limits and max open positions
+- Use the emergency stop mechanism
+- Understand the multi-layer safety architecture
 
-### Module 4: Go Live (If Ready)
-- Start with small position sizes
-- Monitor daily for first month
-- Track performance vs. expectations
-- Adjust or stop strategies as needed
+### Module 4: Advanced Configuration
+- Build custom signal providers
+- Configure symbol whitelists/blacklists
+- Tune ranker scoring parameters
+- Review and adjust trade planner settings
 
 **Full learning path in [USER_GUIDE.md](docs/USER_GUIDE.md)**
 
@@ -361,13 +411,17 @@ pytest test_backtest_engine.py -v
 
 ## 🏆 Built-In Strategies
 
+**Primary: Autonomous Trading Pipeline** — The autonomous engine uses the `TechnicalAnalysisSignalProvider` to scan the S&P 500 and automatically identify, rank, and execute trades. This is the recommended way to trade with TWS Robot.
+
+**Backtesting strategies** (for historical analysis only):
+
 | Strategy | Best For | When to Use | Example Stocks |
 |----------|----------|-------------|----------------|
 | **Moving Average Crossover** | Trending markets | Stock has clear up/down movements | AAPL, MSFT, NVDA |
 | **Mean Reversion** | Range-bound markets | Stock bounces around stable average | KO, PG, JNJ |
 | **Momentum** | High-growth stocks | Stock shows strong trends | TSLA, growth stocks |
 
-**Not sure which to use?** Run `python scripts/strategy_selector.py` for personalized recommendations.
+> **Note:** The backtest strategies above are for historical testing and learning. For automated trading, use the Autonomous Trading pipeline.
 
 ---
 
@@ -391,25 +445,24 @@ Choose your comfort level:
 
 ## 🔧 Advanced Features
 
+**Autonomous trading pipeline:**
+- S&P 500 universe scanning with technical analysis signals
+- Multi-factor candidate ranking with hard filters
+- Automatic trade plan generation (shares or cash-secured puts)
+- Paper Robot Runner for continuous autonomous execution
+- Exit Manager with take-profit, stop-loss, and max holding duration
+- Full audit trail of every decision in JSONL format
+
 **Professional-grade backtesting:**
 - Realistic market simulation with slippage and commissions
 - Performance analytics (Sharpe, Sortino, Calmar ratios)
 - Trade-by-trade analysis and visualization
-- Parameter optimization tools
-
-**Multi-strategy execution:**
-- Run multiple strategies simultaneously
-- Portfolio-level risk management
-- Strategy comparison and correlation analysis
-- Automated performance reporting
 
 **Web dashboard (built-in):**
+- Autonomous Trading page with scan, propose, and execute controls
 - Real-time position and P&L tracking
-- Strategy management and monitoring
 - Backtest execution from the browser
 - Risk monitoring and emergency stop
-- Logs viewer and settings configuration
-- AI-powered strategy assistant
 
 ---
 
@@ -437,10 +490,10 @@ Choose your comfort level:
 
 | Guide | When to Use | What You'll Learn |
 |-------|-------------|-------------------|
+| **[Autonomous Trading (USER_GUIDE §11)](docs/USER_GUIDE.md#11-autonomous-trading)** | Using autonomous mode | Pipeline, safety gates, operating modes, dashboard controls |
 | **[Web Dashboard](/)**  | Every trading session | Real-time positions, P&L, strategy status, risk monitoring |
 | **[check_account.py](scripts/check_account.py)** | Terminal account check | Current account status, positions, P&L, margin health |
 | **[market_status.py](scripts/market_status.py)** | Before placing trades | Is the market open? Safe to trade? |
-| **[Strategy Selector](scripts/strategy_selector.py)** | Choosing a strategy | Interactive tool: finds best strategy for your stock |
 
 ### 🚀 For Developers
 
@@ -475,8 +528,8 @@ Choose your comfort level:
 
 **If you want to trade today:**
 1. **[Web Dashboard](scripts/run_web.py)** → Run `python scripts/run_web.py` and open http://127.0.0.1:5000
-2. **[Strategy Selector](scripts/strategy_selector.py)** → Pick your strategy
-3. **[check_account.py](scripts/check_account.py)** → Check account status
+2. **Autonomous Trading page** → Click "Scan Universe" to see recommendations
+3. **[USER_GUIDE §11](docs/USER_GUIDE.md#11-autonomous-trading)** → Full autonomous trading documentation
 4. **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** → Commands you need
 
 **If you're a developer:**
@@ -599,8 +652,8 @@ python scripts/run_web.py --host 0.0.0.0 --port 8080 --debug
 ```
 
 From the web dashboard you can manage everything visually:
-- **Dashboard** — Connection status, equity, P&L, active strategies at a glance
-- **Strategies** — Start, stop, and monitor your trading strategies
+- **Autonomous Trading** — Scan universe, propose trades, execute on paper, run continuous robot
+- **Dashboard** — Connection status, equity, P&L at a glance
 - **Backtest** — Run backtests and review results
 - **Positions** — View open positions and trade history
 - **Risk** — Monitor risk levels and circuit breaker status
@@ -689,7 +742,16 @@ python scripts/market_status.py
 
 ```
 tws_robot/
-├── web/                 # ⭐ Flask web UI (primary user interface)
+├── autonomous/          # ⭐ Autonomous trading engine (core feature)
+│   ├── autonomous_engine.py  # Top-level pipeline orchestrator
+│   ├── candidate_scanner.py  # S&P 500 universe scanning
+│   ├── candidate_ranker.py   # Hard filters + scoring
+│   ├── trade_planner.py      # BUY_SHARES / SELL_CSP planning
+│   ├── signal_provider.py    # Signal provider interface
+│   ├── exit_manager.py       # TP/SL/duration exit logic
+│   ├── autonomous_runner.py  # Paper runner loop
+│   └── audit.py              # JSONL decision audit log
+├── web/                 # Flask web UI (user interface)
 │   ├── app.py           #   Application entry point
 │   ├── routes/          #   One Blueprint per menu section
 │   ├── templates/       #   Jinja2 HTML templates
@@ -720,7 +782,7 @@ tws_robot/
 │   ├── check_account.py #   Account balance, positions, P&L
 │   ├── market_status.py #   Is the US market open?
 │   └── ...
-├── strategies/          # Live-trading strategies (Bollinger Bands), configs
+├── strategies/          # Live-trading strategies, configs
 ├── strategy/            # Strategy lifecycle, metrics, promotion, validation
 ├── tests/               # Full test suite (mirrors source structure)
 ├── .env.example         # Configuration template
