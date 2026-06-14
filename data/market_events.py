@@ -257,9 +257,9 @@ def _fetch_fomc_dates() -> List[Dict[str, Any]]:
                     r'<[^>]+class="[^"]*panel-title[^"]*"[^>]*>\s*([^<]+?)\s*</[^>]+>',
                     block,
                 )
-                # Strip trailing year and context like ": FOMC Meeting"
+                # Strip trailing ", 2026: FOMC Meeting" or similar suffixes
                 date_matches = [
-                    re.sub(r'[,:]?\s*\d{4}\b.*', '', d).strip()
+                    re.sub(r'[,:]?\s*\d{4}\b[^<]*', '', d).strip()
                     for d in date_matches
                 ]
             if not date_matches:
