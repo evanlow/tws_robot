@@ -1431,7 +1431,7 @@
       if (decision) renderProposal(decision);
 
       if (outcome === 'LIVE_ORDER_SUBMITTED') {
-        const orderId = (body.run && body.run.trade && body.run.trade.order_id) || '';
+        const orderId = (body.run && (body.run.submitted_order_id || (body.run.trade && (body.run.trade.entry_order_id || body.run.trade.order_id)))) || '';
         logActivity('success', 'LIVE ORDER SUBMITTED — Order ID: ' + orderId);
         setFeedback('LIVE ORDER SUBMITTED — Order ID: ' + orderId, 'success');
       } else if (outcome === 'NO_TRADE') {

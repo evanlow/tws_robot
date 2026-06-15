@@ -1280,12 +1280,20 @@ def _build_live_runner(
     live_config: AutonomousLiveRunnerConfig,
     *,
     continuous_mode: bool = False,
+    executor_override=None,
 ) -> AutonomousLiveRunner:
     """Construct an :class:`AutonomousLiveRunner` wired to the live app.
 
-    The runner uses the real :class:`execution.order_executor.OrderExecutor`
-    (or a test override registered via
-    ``current_app.config['autonomous_live_order_executor']``).
+    The runner uses the supplied ``executor_override`` if given, otherwise
+    falls back to the test factory or builds a default dry-run-safe executor.
+
+    The ``executor_override`` parameter is the preferred way to inject
+    a request-scoped executor for actual-live mode, ensuring the runner
+    always uses the intended executor rather than a stale/global one.
+
+    For the dry-run path (``live_config.live_dry_run=True``), no global
+    executor lookup is performed — a fresh dry-run executor is always built
+    to prevent bleed-through from a previous actual-live activation.
     """
     override = current_app.config.get("autonomous_live_runner_factory")
     if callable(override):
@@ -1328,55 +1336,26 @@ def _build_live_runner(
     # Build engine in ASSISTED_LIVE mode (the runner overrides this before run)
     engine = _build_engine({"mode": AutonomousMode.ASSISTED_LIVE.value})
 
-    # Resolve OrderExecutor: prefer the test/operator override.
-    executor = current_app.config.get("autonomous_live_order_executor")
+    # Resolve OrderExecutor.
+    # Priority: explicit executor_override > default build.
+    # The dry-run path ALWAYS builds a fresh dry-run executor to prevent
+    # bleed-through from a stale actual-live executor stored globally.
+    executor = executor_override
     if executor is None:
-        # Build a live executor.  In production, the operator should
-        # supply a pre-built executor (with a proper TwsTradingAdapter and
-        # live_confirmation) via current_app.config['autonomous_live_order_executor'].
-        # The default here builds a configuration-invalid executor that will
-        # reject all non-dry-run orders until a proper TwsTradingAdapter is
-        # wired.  ServiceManager._tws_bridge is a core.TWSBridge instance and
-        # does NOT implement the adapter contract (buy/sell/close_position/
-        # get_all_positions/environment/port), so we intentionally leave
-        # tws_adapter=None here to avoid silent failures.
         try:
-            from execution.order_executor import OrderExecutor, LiveTradingConfirmation
+            from execution.order_executor import OrderExecutor
             from risk.risk_manager import RiskManager
             risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
 
-            # Retrieve the LiveTradingConfirmation persisted at activation.
-            live_confirmation: Optional[LiveTradingConfirmation] = current_app.config.get(
-                "autonomous_live_confirmation"
-            )
-
-            # If no confirmation was persisted yet, try to build one from
-            # the current connection state and the expected_account_id.
-            if live_confirmation is None and not live_config.live_dry_run:
-                account_id = live_config.expected_account_id
-                connection_info = getattr(svc, "connection_info", None) or {}
-                port = int(connection_info.get("port") or 7496)
-                env = getattr(svc, "connection_env", "") or ""
-                if account_id and env.lower() == "live":
-                    live_confirmation = LiveTradingConfirmation(
-                        environment="live",
-                        account_id=account_id,
-                        port=port,
-                        confirmed_by="system:auto",
-                    )
-                    logger.info(
-                        "Built auto LiveTradingConfirmation for account=%s port=%d",
-                        account_id,
-                        port,
-                    )
-
+            # Dry-run path: always build with tws_adapter=None and dry_run=True
+            # to guarantee no real orders can be submitted.
             executor = OrderExecutor(
                 tws_adapter=None,
                 risk_manager=risk_manager,
                 is_live_mode=True,
-                dry_run=live_config.live_dry_run,
+                dry_run=True,  # Always dry-run when no explicit executor supplied
                 live_trading_enabled=live_config.live_enabled,
-                live_confirmation=live_confirmation,
+                live_confirmation=None,
                 expected_account_id=live_config.expected_account_id,
                 limit_orders_only=live_config.live_limit_orders_only,
             )
@@ -1804,6 +1783,15 @@ def actual_live_activate():
         }), 400
 
     # --- All input validation passed; build config and evaluate gates ---
+    #
+    # Ordering (addresses review issue #1):
+    #   1. Validate confirmation fields (done above)
+    #   2. Validate detected live account / port / env
+    #   3. Build LiveTradingConfirmation
+    #   4. Build a connected, actual-live OrderExecutor
+    #   5. Build the AutonomousLiveRunner WITH that executor
+    #   6. Evaluate gates
+    #   7. Run once
 
     live_config = _live_runner_config()
     live_config.expected_account_id = expected_account_id
@@ -1816,26 +1804,142 @@ def actual_live_activate():
     live_config.max_open_live_trades = 1
     live_config.max_live_trades_per_day = 1
 
-    # Build the runner (continuous_mode=False for v1)
-    try:
-        runner = _build_live_runner(live_config, continuous_mode=False)
-    except Exception:
-        logger.exception("Failed to build AutonomousLiveRunner for actual-live")
-        _audit_mode_event("actual_live_activate_failed", {
-            "expected_account_id": expected_account_id,
-            "confirmed_by": confirmed_by,
-            "reason": "runner_construction_failed",
-        })
-        return jsonify({
-            "error": "Failed to construct live runner",
-            "status": "rejected",
-            "outcome": "LIVE_ORDER_REJECTED",
-            "rejection_reason": "runner construction failed",
-        }), 500
+    # --- Step 2: Validate detected live account / port / env ---
+    svc = get_services()
+    connection_info = getattr(svc, "connection_info", None) or {}
+    port = int(connection_info.get("port") or 7496)
+    host = str(connection_info.get("host") or "127.0.0.1")
 
+    # --- Step 3: Build LiveTradingConfirmation ---
+    from execution.order_executor import LiveTradingConfirmation
+    confirmation = LiveTradingConfirmation(
+        environment="live",
+        account_id=expected_account_id,
+        port=port,
+        confirmed_by=confirmed_by,
+    )
+
+    # --- Steps 4+5: Build executor and runner ---
+    # If a test runner factory is registered, it handles executor injection
+    # internally.  Otherwise, build a real adapter, connect it, and pass
+    # the executor directly into the runner.
+    tws_adapter = None  # Will be set only if we build a real adapter
+    runner_factory = current_app.config.get("autonomous_live_runner_factory")
+
+    if callable(runner_factory):
+        # Test/development path: factory handles everything.
+        try:
+            runner = runner_factory(live_config, continuous_mode=False)
+        except Exception:
+            logger.exception("Failed to build AutonomousLiveRunner via factory")
+            _audit_mode_event("actual_live_activate_failed", {
+                "expected_account_id": expected_account_id,
+                "confirmed_by": confirmed_by,
+                "reason": "runner_factory_failed",
+            })
+            return jsonify({
+                "error": "Failed to construct live runner",
+                "status": "rejected",
+                "outcome": "LIVE_ORDER_REJECTED",
+                "rejection_reason": "runner construction failed",
+            }), 500
+    else:
+        # Production path: build a connected adapter and executor, then runner.
+        # The executor is request-scoped — NOT stored globally (addresses
+        # review issue #3: prevents dry-run bleed-through).
+        try:
+            from execution.paper_adapter import TwsTradingAdapter
+            from execution.order_executor import OrderExecutor
+            from risk.risk_manager import RiskManager
+
+            risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
+
+            tws_adapter = TwsTradingAdapter(
+                host=host,
+                port=port,
+                environment="live",
+            )
+
+            # Connect and verify readiness (addresses review issue #2).
+            # If TWS is not available, fail clearly rather than allowing the
+            # UI to imply "Actual Live Trading" is ready.
+            adapter_connected = tws_adapter.connect_and_run()
+            if not adapter_connected or not tws_adapter.ready:
+                _audit_mode_event("actual_live_activate_failed", {
+                    "expected_account_id": expected_account_id,
+                    "confirmed_by": confirmed_by,
+                    "reason": "adapter_not_connected",
+                    "host": host,
+                    "port": port,
+                })
+                return jsonify({
+                    "error": (
+                        "TWS adapter could not connect or is not ready. "
+                        "Verify TWS/Gateway is running and accepting connections "
+                        f"on {host}:{port}."
+                    ),
+                    "status": "rejected",
+                    "outcome": "LIVE_ORDER_REJECTED",
+                    "rejection_reason": "adapter not connected/ready",
+                }), 503
+
+            executor = OrderExecutor(
+                tws_adapter=tws_adapter,
+                risk_manager=risk_manager,
+                is_live_mode=True,
+                require_confirmation=False,  # Dashboard confirmation replaces input()
+                dry_run=False,
+                live_trading_enabled=True,
+                live_confirmation=confirmation,
+                expected_account_id=expected_account_id,
+                limit_orders_only=True,
+            )
+        except Exception:
+            logger.exception("Failed to build actual-live OrderExecutor")
+            if tws_adapter is not None:
+                try:
+                    tws_adapter.disconnect_gracefully()
+                except Exception:
+                    pass
+            _audit_mode_event("actual_live_activate_failed", {
+                "expected_account_id": expected_account_id,
+                "confirmed_by": confirmed_by,
+                "reason": "executor_construction_failed",
+            })
+            return jsonify({
+                "error": "Failed to construct actual-live OrderExecutor",
+                "status": "rejected",
+                "outcome": "LIVE_ORDER_REJECTED",
+                "rejection_reason": "executor construction failed",
+            }), 500
+
+        # Build the runner WITH the actual-live executor (addresses review
+        # issue #1: executor available BEFORE runner.run_once()).
+        try:
+            runner = _build_live_runner(
+                live_config, continuous_mode=False, executor_override=executor
+            )
+        except Exception:
+            logger.exception("Failed to build AutonomousLiveRunner for actual-live")
+            tws_adapter.disconnect_gracefully()
+            _audit_mode_event("actual_live_activate_failed", {
+                "expected_account_id": expected_account_id,
+                "confirmed_by": confirmed_by,
+                "reason": "runner_construction_failed",
+            })
+            return jsonify({
+                "error": "Failed to construct live runner",
+                "status": "rejected",
+                "outcome": "LIVE_ORDER_REJECTED",
+                "rejection_reason": "runner construction failed",
+            }), 500
+
+    # --- Step 6: Evaluate gates ---
     gates = runner.evaluate_gates()
     if not gates.ready:
         msg = "; ".join(gates.reasons()) or "Live runner readiness checks failed"
+        if tws_adapter is not None:
+            tws_adapter.disconnect_gracefully()
         _audit_mode_event("actual_live_activate_rejected", {
             "expected_account_id": expected_account_id,
             "confirmed_by": confirmed_by,
@@ -1854,71 +1958,10 @@ def actual_live_activate():
     state = _live_mode_state()
     state.turn_on(cycle, AccountMode.LIVE, dry_run=False)
 
-    # Persist session values
+    # Persist session values (but NOT the executor — it is request-scoped)
     current_app.config["autonomous_live_expected_account_id"] = expected_account_id
     current_app.config["autonomous_live_dry_run"] = False
-
-    # Build and persist LiveTradingConfirmation
-    svc = get_services()
-    connection_info = getattr(svc, "connection_info", None) or {}
-    port = int(connection_info.get("port") or 7496)
-
-    from execution.order_executor import LiveTradingConfirmation
-    confirmation = LiveTradingConfirmation(
-        environment="live",
-        account_id=expected_account_id,
-        port=port,
-        confirmed_by=confirmed_by,
-    )
     current_app.config["autonomous_live_confirmation"] = confirmation
-
-    # Build a properly wired live OrderExecutor with a real TwsTradingAdapter.
-    # The adapter is constructed with environment='live' and the detected port.
-    # require_confirmation=False because the dashboard confirmation flow
-    # replaces terminal input() — this is the documented approach.
-    try:
-        from execution.paper_adapter import TwsTradingAdapter
-        from execution.order_executor import OrderExecutor
-        from risk.risk_manager import RiskManager
-
-        risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
-        host = str(connection_info.get("host") or "127.0.0.1")
-
-        tws_adapter = TwsTradingAdapter(
-            host=host,
-            port=port,
-            environment="live",
-        )
-
-        executor = OrderExecutor(
-            tws_adapter=tws_adapter,
-            risk_manager=risk_manager,
-            is_live_mode=True,
-            require_confirmation=False,  # Dashboard confirmation replaces input()
-            dry_run=False,
-            live_trading_enabled=True,
-            live_confirmation=confirmation,
-            expected_account_id=expected_account_id,
-            limit_orders_only=True,
-        )
-        current_app.config["autonomous_live_order_executor"] = executor
-    except Exception:
-        logger.exception("Failed to build actual-live OrderExecutor")
-        state.turn_off(
-            message="Actual live executor construction failed.",
-            status="Halted",
-        )
-        _audit_mode_event("actual_live_activate_failed", {
-            "expected_account_id": expected_account_id,
-            "confirmed_by": confirmed_by,
-            "reason": "executor_construction_failed",
-        })
-        return jsonify({
-            "error": "Failed to construct actual-live OrderExecutor",
-            "status": "rejected",
-            "outcome": "LIVE_ORDER_REJECTED",
-            "rejection_reason": "executor construction failed",
-        }), 500
 
     # Audit the activation
     _audit_mode_event("actual_live_activate", {
@@ -1933,7 +1976,7 @@ def actual_live_activate():
         "gates": gates.to_dict(),
     })
 
-    # --- Run the single trade cycle ---
+    # --- Step 7: Run the single trade cycle ---
     payload: Dict[str, Any] = {}
     try:
         result = runner.run_once()
@@ -1944,6 +1987,11 @@ def actual_live_activate():
         run_status = payload.get("status", "")
         if run_status == "executed":
             payload["outcome"] = "LIVE_ORDER_SUBMITTED"
+            # Provide a clear submitted_order_id field (addresses review issue #5)
+            trade = payload.get("trade") or {}
+            payload["submitted_order_id"] = (
+                trade.get("entry_order_id") or trade.get("order_id") or None
+            )
         elif run_status == "dry_run_executed":
             # Should not happen on this path, but handle gracefully
             payload["outcome"] = "LIVE_DRY_RUN_PREVIEW_ONLY"
@@ -1952,26 +2000,30 @@ def actual_live_activate():
         else:
             payload["outcome"] = "LIVE_ORDER_REJECTED"
 
-        # If single trade and no trade or rejection, turn off
-        if run_status in ("no_trade", "rejected"):
+        # v1 single-trade actual-live: turn OFF for ALL non-executed outcomes
+        # (addresses review issue #4).  Only "executed" keeps mode ON.
+        if run_status != "executed":
             message = (
                 payload.get("rejection_reason")
-                or "No live trade. Autonomous Mode has been turned OFF."
+                or f"Actual live single-trade ended with status '{run_status}'. "
+                "Autonomous Mode has been turned OFF."
             )
             state.turn_off(message=message, status="Not Ready")
             _audit_mode_event("halt", {
                 "reason": message,
-                "source": "actual_live_single_trade_no_trade",
+                "run_status": run_status,
+                "source": "actual_live_single_trade_non_executed",
             })
 
         # Check market gate
         decision = payload.get("decision") or {}
         if decision.get("status") == "market_not_suitable":
-            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
-            _audit_mode_event("halt", {
-                "reason": BEARISH_SPY_MESSAGE,
-                "source": "actual_live_spy_gate",
-            })
+            if state.is_on:
+                state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+                _audit_mode_event("halt", {
+                    "reason": BEARISH_SPY_MESSAGE,
+                    "source": "actual_live_spy_gate",
+                })
             payload["outcome"] = "NO_TRADE"
 
     except Exception:
@@ -1985,6 +2037,13 @@ def actual_live_activate():
             "source": "actual_live_activate",
         })
         payload = {"outcome": "LIVE_ORDER_REJECTED", "rejection_reason": "lifecycle exception"}
+    finally:
+        # Always disconnect the request-scoped adapter after execution
+        if tws_adapter is not None:
+            try:
+                tws_adapter.disconnect_gracefully()
+            except Exception:
+                pass
 
     return jsonify({
         "status": "activated" if state.is_on else "halted",

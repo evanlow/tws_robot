@@ -89,6 +89,35 @@ The actual-live path constructs:
 The backend does **NOT** use `svc._tws_bridge` as the adapter; it constructs
 a dedicated `TwsTradingAdapter` instance with the correct environment/port.
 
+The adapter's `connect_and_run()` method is called before any order execution.
+If TWS/Gateway is not available or the adapter cannot reach the ready state,
+the endpoint returns HTTP 503 with a clear error message rather than letting
+the UI imply "Actual Live Trading" is ready.
+
+### Request-Scoped Executor
+
+The actual-live executor is **request-scoped** — it is NOT stored globally.
+This prevents dry-run/actual-live bleed-through: a later dry-run activation
+can never accidentally reuse a non-dry-run executor from a previous actual-live
+session.
+
+The adapter is disconnected in a `finally` block after every actual-live request.
+
+### Executor/Runner Construction Order
+
+The actual-live path follows a strict construction order:
+
+1. Validate all confirmation fields
+2. Build `LiveTradingConfirmation`
+3. Build and **connect** `TwsTradingAdapter`
+4. Build `OrderExecutor` with the connected adapter
+5. Build `AutonomousLiveRunner` with the executor already attached
+6. Evaluate gates
+7. Run once
+
+This ensures the runner always has the correct executor at construction time
+(not a stale/default one injected later).
+
 ### No Terminal `input()` Blocking
 
 The `OrderExecutor` is constructed with `require_confirmation=False` for the
@@ -147,3 +176,26 @@ The dashboard shows a clear final outcome from the `outcome` field in the API re
 | `LIVE_ORDER_SUBMITTED` | Actual live order submitted — order ID displayed |
 | `LIVE_ORDER_REJECTED` | Order rejected by a safety gate — reason displayed |
 | `NO_TRADE` | No qualifying candidates found — no action taken |
+
+## v1 Single-Trade Lifecycle
+
+In v1, actual-live mode uses a conservative single-trade lifecycle:
+
+- **Only `executed` keeps mode ON.** After a successful order submission,
+  autonomous live mode remains active for exit management.
+- **ALL other outcomes turn mode OFF.** This includes:
+  - `no_trade` — no qualifying candidates
+  - `rejected` — gate or risk rejection
+  - `engine_rejected` — engine-level rejection
+  - `execution_failed` — order execution failure
+  - `account_id_mismatch` — account verification failure
+  - Any exception during the lifecycle run
+
+This is intentionally conservative: any unexpected status halts the system
+rather than risking uncontrolled re-execution.
+
+## Frontend Order ID Display
+
+The frontend reads the `submitted_order_id` field from the response payload,
+falling back to `trade.entry_order_id` and then `trade.order_id` for backward
+compatibility.
