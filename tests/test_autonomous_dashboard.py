@@ -471,6 +471,29 @@ class TestModeActivationButton:
         assert "continuousSelected" in src
         assert "AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true" in src
 
+    def test_live_mode_state_is_cached_when_live_status_fails(self):
+        """Live status fetch failures must retain last known live mode state."""
+        src = self._js_source()
+        assert "const cachedMode = (state.modePayload && state.modePayload.mode) || {};" in src
+        assert "const liveMode = (liveData && liveData.autonomous_live_mode) || cachedMode;" in src
+
+    def test_halt_attempts_both_endpoints_when_context_is_ambiguous(self):
+        """When mode appears ON but context is blocked, halt must try live then paper."""
+        src = self._js_source()
+        assert "Ambiguous account context while mode is ON; attempting both live and paper halt endpoints." in src
+        assert "for (const endpoint of [ENDPOINTS.live.halt, ENDPOINTS.paper.halt])" in src
+        assert "No halt endpoint accepted the request" in src
+
+    def test_blocked_context_off_path_contract_in_rendered_dashboard(self, client):
+        """Integration-style guard: rendered dashboard + JS must express dual-halt OFF fallback."""
+        html = self._html_source(client)
+        src = self._js_source()
+        assert 'id="btnAutonomousModeToggle"' in html
+        assert "Turn Autonomous Mode OFF" in src
+        assert "ENDPOINTS.live.halt" in src
+        assert "ENDPOINTS.paper.halt" in src
+        assert "attempting both live and paper halt endpoints" in src
+
     def test_mismatch_diagnostic_shown_when_gates_ready_but_blocked(self):
         """When gates.ready is true but the button is still disabled, the JS must
         show a 'UI readiness mismatch' diagnostic rather than an empty reason."""

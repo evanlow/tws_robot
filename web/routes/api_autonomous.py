@@ -1187,11 +1187,10 @@ def _live_runner_config() -> AutonomousLiveRunnerConfig:
     ``current_app.config['autonomous_live_runner_config']``.  The default
     config has ``live_enabled=False`` which the runner enforces.
 
-    When an ``expected_account_id`` was persisted at activation time
-    (stored in ``current_app.config['autonomous_live_expected_account_id']``),
-    it is applied to the returned config so subsequent lifecycle calls
-    use the same account confirmed at activation — even when the config
-    is re-built from env.
+    When activation-time session values are persisted in app config,
+    they are applied to the returned config so subsequent lifecycle
+    calls use the same confirmed account and dry-run intent even when
+    config is re-built from env.
     """
     cfg = current_app.config.get("autonomous_live_runner_config")
     if isinstance(cfg, AutonomousLiveRunnerConfig):
@@ -1201,6 +1200,9 @@ def _live_runner_config() -> AutonomousLiveRunnerConfig:
     persisted_account_id = current_app.config.get("autonomous_live_expected_account_id")
     if persisted_account_id and not cfg.expected_account_id:
         cfg.expected_account_id = persisted_account_id
+    persisted_dry_run = current_app.config.get("autonomous_live_dry_run")
+    if persisted_dry_run is not None:
+        cfg.live_dry_run = bool(persisted_dry_run)
     return cfg
 
 
@@ -1447,6 +1449,7 @@ def _maybe_advance_live_lifecycle() -> None:
         elif cycle == TradingCycle.CONTINUOUS:
             # Start next live cycle.
             live_config = _live_runner_config()
+            live_config.live_dry_run = bool(getattr(state, "dry_run", live_config.live_dry_run))
             try:
                 runner = _build_live_runner(live_config, continuous_mode=True)
                 result = runner.run_once()
@@ -1594,6 +1597,7 @@ def live_activate():
     # from env.
     if expected_account_id:
         current_app.config["autonomous_live_expected_account_id"] = expected_account_id
+    current_app.config["autonomous_live_dry_run"] = bool(live_config.live_dry_run)
 
     # Build and persist a LiveTradingConfirmation for the session so that the
     # OrderExecutor can verify the account/environment on every live order.
@@ -1647,7 +1651,7 @@ def live_activate():
                 "halt",
                 {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate"},
             )
-        elif payload.get("status") == NO_TRADE and cycle == TradingCycle.SINGLE_TRADE:
+        elif payload.get("status") == "no_trade" and cycle == TradingCycle.SINGLE_TRADE:
             message = (
                 payload.get("rejection_reason")
                 or "No live trade. Autonomous Mode has been turned OFF."
@@ -1710,6 +1714,8 @@ def live_run_once():
         }), 409
 
     live_config = _live_runner_config()
+    # Preserve activation-time mode semantics for all subsequent cycles.
+    live_config.live_dry_run = bool(getattr(state, "dry_run", live_config.live_dry_run))
     continuous_mode = (state.trading_cycle == TradingCycle.CONTINUOUS)
     try:
         runner = _build_live_runner(live_config, continuous_mode=continuous_mode)
@@ -1729,6 +1735,9 @@ def live_run_once():
 def live_evaluate_exits():
     """Evaluate open live autonomous trades and advance lifecycle."""
     live_config = _live_runner_config()
+    live_config.live_dry_run = bool(
+        getattr(_live_mode_state(), "dry_run", live_config.live_dry_run)
+    )
     svc = get_services()
     from autonomous.exit_manager import AutonomousExitManager
 

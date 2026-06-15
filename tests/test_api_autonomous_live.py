@@ -484,6 +484,101 @@ class TestActivationPersistence:
             # dry_run=True → no live confirmation persisted
             assert app.config.get("autonomous_live_confirmation") is None
 
+    def test_activate_persists_dry_run_flag_in_app_config(
+        self, app, client, tmp_path
+    ):
+        """Activation should persist dry-run intent for subsequent lifecycle calls."""
+        _install_live_runner(app, tmp_path, dry_run=False)
+        with app.app_context():
+            resp = client.post(
+                "/api/autonomous/live/activate",
+                json={
+                    "confirm": True,
+                    "account_mode": "live",
+                    "trading_cycle": "single_trade",
+                    "expected_account_id": "U1234567",
+                    "dry_run": True,
+                },
+            )
+            assert resp.status_code == 200
+            assert app.config.get("autonomous_live_dry_run") is True
+
+    def test_run_once_uses_persisted_dry_run_when_config_rebuilds(
+        self, app, client, monkeypatch
+    ):
+        """run-once must use activation-time dry-run state even without fixed app config."""
+
+        seen_dry_run: list[bool] = []
+
+        class _ReadyGates:
+            ready = True
+
+            def reasons(self):
+                return []
+
+            def to_dict(self):
+                return {
+                    "ready": True,
+                    "reasons": [],
+                    "live_mode": True,
+                    "live_enabled": True,
+                    "account_id_verified": True,
+                    "signal_provider_ready": True,
+                    "emergency_stop_active": False,
+                    "connected": True,
+                }
+
+        class _Result:
+            status = DRY_RUN_EXECUTED
+            decision = {}
+
+            def to_dict(self):
+                return {"status": DRY_RUN_EXECUTED, "decision": {}}
+
+        class _Runner:
+            def __init__(self, cfg):
+                self._cfg = cfg
+
+            def evaluate_gates(self):
+                return _ReadyGates()
+
+            def run_once(self):
+                seen_dry_run.append(bool(self._cfg.live_dry_run))
+                return _Result()
+
+        def _factory(cfg, continuous_mode=False):
+            return _Runner(cfg)
+
+        app.config["autonomous_live_runner_factory"] = _factory
+        app.config["autonomous_spy_price_provider"] = lambda: {
+            "open": 100.0,
+            "current": 105.0,
+        }
+        app.config.pop("autonomous_live_runner_config", None)
+        app.config.pop("autonomous_live_dry_run", None)
+
+        monkeypatch.setenv("AUTONOMOUS_LIVE_DRY_RUN", "false")
+
+        with app.app_context():
+            activate = client.post(
+                "/api/autonomous/live/activate",
+                json={
+                    "confirm": True,
+                    "account_mode": "live",
+                    "trading_cycle": "single_trade",
+                    "expected_account_id": "U1234567",
+                    "dry_run": True,
+                },
+            )
+            assert activate.status_code == 200
+            assert app.config.get("autonomous_live_dry_run") is True
+
+            run_once = client.post("/api/autonomous/live/run-once", json={})
+            assert run_once.status_code == 200
+
+        # First run is from activation; second is explicit /live/run-once.
+        assert seen_dry_run[:2] == [True, True]
+
 
 # ---------------------------------------------------------------------------
 # Fix #1 (API layer): live evaluate-exits uses an order executor

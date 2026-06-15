@@ -183,7 +183,10 @@
   function normaliseLiveModePayload(modeData, liveData, liveError) {
     const connection = (modeData && modeData.connection) || {};
     const context = accountContextFromConnection(connection);
-    const liveMode = (liveData && liveData.autonomous_live_mode) || {};
+    // Keep the last known live mode state when /live/status is unavailable
+    // so operators can still turn mode OFF during transient API failures.
+    const cachedMode = (state.modePayload && state.modePayload.mode) || {};
+    const liveMode = (liveData && liveData.autonomous_live_mode) || cachedMode;
     const liveGates = (liveData && liveData.gates) || {};
     const continuousSelected = selectedTradingCycle() === 'continuous';
     const reasons = liveError
@@ -970,11 +973,36 @@
     logActivity('info', 'Operator requested Autonomous Mode OFF');
     setFeedback('Turning Autonomous Mode OFF…');
     try {
-      const endpointMap = ENDPOINTS[state.accountMode] || ENDPOINTS.paper;
-      const endpoint = currentEndpoint('halt') || endpointMap.halt;
-      await postJson(endpoint, {
+      const payload = {
         reason: 'Operator turned Autonomous Mode OFF from dashboard',
-      });
+      };
+      if (state.accountMode === 'live') {
+        await postJson(ENDPOINTS.live.halt, payload);
+      } else if (state.accountMode === 'paper') {
+        await postJson(ENDPOINTS.paper.halt, payload);
+      } else if (state.autonomousModeOn) {
+        // Safety-first: if mode appears ON but account context is blocked,
+        // attempt both halt endpoints so we do not leave live mode running.
+        logActivity(
+          'warning',
+          'Ambiguous account context while mode is ON; attempting both live and paper halt endpoints.'
+        );
+        const errors = [];
+        let halted = false;
+        for (const endpoint of [ENDPOINTS.live.halt, ENDPOINTS.paper.halt]) {
+          try {
+            await postJson(endpoint, payload);
+            halted = true;
+          } catch (err) {
+            errors.push((err && err.message) || String(err));
+          }
+        }
+        if (!halted) {
+          throw new Error(errors.join(' | ') || 'No halt endpoint accepted the request');
+        }
+      } else {
+        await postJson(ENDPOINTS.paper.halt, payload);
+      }
       logActivity('success', 'Autonomous Mode turned OFF. Filled positions were not liquidated.');
       setFeedback('Autonomous Mode is OFF.', 'success');
       refreshStatus();

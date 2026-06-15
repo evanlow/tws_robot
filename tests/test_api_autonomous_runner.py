@@ -327,6 +327,47 @@ class TestAutonomousMode:
         assert body["autonomous_mode"]["mode"]["operating_state"] == "OFF"
         assert store.get("open1").status == OPEN
 
+    def test_dual_halt_sequence_is_safe_under_ambiguous_context(
+        self, app, client, tmp_path
+    ):
+        """Live then paper halt sequence must be safe and idempotent.
+
+        This mirrors the dashboard's ambiguous-context OFF fallback path,
+        where JS attempts both /live/halt and /mode/halt to avoid leaving
+        live mode running when account context is temporarily blocked.
+        """
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            TradingCycle,
+        )
+
+        _install_runner(app, tmp_path)
+
+        # Seed both mode states as ON to emulate an ambiguous UI context.
+        paper_state = AutonomousModeState()
+        paper_state.turn_on(TradingCycle.SINGLE_TRADE)
+        live_state = AutonomousModeState()
+        live_state.turn_on(TradingCycle.CONTINUOUS, AccountMode.LIVE)
+        app.config["autonomous_mode_state"] = paper_state
+        app.config["autonomous_live_mode_state"] = live_state
+
+        live_resp = client.post("/api/autonomous/live/halt", json={"reason": "test-ambiguous"})
+        assert live_resp.status_code == 200
+        live_body = live_resp.get_json()
+        assert live_body["status"] == "halted"
+        assert live_body["autonomous_live_mode"]["operating_state"] == "OFF"
+
+        paper_resp = client.post("/api/autonomous/mode/halt", json={"reason": "test-ambiguous"})
+        assert paper_resp.status_code == 200
+        paper_body = paper_resp.get_json()
+        assert paper_body["status"] == "halted"
+        assert paper_body["autonomous_mode"]["mode"]["operating_state"] == "OFF"
+
+        # Both states must be OFF after the fallback sequence.
+        assert app.config["autonomous_live_mode_state"].is_on is False
+        assert app.config["autonomous_mode_state"].is_on is False
+
     def test_status_poll_forces_off_when_runner_disabled_after_activation(
         self, app, client, tmp_path
     ):
