@@ -946,7 +946,7 @@ class TestActualLiveAdapterConnection:
         assert resp.status_code == 503
         body = resp.get_json()
         assert body["outcome"] == "LIVE_ORDER_REJECTED"
-        assert "not ready" in body["rejection_reason"] or "not connected" in body["rejection_reason"]
+        assert body["rejection_reason"] == "adapter not connected/ready"
 
 
 class TestDryRunBleedThroughPrevention:

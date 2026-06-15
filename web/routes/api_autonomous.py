@@ -2005,8 +2005,7 @@ def actual_live_activate():
         if run_status != "executed":
             message = (
                 payload.get("rejection_reason")
-                or f"Actual live single-trade ended with status '{run_status}'. "
-                "Autonomous Mode has been turned OFF."
+                or f"Actual live single-trade ended with status '{run_status}'. Autonomous Mode has been turned OFF."
             )
             state.turn_off(message=message, status="Not Ready")
             _audit_mode_event("halt", {
