@@ -266,9 +266,21 @@
         chipClass = 'mode-chip-blocked';
         descText = 'Emergency stop is active. Autonomous mode cannot be activated.';
       } else if (state.autonomousModeOn) {
-        modeChip.textContent = (accountContext.label || 'Autonomous').toUpperCase() + ' AUTONOMOUS ON';
-        chipClass = 'mode-chip-on';
-        descText = 'Autonomous lifecycle is active.';
+        const modeLabel = accountContext.label || 'Autonomous';
+        const dryRunActive = (modeState.dry_run === true);
+        if (accountContext.mode === 'live' && !dryRunActive) {
+          modeChip.textContent = 'LIVE SINGLE AUTONOMOUS ON';
+          chipClass = 'mode-chip-on';
+          descText = 'Actual live trading is active — real orders may be submitted.';
+        } else if (accountContext.mode === 'live' && dryRunActive) {
+          modeChip.textContent = 'LIVE DRY-RUN ON';
+          chipClass = 'mode-chip-on';
+          descText = 'Live dry-run is active — no real orders are submitted.';
+        } else {
+          modeChip.textContent = modeLabel.toUpperCase() + ' AUTONOMOUS ON';
+          chipClass = 'mode-chip-on';
+          descText = 'Paper autonomous lifecycle is active.';
+        }
       } else if (readiness.status === 'Not Ready') {
         modeChip.textContent = 'AUTONOMOUS OFF';
         chipClass = 'mode-chip-not-ready';
@@ -356,17 +368,26 @@
     }
 
     const modeBtn = $('btnAutonomousModeToggle');
+    const actualLiveBtn = $('btnActualLiveTrading');
     const modeGateReasons = $('modeGateReasons');
     if (modeBtn) {
       modeBtn.textContent = state.autonomousModeOn
         ? 'Turn Autonomous Mode OFF'
-        : 'Activate Autonomous Mode';
+        : (accountContext.mode === 'live' ? 'Activate Live Dry-Run' : 'Activate Autonomous Mode');
       const ready = readiness.status === 'Ready' && matchStatus === 'Verified' && !halted;
       modeBtn.disabled = !state.autonomousModeOn && !ready;
       modeBtn.title = state.autonomousModeOn
         ? 'Halt autonomous trading. Filled positions are not liquidated.'
         : (ready ? 'Turn Autonomous Mode ON.' :
           'Disabled: ' + ((gates.reasons || []).join('; ') || readiness.message || 'not ready'));
+
+      // Show or hide the Actual Live Trading button (only for live, single_trade, ready)
+      if (actualLiveBtn) {
+        const showActualLive = accountContext.mode === 'live' && !state.autonomousModeOn && ready
+          && selectedTradingCycle() === 'single_trade';
+        actualLiveBtn.style.display = showActualLive ? '' : 'none';
+        actualLiveBtn.disabled = !showActualLive;
+      }
 
       // Show gate reasons visibly in the panel when the button is disabled.
       if (modeGateReasons) {
@@ -1328,6 +1349,110 @@
     }
   }
 
+  /* ----------------------- Actual Live Trading modal ----------------------- */
+
+  function openActualLiveConfirm() {
+    logActivity('info', 'Operator clicked Actual Live Trading');
+    const overlay = $('actualLiveConfirmOverlay');
+    const detectedEl = $('actualLiveDetectedId');
+    const conn = (state.modePayload && state.modePayload.connection) || {};
+    const accountId = conn.running_account_id || state.liveAccountId || '';
+    if (detectedEl) detectedEl.textContent = accountId || 'unavailable';
+    // Clear inputs
+    const acctInput = $('actualLiveAccountId');
+    const operatorInput = $('actualLiveOperator');
+    const phraseInput = $('actualLivePhrase');
+    const riskAck = $('actualLiveRiskAck');
+    if (acctInput) acctInput.value = '';
+    if (operatorInput) operatorInput.value = '';
+    if (phraseInput) phraseInput.value = '';
+    if (riskAck) riskAck.checked = false;
+    overlay.style.display = 'flex';
+  }
+
+  function hideActualLiveConfirm() {
+    $('actualLiveConfirmOverlay').style.display = 'none';
+  }
+
+  function cancelActualLiveConfirm() {
+    logActivity('info', 'Actual Live Trading modal cancelled by operator');
+    hideActualLiveConfirm();
+  }
+
+  async function confirmActualLiveActivation() {
+    const conn = (state.modePayload && state.modePayload.connection) || {};
+    const detectedAccountId = (conn.running_account_id || state.liveAccountId || '').trim();
+    const typedAccountId = ($('actualLiveAccountId') || {}).value || '';
+    const operator = ($('actualLiveOperator') || {}).value || '';
+    const phrase = ($('actualLivePhrase') || {}).value || '';
+    const riskAck = ($('actualLiveRiskAck') || {}).checked;
+
+    // Client-side pre-validation
+    if (!typedAccountId.trim() || typedAccountId.trim().toUpperCase() !== detectedAccountId.toUpperCase()) {
+      setFeedback('Account ID does not match detected account.', 'error');
+      logActivity('error', 'Actual Live: account ID mismatch');
+      return;
+    }
+    if (!operator.trim()) {
+      setFeedback('Operator identifier is required.', 'error');
+      logActivity('error', 'Actual Live: operator identifier missing');
+      return;
+    }
+    if (phrase.trim() !== 'ENABLE ACTUAL LIVE TRADING') {
+      setFeedback('Confirmation phrase does not match.', 'error');
+      logActivity('error', 'Actual Live: confirmation phrase mismatch');
+      return;
+    }
+    if (!riskAck) {
+      setFeedback('You must acknowledge real money risk.', 'error');
+      logActivity('error', 'Actual Live: risk acknowledgement not checked');
+      return;
+    }
+
+    hideActualLiveConfirm();
+    logActivity('warning', 'Actual Live Trading confirmed — submitting to backend');
+    setFeedback('Activating Actual Live Trading…');
+
+    try {
+      const requestBody = {
+        confirm: true,
+        account_mode: 'live',
+        trading_cycle: 'single_trade',
+        expected_account_id: typedAccountId.trim(),
+        confirmed_by: operator.trim(),
+        confirmation_phrase: phrase.trim(),
+        acknowledge_real_money_risk: true,
+      };
+      const body = await postJson('/api/autonomous/live/actual-live/activate', requestBody);
+      const outcome = (body.run && body.run.outcome) || body.outcome || 'unknown';
+      const decision = body.run && body.run.decision;
+      if (decision) renderProposal(decision);
+
+      if (outcome === 'LIVE_ORDER_SUBMITTED') {
+        const orderId = (body.run && body.run.trade && body.run.trade.order_id) || '';
+        logActivity('success', 'LIVE ORDER SUBMITTED — Order ID: ' + orderId);
+        setFeedback('LIVE ORDER SUBMITTED — Order ID: ' + orderId, 'success');
+      } else if (outcome === 'NO_TRADE') {
+        const reason = (body.run && body.run.rejection_reason) || 'no qualifying candidates';
+        logActivity('info', 'NO TRADE: ' + reason);
+        setFeedback('NO TRADE: ' + reason, 'info');
+      } else if (outcome === 'LIVE_ORDER_REJECTED') {
+        const reason = (body.run && body.run.rejection_reason) || body.error || 'unknown';
+        logActivity('error', 'LIVE ORDER REJECTED: ' + reason);
+        setFeedback('LIVE ORDER REJECTED: ' + reason, 'error');
+      } else {
+        logActivity('warning', 'Actual Live result: ' + outcome);
+        setFeedback('Actual Live result: ' + outcome, 'warning');
+      }
+      refreshStatus();
+      refreshAudit();
+    } catch (err) {
+      const errMsg = (err && err.message) || String(err);
+      logActivity('error', 'Actual Live Trading activation failed: ' + errMsg);
+      setFeedback('Actual Live Trading activation failed: ' + errMsg, 'error');
+    }
+  }
+
   /* ------------------------- wire up ------------------------- */
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -1339,6 +1464,9 @@
     $('btnEmergencyStop').addEventListener('click', triggerEmergencyStop);
     $('paperConfirmCancel').addEventListener('click', cancelPaperConfirm);
     $('paperConfirmGo').addEventListener('click', confirmAutonomousActivation);
+    $('btnActualLiveTrading').addEventListener('click', openActualLiveConfirm);
+    $('actualLiveCancel').addEventListener('click', cancelActualLiveConfirm);
+    $('actualLiveGo').addEventListener('click', confirmActualLiveActivation);
 
     const btnRunRobot = $('btnRunPaperRobot');
     if (btnRunRobot) btnRunRobot.addEventListener('click', runAutonomousCycleOnce);

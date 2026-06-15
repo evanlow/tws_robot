@@ -65,6 +65,11 @@
       <button class="btn-primary" id="btnAutonomousModeToggle" type="button" disabled>
         Activate Autonomous Mode
       </button>
+      <button class="btn-emergency" id="btnActualLiveTrading" type="button" disabled
+              style="display:none;"
+              title="Submit actual live orders to TWS — real money at risk.">
+        🚨 Actual Live Trading
+      </button>
       <p class="mode-gate-reasons" id="modeGateReasons" hidden></p>
     </div>
     <p class="provider-warning" id="providerWarning" style="display:none;"></p>
@@ -320,6 +325,54 @@
     <div class="modal-actions">
       <button class="btn-secondary" id="paperConfirmCancel" type="button">Cancel</button>
       <button class="btn-primary" id="paperConfirmGo" type="button">Turn ON</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     Actual Live Trading activation confirmation modal
+     ============================================================ -->
+<div id="actualLiveConfirmOverlay" class="modal-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="actualLiveConfirmTitle" style="display:none;">
+  <div class="modal-card actual-live-modal">
+    <h3 id="actualLiveConfirmTitle">⚠️ Actual Live Trading — REAL MONEY AT RISK ⚠️</h3>
+    <p class="actual-live-warning">
+      This will submit <strong>real orders to TWS</strong>. Money is at risk.
+      This is NOT a dry-run. Review all fields carefully.
+    </p>
+    <div class="actual-live-fields">
+      <label for="actualLiveAccountId">
+        Type detected live account ID exactly:
+        <strong id="actualLiveDetectedId">unavailable</strong>
+      </label>
+      <input id="actualLiveAccountId" name="actualLiveAccountId"
+             type="text" autocomplete="off" spellcheck="false"
+             placeholder="e.g. U1234567" />
+
+      <label for="actualLiveOperator">Operator identifier (your name):</label>
+      <input id="actualLiveOperator" name="actualLiveOperator"
+             type="text" autocomplete="off" spellcheck="false"
+             placeholder="e.g. John Doe" />
+
+      <label for="actualLivePhrase">
+        Type confirmation phrase exactly:
+        <code>ENABLE ACTUAL LIVE TRADING</code>
+      </label>
+      <input id="actualLivePhrase" name="actualLivePhrase"
+             type="text" autocomplete="off" spellcheck="false"
+             placeholder="ENABLE ACTUAL LIVE TRADING" />
+
+      <label class="actual-live-checkbox-label">
+        <input id="actualLiveRiskAck" type="checkbox" />
+        I acknowledge that real money is at risk and this will submit actual orders to TWS.
+      </label>
+    </div>
+    <div id="actualLivePlan" class="proposal-card"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="actualLiveCancel" type="button">Cancel</button>
+      <button class="btn-emergency" id="actualLiveGo" type="button">
+        🚨 Submit Actual Live Trade
+      </button>
     </div>
   </div>
 </div>
