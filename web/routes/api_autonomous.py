@@ -1285,15 +1285,12 @@ def _build_live_runner(
     """Construct an :class:`AutonomousLiveRunner` wired to the live app.
 
     The runner uses the supplied ``executor_override`` if given, otherwise
-    falls back to the test factory or builds a default dry-run-safe executor.
+    falls back to the test factory or builds a default executor whose
+    ``dry_run`` flag mirrors ``live_config.live_dry_run``.
 
     The ``executor_override`` parameter is the preferred way to inject
     a request-scoped executor for actual-live mode, ensuring the runner
     always uses the intended executor rather than a stale/global one.
-
-    For the dry-run path (``live_config.live_dry_run=True``), no global
-    executor lookup is performed — a fresh dry-run executor is always built
-    to prevent bleed-through from a previous actual-live activation.
     """
     override = current_app.config.get("autonomous_live_runner_factory")
     if callable(override):
@@ -1347,13 +1344,13 @@ def _build_live_runner(
             from risk.risk_manager import RiskManager
             risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
 
-            # Dry-run path: always build with tws_adapter=None and dry_run=True
-            # to guarantee no real orders can be submitted.
+            # Build with tws_adapter=None; dry_run follows live_config so the
+            # executor and runner stay in sync (prevents fail-closed mislabelling).
             executor = OrderExecutor(
                 tws_adapter=None,
                 risk_manager=risk_manager,
                 is_live_mode=True,
-                dry_run=True,  # Always dry-run when no explicit executor supplied
+                dry_run=live_config.live_dry_run,
                 live_trading_enabled=live_config.live_enabled,
                 live_confirmation=None,
                 expected_account_id=live_config.expected_account_id,
@@ -1868,17 +1865,26 @@ def actual_live_activate():
             }), 400
 
         detected_account = connection_info.get("account") or ""
-        if detected_account and expected_account_id:
-            if detected_account.lower() != expected_account_id.lower():
-                return jsonify({
-                    "error": (
-                        f"Detected account '{detected_account}' does not match "
-                        f"expected account '{expected_account_id}'."
-                    ),
-                    "status": "rejected",
-                    "outcome": "LIVE_ORDER_REJECTED",
-                    "rejection_reason": "account_id_mismatch_pre_adapter",
-                }), 400
+        if not detected_account:
+            return jsonify({
+                "error": (
+                    "Detected account ID is not available. "
+                    "Cannot verify account identity before building adapter."
+                ),
+                "status": "rejected",
+                "outcome": "LIVE_ORDER_REJECTED",
+                "rejection_reason": "detected_account_id_missing",
+            }), 400
+        if detected_account.lower() != expected_account_id.lower():
+            return jsonify({
+                "error": (
+                    f"Detected account '{detected_account}' does not match "
+                    f"expected account '{expected_account_id}'."
+                ),
+                "status": "rejected",
+                "outcome": "LIVE_ORDER_REJECTED",
+                "rejection_reason": "account_id_mismatch_pre_adapter",
+            }), 400
 
         try:
             from execution.paper_adapter import TwsTradingAdapter

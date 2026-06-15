@@ -959,6 +959,26 @@ class TestActualLiveAdapterConnection:
         assert body["outcome"] == "LIVE_ORDER_REJECTED"
         assert body["rejection_reason"] == "adapter not connected/ready"
 
+    def test_returns_400_when_detected_account_missing(self, app, client, tmp_path, monkeypatch):
+        """When the service is connected/live but the detected account ID has not
+        been populated yet, the endpoint must reject before building an adapter."""
+        app.config["autonomous_spy_price_provider"] = lambda: {"open": 100.0, "current": 105.0}
+        monkeypatch.setattr("web.services.ServiceManager.connected", True)
+        monkeypatch.setattr("web.services.ServiceManager.connection_env", "live")
+        # account is empty — not yet populated
+        monkeypatch.setattr(
+            "web.services.ServiceManager.connection_info",
+            {"account": "", "port": 7496, "host": "127.0.0.1"},
+        )
+
+        resp = client.post(
+            "/api/autonomous/live/actual-live/activate", json=self.VALID_PAYLOAD
+        )
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "LIVE_ORDER_REJECTED"
+        assert body["rejection_reason"] == "detected_account_id_missing"
+
 
 class TestDryRunBleedThroughPrevention:
     """Regression tests ensuring dry-run cannot reuse an actual-live executor."""
@@ -977,7 +997,8 @@ class TestDryRunBleedThroughPrevention:
         self, app, client, tmp_path
     ):
         """After an actual-live activation, the _build_live_runner default path
-        still builds a dry-run executor (no bleed-through)."""
+        builds a fresh executor (no bleed-through from the actual-live executor).
+        The executor's dry_run flag follows live_config.live_dry_run."""
         # Step 1: Perform an actual-live activation
         store, executor = _install_live_runner(app, tmp_path)
         resp = client.post(
@@ -988,33 +1009,46 @@ class TestDryRunBleedThroughPrevention:
         assert body["run"]["outcome"] == "LIVE_ORDER_SUBMITTED"
 
         # Step 2: Verify the default _build_live_runner path (no executor_override)
-        # builds a dry-run executor even after actual-live was used.
+        # builds a fresh executor whose dry_run follows live_config.live_dry_run.
         from web.routes.api_autonomous import _build_live_runner
 
         with app.app_context():
             # Remove the factory to exercise the real default path
             saved_factory = app.config.pop("autonomous_live_runner_factory", None)
             try:
-                live_config = AutonomousLiveRunnerConfig(
+                # With live_dry_run=True the executor must be dry-run.
+                live_config_dry = AutonomousLiveRunnerConfig(
                     live_enabled=True,
                     live_continuous_enabled=True,
                     expected_account_id="U1234567",
-                    live_dry_run=False,  # Even with live_dry_run=False...
+                    live_dry_run=True,
                     trade_store_path=str(tmp_path / "t.jsonl"),
                 )
-                runner = _build_live_runner(live_config, continuous_mode=False)
-                # The default executor MUST be dry-run (no bleed-through)
-                assert runner.order_executor is not None
-                assert runner.order_executor.dry_run is True
+                runner_dry = _build_live_runner(live_config_dry, continuous_mode=False)
+                assert runner_dry.order_executor is not None
+                assert runner_dry.order_executor.dry_run is True
+
+                # With live_dry_run=False the executor must NOT be dry-run,
+                # keeping runner config and executor in sync.
+                live_config_live = AutonomousLiveRunnerConfig(
+                    live_enabled=True,
+                    live_continuous_enabled=True,
+                    expected_account_id="U1234567",
+                    live_dry_run=False,
+                    trade_store_path=str(tmp_path / "t2.jsonl"),
+                )
+                runner_live = _build_live_runner(live_config_live, continuous_mode=False)
+                assert runner_live.order_executor is not None
+                assert runner_live.order_executor.dry_run is False
             finally:
                 if saved_factory:
                     app.config["autonomous_live_runner_factory"] = saved_factory
 
-    def test_build_live_runner_default_executor_is_always_dry_run(
+    def test_build_live_runner_default_executor_follows_live_dry_run(
         self, app, client, tmp_path
     ):
-        """_build_live_runner without executor_override always builds a
-        dry-run-safe executor (dry_run=True, tws_adapter=None)."""
+        """_build_live_runner without executor_override builds an executor whose
+        dry_run flag mirrors live_config.live_dry_run (tws_adapter is always None)."""
         from web.routes.api_autonomous import _build_live_runner
         from autonomous.runner_config import AutonomousLiveRunnerConfig
 
@@ -1023,17 +1057,29 @@ class TestDryRunBleedThroughPrevention:
         app.config.pop("autonomous_live_runner_factory", None)
 
         with app.app_context():
-            live_config = AutonomousLiveRunnerConfig(
+            # dry_run=True when live_dry_run=True
+            live_config_dry = AutonomousLiveRunnerConfig(
                 live_enabled=True,
                 live_continuous_enabled=True,
                 expected_account_id="U1234567",
-                live_dry_run=False,  # Even with dry_run=False in config...
+                live_dry_run=True,
                 trade_store_path=str(tmp_path / "t.jsonl"),
             )
-            runner = _build_live_runner(live_config, continuous_mode=False)
-            # The default executor must be dry-run safe
-            assert runner.order_executor is not None
-            assert runner.order_executor.dry_run is True
+            runner_dry = _build_live_runner(live_config_dry, continuous_mode=False)
+            assert runner_dry.order_executor is not None
+            assert runner_dry.order_executor.dry_run is True
+
+            # dry_run=False when live_dry_run=False
+            live_config_live = AutonomousLiveRunnerConfig(
+                live_enabled=True,
+                live_continuous_enabled=True,
+                expected_account_id="U1234567",
+                live_dry_run=False,
+                trade_store_path=str(tmp_path / "t2.jsonl"),
+            )
+            runner_live = _build_live_runner(live_config_live, continuous_mode=False)
+            assert runner_live.order_executor is not None
+            assert runner_live.order_executor.dry_run is False
 
 
 class TestActualLiveAllStatusesTurnOff:
