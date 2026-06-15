@@ -811,8 +811,8 @@ Every autonomous cycle follows the same five-stage pipeline:
 │  Scanner  │  Ranker  │ Planner  │   Engine    │    Adapter     │
 │           │          │          │  (Gating)   │  (Execution)   │
 │  S&P 500  │ Hard     │ BUY_     │ Cash check  │ Paper adapter  │
-│  universe │ filters  │ SHARES   │ Risk check  │ Live adapter   │
-│  +        │ Scoring  │   or     │ Daily limit │   (future)     │
+│  universe │ filters  │ SHARES   │ Risk check  │ Live runner    │
+│  +        │ Scoring  │   or     │ Daily limit │  (gated/dry)   │
 │  Signal   │ Ranking  │ SHORT_   │ Emergency   │                │
 │  provider │          │ PUT      │   stop gate │                │
 └──────────┴──────────┴──────────┴─────────────┴────────────────┘
@@ -824,23 +824,23 @@ Every autonomous cycle follows the same five-stage pipeline:
 | **Ranker** | Applies hard filters (signal strength, label, volume, trend, earnings proximity, concentration limits). Surviving candidates are scored and sorted — `strength_score` dominates, and support/resistance bonuses apply only when those fields are present. With the current `TechnicalAnalysisSignalProvider`, those fields are `null`, so ranking effectively falls back to strength score. |
 | **Planner** | Given the top-ranked candidate plus your deployable cash, decides between `BUY_SHARES` (limit order for shares) and `SELL_CASH_SECURED_PUT` (cash-secured put, if option chain data is available and strike is at-or-below support). Produces a `TradePlan` with exact quantities, limit price, target, and stop. |
 | **Engine** | Validates the `TradePlan` against safety gates: emergency stop, daily trade limit, account equity checks, and the optional `RiskManager`. Returns a structured `AutonomousDecision` (approved or rejected with reasons). |
-| **Adapter** | In `PAPER_EXECUTE` mode, sends the order to the paper account via `AutonomousPaperAdapter`. In `RECOMMEND_ONLY` mode, the adapter is never called — the decision is returned as a recommendation only. |
+| **Adapter** | In `PAPER_EXECUTE` mode, sends the order to the paper account via `AutonomousPaperAdapter`. In live autonomous mode, orders route through the live runner and `OrderExecutor` gates. In `RECOMMEND_ONLY` mode, the adapter is never called — the decision is returned as a recommendation only. |
 
-The **ExitManager** runs as a separate pass over open autonomous trades. It checks each open position against take-profit, stop-loss, maximum holding duration, and the emergency stop, and submits a paper SELL order when exit conditions are met.
+The **ExitManager** runs as a separate pass over open autonomous trades. It checks each open position against take-profit, stop-loss, maximum holding duration, and the emergency stop, then routes the exit through the active Paper or Live autonomous path.
 
 ---
 
 ### 11.3 Operating Modes
 
-The autonomous engine has three operating modes. The dashboard shows the currently configured mode, but it does not persist mode changes at runtime. Over HTTP, `scan`/`propose` always run in `recommend_only`, `execute-paper`/`runner/*` are paper-only paths, and `assisted_live` is intentionally only reachable by calling the engine directly in code.
+The autonomous engine has three operating modes. The dashboard detects the connected TWS account type and routes the same Autonomous Trading page to Paper or Live runner endpoints automatically. Over HTTP, `scan`/`propose` always run in `recommend_only`; Paper lifecycle calls use `/api/autonomous/mode/*` and `/api/autonomous/runner/*`; Live lifecycle calls use `/api/autonomous/live/*` and require live gates, account ID confirmation, and feature flags.
 
 | Mode | What the Engine Does | Orders Placed? |
 |------|---------------------|---------------|
 | `recommend_only` | Runs the full pipeline and returns a `TradePlan`, but never calls the execution adapter. Safe to run at any time. | ❌ Never |
 | `paper_execute` | Runs the full pipeline **and** sends limit orders to your IBKR paper account via `AutonomousPaperAdapter`. Requires an active paper connection. | ✅ Paper only |
-| `assisted_live` | May submit to your live account, **but only** when `allow_live_execution = True` is set in config **and** your code calls `engine.run_once(confirm=True)`. This mode is not exposed as an HTTP endpoint. | ✅ Live (opt-in) |
+| `assisted_live` | May submit through the live autonomous runner, **but only** when live feature flags, account confirmation, emergency stop, signal provider, deployable cash, and `OrderExecutor` gates pass. The dashboard sends live activation as dry-run by default. | ✅ Live (gated opt-in) |
 
-**Start with `recommend_only`.** Review several cycles of recommendations before ever enabling paper execution. Paper trade for at least 30 days before considering `assisted_live`.
+**Start with `recommend_only`.** Review several cycles of recommendations before ever enabling paper execution. Paper trade for at least 30 days before considering live dry-run, and keep real-money live activation behind explicit feature flags and account confirmation.
 
 ---
 
@@ -852,10 +852,14 @@ Multiple independent layers protect against unintended trading. All of them must
 Layer 1 — Emergency stop file
   └─ If EMERGENCY_STOP file exists on disk → halt immediately, no orders
 
-Layer 2 — Runner gates (paper runner only)
-  ├─ runner_enabled must be True
-  ├─ Must be connected to IBKR paper account (not live)
-  ├─ Paper adapter must report ready
+Layer 2 — Runner gates (active account context)
+  ├─ Paper: runner_enabled must be True
+  ├─ Paper: must be connected to IBKR paper account
+  ├─ Paper: paper adapter must report ready
+  ├─ Live: must be connected to verified live account
+  ├─ Live: live autonomous feature flags must be enabled
+  ├─ Live: expected account ID must match the detected account
+  ├─ Live: deployable cash and live trade limits must pass
   ├─ Signal provider must be ready
   ├─ open_autonomous_trades < max_open_autonomous_trades
   └─ daily_trade_count < max_trades_per_day
@@ -869,7 +873,7 @@ Layer 3 — Engine validation
 Layer 4 — Mode gate
   ├─ RECOMMEND_ONLY → never executes
   ├─ PAPER_EXECUTE  → paper adapter only, never live
-  └─ ASSISTED_LIVE  → requires allow_live_execution=True AND confirm=True
+  └─ ASSISTED_LIVE  → live runner + account confirmation + limit-order gates
 ```
 
 **Emergency Stop** is always available:
@@ -1368,7 +1372,23 @@ Manually triggers the exit manager to evaluate all open trades. Returns a list o
 
 #### `GET /api/autonomous/runner/status`
 
-Returns the runner's readiness gates snapshot — useful for programmatic health checks.
+Returns the Paper runner's readiness gates snapshot — useful for programmatic health checks.
+
+#### Live autonomous endpoints
+
+The unified dashboard uses these endpoints automatically when the detected,
+verified TWS account type is Live:
+
+- `GET /api/autonomous/live/status`
+- `POST /api/autonomous/live/activate`
+- `POST /api/autonomous/live/halt`
+- `POST /api/autonomous/live/run-once`
+- `POST /api/autonomous/live/evaluate-exits`
+- `GET /api/autonomous/live/trades`
+
+Live activation requires `confirm: true`, `account_mode: "live"`,
+`expected_account_id`, `confirmed_by`, `trading_cycle`, and the live runner
+readiness gates. The dashboard sends `dry_run: true` by default.
 
 #### Allowed Top-Level Request Override Fields
 
@@ -1530,6 +1550,12 @@ This means either:
 
 1. You are not connected to the IBKR paper account (check that TWS is in Paper mode on port `7497`).
 2. TWS Robot is connected but the paper adapter failed to initialise — check the web server logs for a Python traceback.
+
+If the detected account is Live, the Autonomous Trading dashboard should show
+Live readiness gates instead of Paper adapter messages. If you still see a
+Paper-only message while connected to a Live account, refresh status and verify
+that the connection panel reports `running_account_type: live` and
+`paper_live_match_status: Verified`.
 
 #### "Trade stuck in `EXIT_PENDING` for a long time"
 

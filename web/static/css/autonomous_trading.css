@@ -415,6 +415,42 @@
   margin: 0 0 0.75rem;
 }
 
+.live-confirm-fields {
+  background: #2a1f14;
+  border: 1px solid #b7791f;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.live-confirm-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: #fbd38d;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.live-confirm-fields input {
+  margin-top: 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  background: #0f1929;
+  border: 1px solid #4a5568;
+  border-radius: 4px;
+  color: #e2e8f0;
+  padding: 0.55rem 0.65rem;
+  font-family: monospace;
+}
+
+.live-confirm-fields p {
+  margin: 0.55rem 0 0;
+  color: #fefcbf;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

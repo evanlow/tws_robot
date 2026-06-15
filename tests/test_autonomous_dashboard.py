@@ -64,9 +64,12 @@ class TestPage:
         ):
             assert needle in body, f"missing section: {needle!r}"
 
-    def test_dashboard_does_not_expose_live_button(self, client):
+    def test_dashboard_uses_unified_live_aware_controls(self, client):
         body = client.get("/autonomous-trading/").get_data(as_text=True)
-        # No live-execution control must be rendered.
+        assert "detected Paper or Live TWS account context" in body
+        assert 'id="liveConfirmFields"' in body
+        assert 'id="liveExpectedAccountId"' in body
+        # Legacy unrestricted live execution endpoint must not be exposed.
         assert "execute-live" not in body.lower()
         assert "execute live" not in body.lower()
 
@@ -274,7 +277,9 @@ class TestStatusBadges:
             "TWS connection status",
             "Selected connection type",
             "Verified running TWS session/account type",
+            "Detected account ID",
             "Paper/Live match status",
+            "Dashboard account context",
             "Latest autonomous readiness status",
             "Last status refresh timestamp",
         ):
@@ -402,10 +407,13 @@ class TestModeActivationButton:
 
     def test_refresh_status_fetches_mode_status_directly(self):
         """refreshStatus() must fetch /api/autonomous/mode/status directly so the
-        mode panel always reads from the correct source of truth."""
+        dashboard can read Paper/Live verification before choosing a runner."""
         src = self._js_source()
         assert "/api/autonomous/mode/status" in src, (
             "refreshStatus() must call /api/autonomous/mode/status directly"
+        )
+        assert "/api/autonomous/live/status" in src, (
+            "refreshStatus() must call /api/autonomous/live/status for live accounts"
         )
 
     def test_render_status_uses_mode_payload_parameter(self):
@@ -432,6 +440,36 @@ class TestModeActivationButton:
         assert "gates.reasons" in src, (
             "gate reasons text must be derived from the gates.reasons array"
         )
+
+    def test_live_account_context_routes_to_live_endpoints(self):
+        """The dashboard must map detected live accounts to /api/autonomous/live/*."""
+        src = self._js_source()
+        for endpoint in (
+            "/api/autonomous/live/activate",
+            "/api/autonomous/live/halt",
+            "/api/autonomous/live/run-once",
+            "/api/autonomous/live/evaluate-exits",
+            "/api/autonomous/live/trades",
+        ):
+            assert endpoint in src
+        assert "accountContextFromConnection" in src
+        assert "running_account_type" in src
+
+    def test_live_activation_requires_account_id_and_dry_run(self):
+        """Live dashboard activation must confirm the detected account and use dry-run."""
+        src = self._js_source()
+        assert "liveExpectedAccountId" in src
+        assert "expected_account_id: expectedAccountId" in src
+        assert "confirmed_by: 'dashboard'" in src
+        assert "dry_run: true" in src
+        assert "Live activation blocked: type the detected account ID exactly." in src
+
+    def test_live_continuous_selection_requires_live_continuous_gate(self):
+        """Continuous Trading must require the live continuous feature gate."""
+        src = self._js_source()
+        assert "live_continuous_enabled" in src
+        assert "continuousSelected" in src
+        assert "AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true" in src
 
     def test_mismatch_diagnostic_shown_when_gates_ready_but_blocked(self):
         """When gates.ready is true but the button is still disabled, the JS must
@@ -555,15 +593,13 @@ class TestActivityLogPanel:
         assert "Dashboard loaded" in src
 
     def test_confirm_path_does_not_log_cancellation(self):
-        """confirmPaperExecute must not log 'Activation modal cancelled by operator'."""
+        """confirmAutonomousActivation must not log cancellation."""
         src = self._js_source()
-        # confirmPaperExecute calls hidePaperConfirm (no log), not cancelPaperConfirm
-        assert "function confirmPaperExecute" in src
-        # Extract the confirmPaperExecute function body
-        start = src.index("async function confirmPaperExecute()")
-        # Find the cancellation log — it must NOT appear in confirmPaperExecute
-        assert "hidePaperConfirm()" in src[start:start + 200]
-        assert "cancelPaperConfirm()" not in src[start:start + 200]
+        assert "function confirmAutonomousActivation" in src
+        start = src.index("async function confirmAutonomousActivation()")
+        region = src[start:start + 1200]
+        assert "hidePaperConfirm()" in region
+        assert "cancelPaperConfirm()" not in region
 
     def test_spy_gate_uses_market_gate_bullish(self):
         """SPY gate logging must derive from decision.market_gate.bullish, not body.run.spy_gate_passed."""

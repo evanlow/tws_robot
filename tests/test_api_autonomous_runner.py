@@ -223,6 +223,7 @@ class TestAutonomousMode:
         assert body["mode"]["operating_state"] == "OFF"
         assert body["mode"]["trading_cycle"] == "single_trade"
         assert body["connection"]["paper_live_match_status"] == "Verified"
+        assert body["connection"]["running_account_id"] == "DU12345"
 
     def test_activate_requires_confirm_flag(self, app, client, tmp_path):
         _install_runner(app, tmp_path)
@@ -522,9 +523,12 @@ class TestDashboardSafety:
         assert "Run One Decision Cycle" in html
         assert "Evaluate Exits Now" in html
 
-    def test_dashboard_does_not_expose_live_runner(self, app, client):
+    def test_dashboard_routes_live_runner_through_account_context(self, app, client):
         html = client.get("/autonomous-trading/").get_data(as_text=True)
-        # The dashboard must never expose a live autonomous runner control.
+        # The dashboard uses one lifecycle panel and lets JS route it to
+        # Paper or Live after account verification.
+        assert "Autonomous Trade Lifecycle" in html
+        assert "Paper" in html and "Live runner" in html
         assert "Run Live Robot" not in html
         assert "Live Robot Runner" not in html
 

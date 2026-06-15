@@ -433,9 +433,10 @@ def _resolve_spy_price_provider():
 def _connection_verification_payload(svc) -> Dict[str, Any]:
     selected = getattr(svc, "connection_env", None)
     info = getattr(svc, "connection_info", {}) or {}
+    account_id = str(info.get("account") or "").strip()
     actual = (
         current_app.config.get("autonomous_actual_account_type")
-        or infer_account_type(info.get("account"))
+        or infer_account_type(account_id)
     )
     if not selected or not actual:
         match = "Unknown"
@@ -446,6 +447,7 @@ def _connection_verification_payload(svc) -> Dict[str, Any]:
     return {
         "selected_connection_type": selected,
         "running_account_type": actual,
+        "running_account_id": account_id,
         "paper_live_match_status": match,
     }
 
