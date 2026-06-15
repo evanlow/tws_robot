@@ -188,10 +188,11 @@
     const continuousSelected = selectedTradingCycle() === 'continuous';
     const reasons = liveError
       ? [liveError.message || String(liveError)]
-      : (liveGates.reasons || []);
+      : [...(liveGates.reasons || [])];
     const halted = !!liveGates.emergency_stop_active;
     const continuousReady = !continuousSelected || !!liveGates.live_continuous_enabled;
-    const ready = !!liveGates.ready && continuousReady && context.verified;
+    const gatesReady = !!liveGates.ready && continuousReady;
+    const ready = gatesReady && context.verified;
     if (continuousSelected && !liveGates.live_continuous_enabled && !liveError) {
       reasons.push(
         'Live continuous mode is disabled. Set AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true in .env to enable.'
@@ -207,7 +208,7 @@
         message: liveMode.message || reasons.join('; ') || '',
         gates: {
           ...liveGates,
-          ready: ready,
+          ready: gatesReady,
           reasons: reasons,
         },
       },
@@ -969,7 +970,8 @@
     logActivity('info', 'Operator requested Autonomous Mode OFF');
     setFeedback('Turning Autonomous Mode OFF…');
     try {
-      const endpoint = currentEndpoint('halt') || ENDPOINTS.paper.halt;
+      const endpointMap = ENDPOINTS[state.accountMode] || ENDPOINTS.paper;
+      const endpoint = currentEndpoint('halt') || endpointMap.halt;
       await postJson(endpoint, {
         reason: 'Operator turned Autonomous Mode OFF from dashboard',
       });

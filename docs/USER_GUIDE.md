@@ -1386,9 +1386,9 @@ verified TWS account type is Live:
 - `POST /api/autonomous/live/evaluate-exits`
 - `GET /api/autonomous/live/trades`
 
-Live activation requires `confirm: true`, `account_mode: "live"`,
-`expected_account_id`, `confirmed_by`, `trading_cycle`, and the live runner
-readiness gates. The dashboard sends `dry_run: true` by default.
+Live activation requires `confirm: true`, `account_mode: "live"`, and `trading_cycle`.
+The dashboard additionally sends `expected_account_id` (the operator-confirmed account ID),
+`confirmed_by: "dashboard"`, and `dry_run: true` by default, but these fields are optional.
 
 #### Allowed Top-Level Request Override Fields
 
