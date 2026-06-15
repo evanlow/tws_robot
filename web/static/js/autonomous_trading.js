@@ -43,6 +43,8 @@
     },
   };
 
+  const ACTUAL_LIVE_CONFIRMATION_PHRASE = 'ENABLE ACTUAL LIVE TRADING';
+
   function normaliseAccountType(value) {
     const text = String(value || '').toLowerCase();
     if (text === 'paper' || text === 'live') return text;
@@ -1398,7 +1400,7 @@
       logActivity('error', 'Actual Live: operator identifier missing');
       return;
     }
-    if (phrase.trim() !== 'ENABLE ACTUAL LIVE TRADING') {
+    if (phrase.trim() !== ACTUAL_LIVE_CONFIRMATION_PHRASE) {
       setFeedback('Confirmation phrase does not match.', 'error');
       logActivity('error', 'Actual Live: confirmation phrase mismatch');
       return;
