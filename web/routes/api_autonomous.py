@@ -2170,20 +2170,30 @@ def live_evaluate_exits():
     if callable(override):
         manager = override()
     else:
-        # Fail-closed guard: when the live mode state indicates actual-live
-        # (dry_run=False), we must NOT silently fall back to a dry-run executor.
-        # A dry-run executor would mark actual-live trades EXIT_PENDING without
-        # submitting a real exit order — dangerous bleed-through.
+        # Fail-closed guard: prevent a dry-run executor from marking actual-live
+        # trades EXIT_PENDING without submitting a real exit order.
         #
-        # For v1, actual-live mode turns OFF after entry (entry-only), so this
-        # guard should rarely trigger.  If it does, it means a code path left
-        # mode ON with dry_run=False without providing a real executor.
+        # Two scenarios need protection:
+        # 1. Mode is ON with dry_run=False (code path left mode ON — shouldn't
+        #    happen in v1 entry-only, but guard catches it).
+        # 2. Mode is OFF but the live trade store still contains open actual-live
+        #    trades (normal v1 state after entry-only — operator manages exits
+        #    manually).  A dry-run executor must NOT mark these EXIT_PENDING.
         state = _live_mode_state()
-        is_actual_live = state.is_on and not state.dry_run
+        is_actual_live_mode = state.is_on and not state.dry_run
+
+        # Check if the store has open trades that were entered via actual-live.
+        # Actual-live trades are marked with "dry_run=False" in their notes by
+        # AutonomousLiveRunner._record_trade().
+        open_trades = live_store.list_open()
+        has_open_actual_live_trades = any(
+            "dry_run=False" in (getattr(t, "notes", None) or [])
+            for t in open_trades
+        )
 
         live_executor = current_app.config.get("autonomous_live_order_executor")
         if live_executor is None:
-            if is_actual_live:
+            if is_actual_live_mode or has_open_actual_live_trades:
                 # Fail closed: do NOT build a dry-run executor for actual-live
                 # trades.  Return a clear rejection so the dashboard knows exits
                 # require manual intervention.
@@ -2194,7 +2204,7 @@ def live_evaluate_exits():
                     "reason": (
                         "Actual-live exit management is not available in v1. "
                         "No connected live executor exists for exit orders. "
-                        "Exits must be managed manually."
+                        "Open actual-live trades must be exited manually."
                     ),
                 }), 400
             try:
@@ -2209,8 +2219,8 @@ def live_evaluate_exits():
                 live_executor = None
 
         # Additional safety: if we resolved an executor but it is dry-run
-        # while the state says actual-live, reject to prevent bleed-through.
-        if is_actual_live and live_executor is not None:
+        # while actual-live trades exist, reject to prevent bleed-through.
+        if (is_actual_live_mode or has_open_actual_live_trades) and live_executor is not None:
             executor_is_dry_run = getattr(live_executor, "dry_run", True)
             if executor_is_dry_run:
                 return jsonify({

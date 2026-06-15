@@ -1271,12 +1271,159 @@ class TestActualLivePostEntryExitBehavior:
         body = resp.get_json()
         assert "decisions" in body
 
-    def test_exit_allowed_when_mode_off(self, app, client, tmp_path):
-        """When mode is OFF (normal state after v1 entry), exit evaluation
-        works normally — the fail-closed guard only triggers for actual-live
-        ON state."""
+    def test_exit_allowed_when_mode_off_no_actual_live_trades(self, app, client, tmp_path):
+        """When mode is OFF and no actual-live trades are open in the store,
+        exit evaluation proceeds normally with a dry-run executor."""
         _install_live_runner(app, tmp_path)
         resp = client.post("/api/autonomous/live/evaluate-exits", json={})
         assert resp.status_code == 200
         body = resp.get_json()
         assert "decisions" in body
+
+    def test_exit_rejects_when_mode_off_but_actual_live_trades_open(
+        self, app, client, tmp_path
+    ):
+        """After v1 entry-only (mode OFF), if the store still has open
+        actual-live trades (dry_run=False in notes), the exit endpoint must
+        fail closed — a dry-run executor must NOT mark these EXIT_PENDING."""
+        _install_live_runner(app, tmp_path)
+        from autonomous.trade_store import AutonomousTrade
+        from datetime import datetime, timezone
+
+        with app.app_context():
+            store = app.config["autonomous_live_trade_store"]
+            # Record an open actual-live trade (like the runner would)
+            trade = AutonomousTrade(
+                autonomous_trade_id="actual-live-123",
+                symbol="AAPL",
+                trade_type="BUY_SHARES",
+                status="OPEN",
+                entry_order_id=42,
+                entry_time=datetime.now(timezone.utc),
+                entry_limit_price=150.0,
+                quantity=10,
+                notes=["recorded by AutonomousLiveRunner", "dry_run=False"],
+            )
+            store.record_trade(trade)
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "NO_EXIT"
+        assert "manual" in body["reason"].lower()
+
+    def test_exit_rejects_dry_run_executor_when_actual_live_trades_open(
+        self, app, client, tmp_path
+    ):
+        """Even if a dry-run executor is globally stored, the exit endpoint
+        must reject when there are open actual-live trades in the store."""
+        _install_live_runner(app, tmp_path)
+        from autonomous.trade_store import AutonomousTrade
+        from datetime import datetime, timezone
+
+        with app.app_context():
+            store = app.config["autonomous_live_trade_store"]
+            trade = AutonomousTrade(
+                autonomous_trade_id="actual-live-456",
+                symbol="MSFT",
+                trade_type="BUY_SHARES",
+                status="OPEN",
+                entry_order_id=99,
+                entry_time=datetime.now(timezone.utc),
+                entry_limit_price=300.0,
+                quantity=5,
+                notes=["recorded by AutonomousLiveRunner", "dry_run=False"],
+            )
+            store.record_trade(trade)
+            # Store a dry-run executor globally
+            dry_executor = _DryRunExecutor()
+            dry_executor.dry_run = True
+            app.config["autonomous_live_order_executor"] = dry_executor
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "NO_EXIT"
+        assert "dry-run" in body["reason"].lower()
+
+    def test_exit_allowed_when_mode_off_only_dry_run_trades_open(
+        self, app, client, tmp_path
+    ):
+        """When mode is OFF and only dry-run trades are open in the store
+        (dry_run=True in notes), exit evaluation works normally — no false
+        rejection for dry-run lifecycle trades."""
+        _install_live_runner(app, tmp_path)
+        from autonomous.trade_store import AutonomousTrade
+        from datetime import datetime, timezone
+
+        with app.app_context():
+            store = app.config["autonomous_live_trade_store"]
+            # Record an open dry-run trade (safe to exit with dry-run executor)
+            trade = AutonomousTrade(
+                autonomous_trade_id="dry-run-789",
+                symbol="TSLA",
+                trade_type="BUY_SHARES",
+                status="OPEN",
+                entry_order_id=0,
+                entry_time=datetime.now(timezone.utc),
+                entry_limit_price=200.0,
+                quantity=3,
+                notes=["recorded by AutonomousLiveRunner", "dry_run=True"],
+            )
+            store.record_trade(trade)
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert "decisions" in body
+
+
+class TestActualLiveFullLifecycleE2E:
+    """End-to-end test: actual-live entry → mode OFF → exit evaluation fails
+    closed for the actual-live trade in the store."""
+
+    VALID_PAYLOAD = {
+        "confirm": True,
+        "account_mode": "live",
+        "trading_cycle": "single_trade",
+        "expected_account_id": "U1234567",
+        "confirmed_by": "test-operator",
+        "confirmation_phrase": "ENABLE ACTUAL LIVE TRADING",
+        "acknowledge_real_money_risk": True,
+    }
+
+    def test_entry_then_exit_fails_closed_for_actual_live_trade(
+        self, app, client, tmp_path
+    ):
+        """Full lifecycle: actual-live entry submits → mode OFF → evaluate-exits
+        detects open actual-live trade in store → returns fail-closed 400.
+
+        This prevents a dry-run executor from marking an actual-live trade
+        EXIT_PENDING when no real exit order was submitted.
+        """
+        _install_live_runner(app, tmp_path)
+
+        # Step 1: Submit actual-live entry
+        resp = client.post(
+            "/api/autonomous/live/actual-live/activate", json=self.VALID_PAYLOAD
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["run"]["outcome"] == "LIVE_ORDER_SUBMITTED"
+        # Mode is OFF (v1 entry-only)
+        assert body["autonomous_live_mode"]["operating_state"] == "OFF"
+
+        # Verify the trade is recorded in the store with dry_run=False
+        with app.app_context():
+            store = app.config["autonomous_live_trade_store"]
+            open_trades = store.list_open()
+            assert len(open_trades) >= 1
+            actual_live_trade = open_trades[0]
+            assert "dry_run=False" in actual_live_trade.notes
+
+        # Step 2: Call evaluate-exits — should fail closed
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "NO_EXIT"
+        assert "manual" in body["reason"].lower()

@@ -207,19 +207,33 @@ as success, which would mark actual-live trades `EXIT_PENDING` without a
 real exit order — a dangerous bleed-through.
 
 To prevent this, v1 turns mode OFF after every outcome and the exit
-endpoint includes a fail-closed guard that rejects actual-live exit
-evaluation when no connected non-dry-run executor is available.
+endpoint includes a fail-closed guard that rejects exit evaluation when
+open actual-live trades exist in the store without a connected non-dry-run
+executor.
 
 ### Fail-closed exit guard
 
-Even if a code path somehow leaves actual-live mode ON, the
-`/live/evaluate-exits` endpoint will:
+The `/live/evaluate-exits` endpoint protects against dry-run bleed-through
+in two scenarios:
+
+**Scenario 1: Mode left ON with `dry_run=False`** (shouldn't happen in v1,
+but guarded):
 
 1. Detect `state.is_on and not state.dry_run` (actual-live mode).
-2. Check for a globally stored executor (`autonomous_live_order_executor`).
-3. If none exists, return HTTP 400 with `outcome: "NO_EXIT"` and a clear
-   reason — no silent dry-run fallback.
-4. If an executor exists but has `dry_run=True`, also reject with 400.
+2. Return HTTP 400 with `outcome: "NO_EXIT"` if no real executor exists.
+
+**Scenario 2: Mode OFF but open actual-live trades in store** (normal v1
+state after entry-only):
+
+1. Check the live trade store for open trades with `dry_run=False` in notes.
+2. If any exist and no non-dry-run executor is available, return HTTP 400
+   with `outcome: "NO_EXIT"` — the trade must be exited manually.
+3. If a globally stored executor exists but has `dry_run=True`, also reject
+   with 400 (prevents dry-run executor from marking actual-live trades
+   `EXIT_PENDING`).
+
+Dry-run trades (`dry_run=True` in notes) and states with no open
+actual-live trades proceed normally.
 
 This is intentionally conservative: the system fails closed rather than
 risking uncontrolled dry-run behavior on actual-live trades.
