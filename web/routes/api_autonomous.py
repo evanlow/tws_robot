@@ -1643,6 +1643,17 @@ def live_activate():
         state.cycles_started += 1
         payload = result.to_dict()
 
+        # Determine outcome label for the dashboard.
+        run_status = payload.get("status", "")
+        if live_config.live_dry_run:
+            payload["outcome"] = "LIVE_DRY_RUN_PREVIEW_ONLY"
+        elif run_status == "executed":
+            payload["outcome"] = "LIVE_ORDER_SUBMITTED"
+        elif run_status == "no_trade":
+            payload["outcome"] = "NO_TRADE"
+        else:
+            payload["outcome"] = "LIVE_ORDER_REJECTED"
+
         # Check for market gate failure.
         decision = payload.get("decision") or {}
         if decision.get("status") == "market_not_suitable":
@@ -1672,6 +1683,308 @@ def live_activate():
             {"reason": "live_lifecycle_run_exception", "source": "live_activate"},
         )
         payload = {}
+
+    return jsonify({
+        "status": "activated" if state.is_on else "halted",
+        "run": payload,
+        "autonomous_live_mode": state.to_dict(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Actual Live Trading — explicit activation with strong confirmation gates
+# ---------------------------------------------------------------------------
+
+# Required confirmation phrase the operator must type to enable actual live
+# trading from the dashboard.  This phrase is validated server-side.
+ACTUAL_LIVE_CONFIRMATION_PHRASE = "ENABLE ACTUAL LIVE TRADING"
+
+
+@bp.route("/live/actual-live/activate", methods=["POST"])
+def actual_live_activate():
+    """Activate **Actual Live Trading** — real orders submitted to TWS.
+
+    This is separate from the dry-run ``/live/activate`` path.  All safety
+    gates must pass, and the operator must supply a strong confirmation
+    including account ID, operator identifier, and the exact confirmation
+    phrase.
+
+    Request body (all fields required):
+
+    .. code-block:: json
+
+        {
+            "confirm": true,
+            "account_mode": "live",
+            "trading_cycle": "single_trade",
+            "expected_account_id": "U1234567",
+            "confirmed_by": "operator-name",
+            "confirmation_phrase": "ENABLE ACTUAL LIVE TRADING",
+            "acknowledge_real_money_risk": true
+        }
+
+    Continuous trading is blocked in v1 — only ``single_trade`` is allowed.
+
+    The dashboard confirmation is treated as the explicit operator
+    confirmation; the backend does NOT block on terminal ``input()``.  The
+    ``OrderExecutor`` is constructed with ``require_confirmation=False``.
+    """
+    body = request.get_json(silent=True) or {}
+
+    # --- Validation gates (all must pass before any execution) ---
+
+    # 1. confirm flag
+    if body.get("confirm") is not True:
+        return jsonify({
+            "error": "confirm must be true",
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "confirm flag missing",
+        }), 400
+
+    # 2. account_mode must be "live"
+    if str(body.get("account_mode") or "").lower().strip() != "live":
+        return jsonify({
+            "error": "account_mode must be 'live'",
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "account_mode not live",
+        }), 400
+
+    # 3. trading_cycle — v1 restricts to single_trade only
+    cycle = normalise_trading_cycle(body.get("trading_cycle"))
+    if cycle is None or cycle != TradingCycle.SINGLE_TRADE:
+        return jsonify({
+            "error": "Actual live trading v1 supports only single_trade cycle",
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "only single_trade allowed in v1",
+        }), 400
+
+    # 4. expected_account_id (non-empty)
+    expected_account_id = str(body.get("expected_account_id") or "").strip()
+    if not expected_account_id:
+        return jsonify({
+            "error": "expected_account_id is required",
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "expected_account_id missing",
+        }), 400
+
+    # 5. confirmed_by (non-empty operator identifier)
+    confirmed_by = str(body.get("confirmed_by") or "").strip()
+    if not confirmed_by:
+        return jsonify({
+            "error": "confirmed_by operator identifier is required",
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "confirmed_by missing",
+        }), 400
+
+    # 6. confirmation_phrase must match exactly
+    confirmation_phrase = str(body.get("confirmation_phrase") or "").strip()
+    if confirmation_phrase != ACTUAL_LIVE_CONFIRMATION_PHRASE:
+        return jsonify({
+            "error": (
+                "confirmation_phrase must be exactly: "
+                f"'{ACTUAL_LIVE_CONFIRMATION_PHRASE}'"
+            ),
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "confirmation phrase mismatch",
+        }), 400
+
+    # 7. acknowledge_real_money_risk
+    if body.get("acknowledge_real_money_risk") is not True:
+        return jsonify({
+            "error": "acknowledge_real_money_risk must be true",
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "risk acknowledgement missing",
+        }), 400
+
+    # --- All input validation passed; build config and evaluate gates ---
+
+    live_config = _live_runner_config()
+    live_config.expected_account_id = expected_account_id
+    live_config.live_dry_run = False  # Actual live — NOT dry run
+
+    # v1 enforcement: single trade, buy-shares-only, limit-orders-only,
+    # max 1 open trade, max 1 per day.
+    live_config.buy_shares_only = True
+    live_config.live_limit_orders_only = True
+    live_config.max_open_live_trades = 1
+    live_config.max_live_trades_per_day = 1
+
+    # Build the runner (continuous_mode=False for v1)
+    try:
+        runner = _build_live_runner(live_config, continuous_mode=False)
+    except Exception:
+        logger.exception("Failed to build AutonomousLiveRunner for actual-live")
+        _audit_mode_event("actual_live_activate_failed", {
+            "expected_account_id": expected_account_id,
+            "confirmed_by": confirmed_by,
+            "reason": "runner_construction_failed",
+        })
+        return jsonify({
+            "error": "Failed to construct live runner",
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "runner construction failed",
+        }), 500
+
+    gates = runner.evaluate_gates()
+    if not gates.ready:
+        msg = "; ".join(gates.reasons()) or "Live runner readiness checks failed"
+        _audit_mode_event("actual_live_activate_rejected", {
+            "expected_account_id": expected_account_id,
+            "confirmed_by": confirmed_by,
+            "gates": gates.to_dict(),
+            "reason": msg,
+        })
+        return jsonify({
+            "status": "rejected",
+            "error": msg,
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": msg,
+            "gates": gates.to_dict(),
+        }), 409
+
+    # --- Activate live mode state ---
+    state = _live_mode_state()
+    state.turn_on(cycle, AccountMode.LIVE, dry_run=False)
+
+    # Persist session values
+    current_app.config["autonomous_live_expected_account_id"] = expected_account_id
+    current_app.config["autonomous_live_dry_run"] = False
+
+    # Build and persist LiveTradingConfirmation
+    svc = get_services()
+    connection_info = getattr(svc, "connection_info", None) or {}
+    port = int(connection_info.get("port") or 7496)
+
+    from execution.order_executor import LiveTradingConfirmation
+    confirmation = LiveTradingConfirmation(
+        environment="live",
+        account_id=expected_account_id,
+        port=port,
+        confirmed_by=confirmed_by,
+    )
+    current_app.config["autonomous_live_confirmation"] = confirmation
+
+    # Build a properly wired live OrderExecutor with a real TwsTradingAdapter.
+    # The adapter is constructed with environment='live' and the detected port.
+    # require_confirmation=False because the dashboard confirmation flow
+    # replaces terminal input() — this is the documented approach.
+    try:
+        from execution.paper_adapter import TwsTradingAdapter
+        from execution.order_executor import OrderExecutor
+        from risk.risk_manager import RiskManager
+
+        risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
+        host = str(connection_info.get("host") or "127.0.0.1")
+
+        tws_adapter = TwsTradingAdapter(
+            host=host,
+            port=port,
+            environment="live",
+        )
+
+        executor = OrderExecutor(
+            tws_adapter=tws_adapter,
+            risk_manager=risk_manager,
+            is_live_mode=True,
+            require_confirmation=False,  # Dashboard confirmation replaces input()
+            dry_run=False,
+            live_trading_enabled=True,
+            live_confirmation=confirmation,
+            expected_account_id=expected_account_id,
+            limit_orders_only=True,
+        )
+        current_app.config["autonomous_live_order_executor"] = executor
+    except Exception:
+        logger.exception("Failed to build actual-live OrderExecutor")
+        state.turn_off(
+            message="Actual live executor construction failed.",
+            status="Halted",
+        )
+        _audit_mode_event("actual_live_activate_failed", {
+            "expected_account_id": expected_account_id,
+            "confirmed_by": confirmed_by,
+            "reason": "executor_construction_failed",
+        })
+        return jsonify({
+            "error": "Failed to construct actual-live OrderExecutor",
+            "status": "rejected",
+            "outcome": "LIVE_ORDER_REJECTED",
+            "rejection_reason": "executor construction failed",
+        }), 500
+
+    # Audit the activation
+    _audit_mode_event("actual_live_activate", {
+        "trading_cycle": cycle.value,
+        "account_mode": "live",
+        "dry_run": False,
+        "expected_account_id": expected_account_id,
+        "confirmed_by": confirmed_by,
+        "confirmation_phrase_valid": True,
+        "acknowledge_real_money_risk": True,
+        "port": port,
+        "gates": gates.to_dict(),
+    })
+
+    # --- Run the single trade cycle ---
+    payload: Dict[str, Any] = {}
+    try:
+        result = runner.run_once()
+        state.cycles_started += 1
+        payload = result.to_dict()
+
+        # Determine outcome label
+        run_status = payload.get("status", "")
+        if run_status == "executed":
+            payload["outcome"] = "LIVE_ORDER_SUBMITTED"
+        elif run_status == "dry_run_executed":
+            # Should not happen on this path, but handle gracefully
+            payload["outcome"] = "LIVE_DRY_RUN_PREVIEW_ONLY"
+        elif run_status == "no_trade":
+            payload["outcome"] = "NO_TRADE"
+        else:
+            payload["outcome"] = "LIVE_ORDER_REJECTED"
+
+        # If single trade and no trade or rejection, turn off
+        if run_status in ("no_trade", "rejected"):
+            message = (
+                payload.get("rejection_reason")
+                or "No live trade. Autonomous Mode has been turned OFF."
+            )
+            state.turn_off(message=message, status="Not Ready")
+            _audit_mode_event("halt", {
+                "reason": message,
+                "source": "actual_live_single_trade_no_trade",
+            })
+
+        # Check market gate
+        decision = payload.get("decision") or {}
+        if decision.get("status") == "market_not_suitable":
+            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+            _audit_mode_event("halt", {
+                "reason": BEARISH_SPY_MESSAGE,
+                "source": "actual_live_spy_gate",
+            })
+            payload["outcome"] = "NO_TRADE"
+
+    except Exception:
+        logger.exception("Actual live autonomous lifecycle run failed")
+        state.turn_off(
+            message="Actual live lifecycle run failed. Autonomous Mode turned OFF.",
+            status="Halted",
+        )
+        _audit_mode_event("halt", {
+            "reason": "actual_live_lifecycle_run_exception",
+            "source": "actual_live_activate",
+        })
+        payload = {"outcome": "LIVE_ORDER_REJECTED", "rejection_reason": "lifecycle exception"}
 
     return jsonify({
         "status": "activated" if state.is_on else "halted",
