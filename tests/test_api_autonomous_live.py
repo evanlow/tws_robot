@@ -934,6 +934,17 @@ class TestActualLiveAdapterConnection:
         TWS.  If TWS is unavailable, it must return 503."""
         # Do NOT install a runner factory — exercise the production code path
         app.config["autonomous_spy_price_provider"] = lambda: {"open": 100.0, "current": 105.0}
+        # Mock service as connected with live environment so we reach adapter check
+        monkeypatch.setattr(
+            "web.services.ServiceManager.connected", True
+        )
+        monkeypatch.setattr(
+            "web.services.ServiceManager.connection_env", "live"
+        )
+        monkeypatch.setattr(
+            "web.services.ServiceManager.connection_info",
+            {"account": "U1234567", "port": 7496, "host": "127.0.0.1"},
+        )
         # Mock TwsTradingAdapter.connect_and_run to return False
         monkeypatch.setattr(
             "execution.paper_adapter.TwsTradingAdapter.connect_and_run",
@@ -1127,8 +1138,8 @@ class TestActualLiveAllStatusesTurnOff:
         body = resp.get_json()
         assert body["status"] == "halted"
 
-    def test_executed_keeps_mode_on(self, app, client, tmp_path):
-        """Only 'executed' keeps mode ON."""
+    def test_executed_turns_mode_off_v1_entry_only(self, app, client, tmp_path):
+        """v1 entry-only: 'executed' also turns mode OFF after entry submission."""
         _install_live_runner(app, tmp_path)
         resp = client.post(
             "/api/autonomous/live/actual-live/activate", json=self.VALID_PAYLOAD
@@ -1136,4 +1147,136 @@ class TestActualLiveAllStatusesTurnOff:
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["run"]["outcome"] == "LIVE_ORDER_SUBMITTED"
-        assert body["status"] == "activated"
+        # v1 entry-only: mode turns OFF even on success
+        assert body["status"] == "halted"
+        state = body["autonomous_live_mode"]
+        assert state["operating_state"] == "OFF"
+
+
+# ---------------------------------------------------------------------------
+# Regression: actual-live post-entry exit lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestActualLivePostEntryExitBehavior:
+    """Regression tests ensuring that after a successful actual-live entry,
+    the exit endpoint fails closed and cannot silently dry-run actual-live
+    trades.
+
+    These tests verify:
+    1. Actual-live entry succeeds and turns mode OFF (v1 entry-only).
+    2. /live/evaluate-exits rejects when actual-live mode is ON with no real
+       executor (fail-closed guard).
+    3. A dry-run executor cannot mark an actual-live trade EXIT_PENDING.
+    """
+
+    VALID_PAYLOAD = {
+        "confirm": True,
+        "account_mode": "live",
+        "trading_cycle": "single_trade",
+        "expected_account_id": "U1234567",
+        "confirmed_by": "test-operator",
+        "confirmation_phrase": "ENABLE ACTUAL LIVE TRADING",
+        "acknowledge_real_money_risk": True,
+    }
+
+    def test_actual_live_entry_turns_mode_off(self, app, client, tmp_path):
+        """After successful actual-live entry, mode is OFF (v1 entry-only)."""
+        _install_live_runner(app, tmp_path)
+        resp = client.post(
+            "/api/autonomous/live/actual-live/activate", json=self.VALID_PAYLOAD
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["run"]["outcome"] == "LIVE_ORDER_SUBMITTED"
+        # Mode turned OFF — exit management is manual for v1
+        assert body["status"] == "halted"
+        assert body["autonomous_live_mode"]["operating_state"] == "OFF"
+
+    def test_exit_rejects_when_actual_live_mode_on_no_executor(
+        self, app, client, tmp_path
+    ):
+        """If actual-live mode is somehow ON without a real executor,
+        /live/evaluate-exits must fail closed (400) instead of silently
+        using a dry-run executor."""
+        _install_live_runner(app, tmp_path)
+        # Manually force mode ON with dry_run=False to simulate the scenario
+        # where mode was left ON (shouldn't happen in v1, but tests the guard)
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            AutonomousOperatingState,
+            TradingCycle,
+        )
+
+        with app.app_context():
+            state = AutonomousModeState()
+            state.turn_on(TradingCycle.SINGLE_TRADE, AccountMode.LIVE, dry_run=False)
+            app.config["autonomous_live_mode_state"] = state
+            # Ensure no global executor is stored
+            app.config.pop("autonomous_live_order_executor", None)
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "NO_EXIT"
+        assert "manual" in body["reason"].lower()
+
+    def test_exit_rejects_dry_run_executor_for_actual_live_trades(
+        self, app, client, tmp_path
+    ):
+        """If a dry-run executor is stored globally while mode is actual-live,
+        the exit endpoint must reject rather than allow the dry-run executor
+        to mark actual-live trades EXIT_PENDING."""
+        _install_live_runner(app, tmp_path)
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            AutonomousOperatingState,
+            TradingCycle,
+        )
+
+        with app.app_context():
+            state = AutonomousModeState()
+            state.turn_on(TradingCycle.SINGLE_TRADE, AccountMode.LIVE, dry_run=False)
+            app.config["autonomous_live_mode_state"] = state
+            # Store a dry-run executor globally (simulates bleed-through risk)
+            dry_executor = _DryRunExecutor()
+            dry_executor.dry_run = True
+            app.config["autonomous_live_order_executor"] = dry_executor
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "NO_EXIT"
+        assert "dry-run" in body["reason"].lower()
+
+    def test_exit_allowed_for_dry_run_mode(self, app, client, tmp_path):
+        """When mode is dry-run (dry_run=True), exit evaluation works normally
+        even with a dry-run executor — no false rejection."""
+        _install_live_runner(app, tmp_path)
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            TradingCycle,
+        )
+
+        with app.app_context():
+            state = AutonomousModeState()
+            state.turn_on(TradingCycle.SINGLE_TRADE, AccountMode.LIVE, dry_run=True)
+            app.config["autonomous_live_mode_state"] = state
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert "decisions" in body
+
+    def test_exit_allowed_when_mode_off(self, app, client, tmp_path):
+        """When mode is OFF (normal state after v1 entry), exit evaluation
+        works normally — the fail-closed guard only triggers for actual-live
+        ON state."""
+        _install_live_runner(app, tmp_path)
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert "decisions" in body

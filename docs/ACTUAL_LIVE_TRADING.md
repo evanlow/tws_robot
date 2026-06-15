@@ -179,11 +179,13 @@ The dashboard shows a clear final outcome from the `outcome` field in the API re
 
 ## v1 Single-Trade Lifecycle
 
-In v1, actual-live mode uses a conservative single-trade lifecycle:
+In v1, actual-live mode uses a conservative **entry-only** single-trade lifecycle:
 
-- **Only `executed` keeps mode ON.** After a successful order submission,
-  autonomous live mode remains active for exit management.
-- **ALL other outcomes turn mode OFF.** This includes:
+- **ALL outcomes turn mode OFF**, including successful entry submission.
+- After a successful entry (`executed`), mode turns OFF with status
+  "Entry Submitted". The operator must manage the exit manually (via the
+  dashboard's manual exit controls or directly through TWS).
+- Non-executed outcomes also turn mode OFF:
   - `no_trade` — no qualifying candidates
   - `rejected` — gate or risk rejection
   - `engine_rejected` — engine-level rejection
@@ -191,8 +193,36 @@ In v1, actual-live mode uses a conservative single-trade lifecycle:
   - `account_id_mismatch` — account verification failure
   - Any exception during the lifecycle run
 
-This is intentionally conservative: any unexpected status halts the system
-rather than risking uncontrolled re-execution.
+### Why v1 is entry-only
+
+The actual-live executor is **request-scoped** — it is built, used, and
+disconnected within a single HTTP request to prevent dry-run/actual-live
+bleed-through. This means no persisted actual-live executor exists for
+subsequent exit evaluation calls.
+
+If mode were left ON after entry, `/live/evaluate-exits` would silently
+fall back to a dry-run executor (since `_build_live_runner()` always builds
+`dry_run=True` by default). The exit manager accepts `OrderStatus.DRY_RUN`
+as success, which would mark actual-live trades `EXIT_PENDING` without a
+real exit order — a dangerous bleed-through.
+
+To prevent this, v1 turns mode OFF after every outcome and the exit
+endpoint includes a fail-closed guard that rejects actual-live exit
+evaluation when no connected non-dry-run executor is available.
+
+### Fail-closed exit guard
+
+Even if a code path somehow leaves actual-live mode ON, the
+`/live/evaluate-exits` endpoint will:
+
+1. Detect `state.is_on and not state.dry_run` (actual-live mode).
+2. Check for a globally stored executor (`autonomous_live_order_executor`).
+3. If none exists, return HTTP 400 with `outcome: "NO_EXIT"` and a clear
+   reason — no silent dry-run fallback.
+4. If an executor exists but has `dry_run=True`, also reject with 400.
+
+This is intentionally conservative: the system fails closed rather than
+risking uncontrolled dry-run behavior on actual-live trades.
 
 ## Frontend Order ID Display
 

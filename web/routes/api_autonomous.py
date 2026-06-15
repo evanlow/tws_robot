@@ -1847,6 +1847,39 @@ def actual_live_activate():
         # Production path: build a connected adapter and executor, then runner.
         # The executor is request-scoped — NOT stored globally (addresses
         # review issue #3: prevents dry-run bleed-through).
+
+        # Explicit server-side checks for connection state, environment, and
+        # account ID before constructing the adapter.
+        if not getattr(svc, "connected", False):
+            return jsonify({
+                "error": "TWS/Gateway is not connected. Cannot proceed with actual live trading.",
+                "status": "rejected",
+                "outcome": "LIVE_ORDER_REJECTED",
+                "rejection_reason": "service not connected",
+            }), 503
+
+        connection_env = getattr(svc, "connection_env", None)
+        if connection_env != "live":
+            return jsonify({
+                "error": f"Connection environment is '{connection_env}', expected 'live'.",
+                "status": "rejected",
+                "outcome": "LIVE_ORDER_REJECTED",
+                "rejection_reason": f"wrong environment: {connection_env}",
+            }), 400
+
+        detected_account = connection_info.get("account") or ""
+        if detected_account and expected_account_id:
+            if detected_account.lower() != expected_account_id.lower():
+                return jsonify({
+                    "error": (
+                        f"Detected account '{detected_account}' does not match "
+                        f"expected account '{expected_account_id}'."
+                    ),
+                    "status": "rejected",
+                    "outcome": "LIVE_ORDER_REJECTED",
+                    "rejection_reason": "account_id_mismatch_pre_adapter",
+                }), 400
+
         try:
             from execution.paper_adapter import TwsTradingAdapter
             from execution.order_executor import OrderExecutor
@@ -2000,9 +2033,26 @@ def actual_live_activate():
         else:
             payload["outcome"] = "LIVE_ORDER_REJECTED"
 
-        # v1 single-trade actual-live: turn OFF for ALL non-executed outcomes
-        # (addresses review issue #4).  Only "executed" keeps mode ON.
-        if run_status != "executed":
+        # v1 single-trade actual-live: turn OFF after EVERY outcome.
+        # v1 is entry-only — automated exit management is not wired for
+        # actual-live (the request-scoped executor is intentionally not
+        # persisted, so /live/evaluate-exits cannot submit real exit orders).
+        # Keeping mode ON after entry would let the exit endpoint silently
+        # fall back to a dry-run executor and mark actual-live trades
+        # EXIT_PENDING without a real order — a dangerous bleed-through.
+        # The operator must manage exits manually for v1.
+        if run_status == "executed":
+            message = (
+                "Actual live entry submitted successfully. "
+                "v1 single-trade mode turned OFF — exit management is manual."
+            )
+            state.turn_off(message=message, status="Entry Submitted")
+            _audit_mode_event("halt", {
+                "reason": message,
+                "run_status": run_status,
+                "source": "actual_live_v1_entry_only",
+            })
+        else:
             message = (
                 payload.get("rejection_reason")
                 or f"Actual live single-trade ended with status '{run_status}'. Autonomous Mode has been turned OFF."
@@ -2120,12 +2170,33 @@ def live_evaluate_exits():
     if callable(override):
         manager = override()
     else:
-        # Resolve the live OrderExecutor (same as used for entries) so that
-        # exit orders are submitted through the same safety gates as entries.
-        # When no executor is available (e.g. TWS not connected), exits fall
-        # back to evaluation-only mode and the dashboard shows would_exit notes.
+        # Fail-closed guard: when the live mode state indicates actual-live
+        # (dry_run=False), we must NOT silently fall back to a dry-run executor.
+        # A dry-run executor would mark actual-live trades EXIT_PENDING without
+        # submitting a real exit order — dangerous bleed-through.
+        #
+        # For v1, actual-live mode turns OFF after entry (entry-only), so this
+        # guard should rarely trigger.  If it does, it means a code path left
+        # mode ON with dry_run=False without providing a real executor.
+        state = _live_mode_state()
+        is_actual_live = state.is_on and not state.dry_run
+
         live_executor = current_app.config.get("autonomous_live_order_executor")
         if live_executor is None:
+            if is_actual_live:
+                # Fail closed: do NOT build a dry-run executor for actual-live
+                # trades.  Return a clear rejection so the dashboard knows exits
+                # require manual intervention.
+                return jsonify({
+                    "decisions": [],
+                    "count": 0,
+                    "outcome": "NO_EXIT",
+                    "reason": (
+                        "Actual-live exit management is not available in v1. "
+                        "No connected live executor exists for exit orders. "
+                        "Exits must be managed manually."
+                    ),
+                }), 400
             try:
                 live_executor = _build_live_runner(
                     live_config, continuous_mode=False
@@ -2136,6 +2207,22 @@ def live_evaluate_exits():
                     "exits will be evaluation-only"
                 )
                 live_executor = None
+
+        # Additional safety: if we resolved an executor but it is dry-run
+        # while the state says actual-live, reject to prevent bleed-through.
+        if is_actual_live and live_executor is not None:
+            executor_is_dry_run = getattr(live_executor, "dry_run", True)
+            if executor_is_dry_run:
+                return jsonify({
+                    "decisions": [],
+                    "count": 0,
+                    "outcome": "NO_EXIT",
+                    "reason": (
+                        "Actual-live exit blocked: resolved executor is dry-run. "
+                        "Cannot mark actual-live trades EXIT_PENDING with a "
+                        "dry-run executor. Exits must be managed manually."
+                    ),
+                }), 400
 
         manager = AutonomousExitManager(
             trade_store=live_store,
