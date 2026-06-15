@@ -12,9 +12,8 @@
     <h1>Autonomous Trading</h1>
     <p class="auto-trading-subtitle">
       Supervised control tower &mdash; review what the robot sees, why it
-      recommends or rejects trades, and safely drive paper execution and
-      the emergency stop. <strong>Live autonomous execution is intentionally
-      not exposed from this dashboard.</strong>
+      recommends or rejects trades, and safely drive autonomous execution
+      from the detected Paper or Live TWS account context.
     </p>
   </header>
 
@@ -194,8 +193,8 @@
     <h2 id="runnerHeading">Autonomous Trade Lifecycle</h2>
     <p class="panel-help">
       Entry and exit lifecycle monitoring for trades opened by Autonomous
-      Mode. The <em>Run One Decision Cycle</em> button is disabled until every
-      readiness gate passes.
+      Mode. The dashboard automatically routes these controls to the Paper
+      or Live runner after the connected account type is verified.
     </p>
     <div class="badge-row" id="runnerGates">
       <span class="badge badge-muted">Loading runner status…</span>
@@ -304,6 +303,19 @@
        The connected account context will be used for autonomous trading.
        Review the selected trading cycle carefully.
     </p>
+    <div id="liveConfirmFields" class="live-confirm-fields" hidden>
+      <label for="liveExpectedAccountId">
+        Type detected live account ID
+        <strong id="liveDetectedAccountId">unavailable</strong>
+      </label>
+      <input id="liveExpectedAccountId" name="liveExpectedAccountId"
+             type="text" autocomplete="off" spellcheck="false" />
+      <p>
+        Live activation from this dashboard is sent as dry-run by default.
+        Backend live feature flags, account confirmation, emergency stop,
+        and limit-order safeguards still apply.
+      </p>
+    </div>
     <div id="paperConfirmPlan" class="proposal-card"></div>
     <div class="modal-actions">
       <button class="btn-secondary" id="paperConfirmCancel" type="button">Cancel</button>

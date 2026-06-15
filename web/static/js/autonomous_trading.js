@@ -2,8 +2,8 @@
  *
  * Drives the supervised control-tower UI by calling the /api/autonomous/*
  * endpoints. CSRF tokens for state-changing requests are injected
- * automatically by web/static/js/main.js. This script intentionally
- * never exposes a live-execution path.
+ * automatically by web/static/js/main.js. The dashboard routes Paper or
+ * Live actions from the detected TWS account context.
  */
 
 (function () {
@@ -13,10 +13,58 @@
 
   const state = {
     status: null,
+    modePayload: null,
+    accountMode: 'unknown',
+    detectedAccountType: 'unknown',
+    activeEndpoints: null,
+    activeRunnerStatus: null,
     lastProposal: null,
     paperAdapterConfigured: false,
     autonomousModeOn: false,
+    liveAccountId: '',
   };
+
+  const ENDPOINTS = {
+    paper: {
+      status: '/api/autonomous/runner/status',
+      activate: '/api/autonomous/mode/activate',
+      halt: '/api/autonomous/mode/halt',
+      runOnce: '/api/autonomous/runner/run-once-paper',
+      evaluateExits: '/api/autonomous/runner/evaluate-exits',
+      trades: '/api/autonomous/runner/trades',
+    },
+    live: {
+      status: '/api/autonomous/live/status',
+      activate: '/api/autonomous/live/activate',
+      halt: '/api/autonomous/live/halt',
+      runOnce: '/api/autonomous/live/run-once',
+      evaluateExits: '/api/autonomous/live/evaluate-exits',
+      trades: '/api/autonomous/live/trades',
+    },
+  };
+
+  function normaliseAccountType(value) {
+    const text = String(value || '').toLowerCase();
+    if (text === 'paper' || text === 'live') return text;
+    return 'unknown';
+  }
+
+  function selectedConnectionIsVerified(connection) {
+    return connection && connection.paper_live_match_status === 'Verified';
+  }
+
+  function accountContextFromConnection(connection) {
+    const detected = normaliseAccountType(connection && connection.running_account_type);
+    const verified = selectedConnectionIsVerified(connection);
+    return {
+      detected: detected,
+      mode: verified && detected !== 'unknown' ? detected : 'blocked',
+      label: verified && detected === 'live' ? 'Live'
+        : (verified && detected === 'paper' ? 'Paper' : 'Blocked'),
+      verified: verified,
+      accountId: (connection && connection.running_account_id) || '',
+    };
+  }
 
   /* ----------------------- activity log ----------------------- */
 
@@ -128,6 +176,53 @@
     return resp.json();
   }
 
+  function currentEndpoint(name) {
+    return state.activeEndpoints && state.activeEndpoints[name];
+  }
+
+  function normaliseLiveModePayload(modeData, liveData, liveError) {
+    const connection = (modeData && modeData.connection) || {};
+    const context = accountContextFromConnection(connection);
+    const liveMode = (liveData && liveData.autonomous_live_mode) || {};
+    const liveGates = (liveData && liveData.gates) || {};
+    const continuousSelected = selectedTradingCycle() === 'continuous';
+    const reasons = liveError
+      ? [liveError.message || String(liveError)]
+      : [...(liveGates.reasons || [])];
+    const halted = !!liveGates.emergency_stop_active;
+    const continuousReady = !continuousSelected || !!liveGates.live_continuous_enabled;
+    const gatesReady = !!liveGates.ready && continuousReady;
+    const ready = gatesReady && context.verified;
+    if (continuousSelected && !liveGates.live_continuous_enabled && !liveError) {
+      reasons.push(
+        'Live continuous mode is disabled. Set AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true in .env to enable.'
+      );
+    }
+    const readinessStatus = halted ? 'Halted' : (ready ? 'Ready' : 'Not Ready');
+    return {
+      account_context: context,
+      mode: liveMode,
+      connection: connection,
+      readiness: {
+        status: readinessStatus,
+        message: liveMode.message || reasons.join('; ') || '',
+        gates: {
+          ...liveGates,
+          ready: gatesReady,
+          reasons: reasons,
+        },
+      },
+    };
+  }
+
+  function normalisePaperModePayload(modeData) {
+    const connection = (modeData && modeData.connection) || {};
+    return {
+      ...(modeData || {}),
+      account_context: accountContextFromConnection(connection),
+    };
+  }
+
   /* ------------------------- status panel ------------------------- */
 
   // renderStatus accepts an optional modePayload from /api/autonomous/mode/status.
@@ -136,8 +231,10 @@
   // reads from the correct source of truth and cannot diverge.
   function renderStatus(payload, modePayload) {
     state.status = payload;
+    state.modePayload = modePayload;
     const cfg = (payload && payload.config) || {};
     const auto = modePayload || (payload && payload.autonomous_mode) || {};
+    const accountContext = auto.account_context || accountContextFromConnection(auto.connection || {});
     const modeState = auto.mode || {};
     const connection = auto.connection || {};
     const readiness = auto.readiness || {};
@@ -149,6 +246,10 @@
       : !!payload.emergency_stop_file_exists;
     state.paperAdapterConfigured = !!payload.paper_adapter_configured;
     state.autonomousModeOn = modeState.operating_state === 'ON';
+    state.detectedAccountType = accountContext.detected;
+    state.accountMode = accountContext.mode;
+    state.activeEndpoints = ENDPOINTS[state.accountMode] || null;
+    state.liveAccountId = accountContext.accountId || '';
 
     const matchStatus = connection.paper_live_match_status || 'Unknown';
 
@@ -162,7 +263,7 @@
         chipClass = 'mode-chip-blocked';
         descText = 'Emergency stop is active. Autonomous mode cannot be activated.';
       } else if (state.autonomousModeOn) {
-        modeChip.textContent = 'AUTONOMOUS ON';
+        modeChip.textContent = (accountContext.label || 'Autonomous').toUpperCase() + ' AUTONOMOUS ON';
         chipClass = 'mode-chip-on';
         descText = 'Autonomous lifecycle is active.';
       } else if (readiness.status === 'Not Ready') {
@@ -190,9 +291,25 @@
         { label: 'TWS connected', ok: connection.status === 'Connected', cls: null },
         { label: matchLabel, ok: matchOk, cls: matchCls },
       ];
-      if (providerReady) {
+      if (accountContext.mode === 'live') {
+        readinessChecks.push(
+          { label: 'LIVE MODE CONFIRMED', ok: !!gates.live_mode, cls: null },
+          { label: 'LIVE AUTONOMOUS ENABLED', ok: !!gates.live_enabled, cls: null },
+          { label: 'ACCOUNT ID VERIFIED', ok: !!gates.account_id_verified, cls: null },
+          { label: 'SIGNAL PROVIDER READY', ok: !!gates.signal_provider_ready, cls: null },
+          { label: 'EMERGENCY STOP INACTIVE', ok: !gates.emergency_stop_active, cls: null }
+        );
+        if (selectedTradingCycle() === 'continuous') {
+          readinessChecks.push({
+            label: 'LIVE CONTINUOUS ENABLED',
+            ok: !!gates.live_continuous_enabled,
+            cls: null,
+          });
+        }
+      }
+      if (providerReady && accountContext.mode !== 'live') {
         readinessChecks.push({ label: 'SIGNAL PROVIDER READY', ok: true, cls: null });
-      } else if (payload.warning || payload.signal_provider_ready === false) {
+      } else if (accountContext.mode !== 'live' && (payload.warning || payload.signal_provider_ready === false)) {
         readinessChecks.push({ label: 'STATIC PROVIDER', ok: false, cls: 'warn' });
       }
       readinessChecks.forEach(function (chk) {
@@ -210,7 +327,9 @@
       ['TWS connection status', connection.status || (payload.connected ? 'Connected' : 'Disconnected')],
       ['Selected connection type', connection.selected_connection_type || '—'],
       ['Verified running TWS session/account type', connection.running_account_type || '—'],
+      ['Detected account ID', connection.running_account_id || '—'],
       ['Paper/Live match status', matchStatus],
+      ['Dashboard account context', accountContext.label || 'Blocked'],
       ['Latest autonomous readiness status', readiness.status || 'Not Ready'],
       ['Latest warning/error message', readiness.message || payload.paper_adapter_reason || payload.warning || '—'],
       ['Last status refresh timestamp', fmtTimestamp(modeState.last_status_refresh)],
@@ -278,16 +397,34 @@
 
   async function refreshStatus() {
     try {
-      // Fetch general status and mode status in parallel.  The mode panel
-      // reads exclusively from /api/autonomous/mode/status so it cannot
-      // diverge from what the backend actually computed.
+      // Fetch general status and Paper/Live verification first. When the
+      // detected account is Live, switch the mode panel to the live runner
+      // status so paper-only gate failures are not shown to live operators.
       const [data, modeData] = await Promise.all([
         getJson('/api/autonomous/status'),
         getJson('/api/autonomous/mode/status'),
       ]);
-      renderStatus(data, modeData);
+      const connection = (modeData && modeData.connection) || {};
+      const context = accountContextFromConnection(connection);
+      let displayModeData = normalisePaperModePayload(modeData);
+      if (context.detected === 'live') {
+        let liveData = null;
+        let liveError = null;
+        try {
+          liveData = await getJson('/api/autonomous/live/status');
+        } catch (err) {
+          liveError = err;
+        }
+        displayModeData = normaliseLiveModePayload(modeData, liveData, liveError);
+        state.activeRunnerStatus = liveData;
+      } else {
+        state.activeRunnerStatus = null;
+      }
+      renderStatus(data, displayModeData);
       if (data.cash_snapshot) renderCashSnapshot(data.cash_snapshot);
       setFeedback('Status refreshed.', 'success');
+      refreshRunnerStatus();
+      refreshAutonomousTrades();
     } catch (err) {
       setFeedback('Failed to refresh status: ' + err.message, 'error');
     }
@@ -660,9 +797,19 @@
     }
   }
 
-  /* ---- paper-execute confirmation modal ---- */
+  /* ---- autonomous activation confirmation modal ---- */
 
-  function openPaperConfirm() {
+  function setLiveConfirmVisible(visible) {
+    const block = $('liveConfirmFields');
+    const input = $('liveExpectedAccountId');
+    if (block) block.hidden = !visible;
+    if (input) {
+      input.value = '';
+      input.required = !!visible;
+    }
+  }
+
+  function openAutonomousConfirm() {
     if (state.autonomousModeOn) {
       logActivity('info', 'Operator clicked Turn Autonomous Mode OFF');
       haltAutonomousMode();
@@ -671,22 +818,41 @@
     logActivity('info', 'Operator clicked Activate Autonomous Mode');
     const overlay = $('paperConfirmOverlay');
     const planEl = $('paperConfirmPlan');
+    const titleEl = $('paperConfirmTitle');
     const confirmText = $('autonomousConfirmText');
     const confirmButton = $('paperConfirmGo');
-    const conn = (state.status && state.status.autonomous_mode &&
-      state.status.autonomous_mode.connection) || {};
+    const accountIdEl = $('liveDetectedAccountId');
+    const expectedInput = $('liveExpectedAccountId');
+    const conn = (state.modePayload && state.modePayload.connection) || {};
     const accountType = (conn.running_account_type || 'unknown').toUpperCase();
+    const accountId = conn.running_account_id || state.liveAccountId || '';
     const cycle = selectedTradingCycle();
     const cycleLabel = cycle === 'continuous' ? 'Continuous Trading' : 'Single Trade';
+    const isLive = state.accountMode === 'live';
+    setLiveConfirmVisible(isLive);
+    if (accountIdEl) accountIdEl.textContent = accountId || 'unavailable';
+    if (expectedInput) expectedInput.placeholder = accountId || 'Detected account ID';
+    if (titleEl) {
+      titleEl.textContent = isLive
+        ? 'Turn Autonomous Mode ON for LIVE account?'
+        : 'Turn Autonomous Mode ON?';
+    }
     if (confirmText) {
-      confirmText.textContent =
-        'Turn Autonomous Mode ON for ' + accountType + ' account? ' +
-        'TWS Robot will begin autonomous paper trading using this account context. ' +
-        'Only paper (simulated) orders are supported. No real orders will be placed. ' +
-        'Trading Cycle: ' + cycleLabel + '.';
+      if (isLive) {
+        confirmText.textContent =
+          'Detected account type: LIVE. Account ID: ' + (accountId || 'unavailable') + '. ' +
+          'Trading Cycle: ' + cycleLabel + '. Live dry-run is the dashboard default; ' +
+          'no real orders will be submitted unless backend live flags and adapters permit it.';
+      } else {
+        confirmText.textContent =
+          'Turn Autonomous Mode ON for ' + accountType + ' account? ' +
+          'TWS Robot will begin autonomous paper trading using this account context. ' +
+          'Only paper (simulated) orders are supported. No real orders will be placed. ' +
+          'Trading Cycle: ' + cycleLabel + '.';
+      }
     }
     if (confirmButton) {
-      confirmButton.textContent = 'Turn ON (Paper Mode)';
+      confirmButton.textContent = isLive ? 'Turn ON (Live Dry-Run)' : 'Turn ON (Paper Mode)';
     }
     planEl.innerHTML = '';
     if (state.lastProposal && state.lastProposal.trade_plan) {
@@ -711,14 +877,43 @@
     hidePaperConfirm();
   }
 
-  async function confirmPaperExecute() {
-    hidePaperConfirm();
+  async function confirmAutonomousActivation() {
     const cycle = selectedTradingCycle();
     const cycleLabel = cycle === 'continuous' ? 'Continuous Trading' : 'Single Trade';
-    logActivity('info', 'Activation confirmed: ' + cycleLabel + ' / Paper account');
+    const isLive = state.accountMode === 'live';
+    const accountModeLabel = isLive ? 'Live account' : 'Paper account';
+    const endpoint = currentEndpoint('activate');
+    if (!endpoint) {
+      const reason = 'Activation blocked: account type is unknown or mismatched.';
+      logActivity('warning', reason);
+      setFeedback(reason, 'error');
+      return;
+    }
+    const expectedAccountId = String(state.liveAccountId || '').trim();
+    if (isLive) {
+      const typed = String(($('liveExpectedAccountId') || {}).value || '').trim();
+      if (!expectedAccountId || typed.toUpperCase() !== expectedAccountId.toUpperCase()) {
+        const reason = 'Live activation blocked: type the detected account ID exactly.';
+        logActivity('warning', reason);
+        setFeedback(reason, 'error');
+        return;
+      }
+    }
+    hidePaperConfirm();
+    logActivity('info', 'Activation confirmed: ' + cycleLabel + ' / ' + accountModeLabel);
     setFeedback('Activating Autonomous Mode…');
     try {
-      const body = await postJson('/api/autonomous/mode/activate', { trading_cycle: cycle, confirm: true });
+      const requestBody = isLive
+        ? {
+          trading_cycle: cycle,
+          confirm: true,
+          account_mode: 'live',
+          expected_account_id: expectedAccountId,
+          confirmed_by: 'dashboard',
+          dry_run: true,
+        }
+        : { trading_cycle: cycle, confirm: true };
+      const body = await postJson(endpoint, requestBody);
       const decision = body.run?.decision;
       if (decision) renderProposal(decision);
       const status = body.status || 'unknown';
@@ -775,7 +970,9 @@
     logActivity('info', 'Operator requested Autonomous Mode OFF');
     setFeedback('Turning Autonomous Mode OFF…');
     try {
-      await postJson('/api/autonomous/mode/halt', {
+      const endpointMap = ENDPOINTS[state.accountMode] || ENDPOINTS.paper;
+      const endpoint = currentEndpoint('halt') || endpointMap.halt;
+      await postJson(endpoint, {
         reason: 'Operator turned Autonomous Mode OFF from dashboard',
       });
       logActivity('success', 'Autonomous Mode turned OFF. Filled positions were not liquidated.');
@@ -811,7 +1008,7 @@
     }
   }
 
-  /* ------------------------- paper robot runner ------------------------- */
+  /* ------------------------- autonomous lifecycle runner ------------------------- */
 
   function setRunnerFeedback(message, kind) {
     const el = $('runnerFeedback');
@@ -827,19 +1024,41 @@
     if (!badges) return;
     badges.innerHTML = '';
     const gates = payload && payload.gates ? payload.gates : null;
+    const mode = (payload && payload.account_mode) || state.accountMode;
     if (!gates) {
-      badges.innerHTML = '<span class="badge badge-muted">Runner status unavailable</span>';
+      const msg = state.activeEndpoints
+        ? 'Runner status unavailable'
+        : 'Activation blocked until account type is verified';
+      badges.innerHTML = '<span class="badge badge-muted">' + msg + '</span>';
       if (btn) btn.disabled = true;
       return;
     }
-    const items = [
-      ['Connected', gates.connected],
-      ['Paper mode', gates.paper_mode],
-      ['Paper adapter', gates.paper_adapter_ready],
-      ['Signal provider', gates.signal_provider_ready],
-      ['Runner enabled', gates.runner_enabled],
-      ['No emergency stop', !gates.emergency_stop_active],
-    ];
+    const items = mode === 'live'
+      ? [
+        ['TWS connected', gates.connected],
+        ['Live account mode confirmed', gates.live_mode],
+        ['Live autonomous enabled', gates.live_enabled],
+        ['Account ID verified', gates.account_id_verified],
+        ['Signal provider ready', gates.signal_provider_ready],
+        ['Emergency stop inactive', !gates.emergency_stop_active],
+        ['Open live trades below limit',
+          gates.open_live_trades < gates.max_open_live_trades],
+        ['Daily live trade limit not reached',
+          gates.live_trades_today < gates.max_live_trades_per_day],
+        ['Deployable cash above minimum',
+          Number(gates.deployable_cash || 0) >= Number(gates.min_deployable_cash || 0)],
+      ]
+      : [
+        ['Connected', gates.connected],
+        ['Paper mode', gates.paper_mode],
+        ['Paper adapter', gates.paper_adapter_ready],
+        ['Signal provider', gates.signal_provider_ready],
+        ['Runner enabled', gates.runner_enabled],
+        ['No emergency stop', !gates.emergency_stop_active],
+      ];
+    if (mode === 'live' && selectedTradingCycle() === 'continuous') {
+      items.splice(3, 0, ['Live continuous enabled', gates.live_continuous_enabled]);
+    }
     items.forEach(([label, ok]) => {
       const b = document.createElement('span');
       b.className = 'badge ' + (ok ? 'badge-success' : 'badge-warning');
@@ -849,9 +1068,17 @@
     });
     const occ = document.createElement('span');
     occ.className = 'badge badge-muted';
-    occ.textContent = 'Open: ' + gates.open_autonomous_trades + '/' +
-      gates.max_open_autonomous_trades;
+    occ.textContent = mode === 'live'
+      ? ('Open live: ' + gates.open_live_trades + '/' + gates.max_open_live_trades)
+      : ('Open: ' + gates.open_autonomous_trades + '/' +
+        gates.max_open_autonomous_trades);
     badges.appendChild(occ);
+    if (mode === 'live') {
+      const cash = document.createElement('span');
+      cash.className = 'badge badge-muted';
+      cash.textContent = 'Deployable: ' + fmtMoney(gates.deployable_cash);
+      badges.appendChild(cash);
+    }
 
     if (reasonsEl) {
       reasonsEl.innerHTML = '';
@@ -862,8 +1089,11 @@
       });
     }
     if (btn) {
-      btn.disabled = !gates.ready;
-      btn.title = gates.ready ? 'Run one paper-only autonomous cycle.'
+      const effectiveReady = mode === 'live' && selectedTradingCycle() === 'continuous'
+        ? (gates.ready && gates.live_continuous_enabled)
+        : gates.ready;
+      btn.disabled = !effectiveReady;
+      btn.title = effectiveReady ? 'Run one ' + mode + ' autonomous cycle.'
         : 'Disabled: ' + (gates.reasons || []).join('; ');
     }
   }
@@ -969,8 +1199,21 @@
 
   async function refreshRunnerStatus() {
     try {
-      const body = await getJson('/api/autonomous/runner/status');
-      renderRunnerGates(body);
+      const endpoint = currentEndpoint('status');
+      if (!endpoint) {
+        renderRunnerGates(null);
+        return;
+      }
+      const body = await getJson(endpoint);
+      const payload = state.accountMode === 'live'
+        ? {
+          account_mode: 'live',
+          runner_config: body.live_runner_config,
+          gates: body.gates,
+        }
+        : { ...body, account_mode: 'paper' };
+      state.activeRunnerStatus = body;
+      renderRunnerGates(payload);
     } catch (err) {
       setRunnerFeedback('Failed to load runner status: ' + err.message, 'error');
     }
@@ -978,22 +1221,37 @@
 
   async function refreshAutonomousTrades() {
     try {
-      const body = await getJson('/api/autonomous/runner/trades');
+      const endpoint = currentEndpoint('trades');
+      if (!endpoint) {
+        renderAutonomousTrades({});
+        return;
+      }
+      const body = await getJson(endpoint);
       renderAutonomousTrades(body);
     } catch (err) {
       setRunnerFeedback('Failed to load autonomous trades: ' + err.message, 'error');
     }
   }
 
-  async function runPaperRobotOnce() {
-    setRunnerFeedback('Running paper robot once…');
+  async function runAutonomousCycleOnce() {
+    const endpoint = currentEndpoint('runOnce');
+    if (!endpoint) {
+      setRunnerFeedback('Run-once blocked until account type is verified.', 'error');
+      return;
+    }
+    setRunnerFeedback('Running ' + state.accountMode + ' robot once…');
     try {
-      const body = await postJson('/api/autonomous/runner/run-once-paper', {});
+      const body = await postJson(endpoint, {});
       const status = body.status || 'unknown';
-      const msg = status === 'executed'
-        ? 'Paper trade executed and recorded.'
+      const msg = status === 'executed' || status === 'dry_run_executed'
+        ? (state.accountMode === 'live'
+          ? 'Live autonomous cycle accepted by runner.'
+          : 'Paper trade executed and recorded.')
         : 'Runner: ' + status + (body.rejection_reason ? ' — ' + body.rejection_reason : '');
-      setRunnerFeedback(msg, status === 'executed' ? 'success' : 'warning');
+      setRunnerFeedback(
+        msg,
+        (status === 'executed' || status === 'dry_run_executed') ? 'success' : 'warning'
+      );
       refreshRunnerStatus();
       refreshAutonomousTrades();
       refreshAudit();
@@ -1003,9 +1261,14 @@
   }
 
   async function evaluateExitsNow() {
+    const endpoint = currentEndpoint('evaluateExits');
+    if (!endpoint) {
+      setRunnerFeedback('Exit evaluation blocked until account type is verified.', 'error');
+      return;
+    }
     setRunnerFeedback('Evaluating exits…');
     try {
-      const body = await postJson('/api/autonomous/runner/evaluate-exits', {});
+      const body = await postJson(endpoint, {});
       renderExitDecisions(body.decisions || []);
       setRunnerFeedback('Evaluated ' + (body.count || 0) + ' open trade(s).', 'success');
       refreshAutonomousTrades();
@@ -1044,17 +1307,20 @@
     $('btnRefreshStatus').addEventListener('click', refreshStatus);
     $('btnScan').addEventListener('click', runScan);
     $('btnPropose').addEventListener('click', runPropose);
-    $('btnAutonomousModeToggle').addEventListener('click', openPaperConfirm);
+    $('btnAutonomousModeToggle').addEventListener('click', openAutonomousConfirm);
     $('btnEmergencyStop').addEventListener('click', triggerEmergencyStop);
     $('paperConfirmCancel').addEventListener('click', cancelPaperConfirm);
-    $('paperConfirmGo').addEventListener('click', confirmPaperExecute);
+    $('paperConfirmGo').addEventListener('click', confirmAutonomousActivation);
 
     const btnRunRobot = $('btnRunPaperRobot');
-    if (btnRunRobot) btnRunRobot.addEventListener('click', runPaperRobotOnce);
+    if (btnRunRobot) btnRunRobot.addEventListener('click', runAutonomousCycleOnce);
     const btnExits = $('btnEvaluateExits');
     if (btnExits) btnExits.addEventListener('click', evaluateExitsNow);
     const btnRefreshTrades = $('btnRefreshAutonomousTrades');
     if (btnRefreshTrades) btnRefreshTrades.addEventListener('click', refreshAutonomousTrades);
+    document.querySelectorAll('input[name="tradingCycle"]').forEach((el) => {
+      el.addEventListener('change', refreshStatus);
+    });
 
     refreshStatus();
     refreshAudit();
