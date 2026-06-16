@@ -1372,6 +1372,16 @@ def _build_live_runner(
         emergency_stop_provider=_estop,
         deployable_cash_provider=_deployable_cash,
         broker_positions_provider=lambda: _build_broker_positions(svc),
+        rejected_order_ids_provider=(
+            svc.tws_bridge.pop_rejected_order_ids
+            if getattr(svc, "tws_bridge", None) is not None
+            else None
+        ),
+        filled_order_ids_provider=(
+            svc.tws_bridge.pop_filled_order_ids
+            if getattr(svc, "tws_bridge", None) is not None
+            else None
+        ),
         continuous_mode=continuous_mode,
     )
 
@@ -1463,6 +1473,10 @@ def live_runner_status():
     live_config = _live_runner_config()
     try:
         runner = _build_live_runner(live_config, continuous_mode=False)
+        # evaluate_gates() drains broker-rejected and broker-filled order
+        # IDs from the TWSBridge; that reconciles trade-store entries
+        # (rejected → FAILED, bracket child filled → CLOSED) before we
+        # try to advance the live lifecycle below.
         gates = runner.evaluate_gates()
     except Exception:
         logger.exception("Failed to build live runner for status check")
@@ -1470,6 +1484,16 @@ def live_runner_status():
             "error": "Failed to evaluate live runner gates",
             "live_runner_config": live_config.to_dict(),
         }), 500
+
+    # Auto-advance the live lifecycle on every status poll so:
+    #   * SINGLE_TRADE: mode turns OFF once the bracket fills (target or
+    #     stop), without needing a manual /live/evaluate-exits click.
+    #   * CONTINUOUS:   the next cycle starts after the previous bracket
+    #     fills, again without manual exit-evaluation.
+    try:
+        _maybe_advance_live_lifecycle()
+    except Exception:
+        logger.exception("Live lifecycle auto-advance failed on /live/status")
 
     state = _live_mode_state()
     return jsonify({
@@ -1727,14 +1751,19 @@ def actual_live_activate():
             "rejection_reason": "account_mode not live",
         }), 400
 
-    # 3. trading_cycle — v1 restricts to single_trade only
+    # 3. trading_cycle — actual-live now supports single_trade and
+    # continuous.  Bracket exits (parent BUY LMT + child SELL LMT @
+    # target + child SELL STP @ stop) are submitted atomically by
+    # AutonomousLiveRunner so exit management is owned by TWS; the
+    # lifecycle advancer turns mode OFF (single_trade) or starts the
+    # next cycle (continuous) once the bracket child fills.
     cycle = normalise_trading_cycle(body.get("trading_cycle"))
-    if cycle is None or cycle != TradingCycle.SINGLE_TRADE:
+    if cycle is None:
         return jsonify({
-            "error": "Actual live trading v1 supports only single_trade cycle",
+            "error": "trading_cycle must be 'single_trade' or 'continuous'",
             "status": "rejected",
             "outcome": "LIVE_ORDER_REJECTED",
-            "rejection_reason": "only single_trade allowed in v1",
+            "rejection_reason": "invalid trading_cycle",
         }), 400
 
     # 4. expected_account_id (non-empty)
@@ -1887,39 +1916,35 @@ def actual_live_activate():
             }), 400
 
         try:
-            from execution.paper_adapter import TwsTradingAdapter
             from execution.order_executor import OrderExecutor
             from risk.risk_manager import RiskManager
 
             risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
 
-            tws_adapter = TwsTradingAdapter(
-                host=host,
-                port=port,
-                environment="live",
-            )
-
-            # Connect and verify readiness (addresses review issue #2).
-            # If TWS is not available, fail clearly rather than allowing the
-            # UI to imply "Actual Live Trading" is ready.
-            adapter_connected = tws_adapter.connect_and_run()
-            if not adapter_connected or not tws_adapter.ready:
+            # Reuse the persistent TWSBridge as the OrderExecutor adapter
+            # instead of opening a second EClient socket. Opening a parallel
+            # adapter on the same client_id caused mid-cycle disconnects
+            # (the symptom: 'adapter port=None' or '<= not supported between
+            # int and NoneType' rejections from inside the IB API after the
+            # second socket was torn down by TWS).
+            tws_adapter = getattr(svc, "tws_bridge", None)
+            if tws_adapter is None or not getattr(tws_adapter, "is_connected", False):
                 _audit_mode_event("actual_live_activate_failed", {
                     "expected_account_id": expected_account_id,
                     "confirmed_by": confirmed_by,
-                    "reason": "adapter_not_connected",
+                    "reason": "bridge_not_connected",
                     "host": host,
                     "port": port,
                 })
                 return jsonify({
                     "error": (
-                        "TWS adapter could not connect or is not ready. "
-                        "Verify TWS/Gateway is running and accepting connections "
+                        "TWS bridge is not connected. "
+                        "Verify TWS/Gateway is running and reconnect "
                         f"on {host}:{port}."
                     ),
                     "status": "rejected",
                     "outcome": "LIVE_ORDER_REJECTED",
-                    "rejection_reason": "adapter not connected/ready",
+                    "rejection_reason": "bridge not connected",
                 }), 503
 
             executor = OrderExecutor(
@@ -1935,11 +1960,6 @@ def actual_live_activate():
             )
         except Exception:
             logger.exception("Failed to build actual-live OrderExecutor")
-            if tws_adapter is not None:
-                try:
-                    tws_adapter.disconnect_gracefully()
-                except Exception:
-                    pass
             _audit_mode_event("actual_live_activate_failed", {
                 "expected_account_id": expected_account_id,
                 "confirmed_by": confirmed_by,
@@ -1960,7 +1980,6 @@ def actual_live_activate():
             )
         except Exception:
             logger.exception("Failed to build AutonomousLiveRunner for actual-live")
-            tws_adapter.disconnect_gracefully()
             _audit_mode_event("actual_live_activate_failed", {
                 "expected_account_id": expected_account_id,
                 "confirmed_by": confirmed_by,
@@ -1977,8 +1996,6 @@ def actual_live_activate():
     gates = runner.evaluate_gates()
     if not gates.ready:
         msg = "; ".join(gates.reasons()) or "Live runner readiness checks failed"
-        if tws_adapter is not None:
-            tws_adapter.disconnect_gracefully()
         _audit_mode_event("actual_live_activate_rejected", {
             "expected_account_id": expected_account_id,
             "confirmed_by": confirmed_by,
@@ -2039,35 +2056,56 @@ def actual_live_activate():
         else:
             payload["outcome"] = "LIVE_ORDER_REJECTED"
 
-        # v1 single-trade actual-live: turn OFF after EVERY outcome.
-        # v1 is entry-only — automated exit management is not wired for
-        # actual-live (the request-scoped executor is intentionally not
-        # persisted, so /live/evaluate-exits cannot submit real exit orders).
-        # Keeping mode ON after entry would let the exit endpoint silently
-        # fall back to a dry-run executor and mark actual-live trades
-        # EXIT_PENDING without a real order — a dangerous bleed-through.
-        # The operator must manage exits manually for v1.
+        # Bracket-managed exits: after a successful entry, the parent
+        # BUY LMT + child SELL LMT (target) + child SELL STP (stop)
+        # are live at TWS.  Keep Autonomous Mode ON so the lifecycle
+        # advancer (driven by /live/status polls) can:
+        #   * SINGLE_TRADE: turn mode OFF once the bracket child fills
+        #     and the trade is reconciled to CLOSED.
+        #   * CONTINUOUS:   start the next cycle once the bracket
+        #     child fills.
+        # Force-OFF only when the entry was rejected / no_trade so the
+        # operator immediately sees the failure state.
         if run_status == "executed":
-            message = (
-                "Actual live entry submitted successfully. "
-                "v1 single-trade mode turned OFF — exit management is manual."
-            )
-            state.turn_off(message=message, status="Entry Submitted")
-            _audit_mode_event("halt", {
-                "reason": message,
-                "run_status": run_status,
-                "source": "actual_live_v1_entry_only",
-            })
+            trade = payload.get("trade") or {}
+            target_id = trade.get("target_order_id")
+            stop_id = trade.get("stop_order_id")
+            if target_id is not None and stop_id is not None:
+                logger.info(
+                    "Actual-live entry submitted with bracket attached "
+                    "(parent=%s, target=%s, stop=%s); mode stays ON until "
+                    "bracket child fills",
+                    payload.get("submitted_order_id"),
+                    target_id,
+                    stop_id,
+                )
+            else:
+                # Entry submitted without a bracket — v1 entry-only
+                # fallback (adapter has no place_bracket_buy, or plan
+                # lacked a target).  Operator must manage exit manually;
+                # keep the original force-OFF behaviour for safety.
+                message = (
+                    "Actual live entry submitted without bracket exit "
+                    "(broker adapter does not support brackets, or plan "
+                    "had no target_price). Autonomous Mode turned OFF — "
+                    "exit management is manual."
+                )
+                state.turn_off(message=message, status="Entry Submitted")
+                _audit_mode_event("halt", {
+                    "reason": message,
+                    "run_status": run_status,
+                    "source": "actual_live_no_bracket",
+                })
         else:
             message = (
                 payload.get("rejection_reason")
-                or f"Actual live single-trade ended with status '{run_status}'. Autonomous Mode has been turned OFF."
+                or f"Actual live cycle ended with status '{run_status}'. Autonomous Mode has been turned OFF."
             )
             state.turn_off(message=message, status="Not Ready")
             _audit_mode_event("halt", {
                 "reason": message,
                 "run_status": run_status,
-                "source": "actual_live_single_trade_non_executed",
+                "source": "actual_live_entry_non_executed",
             })
 
         # Check market gate
@@ -2092,13 +2130,6 @@ def actual_live_activate():
             "source": "actual_live_activate",
         })
         payload = {"outcome": "LIVE_ORDER_REJECTED", "rejection_reason": "lifecycle exception"}
-    finally:
-        # Always disconnect the request-scoped adapter after execution
-        if tws_adapter is not None:
-            try:
-                tws_adapter.disconnect_gracefully()
-            except Exception:
-                pass
 
     return jsonify({
         "status": "activated" if state.is_on else "halted",
@@ -2190,10 +2221,15 @@ def live_evaluate_exits():
 
         # Check if the store has open trades that were entered via actual-live.
         # Actual-live trades are marked with "dry_run=False" in their notes by
-        # AutonomousLiveRunner._record_trade().
+        # AutonomousLiveRunner._record_trade().  Trades with a target_order_id
+        # are bracket-managed at TWS (target + stop already at the broker via
+        # the entry bracket) and need no client-side exit, so they are EXCLUDED
+        # from the fail-closed guard \u2014 the runner's bracket-fill reconciler
+        # (driven from /live/status) is responsible for flipping them to CLOSED.
         open_trades = live_store.list_open()
         has_open_actual_live_trades = any(
             "dry_run=False" in (getattr(t, "notes", None) or [])
+            and getattr(t, "target_order_id", None) is None
             for t in open_trades
         )
 

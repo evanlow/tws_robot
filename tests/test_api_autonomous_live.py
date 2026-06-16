@@ -406,12 +406,16 @@ class TestActualLiveActivate:
         assert resp.status_code == 400
         assert "account_mode" in resp.get_json()["error"]
 
-    def test_rejects_continuous_cycle(self, app, client, tmp_path):
+    def test_accepts_continuous_cycle(self, app, client, tmp_path):
+        """Continuous mode is permitted because bracket-at-entry attaches
+        target+stop child orders at TWS, so exits don't depend on the runner
+        staying ON between cycles."""
         _install_live_runner(app, tmp_path)
         payload = {**self.VALID_PAYLOAD, "trading_cycle": "continuous"}
         resp = client.post("/api/autonomous/live/actual-live/activate", json=payload)
-        assert resp.status_code == 400
-        assert "single_trade" in resp.get_json()["error"]
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["status"] in ("activated", "halted")
 
     def test_rejects_missing_expected_account_id(self, app, client, tmp_path):
         _install_live_runner(app, tmp_path)
@@ -930,11 +934,14 @@ class TestActualLiveAdapterConnection:
     }
 
     def test_returns_503_when_adapter_not_connected(self, app, client, tmp_path, monkeypatch):
-        """Without a factory override, the production path tries to connect to
-        TWS.  If TWS is unavailable, it must return 503."""
+        """Without a factory override, the production path reuses the
+        persistent TWSBridge as the OrderExecutor adapter.  If the bridge
+        is not connected (or absent), the endpoint must return 503."""
         # Do NOT install a runner factory — exercise the production code path
         app.config["autonomous_spy_price_provider"] = lambda: {"open": 100.0, "current": 105.0}
-        # Mock service as connected with live environment so we reach adapter check
+        # Mock service as connected with live environment so we reach the
+        # bridge check.  No tws_bridge is set, so the bridge-not-connected
+        # branch fires.
         monkeypatch.setattr(
             "web.services.ServiceManager.connected", True
         )
@@ -945,10 +952,10 @@ class TestActualLiveAdapterConnection:
             "web.services.ServiceManager.connection_info",
             {"account": "U1234567", "port": 7496, "host": "127.0.0.1"},
         )
-        # Mock TwsTradingAdapter.connect_and_run to return False
+        # Explicitly assert there is no bridge so the production path hits
+        # the bridge_not_connected guard rather than any cached adapter.
         monkeypatch.setattr(
-            "execution.paper_adapter.TwsTradingAdapter.connect_and_run",
-            lambda self: False,
+            "web.services.ServiceManager.tws_bridge", None
         )
 
         resp = client.post(
@@ -957,7 +964,7 @@ class TestActualLiveAdapterConnection:
         assert resp.status_code == 503
         body = resp.get_json()
         assert body["outcome"] == "LIVE_ORDER_REJECTED"
-        assert body["rejection_reason"] == "adapter not connected/ready"
+        assert body["rejection_reason"] == "bridge not connected"
 
     def test_returns_400_when_detected_account_missing(self, app, client, tmp_path, monkeypatch):
         """When the service is connected/live but the detected account ID has not

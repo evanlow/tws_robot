@@ -72,6 +72,10 @@ class AutonomousTrade:
     exit_reason: Optional[str] = None
     realised_pnl: Optional[float] = None
     notes: List[str] = field(default_factory=list)
+    # Bracket child IDs (live trades only) — used by AutonomousLiveRunner
+    # to reconcile a target/stop fill into a CLOSED status.
+    target_order_id: Optional[int] = None
+    stop_order_id: Optional[int] = None
 
     @staticmethod
     def new_id() -> str:

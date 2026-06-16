@@ -30,6 +30,18 @@ from autonomous.candidate_scanner import CandidateSignal
 _OPTION_MULTIPLIER = 100
 
 
+def _add(reasons: Optional[List[str]], msg: str) -> None:
+    """Append ``msg`` to ``reasons`` when the caller passed an accumulator.
+
+    Used by the planner to record quantitative rejection details (cap vs.
+    price, contracts vs. cash, strike vs. support, etc.) so the engine
+    can surface them in ``decision.rejection_reason`` instead of the
+    generic "no tradable plan" string.
+    """
+    if reasons is not None:
+        reasons.append(msg)
+
+
 class TradeType(str, Enum):
     BUY_SHARES = "BUY_SHARES"
     SELL_CASH_SECURED_PUT = "SELL_CASH_SECURED_PUT"
@@ -126,6 +138,7 @@ class TradePlanner:
         deployable_cash: float,
         equity: float,
         option_hint: Optional[OptionChainHint] = None,
+        reasons: Optional[List[str]] = None,
     ) -> Optional[TradePlan]:
         """Return a :class:`TradePlan` or ``None`` when nothing tradable.
 
@@ -140,8 +153,14 @@ class TradePlanner:
         * deployable cash covers at least one contract's reserve.
 
         Otherwise it falls back to a BUY_SHARES plan, if allowed.
+
+        When ``reasons`` is provided, the planner appends one short,
+        numeric explanation per rejection branch so callers can surface
+        a quantitative "no tradable plan" message instead of the generic
+        catch-all.
         """
         if candidate.last_price is None or candidate.last_price <= 0:
+            _add(reasons, f"candidate.last_price invalid ({candidate.last_price!r})")
             return None
 
         if (
@@ -149,13 +168,18 @@ class TradePlanner:
             and self.config.allow_short_put
             and option_hint is not None
         ):
-            put_plan = self._plan_short_put(candidate, deployable_cash, equity, option_hint)
+            put_plan = self._plan_short_put(
+                candidate, deployable_cash, equity, option_hint, reasons=reasons
+            )
             if put_plan is not None:
                 return put_plan
 
         if self.config.allow_share_buy:
-            return self._plan_buy_shares(candidate, deployable_cash, equity)
+            return self._plan_buy_shares(
+                candidate, deployable_cash, equity, reasons=reasons
+            )
 
+        _add(reasons, "config.allow_share_buy=False and no put plan produced")
         return None
 
     # ------------------------------------------------------------------
@@ -167,21 +191,41 @@ class TradePlanner:
         candidate: CandidateSignal,
         deployable_cash: float,
         equity: float,
+        reasons: Optional[List[str]] = None,
     ) -> Optional[TradePlan]:
         price = candidate.last_price
         if price <= 0:
+            _add(reasons, f"{candidate.symbol}: price <= 0 ({price})")
             return None
 
         # Position-size cap is the lower of the configured percentage of
         # equity and the same percentage of deployable cash.
-        cap = deployable_cash * self.config.max_new_position_pct
+        pct = self.config.max_new_position_pct
+        cash_cap = deployable_cash * pct
+        cap = cash_cap
+        equity_cap = None
         if equity > 0:
-            cap = min(cap, equity * self.config.max_new_position_pct)
+            equity_cap = equity * pct
+            cap = min(cap, equity_cap)
         if cap < price:
+            equity_str = (
+                f", equity_cap=${equity_cap:,.2f} (equity ${equity:,.2f} * {pct:.0%})"
+                if equity_cap is not None else ""
+            )
+            _add(
+                reasons,
+                f"{candidate.symbol}: position cap ${cap:,.2f} < share price ${price:,.2f} "
+                f"[deployable ${deployable_cash:,.2f} * {pct:.0%} = ${cash_cap:,.2f}"
+                f"{equity_str}] — can't afford 1 share within sizing cap"
+            )
             return None  # can't afford a single share within the cap
 
         quantity = int(math.floor(cap / price))
         if quantity <= 0:
+            _add(
+                reasons,
+                f"{candidate.symbol}: floor(cap ${cap:,.2f} / price ${price:,.2f}) = 0"
+            )
             return None
 
         required_cash = quantity * price
@@ -323,10 +367,17 @@ class TradePlanner:
         deployable_cash: float,
         equity: float,
         option_hint: OptionChainHint,
+        reasons: Optional[List[str]] = None,
     ) -> Optional[TradePlan]:
         if option_hint.contracts_available <= 0:
+            _add(
+                reasons,
+                f"{candidate.symbol}: option_hint.contracts_available "
+                f"= {option_hint.contracts_available} (need > 0)"
+            )
             return None
         if option_hint.strike <= 0:
+            _add(reasons, f"{candidate.symbol}: option_hint.strike = {option_hint.strike}")
             return None
 
         # Conservative rule: strike must be at-or-below the candidate's
@@ -338,23 +389,48 @@ class TradePlanner:
             or candidate.support_price <= 0
             or option_hint.strike > candidate.support_price
         ):
+            _add(
+                reasons,
+                f"{candidate.symbol}: strike {option_hint.strike} > support "
+                f"{candidate.support_price} (require strike <= support)"
+            )
             return None
 
         per_contract_cash = option_hint.strike * _OPTION_MULTIPLIER
         if per_contract_cash <= 0:
+            _add(reasons, f"{candidate.symbol}: per_contract_cash = {per_contract_cash}")
             return None
 
-        cap = deployable_cash * self.config.max_new_position_pct
+        pct = self.config.max_new_position_pct
+        cash_cap = deployable_cash * pct
+        cap = cash_cap
+        equity_cap = None
         if equity > 0:
-            cap = min(cap, equity * self.config.max_new_position_pct)
+            equity_cap = equity * pct
+            cap = min(cap, equity_cap)
         max_contracts_by_cash = int(math.floor(cap / per_contract_cash))
         contracts = min(max_contracts_by_cash, option_hint.contracts_available)
         if contracts <= 0:
+            equity_str = (
+                f", equity_cap=${equity_cap:,.2f}" if equity_cap is not None else ""
+            )
+            _add(
+                reasons,
+                f"{candidate.symbol}: 0 affordable put contracts — "
+                f"floor(cap ${cap:,.2f} / ${per_contract_cash:,.2f} per contract) = "
+                f"{max_contracts_by_cash} [deployable ${deployable_cash:,.2f} * "
+                f"{pct:.0%} = ${cash_cap:,.2f}{equity_str}]"
+            )
             return None
 
         # Limit (sell-to-open) at the midpoint; never market.
         limit_price = round(option_hint.midpoint, 2)
         if limit_price <= 0:
+            _add(
+                reasons,
+                f"{candidate.symbol}: option midpoint <= 0 "
+                f"(bid={option_hint.bid}, ask={option_hint.ask})"
+            )
             return None
 
         required_cash = per_contract_cash * contracts

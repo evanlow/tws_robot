@@ -22,9 +22,12 @@ from typing import Any, Dict, Optional
 
 from ibapi.client import EClient
 from ibapi.contract import Contract
+from ibapi.order import Order as IBOrder
 from ibapi.wrapper import EWrapper
 
+from backtest.data_models import Position
 from core.event_bus import Event, EventType
+from execution.paper_adapter import LIVE_PORTS, PAPER_PORTS
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,21 @@ class _BridgeApp(EWrapper, EClient):
         # has already issued IDs.  Protected by ``_order_id_lock``.
         self._next_valid_order_id: Optional[int] = None
         self._order_id_lock = threading.Lock()
+
+        # Order IDs the broker has rejected since the last drain (TWS
+        # error codes 110/200/201/202/203/321/388/434).  Consumed by
+        # AutonomousLiveRunner to mark the matching trade-store entries
+        # as FAILED so a rejected order doesn't burn a daily/open slot.
+        self._rejected_order_ids: set[int] = set()
+        self._rejected_order_ids_lock = threading.Lock()
+
+        # Order IDs the broker has reported fully filled since the last
+        # drain.  Consumed by AutonomousLiveRunner so a bracket child
+        # fill (target or stop) flips the matching trade-store entry
+        # from OPEN/EXIT_PENDING to CLOSED — letting Continuous mode
+        # start the next cycle.
+        self._filled_order_ids: set[int] = set()
+        self._filled_order_ids_lock = threading.Lock()
 
     # -- connection lifecycle -----------------------------------------------
 
@@ -222,6 +240,30 @@ class _BridgeApp(EWrapper, EClient):
 
     # -- error handling -----------------------------------------------------
 
+    # Order-level rejection codes from IBKR.  These mean the order did NOT
+    # enter the book and will not fill — they must surface as ERROR, not
+    # buried as a generic warning, because the order ID returned by
+    # placeOrder() looks successful otherwise.
+    #   110 — price/qty violates exchange rules
+    #   200 — no security definition has been found
+    #   201 — order rejected (generic; see message for cause)
+    #   202 — order cancelled (by exchange / risk)
+    #   203 — security is not available for trading
+    #   321 — server validation failed (e.g. API in Read-Only mode)
+    #   388 — order size too small
+    #   434 — order size cannot be zero
+    _ORDER_REJECT_CODES = frozenset({110, 200, 201, 202, 203, 321, 388, 434})
+
+    # Known root causes keyed by errorCode — surfaced so the operator
+    # gets an actionable hint rather than just the raw IBKR string.
+    _ORDER_REJECT_HINTS = {
+        321: (
+            "TWS API is in Read-Only mode. Open TWS → File → Global "
+            "Configuration → API → Settings and uncheck 'Read-Only API', "
+            "then restart the API session."
+        ),
+    }
+
     def error(self, reqId, _errorTime, errorCode: int, errorString: str,
               advancedOrderRejectJson="") -> None:
         # Informational messages (data-farm connections)
@@ -233,8 +275,44 @@ class _BridgeApp(EWrapper, EClient):
             logger.error("TWS connection error %s: %s", errorCode, errorString)
             self._connected = False
             return
+        # Order-level rejections — the order did NOT enter the book.
+        if errorCode in self._ORDER_REJECT_CODES:
+            hint = self._ORDER_REJECT_HINTS.get(errorCode, "")
+            logger.error(
+                "ORDER REJECTED by TWS — code %s, orderId %s: %s%s",
+                errorCode, reqId, errorString,
+                f" [fix: {hint}]" if hint else "",
+            )
+            # Record the rejected order ID so AutonomousLiveRunner can
+            # mark the corresponding trade-store entry as FAILED on the
+            # next cycle (otherwise the rejected order keeps burning a
+            # slot against max_open_live_trades / live_trades_today).
+            if isinstance(reqId, int) and reqId > 0:
+                with self._rejected_order_ids_lock:
+                    self._rejected_order_ids.add(reqId)
+            return
         logger.warning("TWS error %s (reqId %s): %s", errorCode, reqId,
                        errorString)
+
+    # ------------------------------------------------------------------
+    # Order status — tracks fills for bracket reconciliation
+    # ------------------------------------------------------------------
+    def orderStatus(self, orderId: int, status: str, filled: float,
+                    remaining: float, avgFillPrice: float, permId: int,
+                    parentId: int, lastFillPrice: float, clientId: int,
+                    whyHeld: str, mktCapPrice: float) -> None:
+        # Record fully-filled orders so the live runner can reconcile
+        # bracket children (target / stop) into CLOSED trade-store
+        # entries.  We do NOT distinguish parent vs child here; the
+        # reconciler matches against entry/target/stop order IDs.
+        if status == "Filled" and remaining == 0:
+            if isinstance(orderId, int) and orderId > 0:
+                with self._filled_order_ids_lock:
+                    self._filled_order_ids.add(orderId)
+                logger.info(
+                    "TWSBridge: order %s fully filled (avg=%.4f, last=%.4f)",
+                    orderId, avgFillPrice, lastFillPrice,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +430,40 @@ class TWSBridge:
             self._app._next_valid_order_id = current + 1
             return current
 
+    def pop_rejected_order_ids(self) -> set[int]:
+        """Drain and return broker order IDs TWS has rejected.
+
+        Returns a snapshot of every ID seen via an order-level error
+        callback (codes 110/200/201/202/203/321/388/434) since the last
+        drain, then clears the internal set.  Consumed by
+        :class:`AutonomousLiveRunner` to reconcile the trade store:
+        any ``OPEN`` trade whose ``entry_order_id`` is in this set is
+        marked ``FAILED`` so it no longer counts against
+        ``max_open_live_trades`` or ``max_live_trades_per_day``.
+
+        Safe to call when not connected — returns an empty set.
+        """
+        if self._app is None:
+            return set()
+        with self._app._rejected_order_ids_lock:
+            drained = set(self._app._rejected_order_ids)
+            self._app._rejected_order_ids.clear()
+        return drained
+
+    def pop_filled_order_ids(self) -> set[int]:
+        """Drain and return broker order IDs TWS has reported fully filled.
+
+        Consumed by :class:`AutonomousLiveRunner` to flip trade-store
+        entries to ``CLOSED`` when a bracket child (target or stop) fills.
+        Safe to call when not connected — returns an empty set.
+        """
+        if self._app is None:
+            return set()
+        with self._app._filled_order_ids_lock:
+            drained = set(self._app._filled_order_ids)
+            self._app._filled_order_ids.clear()
+        return drained
+
     def cancel_order(self, broker_order_id: int) -> None:
         """Send a cancellation request to TWS for the given order ID.
 
@@ -365,6 +477,267 @@ class TWSBridge:
             "TWSBridge: cancel request sent for broker order %s",
             broker_order_id,
         )
+
+    # -- OrderExecutor adapter surface -------------------------------------
+    #
+    # These attributes and methods let :class:`execution.order_executor.\
+    # OrderExecutor` use the bridge directly as its ``tws_adapter``,
+    # avoiding the need to open a second EClient socket for live trading
+    # (which previously caused mid-cycle disconnects and the cryptic
+    # ``'<=' not supported between 'int' and 'NoneType'`` rejection).
+    #
+    # The bridge exposes exactly the subset of ``TwsTradingAdapter`` that
+    # OrderExecutor depends on:
+    #   * ``environment`` / ``port`` — for the live confirmation check
+    #   * ``ready`` — for the readiness guard
+    #   * ``buy`` / ``sell`` / ``close_position`` — order placement
+    #   * ``get_all_positions`` — portfolio reconciliation
+
+    @property
+    def environment(self) -> str:
+        """Return ``"live"`` or ``"paper"`` based on the configured port.
+
+        Custom/unknown ports default to ``"paper"`` to fail-closed for the
+        live confirmation check; OrderExecutor will then reject the order
+        with a clear port-mismatch message instead of submitting it.
+        """
+        port = int(self._config.get("port") or 0)
+        if port in LIVE_PORTS:
+            return "live"
+        return "paper"
+
+    @property
+    def port(self) -> int:
+        """Configured TWS port. Stable across reconnects (unlike
+        ``EClient.port`` on the underlying app, which is nulled by
+        ``EClient.reset()`` on every socket close)."""
+        return int(self._config.get("port") or 0)
+
+    @property
+    def ready(self) -> bool:
+        """OrderExecutor-compatible readiness flag."""
+        return self.is_connected
+
+    def buy(
+        self,
+        symbol: str,
+        quantity: int,
+        order_type: str = "MARKET",
+        limit_price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+    ) -> int:
+        """Submit a BUY order through the persistent bridge connection."""
+        return self._place_order(
+            symbol, "BUY", quantity, order_type, limit_price, stop_price
+        )
+
+    def sell(
+        self,
+        symbol: str,
+        quantity: int,
+        order_type: str = "MARKET",
+        limit_price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+    ) -> int:
+        """Submit a SELL order through the persistent bridge connection."""
+        return self._place_order(
+            symbol, "SELL", quantity, order_type, limit_price, stop_price
+        )
+
+    def close_position(
+        self, symbol: str, order_type: str = "MARKET"
+    ) -> Optional[int]:
+        """Close an existing stock position via an opposite-side order.
+
+        Returns the broker order ID, or ``None`` if no position is held.
+        Raises ``ValueError`` if ``order_type`` is ``"LIMIT"`` (use
+        ``buy``/``sell`` with an explicit ``limit_price`` instead).
+        """
+        if order_type.upper() == "LIMIT":
+            raise ValueError(
+                "LIMIT order type is not supported for close_position; "
+                "use buy/sell with an explicit limit_price instead"
+            )
+        positions = self.get_all_positions()
+        position = positions.get(symbol)
+        if position is None or position.quantity == 0:
+            return None
+        qty = int(abs(position.quantity))
+        if position.quantity > 0:
+            return self.sell(symbol, qty, order_type)
+        return self.buy(symbol, qty, order_type)
+
+    def get_all_positions(self) -> Dict[str, Position]:
+        """Return current stock positions in OrderExecutor-compatible form.
+
+        Reads from the ServiceManager's position cache (populated by
+        ``_BridgeApp.updatePortfolio``). Only stock (``STK``) positions are
+        returned — option positions use a different symbol format and are
+        not subject to share-quantity reconciliation by OrderExecutor.
+        """
+        try:
+            raw = self._svc.get_positions()
+        except Exception:
+            logger.exception("TWSBridge: failed to read positions from ServiceManager")
+            return {}
+
+        result: Dict[str, Position] = {}
+        for symbol, data in raw.items():
+            if (data.get("sec_type") or "STK") != "STK":
+                continue
+            try:
+                qty = int(float(data.get("quantity") or 0))
+            except (TypeError, ValueError):
+                continue
+            if qty == 0:
+                continue
+            result[symbol] = Position(
+                symbol=symbol,
+                quantity=qty,
+                average_cost=float(data.get("entry_price") or 0.0),
+                current_price=float(data.get("current_price") or 0.0),
+                realized_pnl=float(data.get("realized_pnl") or 0.0),
+            )
+        return result
+
+    def _place_order(
+        self,
+        symbol: str,
+        action: str,
+        quantity: int,
+        order_type: str,
+        limit_price: Optional[float],
+        stop_price: Optional[float],
+    ) -> int:
+        """Build the IB contract + order objects and submit via the
+        persistent ``_BridgeApp`` connection.
+
+        Reserves the next broker-issued order ID atomically via
+        :meth:`reserve_order_id` to avoid colliding with concurrent
+        requests (e.g. dashboard manual cancels racing autonomous orders).
+        """
+        if not self.is_connected:
+            raise RuntimeError("TWSBridge: not connected to TWS")
+
+        order_id = self.reserve_order_id()
+
+        contract = Contract()
+        contract.symbol = symbol
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.currency = "USD"
+
+        ib_order = IBOrder()
+        ib_order.action = action
+        ib_order.totalQuantity = quantity
+        ib_order.orderType = order_type
+        if order_type == "LIMIT" and limit_price is not None:
+            ib_order.lmtPrice = float(limit_price)
+        elif order_type == "STOP" and stop_price is not None:
+            ib_order.auxPrice = float(stop_price)
+        elif order_type == "STOP_LIMIT" and limit_price is not None and stop_price is not None:
+            ib_order.lmtPrice = float(limit_price)
+            ib_order.auxPrice = float(stop_price)
+
+        self._app.placeOrder(order_id, contract, ib_order)
+        logger.info(
+            "TWSBridge: placed %s order %s for %s x%s (%s)",
+            action, order_id, symbol, quantity, order_type,
+        )
+        return order_id
+
+    # ------------------------------------------------------------------
+    # Bracket orders (parent BUY LMT + child target SELL LMT + child stop)
+    # ------------------------------------------------------------------
+    def place_bracket_buy(
+        self,
+        symbol: str,
+        quantity: int,
+        limit_price: float,
+        target_price: float,
+        stop_price: float,
+    ) -> Dict[str, int]:
+        """Submit a 3-leg bracket (parent BUY LMT + child SELL LMT target
+        + child SELL STP stop) atomically.
+
+        All three orders are submitted in sequence with ``transmit`` set
+        to ``False`` on the parent and target legs and ``True`` on the
+        stop leg so TWS only activates the bracket after the final
+        ``placeOrder`` call.  TWS attaches the children to the parent
+        via ``parentId`` and treats them as a one-cancels-the-other
+        group: when the parent fills, the children become live; when
+        either child fills, the other is cancelled by TWS.
+
+        Returns ``{"parent_id": int, "target_id": int, "stop_id": int}``.
+        Raises :class:`RuntimeError` if the bridge is not connected.
+        Raises :class:`ValueError` for invalid prices/quantity.
+        """
+        if not self.is_connected:
+            raise RuntimeError("TWSBridge: not connected to TWS")
+        if quantity <= 0:
+            raise ValueError(f"quantity must be > 0; got {quantity!r}")
+        if limit_price <= 0 or target_price <= 0 or stop_price <= 0:
+            raise ValueError(
+                f"bracket prices must be > 0; got limit={limit_price} "
+                f"target={target_price} stop={stop_price}"
+            )
+        if target_price <= limit_price:
+            raise ValueError(
+                f"bracket target ({target_price}) must be > entry limit "
+                f"({limit_price}) for a long bracket"
+            )
+        if stop_price >= limit_price:
+            raise ValueError(
+                f"bracket stop ({stop_price}) must be < entry limit "
+                f"({limit_price}) for a long bracket"
+            )
+
+        parent_id = self.reserve_order_id()
+        target_id = self.reserve_order_id()
+        stop_id = self.reserve_order_id()
+
+        contract = Contract()
+        contract.symbol = symbol
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.currency = "USD"
+
+        parent = IBOrder()
+        parent.orderId = parent_id
+        parent.action = "BUY"
+        parent.totalQuantity = quantity
+        parent.orderType = "LMT"
+        parent.lmtPrice = float(limit_price)
+        parent.transmit = False
+
+        target = IBOrder()
+        target.orderId = target_id
+        target.action = "SELL"
+        target.totalQuantity = quantity
+        target.orderType = "LMT"
+        target.lmtPrice = float(target_price)
+        target.parentId = parent_id
+        target.transmit = False
+
+        stop = IBOrder()
+        stop.orderId = stop_id
+        stop.action = "SELL"
+        stop.totalQuantity = quantity
+        stop.orderType = "STP"
+        stop.auxPrice = float(stop_price)
+        stop.parentId = parent_id
+        stop.transmit = True  # transmits the whole bracket
+
+        self._app.placeOrder(parent_id, contract, parent)
+        self._app.placeOrder(target_id, contract, target)
+        self._app.placeOrder(stop_id, contract, stop)
+        logger.info(
+            "TWSBridge: placed BRACKET BUY %s x%s @ limit=%.2f "
+            "target=%.2f stop=%.2f (parent=%s, target=%s, stop=%s)",
+            symbol, quantity, limit_price, target_price, stop_price,
+            parent_id, target_id, stop_id,
+        )
+        return {"parent_id": parent_id, "target_id": target_id, "stop_id": stop_id}
 
 
 # ---------------------------------------------------------------------------

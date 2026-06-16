@@ -703,3 +703,465 @@ class TestTWSBridgeIntegration:
         assert received_events[0].event_type == EventType.PORTFOLIO_UPDATE
         assert received_events[0].data["symbol"] == "AAPL"
         assert received_events[0].data["position"] == 100.0
+
+
+
+# ==============================================================================
+# OrderExecutor adapter surface
+# ==============================================================================
+
+
+class TestTWSBridgeAdapterSurface:
+    """Tests for the OrderExecutor-compatible adapter methods on TWSBridge.
+
+    These verify the surface exposed for actual-live trading where the
+    persistent bridge is reused as the OrderExecutor adapter (instead of
+    opening a second EClient socket that TWS would reject)."""
+
+    @pytest.mark.unit
+    def test_environment_live_for_live_port(self, mock_service_manager):
+        bridge = TWSBridge(mock_service_manager, {"port": 7496})
+        assert bridge.environment == "live"
+
+    @pytest.mark.unit
+    def test_environment_live_for_gateway_live_port(self, mock_service_manager):
+        bridge = TWSBridge(mock_service_manager, {"port": 4001})
+        assert bridge.environment == "live"
+
+    @pytest.mark.unit
+    def test_environment_paper_for_paper_port(self, mock_service_manager):
+        bridge = TWSBridge(mock_service_manager, {"port": 7497})
+        assert bridge.environment == "paper"
+
+    @pytest.mark.unit
+    def test_environment_paper_for_unknown_port_failclosed(self, mock_service_manager):
+        """Unknown ports default to 'paper' so the live confirmation check
+        will reject the order with a clear port-mismatch message rather
+        than risk sending a real-money order to an unrecognised port."""
+        bridge = TWSBridge(mock_service_manager, {"port": 9999})
+        assert bridge.environment == "paper"
+
+    @pytest.mark.unit
+    def test_port_returns_configured_port_stable_across_reconnect(self, bridge):
+        """Unlike EClient.port (which is nulled by EClient.reset on every
+        socket close), TWSBridge.port reads from the immutable config."""
+        assert bridge.port == 7497
+
+    @pytest.mark.unit
+    def test_ready_mirrors_is_connected(self, bridge):
+        bridge._app = None
+        assert bridge.ready is False
+
+        app = _BridgeApp(bridge._svc, "DU12345")
+        app._connected = True
+        app._ready = True
+        bridge._app = app
+        assert bridge.ready is True
+
+    @pytest.mark.unit
+    def test_buy_reserves_id_and_calls_place_order(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 1000
+        app.placeOrder = Mock()
+        bridge._app = app
+
+        order_id = bridge.buy("AAPL", 10)
+
+        assert order_id == 1000
+        app.placeOrder.assert_called_once()
+        called_id, contract, order = app.placeOrder.call_args[0]
+        assert called_id == 1000
+        assert contract.symbol == "AAPL"
+        assert contract.secType == "STK"
+        assert order.action == "BUY"
+        assert order.totalQuantity == 10
+        assert order.orderType == "MARKET"
+
+    @pytest.mark.unit
+    def test_sell_reserves_id_and_calls_place_order(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 2000
+        app.placeOrder = Mock()
+        bridge._app = app
+
+        order_id = bridge.sell("AAPL", 5, order_type="LIMIT", limit_price=150.0)
+
+        assert order_id == 2000
+        called_id, _contract, order = app.placeOrder.call_args[0]
+        assert order.action == "SELL"
+        assert order.totalQuantity == 5
+        assert order.orderType == "LIMIT"
+        assert order.lmtPrice == 150.0
+
+    @pytest.mark.unit
+    def test_place_order_when_disconnected_raises(self, bridge):
+        bridge._app = None
+        with pytest.raises(RuntimeError, match="not connected"):
+            bridge.buy("AAPL", 10)
+
+    @pytest.mark.unit
+    def test_close_position_long_submits_sell(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 3000
+        app.placeOrder = Mock()
+        bridge._app = app
+
+        bridge._svc.get_positions = Mock(return_value={
+            "AAPL": {"quantity": 10, "sec_type": "STK", "entry_price": 100.0,
+                     "current_price": 150.0, "realized_pnl": 0.0}
+        })
+
+        order_id = bridge.close_position("AAPL")
+
+        assert order_id == 3000
+        _called_id, _contract, order = app.placeOrder.call_args[0]
+        assert order.action == "SELL"
+        assert order.totalQuantity == 10
+
+    @pytest.mark.unit
+    def test_close_position_short_submits_buy(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 4000
+        app.placeOrder = Mock()
+        bridge._app = app
+
+        bridge._svc.get_positions = Mock(return_value={
+            "AAPL": {"quantity": -5, "sec_type": "STK", "entry_price": 100.0,
+                     "current_price": 80.0, "realized_pnl": 0.0}
+        })
+
+        order_id = bridge.close_position("AAPL")
+
+        assert order_id == 4000
+        _called_id, _contract, order = app.placeOrder.call_args[0]
+        assert order.action == "BUY"
+        assert order.totalQuantity == 5
+
+    @pytest.mark.unit
+    def test_close_position_no_position_returns_none(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 5000
+        app.placeOrder = Mock()
+        bridge._app = app
+
+        bridge._svc.get_positions = Mock(return_value={})
+
+        assert bridge.close_position("AAPL") is None
+        app.placeOrder.assert_not_called()
+
+    @pytest.mark.unit
+    def test_close_position_rejects_limit_order_type(self, bridge):
+        with pytest.raises(ValueError, match="LIMIT"):
+            bridge.close_position("AAPL", order_type="LIMIT")
+
+    @pytest.mark.unit
+    def test_get_all_positions_filters_non_stock(self, bridge):
+        bridge._svc.get_positions = Mock(return_value={
+            "AAPL": {"quantity": 10, "sec_type": "STK", "entry_price": 100.0,
+                     "current_price": 150.0, "realized_pnl": 5.0},
+            "SPY  240315C00500000": {
+                "quantity": -1, "sec_type": "OPT", "entry_price": 2.5,
+                "current_price": 1.0, "realized_pnl": 0.0,
+            },
+        })
+
+        positions = bridge.get_all_positions()
+
+        assert set(positions.keys()) == {"AAPL"}
+        aapl = positions["AAPL"]
+        assert aapl.symbol == "AAPL"
+        assert aapl.quantity == 10
+        assert aapl.average_cost == 100.0
+        assert aapl.current_price == 150.0
+        assert aapl.realized_pnl == 5.0
+
+    @pytest.mark.unit
+    def test_get_all_positions_skips_zero_quantity(self, bridge):
+        bridge._svc.get_positions = Mock(return_value={
+            "AAPL": {"quantity": 0, "sec_type": "STK", "entry_price": 100.0},
+        })
+        assert bridge.get_all_positions() == {}
+
+    @pytest.mark.unit
+    def test_get_all_positions_defaults_missing_sec_type_to_stk(self, bridge):
+        """Older callbacks may omit sec_type; treat as STK to be safe."""
+        bridge._svc.get_positions = Mock(return_value={
+            "AAPL": {"quantity": 10, "entry_price": 100.0},
+        })
+        positions = bridge.get_all_positions()
+        assert "AAPL" in positions
+
+    @pytest.mark.unit
+    def test_get_all_positions_swallows_service_errors(self, bridge):
+        bridge._svc.get_positions = Mock(side_effect=RuntimeError("boom"))
+        assert bridge.get_all_positions() == {}
+
+
+# ==============================================================================
+# Order rejection error codes
+# ==============================================================================
+
+
+class TestBridgeAppErrorHandler:
+    """Tests for _BridgeApp.error() classification of TWS error codes."""
+
+    @pytest.mark.unit
+    def test_read_only_api_rejection_logs_error_with_hint(
+        self, mock_service_manager, caplog
+    ):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        with caplog.at_level("ERROR", logger="core.tws_bridge"):
+            app.error(
+                1,
+                0,
+                321,
+                "Error validating request.-'v' : cause - The API interface "
+                "is currently in Read-Only mode.",
+            )
+        joined = " ".join(r.getMessage() for r in caplog.records)
+        assert "ORDER REJECTED" in joined
+        assert "code 321" in joined
+        assert "Read-Only" in joined  # actionable hint
+
+    @pytest.mark.unit
+    def test_other_order_reject_codes_logged_as_error(
+        self, mock_service_manager, caplog
+    ):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        with caplog.at_level("ERROR", logger="core.tws_bridge"):
+            app.error(42, 0, 201, "Order rejected - reason: insufficient buying power")
+        rejections = [r for r in caplog.records if "ORDER REJECTED" in r.getMessage()]
+        assert len(rejections) == 1
+        assert "code 201" in rejections[0].getMessage()
+        assert "orderId 42" in rejections[0].getMessage()
+
+    @pytest.mark.unit
+    def test_connection_error_marks_disconnected(self, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._connected = True
+        app.error(-1, 0, 1100, "Connectivity lost")
+        assert app._connected is False
+
+    @pytest.mark.unit
+    def test_info_codes_dont_pollute_warnings(self, mock_service_manager, caplog):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        with caplog.at_level("WARNING", logger="core.tws_bridge"):
+            app.error(-1, 0, 2104, "Market data farm connection is OK")
+            app.error(-1, 0, 2106, "HMDS data farm connection is OK")
+        bridge_records = [r for r in caplog.records if r.name == "core.tws_bridge"]
+        assert bridge_records == []
+
+
+# ==============================================================================
+# pop_rejected_order_ids
+# ==============================================================================
+
+
+class TestBridgeRejectedOrderTracking:
+    """Tests for TWSBridge.pop_rejected_order_ids and the underlying set."""
+
+    @pytest.mark.unit
+    def test_order_reject_adds_to_set(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        bridge._app = app
+        app.error(7, 0, 321, "Read-Only API")
+        app.error(8, 0, 201, "rejected")
+        drained = bridge.pop_rejected_order_ids()
+        assert drained == {7, 8}
+
+    @pytest.mark.unit
+    def test_drain_clears_the_set(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        bridge._app = app
+        app.error(7, 0, 321, "Read-Only API")
+        bridge.pop_rejected_order_ids()
+        # Second drain is empty.
+        assert bridge.pop_rejected_order_ids() == set()
+
+    @pytest.mark.unit
+    def test_non_order_errors_dont_pollute_set(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        bridge._app = app
+        app.error(-1, 0, 2104, "Market data farm OK")  # info
+        app.error(99, 0, 1100, "Connectivity lost")    # connection
+        app.error(50, 0, 9999, "unknown")              # generic warning
+        assert bridge.pop_rejected_order_ids() == set()
+
+    @pytest.mark.unit
+    def test_invalid_req_id_ignored(self, bridge):
+        app = _BridgeApp(bridge._svc, "DU12345")
+        bridge._app = app
+        app.error(-1, 0, 321, "Read-Only API")  # reqId -1 → ignore
+        app.error(0, 0, 321, "Read-Only API")   # reqId 0  → ignore
+        assert bridge.pop_rejected_order_ids() == set()
+
+    @pytest.mark.unit
+    def test_pop_when_no_app_returns_empty(self, bridge):
+        bridge._app = None
+        assert bridge.pop_rejected_order_ids() == set()
+
+
+# ==============================================================================
+# pop_filled_order_ids / orderStatus fill tracking
+# ==============================================================================
+
+
+class TestBridgeFilledOrderTracking:
+    """Tests for TWSBridge.pop_filled_order_ids and the orderStatus override."""
+
+    @pytest.mark.unit
+    def test_filled_status_records_order_id(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+        app.orderStatus(
+            orderId=101, status="Filled", filled=1.0, remaining=0.0,
+            avgFillPrice=100.5, permId=0, parentId=0, lastFillPrice=100.5,
+            clientId=1, whyHeld="", mktCapPrice=0.0,
+        )
+        assert bridge.pop_filled_order_ids() == {101}
+
+    @pytest.mark.unit
+    def test_partial_fill_does_not_record(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+        app.orderStatus(
+            orderId=101, status="Filled", filled=1.0, remaining=5.0,
+            avgFillPrice=100.5, permId=0, parentId=0, lastFillPrice=100.5,
+            clientId=1, whyHeld="", mktCapPrice=0.0,
+        )
+        assert bridge.pop_filled_order_ids() == set()
+
+    @pytest.mark.unit
+    def test_non_filled_status_ignored(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+        for status in ("Submitted", "PreSubmitted", "PendingSubmit", "Cancelled"):
+            app.orderStatus(
+                orderId=200, status=status, filled=0.0, remaining=1.0,
+                avgFillPrice=0.0, permId=0, parentId=0, lastFillPrice=0.0,
+                clientId=1, whyHeld="", mktCapPrice=0.0,
+            )
+        assert bridge.pop_filled_order_ids() == set()
+
+    @pytest.mark.unit
+    def test_drain_clears_set(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+        app.orderStatus(
+            orderId=101, status="Filled", filled=1.0, remaining=0.0,
+            avgFillPrice=100.5, permId=0, parentId=0, lastFillPrice=100.5,
+            clientId=1, whyHeld="", mktCapPrice=0.0,
+        )
+        bridge.pop_filled_order_ids()
+        assert bridge.pop_filled_order_ids() == set()
+
+    @pytest.mark.unit
+    def test_pop_when_no_app_returns_empty(self, bridge):
+        bridge._app = None
+        assert bridge.pop_filled_order_ids() == set()
+
+
+# ==============================================================================
+# place_bracket_buy
+# ==============================================================================
+
+
+class TestBridgePlaceBracketBuy:
+    """Tests for TWSBridge.place_bracket_buy (parent BUY LMT + target + stop)."""
+
+    @pytest.mark.unit
+    def test_submits_three_orders_with_correct_legs(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        # Mark connected + ready so place_bracket_buy passes the guards.
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 1000
+        bridge._app = app
+        placed = []
+        app.placeOrder = lambda oid, contract, order: placed.append((oid, contract, order))
+
+        ids = bridge.place_bracket_buy(
+            symbol="AKAM",
+            quantity=10,
+            limit_price=100.0,
+            target_price=110.0,
+            stop_price=95.0,
+        )
+
+        assert ids == {"parent_id": 1000, "target_id": 1001, "stop_id": 1002}
+        assert len(placed) == 3
+        parent_oid, parent_contract, parent_order = placed[0]
+        target_oid, _, target_order = placed[1]
+        stop_oid, _, stop_order = placed[2]
+
+        # Parent: BUY LMT 100.0, transmit=False, no parentId.
+        assert parent_oid == 1000
+        assert parent_order.action == "BUY"
+        assert parent_order.orderType == "LMT"
+        assert parent_order.lmtPrice == 100.0
+        assert parent_order.totalQuantity == 10
+        assert parent_order.transmit is False
+        assert parent_contract.symbol == "AKAM"
+        assert parent_contract.secType == "STK"
+
+        # Child target: SELL LMT 110.0, parentId=1000, transmit=False.
+        assert target_oid == 1001
+        assert target_order.action == "SELL"
+        assert target_order.orderType == "LMT"
+        assert target_order.lmtPrice == 110.0
+        assert target_order.parentId == 1000
+        assert target_order.transmit is False
+
+        # Child stop: SELL STP 95.0, parentId=1000, transmit=True (last leg).
+        assert stop_oid == 1002
+        assert stop_order.action == "SELL"
+        assert stop_order.orderType == "STP"
+        assert stop_order.auxPrice == 95.0
+        assert stop_order.parentId == 1000
+        assert stop_order.transmit is True
+
+    @pytest.mark.unit
+    def test_rejects_when_not_connected(self, bridge):
+        bridge._app = None
+        with pytest.raises(RuntimeError, match="not connected"):
+            bridge.place_bracket_buy("AKAM", 10, 100.0, 110.0, 95.0)
+
+    @pytest.mark.unit
+    def test_rejects_zero_quantity(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 1
+        bridge._app = app
+        with pytest.raises(ValueError, match="quantity must be > 0"):
+            bridge.place_bracket_buy("AKAM", 0, 100.0, 110.0, 95.0)
+
+    @pytest.mark.unit
+    def test_rejects_target_not_above_entry(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 1
+        bridge._app = app
+        with pytest.raises(ValueError, match="target.*must be > entry"):
+            bridge.place_bracket_buy("AKAM", 10, 100.0, 100.0, 95.0)
+
+    @pytest.mark.unit
+    def test_rejects_stop_not_below_entry(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._connected = True
+        app._ready = True
+        app._next_valid_order_id = 1
+        bridge._app = app
+        with pytest.raises(ValueError, match="stop.*must be < entry"):
+            bridge.place_bracket_buy("AKAM", 10, 100.0, 110.0, 100.0)

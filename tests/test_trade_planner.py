@@ -123,3 +123,72 @@ def test_planner_returns_none_when_share_buy_disabled_and_no_option():
         prefer_cash_secured_put=True,
     )
     assert TradePlanner(cfg).plan(_candidate(), 100_000.0, 100_000.0) is None
+
+
+# ---------------------------------------------------------------------------
+# Quantitative rejection diagnostics (reasons accumulator)
+# ---------------------------------------------------------------------------
+
+
+def test_reasons_accumulator_explains_cap_below_share_price():
+    """When sizing cap < share price the planner records the exact numbers."""
+    cfg = AutonomousTradingConfig(max_new_position_pct=0.10)
+    reasons: list[str] = []
+    plan = TradePlanner(cfg).plan(
+        _candidate(symbol="NVDA", last_price=500.0),
+        deployable_cash=2_674.25,
+        equity=10_000.0,
+        reasons=reasons,
+    )
+    assert plan is None
+    assert any("NVDA" in r and "cap" in r and "share price" in r for r in reasons), reasons
+    # The numeric figures themselves should be present.
+    joined = " ".join(reasons)
+    assert "267.43" in joined or "267.42" in joined  # 2674.25 * 0.10
+    assert "500.00" in joined
+
+
+def test_reasons_accumulator_empty_when_plan_succeeds():
+    cfg = AutonomousTradingConfig(max_new_position_pct=0.10)
+    reasons: list[str] = []
+    plan = TradePlanner(cfg).plan(
+        _candidate(last_price=50.0),
+        deployable_cash=10_000.0,
+        equity=100_000.0,
+        reasons=reasons,
+    )
+    assert plan is not None
+    assert reasons == []
+
+
+def test_reasons_accumulator_records_share_buy_disabled():
+    cfg = AutonomousTradingConfig(
+        allow_share_buy=False,
+        allow_short_put=True,
+        prefer_cash_secured_put=True,
+    )
+    reasons: list[str] = []
+    assert TradePlanner(cfg).plan(
+        _candidate(), 100_000.0, 100_000.0, reasons=reasons
+    ) is None
+    assert any("allow_share_buy=False" in r for r in reasons), reasons
+
+
+def test_reasons_accumulator_records_short_put_strike_above_support():
+    cfg = AutonomousTradingConfig(prefer_cash_secured_put=True, allow_short_put=True)
+    hint = OptionChainHint(
+        strike=100.0, expiry=date(2026, 12, 18),
+        bid=1.0, ask=1.2, contracts_available=2,
+    )
+    reasons: list[str] = []
+    # share_buy still allowed → should fall back to BUY_SHARES, but the
+    # short-put rejection reason must be recorded along the way.
+    plan = TradePlanner(cfg).plan(
+        _candidate(last_price=100.0, support_price=95.0),
+        deployable_cash=100_000.0,
+        equity=100_000.0,
+        option_hint=hint,
+        reasons=reasons,
+    )
+    assert plan.trade_type == TradeType.BUY_SHARES
+    assert any("support" in r and "strike" in r for r in reasons), reasons
