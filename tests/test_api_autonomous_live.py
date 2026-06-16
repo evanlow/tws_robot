@@ -699,7 +699,7 @@ class TestLiveRunOnce:
             app.config["autonomous_live_confirmation"] = None  # no confirmation
 
         resp = client.post("/api/autonomous/live/run-once", json={})
-        assert resp.status_code in (400, 503)
+        assert resp.status_code == 400
         body = resp.get_json()
         assert body.get("rejection_reason") == "confirmation_missing"
 

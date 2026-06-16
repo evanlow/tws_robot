@@ -2039,6 +2039,8 @@ def actual_live_activate():
     #   6. Evaluate gates
     #   7. Run once
 
+    # Clone the live runner config for this request so single-trade overrides
+    # do not mutate the shared app-level config used by later activations.
     live_config = AutonomousLiveRunnerConfig(**_live_runner_config().to_dict())
     live_config.expected_account_id = expected_account_id
     live_config.live_dry_run = False  # Actual live — NOT dry run
