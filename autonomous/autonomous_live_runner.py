@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from autonomous.autonomous_config import AutonomousMode
 from autonomous.autonomous_engine import AutonomousDecision, AutonomousTradingEngine, DecisionStatus
@@ -43,6 +43,9 @@ from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.signal_provider import StaticSignalProvider
 from autonomous.trade_planner import TradeType
 from autonomous.trade_store import (
+    CLOSED,
+    EXIT_PENDING,
+    FAILED,
     OPEN,
     AutonomousTrade,
     TradeStore,
@@ -220,6 +223,8 @@ EmergencyStopProvider = Callable[[], bool]
 SignalProviderProvider = Callable[[], Any]
 DeployableCashProvider = Callable[[], float]
 BrokerPositionsProvider = Callable[[], Dict[str, Any]]
+RejectedOrderIdsProvider = Callable[[], Iterable[int]]
+FilledOrderIdsProvider = Callable[[], Iterable[int]]
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +269,22 @@ class AutonomousLiveRunner:
         :meth:`execution.order_executor.OrderExecutor.execute_signal`,
         which will cause reconciliation to reject any execution when the
         broker holds open positions.
+    rejected_order_ids_provider:
+        Callable returning an iterable of broker order IDs the broker
+        has rejected since the last call (typically
+        ``svc.tws_bridge.pop_rejected_order_ids``).  At the start of
+        each ``run_once`` the runner marks any matching OPEN trade in
+        the trade store as ``FAILED`` so a rejected order does not
+        keep burning a slot against ``max_open_live_trades`` or
+        ``max_live_trades_per_day``.
+    filled_order_ids_provider:
+        Callable returning an iterable of broker order IDs that TWS
+        has reported fully filled since the last call (typically
+        ``svc.tws_bridge.pop_filled_order_ids``).  At the start of
+        each ``run_once`` the runner flips any OPEN/EXIT_PENDING
+        trade whose ``target_order_id`` or ``stop_order_id`` matches
+        to ``CLOSED`` — so a bracket child fill (take-profit / stop)
+        unblocks Continuous mode for the next cycle.
     continuous_mode:
         When ``True``, the ``AUTONOMOUS_LIVE_CONTINUOUS_ENABLED`` gate
         is also checked.  Set to ``True`` for continuous live cycles.
@@ -283,6 +304,8 @@ class AutonomousLiveRunner:
         emergency_stop_provider: EmergencyStopProvider,
         deployable_cash_provider: DeployableCashProvider,
         broker_positions_provider: Optional[BrokerPositionsProvider] = None,
+        rejected_order_ids_provider: Optional[RejectedOrderIdsProvider] = None,
+        filled_order_ids_provider: Optional[FilledOrderIdsProvider] = None,
         continuous_mode: bool = False,
     ) -> None:
         self._engine = engine
@@ -296,6 +319,8 @@ class AutonomousLiveRunner:
         self._emergency_stop_provider = emergency_stop_provider
         self._deployable_cash_provider = deployable_cash_provider
         self._broker_positions_provider = broker_positions_provider
+        self._rejected_order_ids_provider = rejected_order_ids_provider
+        self._filled_order_ids_provider = filled_order_ids_provider
         self._continuous_mode = continuous_mode
 
     # ------------------------------------------------------------------
@@ -325,6 +350,13 @@ class AutonomousLiveRunner:
 
     def evaluate_gates(self) -> LiveReadinessGates:
         """Evaluate every readiness gate; never raises."""
+        # Drain any broker-rejected order IDs first so the trade-store
+        # counters reflect reality (rejected orders → FAILED, not OPEN).
+        self._reconcile_rejected_trades()
+        # Then reconcile any bracket fills (target/stop) so a closed
+        # trade no longer counts against the open-trades cap.
+        self._reconcile_filled_brackets()
+
         try:
             connected = bool(self._connected_provider())
         except Exception:  # pragma: no cover - defensive
@@ -536,6 +568,25 @@ class AutonomousLiveRunner:
 
         # Submit via OrderExecutor.
         symbol = str(plan.get("symbol") or "")
+        # Build the bracket exit legs from the plan.  When the planner did
+        # not derive a stop (e.g. no support level was available), fall
+        # back to a configurable percentage of the entry limit so every
+        # live entry has a defined exit on both sides.
+        plan_target_price = _as_float(plan.get("target_price"))
+        plan_stop_price = _as_float(plan.get("stop_price"))
+        bracket_notes: List[str] = []
+        if plan_stop_price is None or plan_stop_price <= 0:
+            synthesized_stop = round(
+                limit_price * (1.0 - self._config.default_stop_pct), 2
+            )
+            if synthesized_stop > 0 and synthesized_stop < limit_price:
+                bracket_notes.append(
+                    f"stop_price synthesised from default_stop_pct="
+                    f"{self._config.default_stop_pct} → {synthesized_stop:.2f} "
+                    f"(plan had no stop_price)"
+                )
+                plan_stop_price = synthesized_stop
+
         signal = Signal(
             symbol=symbol,
             signal_type=SignalType.BUY,
@@ -543,6 +594,8 @@ class AutonomousLiveRunner:
             timestamp=datetime.now(timezone.utc),
             quantity=quantity,
             target_price=limit_price,
+            take_profit=plan_target_price,
+            stop_loss=plan_stop_price,
         )
 
         # Limit-orders-only enforcement: mark strategy name so callers / logs
@@ -582,7 +635,12 @@ class AutonomousLiveRunner:
 
         if result.status == OrderStatus.DRY_RUN:
             # Dry-run: record the would-be trade and return.
-            trade = self._record_trade(decision, plan, quantity, result.order_id)
+            trade = self._record_trade(
+                decision, plan, quantity, result.order_id,
+                target_order_id=getattr(result, "bracket_target_order_id", None),
+                stop_order_id=getattr(result, "bracket_stop_order_id", None),
+                extra_notes=bracket_notes,
+            )
             return AutonomousLiveRunResult(
                 status=DRY_RUN_EXECUTED,
                 gates=gates,
@@ -594,25 +652,40 @@ class AutonomousLiveRunner:
                     f"deployable_cash={deployable_cash:.2f}",
                     f"max_deployable_cash_pct={self._config.max_deployable_cash_pct}",
                     f"max_trade_value={max_trade_value:.2f}",
-                ],
+                ] + bracket_notes,
                 dry_run=True,
             )
 
         if result.status == OrderStatus.SUBMITTED:
-            trade = self._record_trade(decision, plan, quantity, result.order_id)
+            target_id = getattr(result, "bracket_target_order_id", None)
+            stop_id = getattr(result, "bracket_stop_order_id", None)
+            trade = self._record_trade(
+                decision, plan, quantity, result.order_id,
+                target_order_id=target_id,
+                stop_order_id=stop_id,
+                extra_notes=bracket_notes,
+            )
+            submit_notes = [
+                "live order submitted via OrderExecutor",
+                f"order_id={result.order_id}",
+                f"quantity={quantity}",
+            ]
+            if target_id is not None and stop_id is not None:
+                submit_notes.append(
+                    f"bracket attached: target_order_id={target_id} "
+                    f"stop_order_id={stop_id}"
+                )
+            submit_notes += [
+                f"deployable_cash={deployable_cash:.2f}",
+                f"max_deployable_cash_pct={self._config.max_deployable_cash_pct}",
+                f"max_trade_value={max_trade_value:.2f}",
+            ] + bracket_notes
             return AutonomousLiveRunResult(
                 status=EXECUTED,
                 gates=gates,
                 decision=decision_payload,
                 trade=trade.to_dict() if trade else None,
-                notes=[
-                    "live order submitted via OrderExecutor",
-                    f"order_id={result.order_id}",
-                    f"quantity={quantity}",
-                    f"deployable_cash={deployable_cash:.2f}",
-                    f"max_deployable_cash_pct={self._config.max_deployable_cash_pct}",
-                    f"max_trade_value={max_trade_value:.2f}",
-                ],
+                notes=submit_notes,
                 dry_run=False,
             )
 
@@ -633,9 +706,11 @@ class AutonomousLiveRunner:
         """Count live trades with entry_time on ``today`` (UTC date).
 
         Uses the trade store as the source of truth so a process restart
-        cannot reset the counter.  Both OPEN and non-OPEN (EXIT_PENDING,
-        CLOSED, FAILED) entries are counted — we want to know how many
-        entry orders were submitted today, not just how many are still open.
+        cannot reset the counter.  OPEN / EXIT_PENDING / CLOSED entries
+        all count — they represent orders the broker accepted.  ``FAILED``
+        entries are excluded because the order never entered the book
+        (rejected by TWS / OrderExecutor) and should not burn one of
+        today's allowed live-trade slots.
 
         On any store access error the method returns ``max_live_trades_per_day``
         so the gate fails closed rather than silently allowing trades through.
@@ -644,6 +719,8 @@ class AutonomousLiveRunner:
         count = 0
         try:
             for trade in self._store.list_all():
+                if trade.status == FAILED:
+                    continue
                 entry_time = trade.entry_time
                 if isinstance(entry_time, str):
                     try:
@@ -664,6 +741,135 @@ class AutonomousLiveRunner:
             )
             return self._config.max_live_trades_per_day
         return count
+
+    def _reconcile_rejected_trades(self) -> None:
+        """Mark trade-store entries as FAILED for broker-rejected orders.
+
+        Drains the broker-rejection set from
+        ``rejected_order_ids_provider`` and, for each ID, finds the
+        single OPEN trade whose ``entry_order_id`` matches and flips it
+        to ``FAILED``.  No-op when no provider is wired, when the drain
+        is empty, or when the store contains no matching open trade
+        (it may already have been reconciled or closed).
+
+        Never raises — reconciliation is best-effort.  Counter accuracy
+        is more important than a strict guarantee that every rejected
+        ID can be matched to a stored trade.
+        """
+        if self._rejected_order_ids_provider is None:
+            return
+        try:
+            rejected = set(self._rejected_order_ids_provider())
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("rejected_order_ids_provider raised")
+            return
+        if not rejected:
+            return
+
+        try:
+            open_trades = self._store.list_open()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_open failed during reconcile")
+            return
+
+        for trade in open_trades:
+            if trade.entry_order_id in rejected:
+                try:
+                    self._store.update_trade(
+                        trade.autonomous_trade_id,
+                        status=FAILED,
+                        notes=list(trade.notes or []) + [
+                            f"reconciled: broker rejected entry order "
+                            f"#{trade.entry_order_id}"
+                        ],
+                    )
+                    logger.warning(
+                        "AutonomousLiveRunner: reconciled rejected order "
+                        "#%s (trade %s, %s) → FAILED",
+                        trade.entry_order_id,
+                        trade.autonomous_trade_id,
+                        trade.symbol,
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception(
+                        "failed to mark rejected trade %s as FAILED",
+                        trade.autonomous_trade_id,
+                    )
+
+    def _reconcile_filled_brackets(self) -> None:
+        """Flip OPEN/EXIT_PENDING trades to CLOSED on bracket-child fill.
+
+        Drains the broker-filled order-ID set from
+        ``filled_order_ids_provider``.  For each filled ID:
+
+        * if it matches an open trade's ``target_order_id`` → mark
+          CLOSED with ``exit_reason='TAKE_PROFIT'``
+        * if it matches an open trade's ``stop_order_id`` → mark
+          CLOSED with ``exit_reason='STOP_LOSS'``
+
+        Bracket OCO semantics mean the other child is cancelled by TWS
+        when one fills; we treat the first filled child as the exit.
+        No-op when no provider is wired, when the drain is empty, or
+        when no stored trade matches a filled ID.  Never raises —
+        reconciliation is best-effort.
+        """
+        if self._filled_order_ids_provider is None:
+            return
+        try:
+            filled = set(self._filled_order_ids_provider())
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("filled_order_ids_provider raised")
+            return
+        if not filled:
+            return
+
+        try:
+            open_trades = [
+                trade for trade in self._store.list_all()
+                if trade.status in {OPEN, EXIT_PENDING}
+            ]
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_open failed during bracket reconcile")
+            return
+
+        for trade in open_trades:
+            target_id = getattr(trade, "target_order_id", None)
+            stop_id = getattr(trade, "stop_order_id", None)
+            matched_id: Optional[int] = None
+            exit_reason: Optional[str] = None
+            if target_id is not None and target_id in filled:
+                matched_id = int(target_id)
+                exit_reason = "TAKE_PROFIT"
+            elif stop_id is not None and stop_id in filled:
+                matched_id = int(stop_id)
+                exit_reason = "STOP_LOSS"
+            if matched_id is None or exit_reason is None:
+                continue
+            try:
+                self._store.update_trade(
+                    trade.autonomous_trade_id,
+                    status=CLOSED,
+                    exit_order_id=matched_id,
+                    exit_time=datetime.now(timezone.utc),
+                    exit_reason=exit_reason,
+                    notes=list(trade.notes or []) + [
+                        f"reconciled: bracket {exit_reason} filled "
+                        f"(order #{matched_id})"
+                    ],
+                )
+                logger.info(
+                    "AutonomousLiveRunner: bracket %s filled for trade %s "
+                    "(%s, order #%s) → CLOSED",
+                    exit_reason,
+                    trade.autonomous_trade_id,
+                    trade.symbol,
+                    matched_id,
+                )
+            except Exception:  # pragma: no cover - defensive
+                logger.exception(
+                    "failed to mark trade %s as CLOSED on bracket fill",
+                    trade.autonomous_trade_id,
+                )
 
     @staticmethod
     def _first_gate_status(gates: LiveReadinessGates) -> str:
@@ -695,6 +901,10 @@ class AutonomousLiveRunner:
         plan: Dict[str, Any],
         quantity: int,
         order_id: Optional[int],
+        *,
+        target_order_id: Optional[int] = None,
+        stop_order_id: Optional[int] = None,
+        extra_notes: Optional[List[str]] = None,
     ) -> Optional[AutonomousTrade]:
         if self._config.buy_shares_only and plan.get("trade_type") != TradeType.BUY_SHARES.value:
             logger.info(
@@ -704,6 +914,17 @@ class AutonomousLiveRunner:
             )
             return None
         try:
+            notes = [
+                "recorded by AutonomousLiveRunner",
+                f"dry_run={self._config.live_dry_run}",
+            ]
+            if target_order_id is not None and stop_order_id is not None:
+                notes.append(
+                    f"bracket: target_order_id={target_order_id} "
+                    f"stop_order_id={stop_order_id}"
+                )
+            if extra_notes:
+                notes.extend(extra_notes)
             trade = AutonomousTrade(
                 autonomous_trade_id=AutonomousTrade.new_id(),
                 symbol=str(plan.get("symbol")),
@@ -716,10 +937,9 @@ class AutonomousLiveRunner:
                 target_price=_as_float(plan.get("target_price")),
                 stop_price=_as_float(plan.get("stop_price")),
                 max_holding_days=int(self._config.max_holding_days),
-                notes=[
-                    "recorded by AutonomousLiveRunner",
-                    f"dry_run={self._config.live_dry_run}",
-                ],
+                target_order_id=int(target_order_id) if target_order_id is not None else None,
+                stop_order_id=int(stop_order_id) if stop_order_id is not None else None,
+                notes=notes,
             )
         except Exception:  # pragma: no cover - defensive
             logger.exception("failed to build AutonomousTrade from live decision")

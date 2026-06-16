@@ -152,6 +152,11 @@ class AutonomousLiveRunnerConfig:
     ``AUTONOMOUS_LIVE_DRY_RUN``
         When ``true``, the full live lifecycle runs but no order is sent
         to TWS.  Defaults to ``false``.
+    ``AUTONOMOUS_DEFAULT_STOP_PCT``
+        Fallback stop-loss distance below the entry limit price used
+        when the planner does not supply ``stop_price`` (e.g. no
+        support level available).  Default ``0.05`` (5 %).  Must be in
+        ``(0, 1)``.
     """
 
     # ---- Master live-mode switches ------------------------------------
@@ -172,6 +177,13 @@ class AutonomousLiveRunnerConfig:
 
     # ---- Dry-run (rehearsal) mode ------------------------------------
     live_dry_run: bool = False
+
+    # ---- Bracket exit defaults ---------------------------------------
+    # Fallback stop-loss distance below entry when the planner does not
+    # supply a stop_price.  Used by AutonomousLiveRunner to synthesise
+    # the stop leg of the bracket so every live entry has a defined
+    # exit on both sides.
+    default_stop_pct: float = 0.05
 
     # ---- Shared with paper runner ------------------------------------
     buy_shares_only: bool = True
@@ -205,6 +217,11 @@ class AutonomousLiveRunnerConfig:
                 "max_live_trades_per_day must be >= 0; got "
                 f"{self.max_live_trades_per_day!r}"
             )
+        if not (0 < self.default_stop_pct < 1):
+            raise ValueError(
+                "default_stop_pct must be in (0, 1); got "
+                f"{self.default_stop_pct!r}"
+            )
 
     def to_dict(self) -> dict:
         return {
@@ -217,6 +234,7 @@ class AutonomousLiveRunnerConfig:
             "live_limit_orders_only": self.live_limit_orders_only,
             "live_require_account_confirmation": self.live_require_account_confirmation,
             "live_dry_run": self.live_dry_run,
+            "default_stop_pct": self.default_stop_pct,
             "buy_shares_only": self.buy_shares_only,
             "max_holding_days": self.max_holding_days,
             "trade_store_path": self.trade_store_path,
@@ -253,4 +271,5 @@ class AutonomousLiveRunnerConfig:
                 "AUTONOMOUS_LIVE_REQUIRE_ACCOUNT_CONFIRMATION", True
             ),
             live_dry_run=_env_bool("AUTONOMOUS_LIVE_DRY_RUN", False),
+            default_stop_pct=_env_float("AUTONOMOUS_DEFAULT_STOP_PCT", 0.05),
         )

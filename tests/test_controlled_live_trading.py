@@ -388,3 +388,41 @@ def test_limit_order_used_when_target_price_set_regardless_of_limit_orders_only(
     call_kwargs = mock_adapter.buy.call_args[1]
     assert call_kwargs.get("order_type") == "LIMIT"
     assert call_kwargs.get("limit_price") == buy_signal.target_price
+
+
+def test_bracket_buy_falls_back_when_adapter_returns_partial_ids(
+    mock_adapter, risk_manager, tmp_path, monkeypatch
+):
+    """Partial bracket IDs should fall back to regular buy() submission."""
+    monkeypatch.chdir(tmp_path)
+    confirmation = _make_confirmation()
+    mock_adapter.place_bracket_buy = Mock(return_value={"parent_id": 123})
+    mock_adapter.buy.return_value = 124
+    signal = Signal(
+        timestamp=datetime.now(),
+        symbol="AAPL",
+        signal_type=SignalType.BUY,
+        strength=SignalStrength.STRONG,
+        target_price=150.0,
+        quantity=10,
+        confidence=0.9,
+        reason="unit-test",
+        take_profit=160.0,
+        stop_loss=145.0,
+    )
+    executor = OrderExecutor(
+        tws_adapter=mock_adapter,
+        risk_manager=risk_manager,
+        is_live_mode=True,
+        require_confirmation=False,
+        live_trading_enabled=True,
+        live_confirmation=confirmation,
+        limit_orders_only=True,
+    )
+
+    result = executor.execute_signal("live-strategy", signal, 100_000.0, {})
+
+    assert result.status == OrderStatus.SUBMITTED
+    mock_adapter.place_bracket_buy.assert_called_once()
+    mock_adapter.buy.assert_called_once()
+    assert result.order_id == 124

@@ -388,12 +388,14 @@ class AutonomousTradingEngine:
             deployable_cash=decision.deployable_cash,
             equity=equity,
             option_hint=option_hint,
+            reasons=(planner_reasons := []),
         )
         if plan is None:
             decision.status = DecisionStatus.NO_TRADE_PLAN
-            decision.rejection_reason = (
-                "no tradable plan (insufficient cash or no allowed trade type)"
+            detail = "; ".join(planner_reasons) if planner_reasons else (
+                "insufficient cash or no allowed trade type"
             )
+            decision.rejection_reason = f"no tradable plan — {detail}"
             return self._emit(decision)
         decision.trade_plan = plan.to_dict()
 

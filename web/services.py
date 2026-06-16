@@ -108,6 +108,16 @@ class ServiceManager:
         return dict(self._connection_info)
 
     @property
+    def tws_bridge(self) -> Any:
+        """Return the persistent :class:`core.tws_bridge.TWSBridge`, if any.
+
+        Exposed so request handlers (e.g. actual-live activation) can reuse
+        the existing broker connection as an ``OrderExecutor`` adapter
+        instead of opening a second EClient socket.
+        """
+        return self._tws_bridge
+
+    @property
     def current_account_id(self) -> str:
         """Return the IBKR account ID for the active connection (empty string if not connected)."""
         with self._lock:

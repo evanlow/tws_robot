@@ -140,6 +140,12 @@ class OrderResult:
     quantity: int = 0
     price: float = 0.0
     timestamp: datetime = None
+    # Populated when the order was submitted as a bracket; the parent
+    # entry order ID lives in ``order_id`` and the OCO child IDs are
+    # exposed here so callers (e.g. AutonomousLiveRunner) can persist
+    # them and reconcile fills.
+    bracket_target_order_id: Optional[int] = None
+    bracket_stop_order_id: Optional[int] = None
     
     def __post_init__(self):
         if self.timestamp is None:
@@ -700,12 +706,22 @@ class OrderExecutor:
         try:
             # Convert signal to order
             if signal.signal_type == SignalType.BUY:
-                order_id = self.tws_adapter.buy(
-                    symbol=signal.symbol,
-                    quantity=signal.quantity,
-                    order_type=order_type,
-                    limit_price=limit_price,
+                bracket_ids = self._maybe_place_bracket_buy(
+                    signal, limit_price, order_type
                 )
+                if bracket_ids is not None:
+                    order_id = bracket_ids["parent_id"]
+                    bracket_target_id = bracket_ids["target_id"]
+                    bracket_stop_id = bracket_ids["stop_id"]
+                else:
+                    order_id = self.tws_adapter.buy(
+                        symbol=signal.symbol,
+                        quantity=signal.quantity,
+                        order_type=order_type,
+                        limit_price=limit_price,
+                    )
+                    bracket_target_id = None
+                    bracket_stop_id = None
             elif signal.signal_type == SignalType.SELL:
                 order_id = self.tws_adapter.sell(
                     symbol=signal.symbol,
@@ -713,6 +729,8 @@ class OrderExecutor:
                     order_type=order_type,
                     limit_price=limit_price,
                 )
+                bracket_target_id = None
+                bracket_stop_id = None
             elif signal.signal_type == SignalType.CLOSE:
                 if order_type == "LIMIT":
                     result = OrderResult.rejected(
@@ -733,15 +751,19 @@ class OrderExecutor:
                     symbol=signal.symbol,
                     order_type=order_type,
                 )
+                bracket_target_id = None
+                bracket_stop_id = None
             else:
                 raise ValueError(f"Unsupported signal type: {signal.signal_type}")
-            
+
             result = OrderResult.submitted(
                 order_id=order_id,
                 signal=signal,
                 quantity=signal.quantity,
                 price=signal.target_price or 0.0
             )
+            result.bracket_target_order_id = bracket_target_id
+            result.bracket_stop_order_id = bracket_stop_id
             
             self._record_order(result)
             self.orders_submitted += 1
@@ -770,7 +792,46 @@ class OrderExecutor:
             )
             self._record_order(result)
             return result
-    
+
+    def _maybe_place_bracket_buy(
+        self,
+        signal: Signal,
+        limit_price: Optional[float],
+        order_type: str,
+    ) -> Optional[Dict[str, int]]:
+        """Submit a bracket BUY if the signal carries take_profit + stop_loss
+        and the adapter exposes ``place_bracket_buy``.
+
+        Returns the bracket-id dict ``{parent_id, target_id, stop_id}`` on
+        success, or ``None`` to indicate the caller should fall back to
+        the single-leg ``buy()`` path (no take_profit/stop_loss on signal,
+        adapter has no bracket support, or order_type is not LIMIT).
+        """
+        if order_type != "LIMIT":
+            return None
+        if limit_price is None or limit_price <= 0:
+            return None
+        take_profit = getattr(signal, "take_profit", None)
+        stop_loss = getattr(signal, "stop_loss", None)
+        if take_profit is None or stop_loss is None:
+            return None
+        if take_profit <= limit_price or stop_loss >= limit_price:
+            return None
+        place_bracket = getattr(self.tws_adapter, "place_bracket_buy", None)
+        if not callable(place_bracket):
+            return None
+        ids = place_bracket(
+            symbol=signal.symbol,
+            quantity=signal.quantity,
+            limit_price=float(limit_price),
+            target_price=float(take_profit),
+            stop_price=float(stop_loss),
+        )
+        required_ids = {"parent_id", "target_id", "stop_id"}
+        if not isinstance(ids, dict) or not required_ids.issubset(ids.keys()):
+            return None
+        return ids
+
     def _record_order(self, result: OrderResult):
         """Record order in history"""
         self.order_history.append(result)

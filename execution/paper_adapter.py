@@ -143,6 +143,14 @@ class TwsTradingAdapter(EWrapper, EClient):
         self.client_id = client_id
         self.commission_per_share = commission_per_share
         self.environment = env_normalized
+        # Stable copies of the configured host/port/client_id. EClient.reset()
+        # nulls self.host/self.port on every disconnect (and EClient.run()
+        # invokes disconnect() in its finally block), which would otherwise
+        # make OrderExecutor's environment-match check fail with a misleading
+        # "adapter port=None" error after any TWS-initiated socket close.
+        self._configured_host = host
+        self._configured_port = port
+        self._configured_client_id = client_id
         
         # Connection state
         self.connected = False
@@ -167,7 +175,42 @@ class TwsTradingAdapter(EWrapper, EClient):
         )
     
     # ==================== Connection Management ====================
-    
+
+    def reset(self):
+        """Reset the underlying EClient state while preserving adapter config.
+
+        EClient.reset() nulls ``self.host``, ``self.port`` and
+        ``self.serverVersion_`` on every disconnect (including the implicit
+        ``disconnect()`` that EClient.run()'s ``finally`` block invokes when
+        the socket closes). We:
+
+        * restore the configured host/port/client_id so OrderExecutor's
+          ``matches_adapter`` check still sees the configured port; and
+        * clear ``self.connected``, ``self.ready`` and
+          ``self.next_valid_order_id`` so ``_place_order``'s readiness guard
+          fires immediately. Without this, the adapter would still appear
+          "ready" after a transient TWS disconnect and any subsequent
+          ``placeOrder()`` call would crash inside ``EClient.useProtoBuf``
+          with ``'<=' not supported between 'int' and 'NoneType'`` (because
+          ``serverVersion_`` is now ``None``).
+        """
+        super().reset()
+        if getattr(self, "_configured_host", None) is not None:
+            self.host = self._configured_host
+        if getattr(self, "_configured_port", None) is not None:
+            self.port = self._configured_port
+        if getattr(self, "_configured_client_id", None) is not None:
+            self.client_id = self._configured_client_id
+        # These attributes only exist after TwsTradingAdapter.__init__ has
+        # finished; EClient.__init__ calls reset() before we set them, so we
+        # have to guard each assignment.
+        if hasattr(self, "connected"):
+            self.connected = False
+        if hasattr(self, "ready"):
+            self.ready = False
+        if hasattr(self, "next_valid_order_id"):
+            self.next_valid_order_id = None
+
     def connect_and_run(self) -> bool:
         """
         Connect to TWS and run message loop in background thread.

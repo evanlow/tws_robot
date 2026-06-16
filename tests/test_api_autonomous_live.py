@@ -406,12 +406,32 @@ class TestActualLiveActivate:
         assert resp.status_code == 400
         assert "account_mode" in resp.get_json()["error"]
 
-    def test_rejects_continuous_cycle(self, app, client, tmp_path):
+    def test_accepts_continuous_cycle(self, app, client, tmp_path):
+        """Continuous mode is permitted because bracket-at-entry attaches
+        target+stop child orders at TWS, so exits don't depend on the runner
+        staying ON between cycles."""
         _install_live_runner(app, tmp_path)
         payload = {**self.VALID_PAYLOAD, "trading_cycle": "continuous"}
         resp = client.post("/api/autonomous/live/actual-live/activate", json=payload)
-        assert resp.status_code == 400
-        assert "single_trade" in resp.get_json()["error"]
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["status"] in ("activated", "halted")
+
+    def test_passes_continuous_mode_into_actual_live_runner(self, app, client, tmp_path):
+        _install_live_runner(app, tmp_path)
+        base_factory = app.config["autonomous_live_runner_factory"]
+        seen = {"continuous_mode": None}
+
+        def tracking_factory(cfg, continuous_mode=False):
+            seen["continuous_mode"] = continuous_mode
+            return base_factory(cfg, continuous_mode=continuous_mode)
+
+        app.config["autonomous_live_runner_factory"] = tracking_factory
+
+        payload = {**self.VALID_PAYLOAD, "trading_cycle": "continuous"}
+        resp = client.post("/api/autonomous/live/actual-live/activate", json=payload)
+        assert resp.status_code == 200
+        assert seen["continuous_mode"] is True
 
     def test_rejects_missing_expected_account_id(self, app, client, tmp_path):
         _install_live_runner(app, tmp_path)
@@ -930,11 +950,14 @@ class TestActualLiveAdapterConnection:
     }
 
     def test_returns_503_when_adapter_not_connected(self, app, client, tmp_path, monkeypatch):
-        """Without a factory override, the production path tries to connect to
-        TWS.  If TWS is unavailable, it must return 503."""
+        """Without a factory override, the production path reuses the
+        persistent TWSBridge as the OrderExecutor adapter.  If the bridge
+        is not connected (or absent), the endpoint must return 503."""
         # Do NOT install a runner factory — exercise the production code path
         app.config["autonomous_spy_price_provider"] = lambda: {"open": 100.0, "current": 105.0}
-        # Mock service as connected with live environment so we reach adapter check
+        # Mock service as connected with live environment so we reach the
+        # bridge check.  No tws_bridge is set, so the bridge-not-connected
+        # branch fires.
         monkeypatch.setattr(
             "web.services.ServiceManager.connected", True
         )
@@ -945,10 +968,10 @@ class TestActualLiveAdapterConnection:
             "web.services.ServiceManager.connection_info",
             {"account": "U1234567", "port": 7496, "host": "127.0.0.1"},
         )
-        # Mock TwsTradingAdapter.connect_and_run to return False
+        # Explicitly assert there is no bridge so the production path hits
+        # the bridge_not_connected guard rather than any cached adapter.
         monkeypatch.setattr(
-            "execution.paper_adapter.TwsTradingAdapter.connect_and_run",
-            lambda self: False,
+            "web.services.ServiceManager.tws_bridge", None
         )
 
         resp = client.post(
@@ -957,7 +980,7 @@ class TestActualLiveAdapterConnection:
         assert resp.status_code == 503
         body = resp.get_json()
         assert body["outcome"] == "LIVE_ORDER_REJECTED"
-        assert body["rejection_reason"] == "adapter not connected/ready"
+        assert body["rejection_reason"] == "bridge not connected"
 
     def test_returns_400_when_detected_account_missing(self, app, client, tmp_path, monkeypatch):
         """When the service is connected/live but the detected account ID has not
@@ -1348,6 +1371,38 @@ class TestActualLivePostEntryExitBehavior:
                 entry_time=datetime.now(timezone.utc),
                 entry_limit_price=150.0,
                 quantity=10,
+                notes=["recorded by AutonomousLiveRunner", "dry_run=False"],
+            )
+            store.record_trade(trade)
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "NO_EXIT"
+        assert "manual" in body["reason"].lower()
+
+    def test_exit_rejects_partially_persisted_bracket_trade(
+        self, app, client, tmp_path
+    ):
+        """A trade with only one bracket child ID must still be guarded as
+        needing client-side exit management."""
+        _install_live_runner(app, tmp_path)
+        from autonomous.trade_store import AutonomousTrade
+        from datetime import datetime, timezone
+
+        with app.app_context():
+            store = app.config["autonomous_live_trade_store"]
+            trade = AutonomousTrade(
+                autonomous_trade_id="actual-live-partial-bracket",
+                symbol="AAPL",
+                trade_type="BUY_SHARES",
+                status="OPEN",
+                entry_order_id=777,
+                entry_time=datetime.now(timezone.utc),
+                entry_limit_price=150.0,
+                quantity=10,
+                target_order_id=778,
+                stop_order_id=None,
                 notes=["recorded by AutonomousLiveRunner", "dry_run=False"],
             )
             store.record_trade(trade)
