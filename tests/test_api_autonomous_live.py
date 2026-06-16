@@ -417,6 +417,22 @@ class TestActualLiveActivate:
         body = resp.get_json()
         assert body["status"] in ("activated", "halted")
 
+    def test_passes_continuous_mode_into_actual_live_runner(self, app, client, tmp_path):
+        _install_live_runner(app, tmp_path)
+        base_factory = app.config["autonomous_live_runner_factory"]
+        seen = {"continuous_mode": None}
+
+        def tracking_factory(cfg, continuous_mode=False):
+            seen["continuous_mode"] = continuous_mode
+            return base_factory(cfg, continuous_mode=continuous_mode)
+
+        app.config["autonomous_live_runner_factory"] = tracking_factory
+
+        payload = {**self.VALID_PAYLOAD, "trading_cycle": "continuous"}
+        resp = client.post("/api/autonomous/live/actual-live/activate", json=payload)
+        assert resp.status_code == 200
+        assert seen["continuous_mode"] is True
+
     def test_rejects_missing_expected_account_id(self, app, client, tmp_path):
         _install_live_runner(app, tmp_path)
         payload = {**self.VALID_PAYLOAD, "expected_account_id": ""}

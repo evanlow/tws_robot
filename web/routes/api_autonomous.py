@@ -1845,6 +1845,8 @@ def actual_live_activate():
         confirmed_by=confirmed_by,
     )
 
+    continuous_mode = (cycle == TradingCycle.CONTINUOUS)
+
     # --- Steps 4+5: Build executor and runner ---
     # If a test runner factory is registered, it handles executor injection
     # internally.  Otherwise, build a real adapter, connect it, and pass
@@ -1855,7 +1857,7 @@ def actual_live_activate():
     if callable(runner_factory):
         # Test/development path: factory handles everything.
         try:
-            runner = runner_factory(live_config, continuous_mode=False)
+            runner = runner_factory(live_config, continuous_mode=continuous_mode)
         except Exception:
             logger.exception("Failed to build AutonomousLiveRunner via factory")
             _audit_mode_event("actual_live_activate_failed", {
@@ -1976,7 +1978,9 @@ def actual_live_activate():
         # issue #1: executor available BEFORE runner.run_once()).
         try:
             runner = _build_live_runner(
-                live_config, continuous_mode=False, executor_override=executor
+                live_config,
+                continuous_mode=continuous_mode,
+                executor_override=executor,
             )
         except Exception:
             logger.exception("Failed to build AutonomousLiveRunner for actual-live")
