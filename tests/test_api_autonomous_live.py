@@ -110,6 +110,7 @@ def _install_live_runner(
     dry_run: bool = False,
     deployable_cash: float = 50_000.0,
     account_id: str = "U1234567",
+    max_live_trades_per_day: int = 1,
 ):
     """Install a live runner factory and live-mode state into the app config."""
     store_path = tmp_path / "live_trades.jsonl"
@@ -121,6 +122,7 @@ def _install_live_runner(
         expected_account_id=expected_account_id,
         live_dry_run=dry_run,
         trade_store_path=str(store_path),
+        max_live_trades_per_day=max_live_trades_per_day,
     )
 
     signals = [_signal()] if with_signal else []
@@ -407,18 +409,41 @@ class TestActualLiveActivate:
         assert "account_mode" in resp.get_json()["error"]
 
     def test_accepts_continuous_cycle(self, app, client, tmp_path):
-        """Continuous mode is permitted because bracket-at-entry attaches
-        target+stop child orders at TWS, so exits don't depend on the runner
-        staying ON between cycles."""
-        _install_live_runner(app, tmp_path)
+        """Continuous mode is permitted when max_live_trades_per_day > 1 and
+        bracket-at-entry attaches target+stop child orders at TWS, so exits
+        don't depend on the runner staying ON between cycles."""
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
         payload = {**self.VALID_PAYLOAD, "trading_cycle": "continuous"}
         resp = client.post("/api/autonomous/live/actual-live/activate", json=payload)
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["status"] in ("activated", "halted")
 
+    def test_single_trade_activation_does_not_mutate_shared_daily_cap(
+        self, app, client, tmp_path
+    ):
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
+        resp = client.post("/api/autonomous/live/actual-live/activate", json=self.VALID_PAYLOAD)
+        assert resp.status_code == 200
+        with app.app_context():
+            cfg = app.config.get("autonomous_live_runner_config")
+            assert cfg is not None
+            assert cfg.max_live_trades_per_day == 3
+
+    def test_rejects_continuous_when_daily_cap_is_one(self, app, client, tmp_path):
+        """Actual-live continuous activation must be rejected when the configured
+        max_live_trades_per_day is still at the default of 1, because continuous
+        mode cannot make progress with a cap of one."""
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=1)
+        payload = {**self.VALID_PAYLOAD, "trading_cycle": "continuous"}
+        resp = client.post("/api/autonomous/live/actual-live/activate", json=payload)
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "LIVE_ORDER_REJECTED"
+        assert "continuous_cap_too_low" in body["rejection_reason"]
+
     def test_passes_continuous_mode_into_actual_live_runner(self, app, client, tmp_path):
-        _install_live_runner(app, tmp_path)
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
         base_factory = app.config["autonomous_live_runner_factory"]
         seen = {"continuous_mode": None}
 
@@ -579,6 +604,21 @@ class TestActualLiveActivate:
         with app.app_context():
             assert app.config.get("autonomous_live_dry_run") is False
 
+    def test_persists_confirmation_and_account_id_for_continuous_cycles(
+        self, app, client, tmp_path
+    ):
+        """After actual-live activation the app config holds the confirmation
+        and expected_account_id so that subsequent continuous cycles can rebuild
+        a verified actual-live executor."""
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
+        payload = {**self.VALID_PAYLOAD, "trading_cycle": "continuous"}
+        resp = client.post("/api/autonomous/live/actual-live/activate", json=payload)
+        assert resp.status_code == 200
+        with app.app_context():
+            assert app.config.get("autonomous_live_expected_account_id") == "U1234567"
+            assert app.config.get("autonomous_live_confirmation") is not None
+            assert app.config.get("autonomous_live_dry_run") is False
+
 
 # ---------------------------------------------------------------------------
 # /api/autonomous/live/halt
@@ -617,15 +657,51 @@ class TestLiveRunOnce:
     def test_runs_when_mode_on(self, app, client, tmp_path):
         from autonomous.autonomous_mode import AutonomousModeState, TradingCycle, AccountMode
         _install_live_runner(app, tmp_path)
-        # Activate live mode state
+        # Activate live mode state in dry-run (the default) so the executor
+        # build succeeds through the test runner factory without a real TWS
+        # connection.
         state = AutonomousModeState()
-        state.turn_on(TradingCycle.CONTINUOUS, AccountMode.LIVE)
+        state.turn_on(TradingCycle.CONTINUOUS, AccountMode.LIVE, dry_run=True)
         app.config["autonomous_live_mode_state"] = state
 
         resp = client.post("/api/autonomous/live/run-once", json={})
         assert resp.status_code == 200
         body = resp.get_json()
         assert "status" in body
+
+    def test_actual_live_run_once_rejected_without_confirmation(
+        self, app, client, tmp_path, monkeypatch
+    ):
+        """When mode is ON with dry_run=False (actual-live) and no valid
+        LiveTradingConfirmation is stored, run-once must fail closed."""
+        from autonomous.autonomous_mode import AutonomousModeState, TradingCycle, AccountMode
+        _install_live_runner(app, tmp_path)
+        state = AutonomousModeState()
+        state.turn_on(TradingCycle.SINGLE_TRADE, AccountMode.LIVE, dry_run=False)
+
+        # Monkeypatch services so the connectivity checks pass and we reach
+        # the confirmation validation step.
+        monkeypatch.setattr("web.services.ServiceManager.connected", True)
+        monkeypatch.setattr("web.services.ServiceManager.connection_env", "live")
+        monkeypatch.setattr(
+            "web.services.ServiceManager.connection_info",
+            {"account": "U1234567", "port": 7496, "host": "127.0.0.1"},
+        )
+
+        class _ConnectedBridge:
+            is_connected = True
+
+        monkeypatch.setattr("web.services.ServiceManager.tws_bridge", _ConnectedBridge())
+
+        with app.app_context():
+            app.config["autonomous_live_mode_state"] = state
+            app.config["autonomous_live_expected_account_id"] = "U1234567"
+            app.config["autonomous_live_confirmation"] = None  # no confirmation
+
+        resp = client.post("/api/autonomous/live/run-once", json={})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body.get("rejection_reason") == "confirmation_missing"
 
 
 # ---------------------------------------------------------------------------
@@ -980,7 +1056,7 @@ class TestActualLiveAdapterConnection:
         assert resp.status_code == 503
         body = resp.get_json()
         assert body["outcome"] == "LIVE_ORDER_REJECTED"
-        assert body["rejection_reason"] == "bridge not connected"
+        assert body["rejection_reason"] == "tws_not_connected"
 
     def test_returns_400_when_detected_account_missing(self, app, client, tmp_path, monkeypatch):
         """When the service is connected/live but the detected account ID has not
@@ -1000,7 +1076,7 @@ class TestActualLiveAdapterConnection:
         assert resp.status_code == 400
         body = resp.get_json()
         assert body["outcome"] == "LIVE_ORDER_REJECTED"
-        assert body["rejection_reason"] == "detected_account_id_missing"
+        assert body["rejection_reason"] == "account_id_unavailable"
 
 
 class TestDryRunBleedThroughPrevention:
@@ -1528,3 +1604,270 @@ class TestActualLiveFullLifecycleE2E:
         body = resp.get_json()
         assert body["outcome"] == "NO_EXIT"
         assert "manual" in body["reason"].lower()
+
+
+class TestActualLiveContinuousLifecycle:
+    """Tests for actual-live continuous lifecycle advancement.
+
+    When mode is actual-live (dry_run=False) and cycle is continuous,
+    _maybe_advance_live_lifecycle() must rebuild a verified actual-live
+    executor for the next cycle and fail closed if it cannot.
+    """
+
+    VALID_PAYLOAD = {
+        "confirm": True,
+        "account_mode": "live",
+        "trading_cycle": "continuous",
+        "expected_account_id": "U1234567",
+        "confirmed_by": "test-operator",
+        "confirmation_phrase": "ENABLE ACTUAL LIVE TRADING",
+        "acknowledge_real_money_risk": True,
+    }
+
+    def test_continuous_actual_live_activation_persists_context(
+        self, app, client, tmp_path
+    ):
+        """After actual-live continuous activation, expected_account_id,
+        confirmation, and dry_run=False are persisted for subsequent cycles."""
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
+        resp = client.post(
+            "/api/autonomous/live/actual-live/activate", json=self.VALID_PAYLOAD
+        )
+        assert resp.status_code == 200
+        with app.app_context():
+            assert app.config.get("autonomous_live_expected_account_id") == "U1234567"
+            assert app.config.get("autonomous_live_dry_run") is False
+            assert app.config.get("autonomous_live_confirmation") is not None
+
+    def test_lifecycle_fails_closed_when_executor_build_fails(
+        self, app, client, tmp_path
+    ):
+        """When _maybe_advance_live_lifecycle cannot build an actual-live
+        executor (no live bridge in test service), mode must turn OFF rather
+        than fall back to a dry-run executor.
+
+        For the lifecycle to attempt advancement, a previous actual-live trade
+        must have been started (since_activation non-empty) and all such trades
+        must now be CLOSED (still_active empty).
+        """
+        import datetime as _dt
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            TradingCycle,
+        )
+        from autonomous.trade_store import AutonomousTrade, TradeStore
+
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
+
+        activation_time = _dt.datetime.now(_dt.timezone.utc)
+
+        with app.app_context():
+            # Set up actual-live continuous mode as ON
+            state = AutonomousModeState()
+            state.turn_on(TradingCycle.CONTINUOUS, AccountMode.LIVE, dry_run=False)
+            state.cycles_started = 1
+            state.activated_at = activation_time.isoformat()
+            app.config["autonomous_live_mode_state"] = state
+            app.config["autonomous_live_dry_run"] = False
+            app.config["autonomous_live_expected_account_id"] = "U1234567"
+            app.config["autonomous_live_confirmation"] = None
+
+            # Seed a CLOSED trade dated after activation so lifecycle
+            # sees `since_activation` non-empty and `still_active` empty,
+            # triggering the advancement path.
+            store_path = str(tmp_path / "live2.jsonl")
+            store = TradeStore(path=store_path)
+            closed_trade = AutonomousTrade(
+                autonomous_trade_id="alc-closed-001",
+                symbol="AAPL",
+                trade_type="BUY_SHARES",
+                status="CLOSED",
+                entry_order_id=1001,
+                entry_time=activation_time,
+                entry_limit_price=150.0,
+                quantity=5,
+                notes=["dry_run=False"],
+            )
+            store.record_trade(closed_trade)
+            app.config["autonomous_live_trade_store"] = store
+
+        # Status poll triggers _maybe_advance_live_lifecycle() automatically.
+        # The lifecycle will attempt to build an actual-live executor via
+        # _build_actual_live_executor(), which will fail because the test
+        # service has no real TWS connection.  Fail-closed: mode turns OFF.
+        resp = client.get("/api/autonomous/live/status")
+        assert resp.status_code == 200
+
+        with app.app_context():
+            final_state = app.config.get("autonomous_live_mode_state")
+            assert final_state is not None
+            assert final_state.operating_state.value == "OFF"
+
+    def test_lifecycle_turns_off_on_daily_cap_exhausted(
+        self, app, client, tmp_path, monkeypatch
+    ):
+        """When actual-live continuous lifecycle fires and run_once() returns
+        daily_live_trade_limit_reached, Autonomous Mode must turn OFF rather
+        than stay ON and keep polling.
+        """
+        import datetime as _dt
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            TradingCycle,
+        )
+        from autonomous.trade_store import AutonomousTrade, TradeStore
+        from execution.order_executor import LiveTradingConfirmation
+
+        activation_time = _dt.datetime.now(_dt.timezone.utc)
+
+        # Build a store pre-seeded with two closed trades so:
+        #   - lifecycle sees since_activation non-empty and still_active empty
+        #     (advances past the "wait for fills" guard)
+        #   - runner's own store also reports two trades today (>= cap of 1)
+        store_path = str(tmp_path / "live_cap.jsonl")
+        store = TradeStore(path=str(store_path))
+        for i, oid in enumerate([2001, 2002], start=1):
+            store.record_trade(AutonomousTrade(
+                autonomous_trade_id=f"alc-cap-00{i}",
+                symbol="AAPL",
+                trade_type="BUY_SHARES",
+                status="CLOSED",
+                entry_order_id=oid,
+                entry_time=activation_time,
+                entry_limit_price=150.0 + i,
+                quantity=5,
+                notes=["dry_run=False"],
+            ))
+
+        # Monkeypatch services so _build_actual_live_executor() passes all
+        # connectivity and account checks.
+        class _ConnectedBridge:
+            is_connected = True
+            environment = "live"
+            port = 7496
+
+        monkeypatch.setattr("web.services.ServiceManager.connected", True)
+        monkeypatch.setattr("web.services.ServiceManager.connection_env", "live")
+        monkeypatch.setattr(
+            "web.services.ServiceManager.connection_info",
+            {"account": "U1234567", "port": 7496, "host": "127.0.0.1"},
+        )
+        monkeypatch.setattr("web.services.ServiceManager.tws_bridge", _ConnectedBridge())
+
+        confirmation = LiveTradingConfirmation(
+            environment="live",
+            account_id="U1234567",
+            port=7496,
+            confirmed_by="test-operator",
+        )
+
+        # Install the base runner (for engine/config) then override the
+        # factory to share the cap-exhausted store, ensuring both the
+        # lifecycle guard and runner.evaluate_gates() see the same data.
+        _, _ = _install_live_runner(app, tmp_path, max_live_trades_per_day=1)
+
+        with app.app_context():
+            base_cfg = app.config.get("autonomous_live_runner_config")
+
+            # Rebuild factory with the shared cap-exhausted store.
+            signals = [_signal()]
+            scanner = CandidateScanner(
+                signal_provider=StaticSignalProvider(signals),
+                symbols=[{"symbol": "AAA", "security": "AAA", "sector": "X", "sub_industry": ""}],
+            )
+            engine_cfg = AutonomousTradingConfig(
+                mode=AutonomousMode.ASSISTED_LIVE,
+                allow_live_execution=True,
+                max_trades_per_day=5,
+                audit_log_dir=str(tmp_path),
+                emergency_stop_file=str(tmp_path / "ESTOP"),
+            )
+            engine = AutonomousTradingEngine(
+                scanner=scanner,
+                cash_analyzer=CashAvailabilityAnalyzer(),
+                account_provider=lambda: {"cash_balance": 100_000, "equity": 100_000},
+                positions_provider=lambda: {},
+                config=engine_cfg,
+                paper_adapter=None,
+                spy_price_provider=app.config.get("autonomous_spy_price_provider"),
+                audit_logger=AuditLogger(log_dir=str(tmp_path)),
+            )
+
+            def cap_factory(cfg, continuous_mode=False):
+                return AutonomousLiveRunner(
+                    engine=engine,
+                    trade_store=store,  # cap-exhausted store
+                    live_config=cfg,
+                    order_executor=_SubmittingExecutor(),
+                    connected_provider=lambda: True,
+                    connection_env_provider=lambda: "live",
+                    account_id_provider=lambda: "U1234567",
+                    signal_provider_provider=lambda: _RealProvider(),
+                    emergency_stop_provider=lambda: False,
+                    deployable_cash_provider=lambda: 50_000.0,
+                    continuous_mode=continuous_mode,
+                )
+
+            app.config["autonomous_live_runner_factory"] = cap_factory
+            app.config["autonomous_live_trade_store"] = store
+
+            state = AutonomousModeState()
+            state.turn_on(TradingCycle.CONTINUOUS, AccountMode.LIVE, dry_run=False)
+            state.cycles_started = 1
+            state.activated_at = activation_time.isoformat()
+            app.config["autonomous_live_mode_state"] = state
+            app.config["autonomous_live_dry_run"] = False
+            app.config["autonomous_live_expected_account_id"] = "U1234567"
+            app.config["autonomous_live_confirmation"] = confirmation
+
+        resp = client.get("/api/autonomous/live/status")
+        assert resp.status_code == 200
+
+        with app.app_context():
+            final_state = app.config.get("autonomous_live_mode_state")
+            assert final_state is not None
+            assert final_state.operating_state.value == "OFF"
+
+    def test_lifecycle_turns_off_when_failed_trade_detected(
+        self, app, client, tmp_path
+    ):
+        import datetime as _dt
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            TradingCycle,
+        )
+        from autonomous.trade_store import AutonomousTrade, TradeStore
+
+        activation_time = _dt.datetime.now(_dt.timezone.utc)
+        store = TradeStore(path=str(tmp_path / "live_failed.jsonl"))
+        store.record_trade(AutonomousTrade(
+            autonomous_trade_id="alc-failed-001",
+            symbol="AAPL",
+            trade_type="BUY_SHARES",
+            status="FAILED",
+            entry_order_id=3001,
+            entry_time=activation_time,
+            entry_limit_price=150.0,
+            quantity=5,
+            notes=["dry_run=False"],
+        ))
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
+
+        with app.app_context():
+            state = AutonomousModeState()
+            state.turn_on(TradingCycle.CONTINUOUS, AccountMode.LIVE, dry_run=False)
+            state.cycles_started = 1
+            state.activated_at = activation_time.isoformat()
+            app.config["autonomous_live_mode_state"] = state
+            app.config["autonomous_live_dry_run"] = False
+            app.config["autonomous_live_trade_store"] = store
+
+        resp = client.get("/api/autonomous/live/status")
+        assert resp.status_code == 200
+        with app.app_context():
+            final_state = app.config.get("autonomous_live_mode_state")
+            assert final_state is not None
+            assert final_state.operating_state.value == "OFF"

@@ -336,9 +336,16 @@
      aria-modal="true" aria-labelledby="actualLiveConfirmTitle" style="display:none;">
   <div class="modal-card actual-live-modal">
     <h3 id="actualLiveConfirmTitle">⚠️ Actual Live Trading — REAL MONEY AT RISK ⚠️</h3>
+    <p id="actualLiveCycleLabel" class="actual-live-cycle-label">Actual Live Single Trade</p>
     <p class="actual-live-warning">
       This will submit <strong>real orders to TWS</strong>. Money is at risk.
       This is NOT a dry-run. Review all fields carefully.
+    </p>
+    <p id="actualLiveContinuousWarning" class="actual-live-warning actual-live-continuous-warning" style="display:none;">
+      ⚠️ <strong>Continuous mode:</strong> after a bracket exit fills, the system may
+      automatically start another actual-live cycle if gates still pass. Real money is at
+      risk on every cycle. Ensure <code>AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY</code> is set
+      to a conservative cap before proceeding.
     </p>
     <div class="actual-live-fields">
       <label for="actualLiveAccountId">

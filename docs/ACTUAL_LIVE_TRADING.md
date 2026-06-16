@@ -27,14 +27,31 @@ The Autonomous Trading dashboard supports three distinct execution modes:
 
 ### Actual Live Trading
 - Activated via the separate **"🚨 Actual Live Trading"** button (red, visually distinct).
-- Only visible when:
+- Visible when:
   - Account context is Live
-  - Trading cycle is Single Trade
   - All readiness gates pass
+  - For **Continuous Trading** cycle: `AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true` gate must also pass
 - Requires explicit multi-step confirmation (see below).
 - The frontend sends `dry_run: false` only through this path.
-- Dashboard status chip shows: **LIVE SINGLE AUTONOMOUS ON**
+- Dashboard status chip:
+  - Single Trade: **LIVE SINGLE AUTONOMOUS ON**
+  - Continuous Trading: **LIVE CONTINUOUS AUTONOMOUS ON**
 - Outcome labels: `LIVE_ORDER_SUBMITTED` / `LIVE_ORDER_REJECTED` / `NO_TRADE`
+
+#### Single Trade actual-live
+- One entry cycle is executed; bracket exits (target + stop) are submitted atomically.
+- After entry, Autonomous Mode stays ON until the bracket child fills, then turns OFF.
+- Conservative caps: `max_open_live_trades=1`, `max_live_trades_per_day=1` (hardcoded).
+
+#### Continuous Trading actual-live
+- Same as single trade but after the bracket child fills, the lifecycle advancer
+  automatically starts the next cycle when gates still pass.
+- Requires `AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true` **and**
+  `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY` > 1 (backend rejects activation if the daily
+  cap is still at the default of 1, making continuous impossible).
+- Each subsequent cycle rebuilds a verified actual-live `OrderExecutor` using the
+  current `TWSBridge`; if this fails (disconnected, wrong environment, account
+  mismatch), the system **fails closed** and turns Autonomous Mode OFF.
 
 ## Actual Live Trading Confirmation Flow
 
@@ -45,7 +62,23 @@ The operator must provide **all** of the following in the confirmation modal:
 3. **Confirmation phrase** — must be typed exactly: `ENABLE ACTUAL LIVE TRADING`
 4. **Risk acknowledgement** — checkbox confirming real money is at risk.
 
+The modal title reflects the selected trading cycle:
+
+- **Actual Live Single Trade** — single entry, mode turns OFF after bracket fills.
+- **Actual Live Continuous Trading** — additional warning explains that further actual-live
+  cycles may start automatically after each bracket fill.
+
 Only after all four fields validate does the frontend submit to the backend.
+
+## Required `.env` Switches
+
+| Variable | Required for | Value |
+|----------|-------------|-------|
+| `AUTONOMOUS_LIVE_ENABLED` | All actual-live | `true` |
+| `AUTONOMOUS_LIVE_CONTINUOUS_ENABLED` | Continuous actual-live | `true` |
+| `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY` | Continuous actual-live | > 1 (e.g. `3`) |
+| `AUTONOMOUS_MAX_OPEN_LIVE_TRADES` | All actual-live | Conservative int (default: `1`) |
+| `AUTONOMOUS_LIVE_DRY_RUN` | Must be absent/false for actual-live | `false` |
 
 ## Backend Architecture
 
@@ -69,30 +102,28 @@ POST /api/autonomous/live/actual-live/activate
 }
 ```
 
+Use `"trading_cycle": "continuous"` for continuous actual-live activation.
+
 ### Executor Wiring
 
-The actual-live path constructs:
+The actual-live path constructs a verified `OrderExecutor` via
+`_build_actual_live_executor()`, which:
 
-1. **`TwsTradingAdapter(environment='live', port=<detected_port>)`** — a proper
-   live adapter implementing the required contract (`buy`/`sell`/`close_position`/
-   `get_all_positions`/`environment`/`port`).
-
-2. **`OrderExecutor(...)`** with:
+1. Checks `svc.connected` is truthy.
+2. Checks `svc.connection_env == 'live'`.
+3. Checks detected account ID matches `expected_account_id`.
+4. Checks `svc.tws_bridge` is present and connected.
+5. Builds **`OrderExecutor(...)`** with:
    - `is_live_mode=True`
    - `require_confirmation=False` — the dashboard confirmation replaces terminal `input()`
    - `dry_run=False`
    - `live_trading_enabled=True`
    - `live_confirmation=LiveTradingConfirmation(...)` — validated per-session token
    - `expected_account_id=<typed_account_id>`
-   - `limit_orders_only=True`
+   - `limit_orders_only=live_config.live_limit_orders_only`
 
-The backend does **NOT** use `svc._tws_bridge` as the adapter; it constructs
-a dedicated `TwsTradingAdapter` instance with the correct environment/port.
-
-The adapter's `connect_and_run()` method is called before any order execution.
-If TWS/Gateway is not available or the adapter cannot reach the ready state,
-the endpoint returns HTTP 503 with a clear error message rather than letting
-the UI imply "Actual Live Trading" is ready.
+This helper is reused by both the initial activation request and subsequent
+continuous cycles in `_maybe_advance_live_lifecycle()`.
 
 ### Request-Scoped Executor
 
@@ -101,7 +132,14 @@ This prevents dry-run/actual-live bleed-through: a later dry-run activation
 can never accidentally reuse a non-dry-run executor from a previous actual-live
 session.
 
-The adapter is disconnected in a `finally` block after every actual-live request.
+### Subsequent Continuous Cycles
+
+After a bracket child fills, `_maybe_advance_live_lifecycle()` is called by
+`/live/status` polls. When `state.dry_run is False` (actual-live), the next
+cycle calls `_build_actual_live_executor()` again to rebuild a fresh verified
+executor. If this fails for any reason, the system **fails closed**: Autonomous
+Mode is turned OFF with a clear audit log entry rather than falling back to a
+dry-run or no-adapter executor.
 
 ### Executor/Runner Construction Order
 
@@ -109,11 +147,11 @@ The actual-live path follows a strict construction order:
 
 1. Validate all confirmation fields
 2. Build `LiveTradingConfirmation`
-3. Build and **connect** `TwsTradingAdapter`
-4. Build `OrderExecutor` with the connected adapter
-5. Build `AutonomousLiveRunner` with the executor already attached
-6. Evaluate gates
-7. Run once
+3. Build actual-live `OrderExecutor` via `_build_actual_live_executor()` (verifies
+   connection, environment, account ID, and bridge availability)
+4. Build `AutonomousLiveRunner` with the executor already attached
+5. Evaluate gates
+6. Run once
 
 This ensures the runner always has the correct executor at construction time
 (not a stale/default one injected later).
@@ -136,21 +174,23 @@ uses `input()` (unsuitable for Flask/web server processes).
 - Emergency stop inactive
 - Signal provider ready
 - Deployable cash above configured minimum
-- Max open live autonomous trades not exceeded (v1: max 1)
-- Max live trades per day not exceeded (v1: max 1)
+- Max open live autonomous trades not exceeded
+- Max live trades per day not exceeded
 - Limit orders only
-- Buy-shares-only (v1 restriction)
+- Buy-shares-only restriction
 - Risk manager passes
 - Portfolio reconciliation passes
 - Order sanity checks pass
+- *(Continuous only)* `AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true`
+- *(Continuous only)* `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY > 1`
 
-## v1 Conservative Restrictions
+## Conservative Restrictions
 
-- **Single Trade only** — continuous actual-live trading is not supported.
 - **Buy shares only** — no short, options, or spread orders.
 - **Limit orders only** — MARKET orders are always rejected.
-- **Max 1 open autonomous live trade** at a time.
-- **Max 1 live autonomous entry per day** by default.
+- **Single Trade**: `max_open_live_trades=1`, `max_live_trades_per_day=1` (hardcoded).
+- **Continuous Trading**: explicit operator-configured caps required; the backend
+  rejects activation if `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY <= 1`.
 
 ## Audit Trail
 
@@ -177,63 +217,43 @@ The dashboard shows a clear final outcome from the `outcome` field in the API re
 | `LIVE_ORDER_REJECTED` | Order rejected by a safety gate — reason displayed |
 | `NO_TRADE` | No qualifying candidates found — no action taken |
 
-## v1 Single-Trade Lifecycle
+## Single-Trade Lifecycle
 
-In v1, actual-live mode uses a conservative **entry-only** single-trade lifecycle:
+1. Entry submitted with bracket (BUY LMT + SELL LMT target + SELL STP stop).
+2. Autonomous Mode stays ON while bracket is active.
+3. Once bracket child fills, lifecycle advancer detects all trades closed.
+4. Mode turns OFF automatically.
 
-- **ALL outcomes turn mode OFF**, including successful entry submission.
-- After a successful entry (`executed`), mode turns OFF with status
-  "Entry Submitted". The operator must manage the exit manually (via the
-  dashboard's manual exit controls or directly through TWS).
-- Non-executed outcomes also turn mode OFF:
-  - `no_trade` — no qualifying candidates
-  - `rejected` — gate or risk rejection
-  - `engine_rejected` — engine-level rejection
-  - `execution_failed` — order execution failure
-  - `account_id_mismatch` — account verification failure
-  - Any exception during the lifecycle run
+## Continuous Trading Lifecycle
 
-### Why v1 is entry-only
+1. First entry submitted with bracket (same as single-trade).
+2. Autonomous Mode stays ON.
+3. Once bracket child fills, `_maybe_advance_live_lifecycle()` detects all trades closed.
+4. A new `_build_actual_live_executor()` call verifies connection, environment, account ID,
+   and bridge. If this fails, mode turns OFF (fail-closed).
+5. The next cycle's runner uses the freshly built executor. Step 2 repeats.
+6. Mode turns OFF when `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY` is exhausted, the SPY gate
+   fails, or any unhandled error occurs.
 
-The actual-live executor is **request-scoped** — it is built, used, and
-disconnected within a single HTTP request to prevent dry-run/actual-live
-bleed-through. This means no persisted actual-live executor exists for
-subsequent exit evaluation calls.
+### Operator responsibilities for Continuous Trading actual-live
 
-If mode were left ON after entry, `/live/evaluate-exits` would silently
-fall back to a dry-run executor (since `_build_live_runner()` always builds
-`dry_run=True` by default). The exit manager accepts `OrderStatus.DRY_RUN`
-as success, which would mark actual-live trades `EXIT_PENDING` without a
-real exit order — a dangerous bleed-through.
+- Set `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY` to a deliberately conservative cap.
+- Monitor the dashboard; use the emergency stop if anything is unexpected.
+- Understand that each bracket fill may immediately trigger another entry if
+  gates pass.
+- No background loop exists; advancement happens only on `/live/status` polls
+  or `/live/evaluate-exits` calls.
 
-To prevent this, v1 turns mode OFF after every outcome and the exit
-endpoint includes a fail-closed guard that rejects exit evaluation when
-open actual-live trades exist in the store without a connected non-dry-run
-executor.
+## Fail-Closed Exit Guard
 
-### Fail-closed exit guard
+The `/live/evaluate-exits` endpoint protects against dry-run bleed-through:
 
-The `/live/evaluate-exits` endpoint protects against dry-run bleed-through
-in two scenarios:
+**Scenario: Mode ON with `dry_run=False`** (actual-live mode):
 
-**Scenario 1: Mode left ON with `dry_run=False`** (shouldn't happen in v1,
-but guarded):
-
-1. Detect `state.is_on and not state.dry_run` (actual-live mode).
+1. Detect `state.is_on and not state.dry_run`.
 2. Return HTTP 400 with `outcome: "NO_EXIT"` if no real executor exists.
 
-**Scenario 2: Mode OFF but open actual-live trades in store** (normal v1
-state after entry-only):
-
-1. Check the live trade store for open trades with `dry_run=False` in notes.
-2. If any exist and no non-dry-run executor is available, return HTTP 400
-   with `outcome: "NO_EXIT"` — the trade must be exited manually.
-3. If a globally stored executor exists but has `dry_run=True`, also reject
-   with 400 (prevents dry-run executor from marking actual-live trades
-   `EXIT_PENDING`).
-
-Dry-run trades (`dry_run=True` in notes) and states with no open
-actual-live trades proceed normally.
+Dry-run trades and states with no open actual-live trades proceed normally.
 
 This is intentionally conservative: the system fails closed rather than
 risking uncontrolled dry-run behavior on actual-live trades.

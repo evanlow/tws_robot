@@ -271,9 +271,14 @@
         const modeLabel = accountContext.label || 'Autonomous';
         const dryRunActive = (modeState.dry_run === true);
         if (accountContext.mode === 'live' && !dryRunActive) {
-          modeChip.textContent = 'LIVE SINGLE AUTONOMOUS ON';
+          const activeCycle = modeState.trading_cycle || 'single_trade';
+          modeChip.textContent = activeCycle === 'continuous'
+            ? 'LIVE CONTINUOUS AUTONOMOUS ON'
+            : 'LIVE SINGLE AUTONOMOUS ON';
           chipClass = 'mode-chip-on';
-          descText = 'Actual live trading is active — real orders may be submitted.';
+          descText = activeCycle === 'continuous'
+            ? 'Actual live continuous trading is active — real orders may be submitted on each cycle.'
+            : 'Actual live trading is active — real orders may be submitted.';
         } else if (accountContext.mode === 'live' && dryRunActive) {
           modeChip.textContent = 'LIVE DRY-RUN ON';
           chipClass = 'mode-chip-on';
@@ -383,10 +388,14 @@
         : (ready ? 'Turn Autonomous Mode ON.' :
           'Disabled: ' + ((gates.reasons || []).join('; ') || readiness.message || 'not ready'));
 
-      // Show or hide the Actual Live Trading button (only for live, single_trade, ready)
+      // Show or hide the Actual Live Trading button.
+      // Visible for live accounts when mode is OFF and readiness gates pass.
+      // Continuous cycle additionally requires the live_continuous_enabled gate.
       if (actualLiveBtn) {
-        const showActualLive = accountContext.mode === 'live' && !state.autonomousModeOn && ready
-          && selectedTradingCycle() === 'single_trade';
+        const cycle = selectedTradingCycle();
+        const continuousGateOk = cycle !== 'continuous' || !!gates.live_continuous_enabled;
+        const showActualLive = accountContext.mode === 'live' && !state.autonomousModeOn
+          && ready && continuousGateOk;
         actualLiveBtn.style.display = showActualLive ? '' : 'none';
         actualLiveBtn.disabled = !showActualLive;
       }
@@ -1360,6 +1369,20 @@
     const conn = (state.modePayload && state.modePayload.connection) || {};
     const accountId = conn.running_account_id || state.liveAccountId || '';
     if (detectedEl) detectedEl.textContent = accountId || 'unavailable';
+
+    // Show selected cycle in the modal title and warn strongly for continuous
+    const cycle = selectedTradingCycle();
+    const cycleLabelEl = $('actualLiveCycleLabel');
+    const continuousWarningEl = $('actualLiveContinuousWarning');
+    if (cycleLabelEl) {
+      cycleLabelEl.textContent = cycle === 'continuous'
+        ? 'Actual Live Continuous Trading'
+        : 'Actual Live Single Trade';
+    }
+    if (continuousWarningEl) {
+      continuousWarningEl.style.display = cycle === 'continuous' ? '' : 'none';
+    }
+
     // Clear inputs
     const acctInput = $('actualLiveAccountId');
     const operatorInput = $('actualLiveOperator');
@@ -1412,14 +1435,16 @@
     }
 
     hideActualLiveConfirm();
-    logActivity('warning', 'Actual Live Trading confirmed — submitting to backend');
-    setFeedback('Activating Actual Live Trading…');
+    const tradingCycle = selectedTradingCycle();
+    const cycleLabel = tradingCycle === 'continuous' ? 'Continuous Trading' : 'Single Trade';
+    logActivity('warning', 'Actual Live Trading (' + cycleLabel + ') confirmed — submitting to backend');
+    setFeedback('Activating Actual Live Trading (' + cycleLabel + ')…');
 
     try {
       const requestBody = {
         confirm: true,
         account_mode: 'live',
-        trading_cycle: 'single_trade',
+        trading_cycle: tradingCycle,
         expected_account_id: typedAccountId.trim(),
         confirmed_by: operator.trim(),
         confirmation_phrase: phrase.trim(),
