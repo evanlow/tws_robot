@@ -419,6 +419,17 @@ class TestActualLiveActivate:
         body = resp.get_json()
         assert body["status"] in ("activated", "halted")
 
+    def test_single_trade_activation_does_not_mutate_shared_daily_cap(
+        self, app, client, tmp_path
+    ):
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
+        resp = client.post("/api/autonomous/live/actual-live/activate", json=self.VALID_PAYLOAD)
+        assert resp.status_code == 200
+        with app.app_context():
+            cfg = app.config.get("autonomous_live_runner_config")
+            assert cfg is not None
+            assert cfg.max_live_trades_per_day == 3
+
     def test_rejects_continuous_when_daily_cap_is_one(self, app, client, tmp_path):
         """Actual-live continuous activation must be rejected when the configured
         max_live_trades_per_day is still at the default of 1, because continuous
@@ -690,7 +701,7 @@ class TestLiveRunOnce:
         resp = client.post("/api/autonomous/live/run-once", json={})
         assert resp.status_code in (400, 503)
         body = resp.get_json()
-        assert body.get("rejection_code") == "confirmation_missing"
+        assert body.get("rejection_reason") == "confirmation_missing"
 
 
 # ---------------------------------------------------------------------------
@@ -1814,6 +1825,48 @@ class TestActualLiveContinuousLifecycle:
         resp = client.get("/api/autonomous/live/status")
         assert resp.status_code == 200
 
+        with app.app_context():
+            final_state = app.config.get("autonomous_live_mode_state")
+            assert final_state is not None
+            assert final_state.operating_state.value == "OFF"
+
+    def test_lifecycle_turns_off_when_failed_trade_detected(
+        self, app, client, tmp_path
+    ):
+        import datetime as _dt
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            TradingCycle,
+        )
+        from autonomous.trade_store import AutonomousTrade, TradeStore
+
+        activation_time = _dt.datetime.now(_dt.timezone.utc)
+        store = TradeStore(path=str(tmp_path / "live_failed.jsonl"))
+        store.record_trade(AutonomousTrade(
+            autonomous_trade_id="alc-failed-001",
+            symbol="AAPL",
+            trade_type="BUY_SHARES",
+            status="FAILED",
+            entry_order_id=3001,
+            entry_time=activation_time,
+            entry_limit_price=150.0,
+            quantity=5,
+            notes=["dry_run=False"],
+        ))
+        _install_live_runner(app, tmp_path, max_live_trades_per_day=3)
+
+        with app.app_context():
+            state = AutonomousModeState()
+            state.turn_on(TradingCycle.CONTINUOUS, AccountMode.LIVE, dry_run=False)
+            state.cycles_started = 1
+            state.activated_at = activation_time.isoformat()
+            app.config["autonomous_live_mode_state"] = state
+            app.config["autonomous_live_dry_run"] = False
+            app.config["autonomous_live_trade_store"] = store
+
+        resp = client.get("/api/autonomous/live/status")
+        assert resp.status_code == 200
         with app.app_context():
             final_state = app.config.get("autonomous_live_mode_state")
             assert final_state is not None

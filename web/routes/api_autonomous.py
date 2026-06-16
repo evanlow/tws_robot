@@ -39,17 +39,6 @@ from autonomous.audit import AuditLogger
 from autonomous.autonomous_live_runner import (
     AutonomousLiveRunner,
     EXECUTED as LIVE_EXECUTED,
-    DRY_RUN_EXECUTED,
-    NOT_CONNECTED as LIVE_NOT_CONNECTED,
-    NOT_LIVE_MODE,
-    LIVE_DISABLED,
-    LIVE_CONTINUOUS_DISABLED,
-    MAX_OPEN_TRADES as LIVE_MAX_OPEN_TRADES,
-    DAILY_LIVE_TRADE_LIMIT_REACHED,
-    EXECUTION_FAILED as LIVE_EXECUTION_FAILED,
-    ENGINE_REJECTED as LIVE_ENGINE_REJECTED,
-    EMERGENCY_STOP_ACTIVE as LIVE_EMERGENCY_STOP_ACTIVE,
-    NO_TRADE as LIVE_NO_TRADE,
 )
 from autonomous.autonomous_runner import (
     AutonomousPaperRunner,
@@ -1561,6 +1550,28 @@ def _maybe_advance_live_lifecycle() -> None:
 
             executor_override = None
             if not live_config.live_dry_run:
+                # Actual-live safety policy is sticky across cycles.
+                live_config.live_limit_orders_only = True
+                # If a live trade failed since activation, fail closed before
+                # attempting another cycle to avoid unattended retries.
+                failed_trades = [t for t in since_activation if t.status == FAILED]
+                if failed_trades:
+                    state.turn_off(
+                        message=(
+                            "Live continuous halted: failed live trade detected since activation. "
+                            "Autonomous Mode turned OFF."
+                        ),
+                        status="Halted",
+                    )
+                    _audit_mode_event(
+                        "halt",
+                        {
+                            "reason": "failed_live_trade_detected",
+                            "source": "lifecycle_continuous",
+                            "account_mode": "live",
+                        },
+                    )
+                    return
                 # Actual-live continuous: build a verified real executor for
                 # the next cycle.  Fail closed if any safety check fails so
                 # the next cycle cannot silently fall back to dry-run/no-adapter
@@ -1582,7 +1593,7 @@ def _maybe_advance_live_lifecycle() -> None:
                     state.turn_off(
                         message=(
                             "Actual-live continuous: could not build a verified executor "
-                            f"for the next cycle ({exc}). Autonomous Mode turned OFF."
+                            "for the next cycle. Autonomous Mode turned OFF."
                         ),
                         status="Halted",
                     )
@@ -2028,7 +2039,7 @@ def actual_live_activate():
     #   6. Evaluate gates
     #   7. Run once
 
-    live_config = _live_runner_config()
+    live_config = AutonomousLiveRunnerConfig(**_live_runner_config().to_dict())
     live_config.expected_account_id = expected_account_id
     live_config.live_dry_run = False  # Actual live — NOT dry run
 
@@ -2339,6 +2350,7 @@ def live_run_once():
 
     executor_override = None
     if not live_config.live_dry_run:
+        live_config.live_limit_orders_only = True
         # Actual-live: build a verified executor using the same fail-closed
         # helper used by the activation endpoint and the continuous lifecycle.
         expected_account_id = current_app.config.get(
@@ -2352,7 +2364,7 @@ def live_run_once():
         except (_LiveConnectionError, _LiveValidationError) as exc:
             return jsonify({
                 "status": "error",
-                "rejection_code": exc.rejection_code,
+                "rejection_reason": exc.rejection_code,
                 "error": "Actual-live executor build failed; run-once rejected.",
             }), exc.http_status
         except Exception:
