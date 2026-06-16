@@ -27,7 +27,7 @@ from ibapi.wrapper import EWrapper
 
 from backtest.data_models import Position
 from core.event_bus import Event, EventType
-from execution.paper_adapter import LIVE_PORTS, PAPER_PORTS
+from execution.paper_adapter import LIVE_PORTS
 
 logger = logging.getLogger(__name__)
 

@@ -824,7 +824,10 @@ class AutonomousLiveRunner:
             return
 
         try:
-            open_trades = self._store.list_open()
+            open_trades = [
+                trade for trade in self._store.list_all()
+                if trade.status in {OPEN, EXIT_PENDING}
+            ]
         except Exception:  # pragma: no cover - defensive
             logger.exception("trade store list_open failed during bracket reconcile")
             return

@@ -1365,6 +1365,38 @@ class TestActualLivePostEntryExitBehavior:
         assert body["outcome"] == "NO_EXIT"
         assert "manual" in body["reason"].lower()
 
+    def test_exit_rejects_partially_persisted_bracket_trade(
+        self, app, client, tmp_path
+    ):
+        """A trade with only one bracket child ID must still be guarded as
+        needing client-side exit management."""
+        _install_live_runner(app, tmp_path)
+        from autonomous.trade_store import AutonomousTrade
+        from datetime import datetime, timezone
+
+        with app.app_context():
+            store = app.config["autonomous_live_trade_store"]
+            trade = AutonomousTrade(
+                autonomous_trade_id="actual-live-partial-bracket",
+                symbol="AAPL",
+                trade_type="BUY_SHARES",
+                status="OPEN",
+                entry_order_id=777,
+                entry_time=datetime.now(timezone.utc),
+                entry_limit_price=150.0,
+                quantity=10,
+                target_order_id=778,
+                stop_order_id=None,
+                notes=["recorded by AutonomousLiveRunner", "dry_run=False"],
+            )
+            store.record_trade(trade)
+
+        resp = client.post("/api/autonomous/live/evaluate-exits", json={})
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["outcome"] == "NO_EXIT"
+        assert "manual" in body["reason"].lower()
+
     def test_exit_rejects_dry_run_executor_when_actual_live_trades_open(
         self, app, client, tmp_path
     ):

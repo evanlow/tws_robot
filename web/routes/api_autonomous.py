@@ -2221,15 +2221,19 @@ def live_evaluate_exits():
 
         # Check if the store has open trades that were entered via actual-live.
         # Actual-live trades are marked with "dry_run=False" in their notes by
-        # AutonomousLiveRunner._record_trade().  Trades with a target_order_id
-        # are bracket-managed at TWS (target + stop already at the broker via
-        # the entry bracket) and need no client-side exit, so they are EXCLUDED
-        # from the fail-closed guard \u2014 the runner's bracket-fill reconciler
-        # (driven from /live/status) is responsible for flipping them to CLOSED.
+        # AutonomousLiveRunner._record_trade().  Trades with BOTH
+        # target_order_id and stop_order_id are bracket-managed at TWS
+        # (target + stop already at the broker via the entry bracket) and need
+        # no client-side exit, so they are EXCLUDED from the fail-closed guard
+        # \u2014 the runner's bracket-fill reconciler (driven from /live/status)
+        # is responsible for flipping them to CLOSED.
         open_trades = live_store.list_open()
         has_open_actual_live_trades = any(
             "dry_run=False" in (getattr(t, "notes", None) or [])
-            and getattr(t, "target_order_id", None) is None
+            and not (
+                getattr(t, "target_order_id", None) is not None
+                and getattr(t, "stop_order_id", None) is not None
+            )
             for t in open_trades
         )
 

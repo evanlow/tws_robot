@@ -40,7 +40,14 @@ from autonomous.runner_config import AutonomousLiveRunnerConfig
 # OPEN / CLOSED / FAILED are trade-lifecycle status strings (trade_store).
 # EXECUTED / DRY_RUN_EXECUTED / NO_TRADE / EXECUTION_FAILED are runner-result
 # status strings (autonomous_live_runner) — two distinct namespaces.
-from autonomous.trade_store import TradeStore, AutonomousTrade, OPEN, CLOSED, FAILED
+from autonomous.trade_store import (
+    TradeStore,
+    AutonomousTrade,
+    OPEN,
+    EXIT_PENDING,
+    CLOSED,
+    FAILED,
+)
 from data.cash_availability import CashAvailabilityAnalyzer
 from execution.order_executor import OrderResult, OrderStatus
 
@@ -894,6 +901,29 @@ def test_bracket_stop_fill_marks_trade_closed_stop_loss(tmp_path):
     assert closed.status == CLOSED
     assert closed.exit_reason == "STOP_LOSS"
     assert closed.exit_order_id == 302
+    assert gates.open_live_trades == 0
+
+
+def test_bracket_fill_reconciles_exit_pending_trade(tmp_path):
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        filled_order_ids_provider=lambda: {402},
+    )
+    seeded = _seed_bracket_trade(
+        runner.trade_store, parent_id=400, target_id=401, stop_id=402,
+    )
+    runner.trade_store.update_trade(
+        seeded.autonomous_trade_id,
+        status=EXIT_PENDING,
+    )
+
+    gates = runner.evaluate_gates()
+
+    closed = runner.trade_store.get(seeded.autonomous_trade_id)
+    assert closed.status == CLOSED
+    assert closed.exit_reason == "STOP_LOSS"
+    assert closed.exit_order_id == 402
     assert gates.open_live_trades == 0
 
 

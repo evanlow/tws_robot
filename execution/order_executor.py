@@ -827,7 +827,8 @@ class OrderExecutor:
             target_price=float(take_profit),
             stop_price=float(stop_loss),
         )
-        if not isinstance(ids, dict) or "parent_id" not in ids:
+        required_ids = {"parent_id", "target_id", "stop_id"}
+        if not isinstance(ids, dict) or not required_ids.issubset(ids.keys()):
             return None
         return ids
 
