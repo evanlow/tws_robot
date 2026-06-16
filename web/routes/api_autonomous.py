@@ -44,6 +44,12 @@ from autonomous.autonomous_live_runner import (
     NOT_LIVE_MODE,
     LIVE_DISABLED,
     LIVE_CONTINUOUS_DISABLED,
+    MAX_OPEN_TRADES as LIVE_MAX_OPEN_TRADES,
+    DAILY_LIVE_TRADE_LIMIT_REACHED,
+    EXECUTION_FAILED as LIVE_EXECUTION_FAILED,
+    ENGINE_REJECTED as LIVE_ENGINE_REJECTED,
+    EMERGENCY_STOP_ACTIVE as LIVE_EMERGENCY_STOP_ACTIVE,
+    NO_TRADE as LIVE_NO_TRADE,
 )
 from autonomous.autonomous_runner import (
     AutonomousPaperRunner,
@@ -1356,6 +1362,28 @@ def _build_actual_live_executor(
             rejection_code="tws_not_connected",
         )
 
+    # Validate the per-session LiveTradingConfirmation before building the
+    # executor.  A missing or stale confirmation must prevent execution here,
+    # not later inside execute_signal(), so continuous lifecycle advancement
+    # fails closed at build time rather than after scan/run.
+    if confirmation is None:
+        raise _LiveValidationError(
+            "No LiveTradingConfirmation is present for this session",
+            rejection_code="confirmation_missing",
+        )
+    if (confirmation.account_id or "").lower() != expected_account_id.lower():
+        raise _LiveValidationError(
+            f"Confirmation account '{confirmation.account_id}' does not match "
+            f"expected account '{expected_account_id}'",
+            rejection_code="confirmation_account_mismatch",
+        )
+    ok, reason = confirmation.matches_adapter(tws_adapter)
+    if not ok:
+        raise _LiveValidationError(
+            f"LiveTradingConfirmation does not match adapter: {reason}",
+            rejection_code="confirmation_adapter_mismatch",
+        )
+
     risk_manager = getattr(svc, "risk_manager", None) or RiskManager()
     return OrderExecutor(
         tws_adapter=tws_adapter,
@@ -1601,14 +1629,34 @@ def _maybe_advance_live_lifecycle() -> None:
                     "live_continuous_cycle",
                     {"cycles_started": state.cycles_started, "result_status": result.status},
                 )
-                if result.decision:
-                    decision_status = (result.decision or {}).get("status")
-                    if decision_status == "market_not_suitable":
-                        state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
-                        _audit_mode_event(
-                            "halt",
-                            {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate_continuous"},
-                        )
+                # Decision-level market gate: turns OFF for both dry-run and actual-live.
+                decision_status = (result.decision or {}).get("status")
+                if decision_status == "market_not_suitable":
+                    state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+                    _audit_mode_event(
+                        "halt",
+                        {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate_continuous"},
+                    )
+                elif not live_config.live_dry_run and result.status != LIVE_EXECUTED:
+                    # Actual-live continuous: fail closed on any non-executed outcome.
+                    # Repeated polling must not silently retry a blocked/failed cycle
+                    # against the live broker (daily cap, max open trades, execution
+                    # failures, engine rejections, no-trade outcomes all require an
+                    # explicit operator decision to resume).
+                    halt_message = (
+                        f"Live continuous halted: {result.status}. "
+                        "Autonomous Mode turned OFF."
+                    )
+                    state.turn_off(message=halt_message, status="Halted")
+                    _audit_mode_event(
+                        "halt",
+                        {
+                            "reason": result.status,
+                            "rejection_reason": result.rejection_reason,
+                            "source": "live_continuous_terminal_status",
+                            "account_mode": "live",
+                        },
+                    )
             except Exception:
                 logger.exception("Live continuous lifecycle cycle failed")
                 state.turn_off(
@@ -2288,8 +2336,40 @@ def live_run_once():
     # Preserve activation-time mode semantics for all subsequent cycles.
     live_config.live_dry_run = bool(getattr(state, "dry_run", live_config.live_dry_run))
     continuous_mode = (state.trading_cycle == TradingCycle.CONTINUOUS)
+
+    executor_override = None
+    if not live_config.live_dry_run:
+        # Actual-live: build a verified executor using the same fail-closed
+        # helper used by the activation endpoint and the continuous lifecycle.
+        expected_account_id = current_app.config.get(
+            "autonomous_live_expected_account_id", ""
+        )
+        confirmation = current_app.config.get("autonomous_live_confirmation")
+        try:
+            executor_override = _build_actual_live_executor(
+                live_config, confirmation, expected_account_id
+            )
+        except (_LiveConnectionError, _LiveValidationError) as exc:
+            return jsonify({
+                "status": "error",
+                "rejection_code": exc.rejection_code,
+                "error": "Actual-live executor build failed; run-once rejected.",
+            }), exc.http_status
+        except Exception:
+            logger.exception(
+                "Unexpected error building actual-live executor for run-once; rejecting"
+            )
+            return jsonify({
+                "status": "error",
+                "error": "Unexpected error building actual-live executor.",
+            }), 500
+
     try:
-        runner = _build_live_runner(live_config, continuous_mode=continuous_mode)
+        runner = _build_live_runner(
+            live_config,
+            continuous_mode=continuous_mode,
+            executor_override=executor_override,
+        )
     except Exception:
         logger.exception("Failed to build AutonomousLiveRunner for run-once")
         return jsonify({
