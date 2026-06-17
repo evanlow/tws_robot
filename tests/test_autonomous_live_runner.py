@@ -166,6 +166,7 @@ def _runner(
     continuous_mode: bool = False,
     rejected_order_ids_provider: Any = None,
     filled_order_ids_provider: Any = None,
+    broker_positions_provider: Any = None,
 ) -> AutonomousLiveRunner:
     engine = _build_engine(tmp_path, signal=signal)
     store = TradeStore(path=str(tmp_path / "live_trades.jsonl"))
@@ -192,6 +193,7 @@ def _runner(
         deployable_cash_provider=lambda: deployable_cash,
         rejected_order_ids_provider=rejected_order_ids_provider,
         filled_order_ids_provider=filled_order_ids_provider,
+        broker_positions_provider=broker_positions_provider,
         continuous_mode=continuous_mode,
     )
 
@@ -1045,3 +1047,156 @@ def test_synthesized_stop_when_plan_lacks_stop_price(tmp_path):
     assert sent.stop_loss < sent.target_price
     # The trade notes should mention the synthesised stop.
     assert any("synthesised" in n.lower() for n in result.trade["notes"])
+
+
+# ---------------------------------------------------------------------------
+# Stale-position reconciliation (broker no longer holds the symbol)
+# ---------------------------------------------------------------------------
+
+
+from datetime import timedelta  # noqa: E402  (grouped with stale-position tests)
+
+
+def _old_open_trade(store: TradeStore, *, symbol: str, order_id: int = 1) -> AutonomousTrade:
+    """Seed an OPEN trade whose entry_time is well outside the grace window."""
+    trade = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol=symbol,
+        trade_type="BUY_SHARES",
+        status=OPEN,
+        entry_order_id=order_id,
+        entry_time=datetime.now(timezone.utc) - timedelta(hours=2),
+        entry_limit_price=100.0,
+        quantity=1,
+        max_holding_days=5,
+    )
+    store.record_trade(trade)
+    return trade
+
+
+def test_stale_open_trade_closed_when_broker_holds_nothing(tmp_path):
+    """OPEN trade older than the grace window is auto-closed when the
+    broker positions snapshot does not include its symbol."""
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        broker_positions_provider=lambda: {},  # broker holds nothing
+    )
+    seeded = _old_open_trade(runner.trade_store, symbol="AKAM", order_id=42)
+
+    gates = runner.evaluate_gates()
+
+    closed = runner.trade_store.get(seeded.autonomous_trade_id)
+    assert closed is not None
+    assert closed.status == CLOSED
+    assert closed.exit_reason == "reconciled_no_broker_position"
+    assert gates.open_live_trades == 0
+
+
+def test_stale_trade_not_closed_when_broker_still_holds_symbol(tmp_path):
+    """OPEN trade stays OPEN when the broker still holds the symbol."""
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        broker_positions_provider=lambda: {"AKAM": {"quantity": 1}},
+    )
+    seeded = _old_open_trade(runner.trade_store, symbol="AKAM", order_id=42)
+
+    gates = runner.evaluate_gates()
+
+    still_open = runner.trade_store.get(seeded.autonomous_trade_id)
+    assert still_open.status == OPEN
+    assert gates.open_live_trades == 1
+
+
+def test_stale_reconcile_treats_zero_quantity_as_not_held(tmp_path):
+    """A broker position with zero quantity means the symbol is not held."""
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        broker_positions_provider=lambda: {"AKAM": {"quantity": 0}},
+    )
+    seeded = _old_open_trade(runner.trade_store, symbol="AKAM", order_id=42)
+
+    gates = runner.evaluate_gates()
+
+    closed = runner.trade_store.get(seeded.autonomous_trade_id)
+    assert closed.status == CLOSED
+    assert gates.open_live_trades == 0
+
+
+def test_fresh_open_trade_protected_by_grace_window(tmp_path):
+    """A just-opened trade must not be reconciled even if positions are empty
+    — the broker position update may not have arrived yet."""
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        broker_positions_provider=lambda: {},
+    )
+    # Fresh OPEN trade (entry_time = now)
+    fresh = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol="AKAM",
+        trade_type="BUY_SHARES",
+        status=OPEN,
+        entry_order_id=99,
+        entry_time=datetime.now(timezone.utc),
+        entry_limit_price=100.0,
+        quantity=1,
+        max_holding_days=5,
+    )
+    runner.trade_store.record_trade(fresh)
+
+    gates = runner.evaluate_gates()
+
+    still_open = runner.trade_store.get(fresh.autonomous_trade_id)
+    assert still_open.status == OPEN
+    assert gates.open_live_trades == 1
+
+
+def test_stale_reconcile_noop_when_no_provider(tmp_path):
+    """Without a broker_positions_provider, no stale reconciliation occurs."""
+    runner = _runner(tmp_path, signal=_signal())  # no broker provider
+    seeded = _old_open_trade(runner.trade_store, symbol="AKAM", order_id=42)
+
+    gates = runner.evaluate_gates()
+
+    still_open = runner.trade_store.get(seeded.autonomous_trade_id)
+    assert still_open.status == OPEN
+    assert gates.open_live_trades == 1
+
+
+def test_stale_reconcile_swallows_provider_exception(tmp_path):
+    """A broker_positions_provider that raises must not crash gate eval."""
+    def boom():
+        raise RuntimeError("bridge gone")
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        broker_positions_provider=boom,
+    )
+    _old_open_trade(runner.trade_store, symbol="AKAM", order_id=42)
+
+    # Must not raise.
+    gates = runner.evaluate_gates()
+    assert gates.open_live_trades == 1
+
+
+def test_stale_reconcile_accepts_riskposition_objects(tmp_path):
+    """Broker positions returned as objects with a ``quantity`` attribute
+    are handled (the production provider returns RiskPosition objects)."""
+    class _PosLike:
+        def __init__(self, qty):
+            self.quantity = qty
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        broker_positions_provider=lambda: {"AKAM": _PosLike(1)},
+    )
+    seeded = _old_open_trade(runner.trade_store, symbol="AKAM", order_id=42)
+
+    gates = runner.evaluate_gates()
+
+    still_open = runner.trade_store.get(seeded.autonomous_trade_id)
+    assert still_open.status == OPEN
+    assert gates.open_live_trades == 1

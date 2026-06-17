@@ -192,3 +192,109 @@ def test_reasons_accumulator_records_short_put_strike_above_support():
     )
     assert plan.trade_type == TradeType.BUY_SHARES
     assert any("support" in r and "strike" in r for r in reasons), reasons
+
+
+# ---------------------------------------------------------------------------
+# Split caps: independent deployable-cash and equity fractions
+# ---------------------------------------------------------------------------
+
+
+def test_split_caps_loose_deployable_lets_high_priced_share_through():
+    """With a tight equity cap (10%) but loose deployable-cash cap (50%),
+    a high-priced share that the old single-pct rule would have blocked
+    should now be fundable from a small deployable-cash balance."""
+    cfg = AutonomousTradingConfig(
+        max_position_deployable_cash_pct=0.50,
+        max_position_equity_pct=0.10,
+    )
+    # Old behavior (both at 10%): cap = min(0.1*2674, 0.1*8531) = 267 < 454 → None.
+    # New behavior: cap = min(0.5*2674, 0.1*8531) = min(1337, 853) = 853 ≥ 454 → 1 share.
+    plan = TradePlanner(cfg).plan(
+        _candidate(symbol="CIEN", last_price=454.11),
+        deployable_cash=2_674.0,
+        equity=8_531.0,
+    )
+    assert plan is not None
+    assert plan.trade_type == TradeType.BUY_SHARES
+    assert plan.quantity == 1
+
+
+def test_split_caps_equity_side_still_binds():
+    """A loose deployable cap must not bypass the equity guard."""
+    cfg = AutonomousTradingConfig(
+        max_position_deployable_cash_pct=0.99,
+        max_position_equity_pct=0.05,
+    )
+    # 5% of $10k equity = $500 cap → at $100/share = 5 shares regardless of
+    # the $9,900 deployable-side allowance.
+    plan = TradePlanner(cfg).plan(
+        _candidate(last_price=100.0),
+        deployable_cash=10_000.0,
+        equity=10_000.0,
+    )
+    assert plan is not None
+    assert plan.quantity == 5
+
+
+def test_split_caps_fall_back_to_max_new_position_pct():
+    """Unset split caps preserve the legacy single-percentage behavior."""
+    cfg = AutonomousTradingConfig(max_new_position_pct=0.20)
+    assert cfg.deployable_cash_cap_pct() == 0.20
+    assert cfg.equity_cap_pct() == 0.20
+
+
+def test_split_caps_reject_reason_shows_both_pcts():
+    """When the cap blocks the trade the reason string must show the
+    actual percentages used on each side (not a single value)."""
+    cfg = AutonomousTradingConfig(
+        max_position_deployable_cash_pct=0.10,
+        max_position_equity_pct=0.05,
+    )
+    reasons: list[str] = []
+    plan = TradePlanner(cfg).plan(
+        _candidate(symbol="ZZZ", last_price=1_000.0),
+        deployable_cash=2_000.0,
+        equity=10_000.0,
+        reasons=reasons,
+    )
+    assert plan is None
+    joined = " ".join(reasons)
+    assert "10%" in joined  # deployable side
+    assert "5%" in joined   # equity side
+
+
+def test_split_caps_short_put_reject_reason_shows_both_pcts():
+    cfg = AutonomousTradingConfig(
+        max_position_deployable_cash_pct=0.10,
+        max_position_equity_pct=0.05,
+        prefer_cash_secured_put=True,
+        allow_short_put=True,
+        allow_share_buy=False,
+    )
+    hint = OptionChainHint(
+        strike=100.0,
+        expiry=date(2026, 12, 18),
+        bid=1.0,
+        ask=1.2,
+        contracts_available=1,
+    )
+    reasons: list[str] = []
+    plan = TradePlanner(cfg).plan(
+        _candidate(symbol="ZZZ", last_price=100.0, support_price=100.0),
+        deployable_cash=2_000.0,
+        equity=10_000.0,
+        option_hint=hint,
+        reasons=reasons,
+    )
+    assert plan is None
+    joined = " ".join(reasons)
+    assert "10%" in joined  # deployable side
+    assert "5%" in joined   # equity side
+
+
+def test_split_caps_invalid_value_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        AutonomousTradingConfig(max_position_deployable_cash_pct=0.0)
+    with pytest.raises(ValueError):
+        AutonomousTradingConfig(max_position_equity_pct=1.5)

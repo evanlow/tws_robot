@@ -1871,3 +1871,46 @@ class TestActualLiveContinuousLifecycle:
             final_state = app.config.get("autonomous_live_mode_state")
             assert final_state is not None
             assert final_state.operating_state.value == "OFF"
+
+
+# ---------------------------------------------------------------------------
+# _live_runner_config() reads env on every call
+# ---------------------------------------------------------------------------
+
+
+class TestLiveRunnerConfigEnvReread:
+    """Operator-edited .env values should take effect on the next call
+    without restarting the web server."""
+
+    def test_env_change_visible_on_next_call(self, app, monkeypatch):
+        from web.routes.api_autonomous import _live_runner_config
+
+        # Ensure no preset config short-circuits the env-read path.
+        app.config.pop("autonomous_live_runner_config", None)
+
+        monkeypatch.setenv("AUTONOMOUS_MAX_OPEN_LIVE_TRADES", "1")
+        with app.app_context():
+            cfg1 = _live_runner_config()
+        assert cfg1.max_open_live_trades == 1
+
+        # Operator edits the env (simulates editing .env between clicks).
+        monkeypatch.setenv("AUTONOMOUS_MAX_OPEN_LIVE_TRADES", "5")
+        with app.app_context():
+            cfg2 = _live_runner_config()
+        assert cfg2.max_open_live_trades == 5
+
+    def test_preset_config_overrides_env(self, app, tmp_path):
+        """When the operator/test registers an explicit config, the
+        env-reread path is bypassed and the registered config wins."""
+        from web.routes.api_autonomous import _live_runner_config
+
+        preset = AutonomousLiveRunnerConfig(
+            live_enabled=True,
+            max_open_live_trades=3,
+            trade_store_path=str(tmp_path / "live.jsonl"),
+        )
+        app.config["autonomous_live_runner_config"] = preset
+        with app.app_context():
+            cfg = _live_runner_config()
+        assert cfg is preset
+        assert cfg.max_open_live_trades == 3

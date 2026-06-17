@@ -49,6 +49,13 @@ class AutonomousTradingConfig:
     # ---- Trade frequency / sizing -------------------------------------
     max_trades_per_day: int = 1
     max_new_position_pct: float = 0.10  # of equity
+    # Optional split caps.  When set, override max_new_position_pct on
+    # the deployable-cash and equity sides independently so a single
+    # high-priced share is not blocked by a tight deployable-cash cap
+    # while a tight equity guard still protects total exposure.  Each
+    # must be in (0, 1].  ``None`` falls back to max_new_position_pct.
+    max_position_deployable_cash_pct: Optional[float] = None
+    max_position_equity_pct: Optional[float] = None
     min_deployable_cash: float = 1000.0
 
     # ---- Signal filter ------------------------------------------------
@@ -99,6 +106,16 @@ class AutonomousTradingConfig:
                 "max_new_position_pct must be in (0, 1]; got "
                 f"{self.max_new_position_pct!r}"
             )
+        for label, value in (
+            ("max_position_deployable_cash_pct", self.max_position_deployable_cash_pct),
+            ("max_position_equity_pct", self.max_position_equity_pct),
+        ):
+            if value is None:
+                continue
+            if value <= 0 or value > 1:
+                raise ValueError(
+                    f"{label} must be in (0, 1]; got {value!r}"
+                )
         if self.max_trades_per_day < 0:
             raise ValueError(
                 "max_trades_per_day must be >= 0; got "
@@ -115,6 +132,18 @@ class AutonomousTradingConfig:
                 f"{self.min_signal_strength!r}"
             )
 
+    def deployable_cash_cap_pct(self) -> float:
+        """Effective per-trade cap as a fraction of deployable cash."""
+        if self.max_position_deployable_cash_pct is not None:
+            return self.max_position_deployable_cash_pct
+        return self.max_new_position_pct
+
+    def equity_cap_pct(self) -> float:
+        """Effective per-trade cap as a fraction of account equity."""
+        if self.max_position_equity_pct is not None:
+            return self.max_position_equity_pct
+        return self.max_new_position_pct
+
     def to_dict(self) -> dict:
         """Return a JSON-serialisable representation (used in audit log)."""
         return {
@@ -123,6 +152,8 @@ class AutonomousTradingConfig:
             "require_user_confirmation": self.require_user_confirmation,
             "max_trades_per_day": self.max_trades_per_day,
             "max_new_position_pct": self.max_new_position_pct,
+            "max_position_deployable_cash_pct": self.max_position_deployable_cash_pct,
+            "max_position_equity_pct": self.max_position_equity_pct,
             "min_deployable_cash": self.min_deployable_cash,
             "min_signal_strength": self.min_signal_strength,
             "required_signal_label": self.required_signal_label,

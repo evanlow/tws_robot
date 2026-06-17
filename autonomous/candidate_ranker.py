@@ -89,7 +89,7 @@ class CandidateRanker:
         market_value = abs(float(pos.get("market_value", 0.0)))
         if market_value <= 0:
             return False
-        return (market_value / equity) >= self.config.max_new_position_pct
+        return (market_value / equity) >= self.config.equity_cap_pct()
 
     def _passes_hard_filters(
         self,
