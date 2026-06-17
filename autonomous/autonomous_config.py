@@ -52,7 +52,7 @@ class AutonomousTradingConfig:
     # Optional split caps.  When set, override max_new_position_pct on
     # the deployable-cash and equity sides independently so a single
     # high-priced share is not blocked by a tight deployable-cash cap
-    # while a looser equity guard still protects total exposure.  Each
+    # while a tight equity guard still protects total exposure.  Each
     # must be in (0, 1].  ``None`` falls back to max_new_position_pct.
     max_position_deployable_cash_pct: Optional[float] = None
     max_position_equity_pct: Optional[float] = None

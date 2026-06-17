@@ -263,6 +263,35 @@ def test_split_caps_reject_reason_shows_both_pcts():
     assert "5%" in joined   # equity side
 
 
+def test_split_caps_short_put_reject_reason_shows_both_pcts():
+    cfg = AutonomousTradingConfig(
+        max_position_deployable_cash_pct=0.10,
+        max_position_equity_pct=0.05,
+        prefer_cash_secured_put=True,
+        allow_short_put=True,
+        allow_share_buy=False,
+    )
+    hint = OptionChainHint(
+        strike=100.0,
+        expiry=date(2026, 12, 18),
+        bid=1.0,
+        ask=1.2,
+        contracts_available=1,
+    )
+    reasons: list[str] = []
+    plan = TradePlanner(cfg).plan(
+        _candidate(symbol="ZZZ", last_price=100.0, support_price=100.0),
+        deployable_cash=2_000.0,
+        equity=10_000.0,
+        option_hint=hint,
+        reasons=reasons,
+    )
+    assert plan is None
+    joined = " ".join(reasons)
+    assert "10%" in joined  # deployable side
+    assert "5%" in joined   # equity side
+
+
 def test_split_caps_invalid_value_rejected():
     import pytest
     with pytest.raises(ValueError):

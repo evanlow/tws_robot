@@ -339,6 +339,22 @@ class TestConfigOverrideValidation:
         cleaned = _sanitize_config_overrides({"adr_respect_resistance_cap": "yes"})
         assert "adr_respect_resistance_cap" not in cleaned
 
+    def test_split_position_caps_accepted(self):
+        cleaned = _sanitize_config_overrides({
+            "max_position_deployable_cash_pct": 0.25,
+            "max_position_equity_pct": 0.10,
+        })
+        assert cleaned["max_position_deployable_cash_pct"] == 0.25
+        assert cleaned["max_position_equity_pct"] == 0.10
+
+    def test_split_position_caps_out_of_range_rejected(self):
+        cleaned = _sanitize_config_overrides({
+            "max_position_deployable_cash_pct": 1.5,
+            "max_position_equity_pct": 0,
+        })
+        assert "max_position_deployable_cash_pct" not in cleaned
+        assert "max_position_equity_pct" not in cleaned
+
 
 class TestADREnvConfig:
     """Tests proving env vars affect the built engine config."""
@@ -381,6 +397,17 @@ class TestADREnvConfig:
         assert cfg.take_profit_pct == 0.08
         # Negative int not applied — default
         assert cfg.adr_lookback_days == 0
+
+    def test_invalid_split_cap_env_values_use_defaults(self, monkeypatch, app):
+        monkeypatch.setenv("AUTONOMOUS_MAX_POSITION_DEPLOYABLE_CASH_PCT", "1.5")
+        monkeypatch.setenv("AUTONOMOUS_MAX_POSITION_EQUITY_PCT", "25")
+
+        from web.routes.api_autonomous import _build_engine
+        with app.app_context():
+            engine = _build_engine()
+        cfg = engine.config
+        assert cfg.max_position_deployable_cash_pct is None
+        assert cfg.max_position_equity_pct is None
 
     def test_api_override_changes_target_mode(self, monkeypatch, app):
         """HTTP config override for exit_target_mode flows through."""

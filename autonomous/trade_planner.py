@@ -420,7 +420,9 @@ class TradePlanner:
         contracts = min(max_contracts_by_cash, option_hint.contracts_available)
         if contracts <= 0:
             equity_str = (
-                f", equity_cap=${equity_cap:,.2f}" if equity_cap is not None else ""
+                f", equity ${equity:,.2f} * {eq_pct:.0%} = ${equity_cap:,.2f}"
+                if equity_cap is not None
+                else ""
             )
             _add(
                 reasons,

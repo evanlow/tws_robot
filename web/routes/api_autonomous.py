@@ -96,7 +96,18 @@ def _sanitize_config_overrides(overrides: Dict[str, Any]) -> Dict[str, Any]:
         elif key in {"max_trades_per_day", "min_signal_strength"}:
             if isinstance(value, int) and not isinstance(value, bool):
                 cleaned[key] = value
-        elif key in {"max_new_position_pct", "min_deployable_cash"}:
+        elif key in {
+            "max_new_position_pct",
+            "max_position_deployable_cash_pct",
+            "max_position_equity_pct",
+        }:
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and 0 < float(value) <= 1
+            ):
+                cleaned[key] = float(value)
+        elif key == "min_deployable_cash":
             if (
                 isinstance(value, (int, float))
                 and not isinstance(value, bool)
@@ -206,7 +217,14 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
         if raw:
             try:
                 val = converter(raw)
-                if val > 0:
+                if config_key in {
+                    "max_new_position_pct",
+                    "max_position_deployable_cash_pct",
+                    "max_position_equity_pct",
+                }:
+                    if 0 < val <= 1:
+                        env_config_kwargs[config_key] = val
+                elif val > 0:
                     env_config_kwargs[config_key] = val
             except (ValueError, TypeError):
                 pass  # Invalid env value — use dataclass default
