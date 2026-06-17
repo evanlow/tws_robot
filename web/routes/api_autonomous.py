@@ -165,6 +165,17 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
 
     svc = get_services()
 
+    # Re-read .env on every build so operator edits (e.g. raising
+    # AUTONOMOUS_MAX_POSITION_DEPLOYABLE_CASH_PCT) take effect on the
+    # next click without restarting the web server.  Skipped under
+    # TESTING so tests can monkeypatch os.environ deterministically.
+    if not current_app.config.get("TESTING"):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("load_dotenv failed in _build_engine", exc_info=True)
+
     # --- Read ADR / exit-target settings from environment ----------------
     env_config_kwargs: Dict[str, Any] = {}
     _exit_mode = os.environ.get("AUTONOMOUS_EXIT_TARGET_MODE", "").strip().lower()
@@ -177,6 +188,19 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
         ("AUTONOMOUS_ADR_TARGET_FRACTION", "adr_target_fraction", float, None),
         ("AUTONOMOUS_ADR_MAX_TARGET_PCT", "adr_max_target_pct", float, None),
         ("AUTONOMOUS_ADR_MIN_TARGET_PCT", "adr_min_target_pct", float, None),
+        ("AUTONOMOUS_MAX_NEW_POSITION_PCT", "max_new_position_pct", float, None),
+        (
+            "AUTONOMOUS_MAX_POSITION_DEPLOYABLE_CASH_PCT",
+            "max_position_deployable_cash_pct",
+            float,
+            None,
+        ),
+        (
+            "AUTONOMOUS_MAX_POSITION_EQUITY_PCT",
+            "max_position_equity_pct",
+            float,
+            None,
+        ),
     ]:
         raw = os.environ.get(env_key, "").strip()
         if raw:
@@ -210,6 +234,8 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
             "require_user_confirmation",
             "max_trades_per_day",
             "max_new_position_pct",
+            "max_position_deployable_cash_pct",
+            "max_position_equity_pct",
             "min_deployable_cash",
             "min_signal_strength",
             "required_signal_label",
@@ -1186,10 +1212,22 @@ def _live_runner_config() -> AutonomousLiveRunnerConfig:
     they are applied to the returned config so subsequent lifecycle
     calls use the same confirmed account and dry-run intent even when
     config is re-built from env.
+
+    .env is re-read on every call (with ``override=True``) so an
+    operator editing ``AUTONOMOUS_MAX_OPEN_LIVE_TRADES`` (or any other
+    live-runner env var) sees the new value on the next click without
+    restarting the web server.  The re-read is skipped under TESTING
+    so tests can monkeypatch ``os.environ`` deterministically.
     """
     cfg = current_app.config.get("autonomous_live_runner_config")
     if isinstance(cfg, AutonomousLiveRunnerConfig):
         return cfg
+    if not current_app.config.get("TESTING"):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("load_dotenv failed in _live_runner_config", exc_info=True)
     cfg = AutonomousLiveRunnerConfig.from_env()
     # Apply the activation-time expected_account_id so it persists across calls.
     persisted_account_id = current_app.config.get("autonomous_live_expected_account_id")

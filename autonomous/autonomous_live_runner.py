@@ -227,6 +227,32 @@ RejectedOrderIdsProvider = Callable[[], Iterable[int]]
 FilledOrderIdsProvider = Callable[[], Iterable[int]]
 
 
+def _position_quantity(pos: Any) -> int:
+    """Return the signed quantity of a broker position record.
+
+    Tolerates dict snapshots ("quantity"/"position"/"shares") and
+    objects with a ``quantity`` attribute (e.g. ``RiskPosition``).
+    Returns ``0`` for any value that cannot be parsed.
+    """
+    if pos is None:
+        return 0
+    candidates: List[Any] = []
+    if isinstance(pos, dict):
+        for key in ("quantity", "position", "shares"):
+            if key in pos:
+                candidates.append(pos[key])
+    else:
+        candidates.append(getattr(pos, "quantity", None))
+    for raw in candidates:
+        if raw is None:
+            continue
+        try:
+            return int(float(raw))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -356,6 +382,11 @@ class AutonomousLiveRunner:
         # Then reconcile any bracket fills (target/stop) so a closed
         # trade no longer counts against the open-trades cap.
         self._reconcile_filled_brackets()
+        # Finally, close any OPEN trade whose symbol the broker no
+        # longer holds (manual exit, missed bracket fill, restart
+        # between submit and confirm, etc.) so a stranded record never
+        # blocks future autonomous trades.
+        self._reconcile_stale_positions()
 
         try:
             connected = bool(self._connected_provider())
@@ -868,6 +899,91 @@ class AutonomousLiveRunner:
             except Exception:  # pragma: no cover - defensive
                 logger.exception(
                     "failed to mark trade %s as CLOSED on bracket fill",
+                    trade.autonomous_trade_id,
+                )
+
+    # Trades younger than this are never auto-reconciled against broker
+    # positions — the position update may not yet have arrived from TWS.
+    _STALE_POSITION_GRACE_MINUTES = 5
+
+    def _reconcile_stale_positions(self) -> None:
+        """Flip OPEN trades whose symbol the broker no longer holds.
+
+        For each OPEN trade older than ``_STALE_POSITION_GRACE_MINUTES``,
+        if the broker positions snapshot does not contain the trade's
+        symbol (or holds zero quantity), mark the trade CLOSED with
+        ``exit_reason='reconciled_no_broker_position'``.  This recovers
+        from:
+
+        * a manual exit done outside the autonomous lifecycle,
+        * a bracket fill that arrived while the runner was offline,
+        * an OPEN snapshot written between order submit and the
+          subsequent restart/crash that lost the confirmation.
+
+        No-op when no broker_positions_provider is wired, when the
+        provider raises, or when the store has no OPEN trades.  Never
+        raises — reconciliation is best-effort, and a single failure
+        must not block the readiness check.
+        """
+        if self._broker_positions_provider is None:
+            return
+        try:
+            open_trades = self._store.list_open()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_open failed during stale-position reconcile")
+            return
+        if not open_trades:
+            return
+        try:
+            positions = self._broker_positions_provider() or {}
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker_positions_provider raised during stale-position reconcile")
+            return
+        held_symbols = {
+            str(sym).strip().upper()
+            for sym, pos in positions.items()
+            if _position_quantity(pos) != 0
+        }
+        now = datetime.now(timezone.utc)
+        grace = self._STALE_POSITION_GRACE_MINUTES
+        for trade in open_trades:
+            entry_time = trade.entry_time
+            if isinstance(entry_time, str):
+                try:
+                    entry_time = datetime.fromisoformat(entry_time)
+                except ValueError:
+                    continue
+            if entry_time is None:
+                continue
+            if entry_time.tzinfo is None:
+                entry_time = entry_time.replace(tzinfo=timezone.utc)
+            age_minutes = (now - entry_time).total_seconds() / 60.0
+            if age_minutes < grace:
+                continue
+            symbol = str(trade.symbol or "").strip().upper()
+            if not symbol or symbol in held_symbols:
+                continue
+            try:
+                self._store.update_trade(
+                    trade.autonomous_trade_id,
+                    status=CLOSED,
+                    exit_time=now,
+                    exit_reason="reconciled_no_broker_position",
+                    notes=list(trade.notes or []) + [
+                        "reconciled: broker no longer holds "
+                        f"{trade.symbol} (auto-closed after "
+                        f"{grace}-minute grace)"
+                    ],
+                )
+                logger.warning(
+                    "AutonomousLiveRunner: reconciled stale OPEN trade %s "
+                    "(%s) — broker holds no position → CLOSED",
+                    trade.autonomous_trade_id,
+                    trade.symbol,
+                )
+            except Exception:  # pragma: no cover - defensive
+                logger.exception(
+                    "failed to mark stale trade %s as CLOSED",
                     trade.autonomous_trade_id,
                 )
 

@@ -198,24 +198,28 @@ class TradePlanner:
             _add(reasons, f"{candidate.symbol}: price <= 0 ({price})")
             return None
 
-        # Position-size cap is the lower of the configured percentage of
-        # equity and the same percentage of deployable cash.
-        pct = self.config.max_new_position_pct
-        cash_cap = deployable_cash * pct
+        # Position-size cap is the lower of:
+        #   * deployable_cash * deployable_cash_cap_pct
+        #   * equity          * equity_cap_pct
+        # Either fraction may be overridden independently via env vars;
+        # both fall back to max_new_position_pct when unset.
+        cash_pct = self.config.deployable_cash_cap_pct()
+        eq_pct = self.config.equity_cap_pct()
+        cash_cap = deployable_cash * cash_pct
         cap = cash_cap
         equity_cap = None
         if equity > 0:
-            equity_cap = equity * pct
+            equity_cap = equity * eq_pct
             cap = min(cap, equity_cap)
         if cap < price:
             equity_str = (
-                f", equity_cap=${equity_cap:,.2f} (equity ${equity:,.2f} * {pct:.0%})"
+                f", equity_cap=${equity_cap:,.2f} (equity ${equity:,.2f} * {eq_pct:.0%})"
                 if equity_cap is not None else ""
             )
             _add(
                 reasons,
                 f"{candidate.symbol}: position cap ${cap:,.2f} < share price ${price:,.2f} "
-                f"[deployable ${deployable_cash:,.2f} * {pct:.0%} = ${cash_cap:,.2f}"
+                f"[deployable ${deployable_cash:,.2f} * {cash_pct:.0%} = ${cash_cap:,.2f}"
                 f"{equity_str}] — can't afford 1 share within sizing cap"
             )
             return None  # can't afford a single share within the cap
@@ -262,7 +266,10 @@ class TradePlanner:
             ),
             risk_notes=[
                 "Limit order only; never market.",
-                f"Sized to <= {self.config.max_new_position_pct:.0%} of equity and deployable cash.",
+                (
+                    f"Sized to <= {self.config.equity_cap_pct():.0%} of equity "
+                    f"and <= {self.config.deployable_cash_cap_pct():.0%} of deployable cash."
+                ),
             ],
             exit_plan=(
                 f"Exit on target_price ({target_mode}) or stop_price; "
@@ -401,12 +408,13 @@ class TradePlanner:
             _add(reasons, f"{candidate.symbol}: per_contract_cash = {per_contract_cash}")
             return None
 
-        pct = self.config.max_new_position_pct
-        cash_cap = deployable_cash * pct
+        cash_pct = self.config.deployable_cash_cap_pct()
+        eq_pct = self.config.equity_cap_pct()
+        cash_cap = deployable_cash * cash_pct
         cap = cash_cap
         equity_cap = None
         if equity > 0:
-            equity_cap = equity * pct
+            equity_cap = equity * eq_pct
             cap = min(cap, equity_cap)
         max_contracts_by_cash = int(math.floor(cap / per_contract_cash))
         contracts = min(max_contracts_by_cash, option_hint.contracts_available)
@@ -419,7 +427,7 @@ class TradePlanner:
                 f"{candidate.symbol}: 0 affordable put contracts — "
                 f"floor(cap ${cap:,.2f} / ${per_contract_cash:,.2f} per contract) = "
                 f"{max_contracts_by_cash} [deployable ${deployable_cash:,.2f} * "
-                f"{pct:.0%} = ${cash_cap:,.2f}{equity_str}]"
+                f"{cash_pct:.0%} = ${cash_cap:,.2f}{equity_str}]"
             )
             return None
 
