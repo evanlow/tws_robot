@@ -89,7 +89,27 @@ class ServiceManager:
         # Market events background refresh
         self._start_market_events_refresh()
 
+        # React to socket-level drops detected by the bridge's reader thread
+        # so cached connection state never outlives the underlying socket.
+        self.event_bus.subscribe(
+            EventType.CONNECTION_LOST, self._on_bridge_connection_lost,
+        )
+
         logger.info("ServiceManager initialised")
+
+    def _on_bridge_connection_lost(self, event: Event) -> None:
+        # Only react to drops originating from the TWS bridge — set_disconnected()
+        # itself re-publishes CONNECTION_LOST (source='ServiceManager'); ignoring
+        # that prevents recursion.
+        if event.source != "TWSBridge":
+            return
+        with self._lock:
+            if not self._connected and self._tws_bridge is None:
+                return
+            self._tws_bridge = None
+            self._positions.clear()
+            self._account_summary.clear()
+        self.set_disconnected()
 
     # ------------------------------------------------------------------
     # Connection management
