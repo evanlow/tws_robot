@@ -427,6 +427,24 @@ BEARISH_SPY_MESSAGE = (
 )
 
 
+def _format_bearish_spy_message(decision: Optional[Dict[str, Any]]) -> str:
+    """Append the SPY open/current prices (yfinance source) to the bearish
+    termination message so the operator can see what numbers triggered the
+    gate and judge whether the upstream data looks stale."""
+    gate = (decision or {}).get("market_gate") or {}
+    try:
+        open_price = float(gate.get("open") or 0.0)
+        current_price = float(gate.get("current") or 0.0)
+    except (TypeError, ValueError):
+        open_price = current_price = 0.0
+    if open_price <= 0 and current_price <= 0:
+        return BEARISH_SPY_MESSAGE + " (SPY price unavailable from yfinance)"
+    return (
+        f"{BEARISH_SPY_MESSAGE} "
+        f"(SPY open={open_price:.2f}, current={current_price:.2f}; source: yfinance)"
+    )
+
+
 def _provider_warning_if_default() -> Dict[str, Any]:
     """Return a ``{"warning": ...}`` dict when the active provider is the
     fallback stub; empty dict otherwise.
@@ -797,10 +815,11 @@ def _run_next_paper_cycle(state: "AutonomousModeState") -> None:
         )
         decision = r_payload.get("decision") or {}
         if decision.get("status") == "market_not_suitable":
-            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+            msg = _format_bearish_spy_message(decision)
+            state.turn_off(message=msg, status="Halted")
             _audit_mode_event(
                 "halt",
-                {"reason": BEARISH_SPY_MESSAGE, "source": "spy_gate_continuous"},
+                {"reason": msg, "source": "spy_gate_continuous"},
             )
     except Exception:
         logger.exception("Continuous lifecycle cycle failed")
@@ -1090,8 +1109,9 @@ def autonomous_mode_activate():
         payload = result.to_dict()
         decision = payload.get("decision") or {}
         if decision.get("status") == "market_not_suitable":
-            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
-            _audit_mode_event("halt", {"reason": BEARISH_SPY_MESSAGE, "source": "spy_gate"})
+            msg = _format_bearish_spy_message(decision)
+            state.turn_off(message=msg, status="Halted")
+            _audit_mode_event("halt", {"reason": msg, "source": "spy_gate"})
         elif payload.get("status") == "no_trade" and cycle == TradingCycle.SINGLE_TRADE:
             message = (
                 payload.get("rejection_reason")
@@ -1925,10 +1945,11 @@ def _run_next_live_cycle(
         )
         decision_status = (result.decision or {}).get("status")
         if decision_status == "market_not_suitable":
-            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+            msg = _format_bearish_spy_message(decision)
+            state.turn_off(message=msg, status="Halted")
             _audit_mode_event(
                 "halt",
-                {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate_continuous"},
+                {"reason": msg, "source": "live_spy_gate_continuous"},
             )
         elif not live_config.live_dry_run and result.status != LIVE_EXECUTED:
             halt_message = (
@@ -2148,10 +2169,11 @@ def live_activate():
         # Check for market gate failure.
         decision = payload.get("decision") or {}
         if decision.get("status") == "market_not_suitable":
-            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+            msg = _format_bearish_spy_message(decision)
+            state.turn_off(message=msg, status="Halted")
             _audit_mode_event(
                 "halt",
-                {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate"},
+                {"reason": msg, "source": "live_spy_gate"},
             )
         elif payload.get("status") == "no_trade" and cycle == TradingCycle.SINGLE_TRADE:
             message = (
@@ -2564,9 +2586,10 @@ def actual_live_activate():
         decision = payload.get("decision") or {}
         if decision.get("status") == "market_not_suitable":
             if state.is_on:
-                state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+                msg = _format_bearish_spy_message(decision)
+                state.turn_off(message=msg, status="Halted")
                 _audit_mode_event("halt", {
-                    "reason": BEARISH_SPY_MESSAGE,
+                    "reason": msg,
                     "source": "actual_live_spy_gate",
                 })
             payload["outcome"] = "NO_TRADE"

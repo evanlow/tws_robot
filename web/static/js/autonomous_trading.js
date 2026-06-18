@@ -250,11 +250,33 @@
     const halted = modePayload ? !!gates.emergency_stop_active
       : !!payload.emergency_stop_file_exists;
     state.paperAdapterConfigured = !!payload.paper_adapter_configured;
+    const previousAutonomousModeOn = state.autonomousModeOn;
     state.autonomousModeOn = modeState.operating_state === 'ON';
     state.detectedAccountType = accountContext.detected;
     state.accountMode = accountContext.mode;
     state.activeEndpoints = ENDPOINTS[state.accountMode] || null;
     state.liveAccountId = accountContext.accountId || '';
+
+    // Emit a clear ON/OFF transition entry in the activity log whenever the
+    // operating state flips.  This covers every path (operator clicks,
+    // lifecycle worker auto-off, SPY gate halts, single-trade no-trade auto-off),
+    // not just UI-initiated activations.
+    if (typeof previousAutonomousModeOn === 'boolean'
+        && previousAutonomousModeOn !== state.autonomousModeOn) {
+      if (state.autonomousModeOn) {
+        logActivity('success', '=== AUTONOMOUS TRADING ON ===');
+      } else {
+        logActivity('info', '=== AUTONOMOUS TRADING OFF ===');
+      }
+    } else if (typeof previousAutonomousModeOn !== 'boolean') {
+      // First status render after page load — emit a baseline so the operator
+      // sees the current state in the log even without a transition.
+      if (state.autonomousModeOn) {
+        logActivity('success', '=== AUTONOMOUS TRADING ON (current state) ===');
+      } else {
+        logActivity('info', '=== AUTONOMOUS TRADING OFF (current state) ===');
+      }
+    }
 
     const matchStatus = connection.paper_live_match_status || 'Unknown';
 
@@ -965,21 +987,33 @@
 
       // Log detailed activity entries based on the response
       const marketGate = decision?.market_gate;
-      if (marketGate && marketGate.bullish === true) {
+      if (marketGate && (marketGate.open != null || marketGate.current != null)) {
+        const openStr = Number.isFinite(marketGate.open) ? marketGate.open.toFixed(2) : '?';
+        const currStr = Number.isFinite(marketGate.current) ? marketGate.current.toFixed(2) : '?';
+        const priceInfo = `SPY open=${openStr}, current=${currStr} (source: yfinance, ~15 min delayed)`;
+        if (marketGate.bullish === true) {
+          logActivity('success', `SPY gate passed: current price above opening price — ${priceInfo}`);
+        } else if (marketGate.bullish === false) {
+          logActivity('warning', `SPY gate failed: current price <= opening price — ${priceInfo}`);
+        }
+      } else if (marketGate && marketGate.bullish === true) {
         logActivity('success', 'SPY gate passed: current price above opening price');
       } else if (marketGate && marketGate.bullish === false) {
         logActivity('warning', 'SPY gate failed: current price <= opening price');
       }
 
       if (status === 'activated' && !reason) {
+        logActivity('success', '=== AUTONOMOUS TRADING ON ===');
         logActivity('success', 'Autonomous Mode activated successfully');
       } else if (status === 'no_trade' || runStatus === 'no_trade') {
         logActivity('info', 'No Trade: ' + (reason || 'no qualifying candidates found'));
         logActivity('info', cycleLabel + ' ended with NO TRADE; Autonomous Mode turned OFF');
+        logActivity('info', '=== AUTONOMOUS TRADING OFF ===');
       } else if (reason) {
         logActivity('warning', 'Autonomous Mode result: ' + status + ' — ' + reason);
         if (body.run?.mode_turned_off) {
           logActivity('info', 'Autonomous Mode turned OFF');
+          logActivity('info', '=== AUTONOMOUS TRADING OFF ===');
         }
       } else {
         logActivity(kind, 'Autonomous Mode result: ' + status);
@@ -1036,6 +1070,7 @@
         await postJson(ENDPOINTS.paper.halt, payload);
       }
       logActivity('success', 'Autonomous Mode turned OFF. Filled positions were not liquidated.');
+      logActivity('info', '=== AUTONOMOUS TRADING OFF ===');
       setFeedback('Autonomous Mode is OFF.', 'success');
       refreshStatus();
       refreshAudit();

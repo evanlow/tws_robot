@@ -338,9 +338,15 @@ class AutonomousTradingEngine:
             decision.market_gate = spy_gate
             if not spy_gate.get("bullish"):
                 decision.status = DecisionStatus.MARKET_NOT_SUITABLE
+                open_p = float(spy_gate.get("open") or 0.0)
+                curr_p = float(spy_gate.get("current") or 0.0)
+                if open_p > 0 or curr_p > 0:
+                    price_info = f" (SPY Open: ${open_p:.2f}, Current: ${curr_p:.2f})"
+                else:
+                    price_info = " (SPY price unavailable from yfinance)"
                 decision.rejection_reason = (
-                    "Autonomous Mode strategy doesn't work well in current bearish market. "
-                    "Terminating Autonomous Mode."
+                    "Autonomous Mode strategy doesn't work well in current bearish market."
+                    f"{price_info} Terminating Autonomous Mode."
                 )
                 return self._emit(decision)
 
