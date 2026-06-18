@@ -17,7 +17,7 @@ Usage (from the connection API route)::
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from ibapi.client import EClient
@@ -301,11 +301,30 @@ class _BridgeApp(EWrapper, EClient):
                     remaining: float, avgFillPrice: float, permId: int,
                     parentId: int, lastFillPrice: float, clientId: int,
                     whyHeld: str, mktCapPrice: float) -> None:
+        payload = {
+            "id": str(orderId),
+            "order_id": int(orderId),
+            "broker_order_id": int(orderId),
+            "status": str(status or "").strip().replace(" ", "_").upper(),
+            "filled": float(filled or 0.0),
+            "remaining": float(remaining or 0.0),
+            "avg_fill_price": float(avgFillPrice or 0.0),
+            "last_fill_price": float(lastFillPrice or 0.0),
+            "perm_id": int(permId or 0),
+            "parent_id": int(parentId or 0),
+            "client_id": int(clientId or 0),
+            "why_held": whyHeld,
+            "market_cap_price": float(mktCapPrice or 0.0),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source": "tws_order_status",
+        }
+        self._svc.add_order(payload)
+
         # Record fully-filled orders so the live runner can reconcile
         # bracket children (target / stop) into CLOSED trade-store
         # entries.  We do NOT distinguish parent vs child here; the
         # reconciler matches against entry/target/stop order IDs.
-        if status == "Filled" and remaining == 0:
+        if payload["status"] == "FILLED" and payload["remaining"] == 0:
             if isinstance(orderId, int) and orderId > 0:
                 with self._filled_order_ids_lock:
                     self._filled_order_ids.add(orderId)
@@ -313,6 +332,11 @@ class _BridgeApp(EWrapper, EClient):
                     "TWSBridge: order %s fully filled (avg=%.4f, last=%.4f)",
                     orderId, avgFillPrice, lastFillPrice,
                 )
+            self._svc.event_bus.publish(Event(
+                EventType.ORDER_FILLED,
+                data=payload,
+                source="TWSBridge",
+            ))
 
 
 # ---------------------------------------------------------------------------

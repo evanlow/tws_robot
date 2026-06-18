@@ -18,7 +18,7 @@ from autonomous import (
 from autonomous.audit import AuditLogger
 from autonomous.autonomous_runner import AutonomousPaperRunner
 from autonomous.runner_config import AutonomousRunnerConfig
-from autonomous.trade_store import AutonomousTrade, FAILED, OPEN, TradeStore
+from autonomous.trade_store import AutonomousTrade, EXIT_PENDING, FAILED, OPEN, TradeStore
 from data.cash_availability import CashAvailabilityAnalyzer
 from web import create_app
 
@@ -461,6 +461,65 @@ class TestEvaluateExits:
         mode_body = client.get("/api/autonomous/mode/status").get_json()
         assert mode_body["mode"]["operating_state"] == "OFF"
         assert "completed" in mode_body["mode"]["message"]
+
+    def test_single_trade_turns_off_after_filled_exit_order(
+        self, app, client, tmp_path
+    ):
+        """Single Trade closes from broker fill reconciliation, then turns OFF."""
+        store, _adapter = _install_runner(app, tmp_path)
+        app.config["services"].set_connected(
+            "paper",
+            {"host": "127.0.0.1", "port": 7497, "client_id": 1, "account": "DU12345"},
+        )
+
+        body = client.post(
+            "/api/autonomous/mode/activate",
+            json={"trading_cycle": "single_trade", "confirm": True},
+        ).get_json()
+        assert body["status"] == "activated"
+        trade = store.list_open()[0]
+
+        store.update_trade(
+            trade.autonomous_trade_id,
+            status=EXIT_PENDING,
+            exit_order_id=5555,
+            exit_reason="TAKE_PROFIT",
+        )
+        app.config["services"].add_order({
+            "broker_order_id": 5555,
+            "status": "FILLED",
+            "avg_fill_price": 112.5,
+            "filled": trade.quantity,
+        })
+
+        resp = client.post("/api/autonomous/runner/evaluate-exits", json={})
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["reconciliation"]["before"]["exit_fills"] == 1
+        assert store.get(trade.autonomous_trade_id).status == "CLOSED"
+
+        mode_body = client.get("/api/autonomous/mode/status").get_json()
+        assert mode_body["mode"]["operating_state"] == "OFF"
+        assert "completed" in mode_body["mode"]["message"]
+
+    def test_continuous_retries_scan_when_no_trade_was_opened(
+        self, app, client, tmp_path
+    ):
+        """Continuous mode keeps scanning after a no-candidate/no-trade cycle."""
+        from autonomous.autonomous_mode import AutonomousModeState, TradingCycle
+
+        store, _adapter = _install_runner(app, tmp_path)
+        state = AutonomousModeState()
+        state.turn_on(TradingCycle.CONTINUOUS)
+        state.cycles_started = 1
+        app.config["autonomous_mode_state"] = state
+
+        resp = client.post("/api/autonomous/runner/evaluate-exits", json={})
+        assert resp.status_code == 200
+
+        assert state.is_on is True
+        assert state.cycles_started == 2
+        assert len(store.list_open()) == 1
 
 
 class TestTrades:

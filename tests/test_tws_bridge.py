@@ -1031,6 +1031,28 @@ class TestBridgeFilledOrderTracking:
         assert bridge.pop_filled_order_ids() == {101}
 
     @pytest.mark.unit
+    def test_order_status_forwards_snapshot_to_service_manager(
+        self, bridge, mock_service_manager
+    ):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+
+        app.orderStatus(
+            orderId=101, status="Filled", filled=1.0, remaining=0.0,
+            avgFillPrice=100.5, permId=10, parentId=0, lastFillPrice=100.5,
+            clientId=1, whyHeld="", mktCapPrice=0.0,
+        )
+
+        mock_service_manager.add_order.assert_called_once()
+        payload = mock_service_manager.add_order.call_args.args[0]
+        assert payload["broker_order_id"] == 101
+        assert payload["status"] == "FILLED"
+        assert payload["filled"] == 1.0
+        assert payload["remaining"] == 0.0
+        assert payload["avg_fill_price"] == 100.5
+        mock_service_manager.event_bus.publish.assert_called()
+
+    @pytest.mark.unit
     def test_partial_fill_does_not_record(self, bridge, mock_service_manager):
         app = _BridgeApp(mock_service_manager, "DU12345")
         bridge._app = app
