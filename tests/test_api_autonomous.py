@@ -381,6 +381,27 @@ class TestADREnvConfig:
         assert cfg.adr_min_target_pct == 0.003
         assert cfg.adr_respect_resistance_cap is False
 
+    def test_adr_lookback_passed_to_production_signal_provider(
+        self, monkeypatch, app
+    ):
+        captured = {}
+
+        def fake_try_build(cls, **kwargs):
+            captured.update(kwargs)
+            return StaticSignalProvider()
+
+        monkeypatch.setenv("AUTONOMOUS_ADR_LOOKBACK_DAYS", "20")
+        monkeypatch.setattr(
+            "web.routes.api_autonomous.TechnicalAnalysisSignalProvider.try_build",
+            classmethod(fake_try_build),
+        )
+
+        from web.routes.api_autonomous import _build_engine
+        with app.app_context():
+            _build_engine()
+
+        assert captured["adr_lookback_days"] == 20
+
     def test_invalid_env_vars_use_defaults(self, monkeypatch, app):
         """Invalid env values should not crash — defaults apply."""
         monkeypatch.setenv("AUTONOMOUS_EXIT_TARGET_MODE", "bad_mode")
