@@ -58,8 +58,10 @@ from autonomous.autonomous_mode import (
     normalise_trading_cycle,
 )
 from autonomous.exit_manager import AutonomousExitManager
+from autonomous.lifecycle_worker import AutonomousLifecycleWorker
 from autonomous.runner_config import AutonomousRunnerConfig, AutonomousLiveRunnerConfig
 from autonomous.trade_store import CLOSED, EXIT_PENDING, FAILED, OPEN, TradeStore
+from autonomous.trade_reconciler import TradeReconciler
 from autonomous.technical_analysis_signal_provider import (
     TechnicalAnalysisSignalProvider,
 )
@@ -238,7 +240,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
             "emergency_stop_file": str(EMERGENCY_STOP_FILE),
         })
 
-    scanner = CandidateScanner(signal_provider=_resolve_signal_provider())
+    scanner = CandidateScanner(signal_provider=_resolve_signal_provider(base_config))
     cash_analyzer = CashAvailabilityAnalyzer()
     paper_adapter = _resolve_paper_adapter(svc)
     return AutonomousTradingEngine(
@@ -258,7 +260,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
 # Signal provider / paper adapter resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_signal_provider():
+def _resolve_signal_provider(config: AutonomousTradingConfig | None = None):
     """Return the active signal provider, preferring the real one.
 
     Resolution order:
@@ -276,7 +278,10 @@ def _resolve_signal_provider():
     override = current_app.config.get("autonomous_signal_provider")
     if override is not None:
         return override
-    provider = TechnicalAnalysisSignalProvider.try_build()
+    kwargs: Dict[str, Any] = {}
+    if config is not None:
+        kwargs["adr_lookback_days"] = int(config.adr_lookback_days)
+    provider = TechnicalAnalysisSignalProvider.try_build(**kwargs)
     if provider is not None:
         return provider
     return StaticSignalProvider()
@@ -310,6 +315,47 @@ def _resolve_paper_adapter(svc):
     except Exception:  # pragma: no cover - defensive
         logger.exception("Failed to construct AutonomousPaperAdapter")
     return None
+
+
+def _adapter_order_lookup(adapter):
+    if adapter is None:
+        return None
+    getter = getattr(adapter, "get_order", None)
+    if callable(getter):
+        return getter
+    return None
+
+
+def _reconcile_store(store: TradeStore, *, adapter=None):
+    svc = get_services()
+    override = current_app.config.get("autonomous_order_lookup_provider")
+    lookup = override if callable(override) else _adapter_order_lookup(adapter)
+    result = TradeReconciler(
+        trade_store=store,
+        orders_provider=svc.get_orders,
+        order_lookup_provider=lookup,
+    ).reconcile()
+    if result.entry_fills or result.exit_fills:
+        _audit_mode_event("reconcile", result.to_dict())
+    return result
+
+
+def _reconcile_paper_trades():
+    svc = get_services()
+    adapter = _resolve_paper_adapter(svc)
+    return _reconcile_store(_trade_store(), adapter=adapter)
+
+
+def _reconcile_live_trades():
+    return _reconcile_store(_live_trade_store(), adapter=None)
+
+
+def _lifecycle_interval_seconds() -> float:
+    raw = os.environ.get("AUTONOMOUS_LIFECYCLE_INTERVAL_SECONDS", "60")
+    try:
+        return max(1.0, float(raw))
+    except (TypeError, ValueError):
+        return 60.0
 
 
 def _signal_provider_info(provider) -> Dict[str, Any]:
@@ -387,6 +433,90 @@ def _audit_mode_event(event: str, payload: Dict[str, Any] | None = None) -> None
         "event": event,
         "payload": payload or {},
     })
+
+
+def _start_paper_lifecycle_worker() -> None:
+    _start_lifecycle_worker(
+        config_key="autonomous_paper_lifecycle_worker",
+        name="AutonomousPaperLifecycleWorker",
+        state_getter=_mode_state,
+        tick=_paper_lifecycle_tick,
+    )
+
+
+def _start_live_lifecycle_worker() -> None:
+    _start_lifecycle_worker(
+        config_key="autonomous_live_lifecycle_worker",
+        name="AutonomousLiveLifecycleWorker",
+        state_getter=_live_mode_state,
+        tick=_live_lifecycle_tick,
+    )
+
+
+def _stop_paper_lifecycle_worker() -> None:
+    _stop_lifecycle_worker("autonomous_paper_lifecycle_worker")
+
+
+def _stop_live_lifecycle_worker() -> None:
+    _stop_lifecycle_worker("autonomous_live_lifecycle_worker")
+
+
+def _start_lifecycle_worker(config_key: str, name: str, state_getter, tick) -> None:
+    if current_app.config.get("TESTING") and not current_app.config.get(
+        "autonomous_lifecycle_worker_enabled",
+        False,
+    ):
+        return
+    if current_app.config.get("autonomous_lifecycle_worker_enabled", True) is False:
+        return
+
+    app = current_app._get_current_object()
+    existing = current_app.config.get(config_key)
+    if isinstance(existing, AutonomousLifecycleWorker) and existing.running:
+        return
+
+    def _active() -> bool:
+        with app.app_context():
+            return bool(state_getter().is_on)
+
+    def _tick() -> None:
+        with app.app_context():
+            tick()
+
+    worker = AutonomousLifecycleWorker(
+        name=name,
+        is_active=_active,
+        tick=_tick,
+        interval_seconds=_lifecycle_interval_seconds(),
+    )
+    current_app.config[config_key] = worker
+    worker.start()
+
+
+def _stop_lifecycle_worker(config_key: str) -> None:
+    worker = current_app.config.get(config_key)
+    if isinstance(worker, AutonomousLifecycleWorker):
+        worker.stop()
+
+
+def _paper_lifecycle_tick() -> None:
+    if not _mode_state().is_on:
+        return
+    _reconcile_paper_trades()
+    manager = _build_exit_manager()
+    manager.evaluate_open_trades()
+    _reconcile_paper_trades()
+    _maybe_advance_lifecycle()
+
+
+def _live_lifecycle_tick() -> None:
+    if not _live_mode_state().is_on:
+        return
+    _reconcile_live_trades()
+    manager = _build_live_exit_manager()
+    manager.evaluate_open_trades()
+    _reconcile_live_trades()
+    _maybe_advance_live_lifecycle()
 
 
 def _spy_price_from_yfinance() -> Dict[str, Any]:
@@ -569,12 +699,9 @@ def _advance_single_trade_if_complete(state: "AutonomousModeState") -> None:
 def _maybe_advance_lifecycle() -> None:
     """Advance the autonomous lifecycle after exit evaluation completes.
 
-    **This function is poll/evaluate-driven, not a background loop.**  It is
-    called exclusively from the ``/runner/evaluate-exits`` endpoint.  The
-    operator (or a scheduler) must call that endpoint periodically to advance
-    the lifecycle.  Continuous Trading does *not* loop on its own; each new
-    cycle begins only after an explicit evaluate-exits call returns with all
-    prior trades closed.
+    This function is called by both the explicit ``/runner/evaluate-exits``
+    endpoint and the background lifecycle worker started at activation time.
+    Continuous Trading starts the next cycle when no lifecycle trade is active.
 
     Does nothing when mode is OFF or ``cycles_started == 0`` (no lifecycle
     has been started yet).
@@ -593,6 +720,8 @@ def _maybe_advance_lifecycle() -> None:
     try:
         since_activation = _trades_since_activation(state)
         if not since_activation:
+            if state.trading_cycle == TradingCycle.CONTINUOUS:
+                _run_next_paper_cycle(state)
             return  # No trade placed yet
         still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
         if still_active:
@@ -602,30 +731,36 @@ def _maybe_advance_lifecycle() -> None:
         if cycle == TradingCycle.SINGLE_TRADE:
             _advance_single_trade_if_complete(state)
         elif cycle == TradingCycle.CONTINUOUS:
-            # Recheck SPY gate and start next cycle
-            try:
-                result = _build_runner().run_once()
-                state.cycles_started += 1
-                _audit_mode_event(
-                    "continuous_cycle",
-                    {"cycles_started": state.cycles_started},
-                )
-                r_payload = result.to_dict()
-                decision = r_payload.get("decision") or {}
-                if decision.get("status") == "market_not_suitable":
-                    state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
-                    _audit_mode_event(
-                        "halt",
-                        {"reason": BEARISH_SPY_MESSAGE, "source": "spy_gate_continuous"},
-                    )
-            except Exception:
-                logger.exception("Continuous lifecycle cycle failed")
-                state.turn_off(
-                    message="Continuous lifecycle error. Autonomous Mode turned OFF.",
-                    status="Halted",
-                )
+            _run_next_paper_cycle(state)
     except Exception:
         logger.exception("Lifecycle advancement check failed")
+
+
+def _run_next_paper_cycle(state: "AutonomousModeState") -> None:
+    try:
+        result = _build_runner().run_once()
+        state.cycles_started += 1
+        r_payload = result.to_dict()
+        _audit_mode_event(
+            "continuous_cycle",
+            {
+                "cycles_started": state.cycles_started,
+                "result_status": r_payload.get("status"),
+            },
+        )
+        decision = r_payload.get("decision") or {}
+        if decision.get("status") == "market_not_suitable":
+            state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+            _audit_mode_event(
+                "halt",
+                {"reason": BEARISH_SPY_MESSAGE, "source": "spy_gate_continuous"},
+            )
+    except Exception:
+        logger.exception("Continuous lifecycle cycle failed")
+        state.turn_off(
+            message="Continuous lifecycle error. Autonomous Mode turned OFF.",
+            status="Halted",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -833,6 +968,12 @@ def emergency_stop():
         message="Emergency stop active. Autonomous Mode has been turned OFF.",
         status="Halted",
     )
+    _live_mode_state().turn_off(
+        "Emergency stop active. Live Autonomous Mode has been turned OFF.",
+        status="Halted",
+    )
+    _stop_paper_lifecycle_worker()
+    _stop_live_lifecycle_worker()
     _audit_mode_event("halt", {"reason": reason, "source": "emergency_stop"})
 
     return jsonify({
@@ -920,6 +1061,9 @@ def autonomous_mode_activate():
         _audit_mode_event("halt", {"reason": "lifecycle_run_exception", "source": "activate"})
         payload = {}
 
+    if state.is_on:
+        _start_paper_lifecycle_worker()
+
     return jsonify({
         "status": "activated" if state.is_on else "halted",
         "run": payload,
@@ -934,6 +1078,7 @@ def autonomous_mode_halt():
     body = request.get_json(silent=True) or {}
     reason = str(body.get("reason") or "Operator turned Autonomous Mode OFF")
     _mode_state().turn_off(message=reason, status="Halted")
+    _stop_paper_lifecycle_worker()
     _audit_mode_event("halt", {"reason": reason, "source": "operator"})
     return jsonify({"status": "halted", "autonomous_mode": _autonomous_status_payload()})
 
@@ -1068,14 +1213,20 @@ def runner_run_once_paper():
 @bp.route("/runner/evaluate-exits", methods=["POST"])
 def runner_evaluate_exits():
     """Evaluate every open autonomous trade and submit paper SELL exits."""
+    before = _reconcile_paper_trades()
     manager = _build_exit_manager()
     decisions = manager.evaluate_open_trades()
+    after = _reconcile_paper_trades()
     # Advance lifecycle after exits are evaluated: Single Trade turns OFF when
     # complete; Continuous Trading starts the next cycle after SPY recheck.
     _maybe_advance_lifecycle()
     return jsonify({
         "decisions": [d.to_dict() for d in decisions],
         "count": len(decisions),
+        "reconciliation": {
+            "before": before.to_dict(),
+            "after": after.to_dict(),
+        },
     })
 
 
@@ -1274,6 +1425,41 @@ def _live_trade_store() -> TradeStore:
     return store
 
 
+def _build_live_exit_manager() -> AutonomousExitManager:
+    """Build the exit manager used by live lifecycle evaluation."""
+    override = current_app.config.get("autonomous_live_exit_manager_factory")
+    if callable(override):
+        return override()
+
+    live_config = _live_runner_config()
+    svc = get_services()
+    live_executor = current_app.config.get("autonomous_live_order_executor")
+    if live_executor is None:
+        try:
+            live_executor = _build_live_runner(
+                live_config, continuous_mode=False
+            ).order_executor
+        except Exception:
+            logger.warning(
+                "Could not resolve live OrderExecutor for exit manager; "
+                "exits will be evaluation-only"
+            )
+            live_executor = None
+
+    return AutonomousExitManager(
+        trade_store=_live_trade_store(),
+        paper_adapter=None,
+        positions_provider=svc.get_positions,
+        risk_manager=getattr(svc, "risk_manager", None),
+        emergency_stop_file=str(EMERGENCY_STOP_FILE),
+        order_executor=live_executor,
+        account_equity_provider=lambda: (
+            svc.get_account_summary().get("equity")
+        ),
+        broker_positions_provider=lambda: _build_broker_positions(svc),
+    )
+
+
 def _build_live_runner(
     live_config: AutonomousLiveRunnerConfig,
     *,
@@ -1429,6 +1615,8 @@ def _maybe_advance_live_lifecycle() -> None:
             if t.entry_time >= activated_at
         ]
         if not since_activation:
+            if state.trading_cycle == TradingCycle.CONTINUOUS:
+                _run_next_live_cycle(state)
             return
         still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
         if still_active:
@@ -1445,32 +1633,35 @@ def _maybe_advance_live_lifecycle() -> None:
                 {"reason": "live_single_trade_completed", "source": "lifecycle", "account_mode": "live"},
             )
         elif cycle == TradingCycle.CONTINUOUS:
-            # Start next live cycle.
-            live_config = _live_runner_config()
-            try:
-                runner = _build_live_runner(live_config, continuous_mode=True)
-                result = runner.run_once()
-                state.cycles_started += 1
-                _audit_mode_event(
-                    "live_continuous_cycle",
-                    {"cycles_started": state.cycles_started, "result_status": result.status},
-                )
-                if result.decision:
-                    decision_status = (result.decision or {}).get("status")
-                    if decision_status == "market_not_suitable":
-                        state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
-                        _audit_mode_event(
-                            "halt",
-                            {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate_continuous"},
-                        )
-            except Exception:
-                logger.exception("Live continuous lifecycle cycle failed")
-                state.turn_off(
-                    message="Live continuous lifecycle error. Autonomous Mode turned OFF.",
-                    status="Halted",
-                )
+            _run_next_live_cycle(state)
     except Exception:
         logger.exception("Live lifecycle advancement check failed")
+
+
+def _run_next_live_cycle(state: "AutonomousModeState") -> None:
+    live_config = _live_runner_config()
+    try:
+        runner = _build_live_runner(live_config, continuous_mode=True)
+        result = runner.run_once()
+        state.cycles_started += 1
+        _audit_mode_event(
+            "live_continuous_cycle",
+            {"cycles_started": state.cycles_started, "result_status": result.status},
+        )
+        if result.decision:
+            decision_status = (result.decision or {}).get("status")
+            if decision_status == "market_not_suitable":
+                state.turn_off(message=BEARISH_SPY_MESSAGE, status="Halted")
+                _audit_mode_event(
+                    "halt",
+                    {"reason": BEARISH_SPY_MESSAGE, "source": "live_spy_gate_continuous"},
+                )
+    except Exception:
+        logger.exception("Live continuous lifecycle cycle failed")
+        state.turn_off(
+            message="Live continuous lifecycle error. Autonomous Mode turned OFF.",
+            status="Halted",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1669,6 +1860,9 @@ def live_activate():
         )
         payload = {}
 
+    if state.is_on:
+        _start_live_lifecycle_worker()
+
     return jsonify({
         "status": "activated" if state.is_on else "halted",
         "run": payload,
@@ -1682,6 +1876,7 @@ def live_halt():
     body = request.get_json(silent=True) or {}
     reason = str(body.get("reason") or "Operator turned Live Autonomous Mode OFF")
     _live_mode_state().turn_off(message=reason, status="Halted")
+    _stop_live_lifecycle_worker()
     _audit_mode_event(
         "live_halt",
         {"reason": reason, "source": "operator"},
@@ -1728,53 +1923,18 @@ def live_run_once():
 @bp.route("/live/evaluate-exits", methods=["POST"])
 def live_evaluate_exits():
     """Evaluate open live autonomous trades and advance lifecycle."""
-    live_config = _live_runner_config()
-    svc = get_services()
-    from autonomous.exit_manager import AutonomousExitManager
-
-    # Use the live trade store for exit evaluation.
-    live_store = _live_trade_store()
-
-    # Build exit manager using live adapter when available.
-    override = current_app.config.get("autonomous_live_exit_manager_factory")
-    if callable(override):
-        manager = override()
-    else:
-        # Resolve the live OrderExecutor (same as used for entries) so that
-        # exit orders are submitted through the same safety gates as entries.
-        # When no executor is available (e.g. TWS not connected), exits fall
-        # back to evaluation-only mode and the dashboard shows would_exit notes.
-        live_executor = current_app.config.get("autonomous_live_order_executor")
-        if live_executor is None:
-            try:
-                live_executor = _build_live_runner(
-                    live_config, continuous_mode=False
-                ).order_executor
-            except Exception:
-                logger.warning(
-                    "Could not resolve live OrderExecutor for exit manager; "
-                    "exits will be evaluation-only"
-                )
-                live_executor = None
-
-        manager = AutonomousExitManager(
-            trade_store=live_store,
-            paper_adapter=None,
-            positions_provider=svc.get_positions,
-            risk_manager=getattr(svc, "risk_manager", None),
-            emergency_stop_file=str(EMERGENCY_STOP_FILE),
-            order_executor=live_executor,
-            account_equity_provider=lambda: (
-                svc.get_account_summary().get("equity")
-            ),
-            broker_positions_provider=lambda: _build_broker_positions(svc),
-        )
-
+    before = _reconcile_live_trades()
+    manager = _build_live_exit_manager()
     decisions = manager.evaluate_open_trades()
+    after = _reconcile_live_trades()
     _maybe_advance_live_lifecycle()
     return jsonify({
         "decisions": [d.to_dict() for d in decisions],
         "count": len(decisions),
+        "reconciliation": {
+            "before": before.to_dict(),
+            "after": after.to_dict(),
+        },
     })
 
 

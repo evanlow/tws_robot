@@ -17,7 +17,7 @@ Usage (from the connection API route)::
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from ibapi.client import EClient
@@ -221,6 +221,45 @@ class _BridgeApp(EWrapper, EClient):
         pass
 
     # -- error handling -----------------------------------------------------
+
+    def orderStatus(
+        self,
+        orderId,
+        status: str,
+        filled: float,
+        remaining: float,
+        avgFillPrice: float,
+        permId=0,
+        parentId=0,
+        lastFillPrice=0.0,
+        clientId=0,
+        whyHeld="",
+        mktCapPrice=0.0,
+    ) -> None:
+        payload = {
+            "id": str(orderId),
+            "order_id": int(orderId),
+            "broker_order_id": int(orderId),
+            "status": str(status or "").upper(),
+            "filled": float(filled or 0.0),
+            "remaining": float(remaining or 0.0),
+            "avg_fill_price": float(avgFillPrice or 0.0),
+            "last_fill_price": float(lastFillPrice or 0.0),
+            "perm_id": int(permId or 0),
+            "parent_id": int(parentId or 0),
+            "client_id": int(clientId or 0),
+            "why_held": whyHeld,
+            "market_cap_price": float(mktCapPrice or 0.0),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source": "tws_order_status",
+        }
+        self._svc.add_order(payload)
+        if payload["status"] == "FILLED":
+            self._svc.event_bus.publish(Event(
+                EventType.ORDER_FILLED,
+                data=payload,
+                source="TWSBridge",
+            ))
 
     def error(self, reqId, _errorTime, errorCode: int, errorString: str,
               advancedOrderRejectJson="") -> None:
