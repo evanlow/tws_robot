@@ -1914,3 +1914,56 @@ class TestLiveRunnerConfigEnvReread:
             cfg = _live_runner_config()
         assert cfg is preset
         assert cfg.max_open_live_trades == 3
+
+
+class TestLiveLifecycleTick:
+    def test_live_lifecycle_tick_drains_runner_gates(self, app, monkeypatch):
+        from web.routes import api_autonomous
+
+        calls = {"gate_drains": 0, "exit_eval": 0}
+
+        class _Runner:
+            def evaluate_gates(self):
+                calls["gate_drains"] += 1
+
+        monkeypatch.setattr(api_autonomous, "_live_mode_state", lambda: type("S", (), {"is_on": True})())
+        monkeypatch.setattr(api_autonomous, "_live_runner_config", lambda: object())
+        monkeypatch.setattr(api_autonomous, "_build_live_runner", lambda *args, **kwargs: _Runner())
+        monkeypatch.setattr(api_autonomous, "_reconcile_live_trades", lambda: None)
+        monkeypatch.setattr(
+            api_autonomous,
+            "_build_live_exit_manager",
+            lambda: type("M", (), {"evaluate_open_trades": lambda self: calls.__setitem__("exit_eval", calls["exit_eval"] + 1)})(),
+        )
+        monkeypatch.setattr(api_autonomous, "_maybe_advance_live_lifecycle", lambda: None)
+
+        with app.app_context():
+            api_autonomous._live_lifecycle_tick()
+
+        assert calls["gate_drains"] == 1
+        assert calls["exit_eval"] == 1
+
+    def test_live_lifecycle_tick_continues_when_gate_drain_fails(self, app, monkeypatch):
+        from web.routes import api_autonomous
+
+        calls = {"exit_eval": 0}
+
+        class _Runner:
+            def evaluate_gates(self):
+                raise RuntimeError("boom")
+
+        monkeypatch.setattr(api_autonomous, "_live_mode_state", lambda: type("S", (), {"is_on": True})())
+        monkeypatch.setattr(api_autonomous, "_live_runner_config", lambda: object())
+        monkeypatch.setattr(api_autonomous, "_build_live_runner", lambda *args, **kwargs: _Runner())
+        monkeypatch.setattr(api_autonomous, "_reconcile_live_trades", lambda: None)
+        monkeypatch.setattr(
+            api_autonomous,
+            "_build_live_exit_manager",
+            lambda: type("M", (), {"evaluate_open_trades": lambda self: calls.__setitem__("exit_eval", calls["exit_eval"] + 1)})(),
+        )
+        monkeypatch.setattr(api_autonomous, "_maybe_advance_live_lifecycle", lambda: None)
+
+        with app.app_context():
+            api_autonomous._live_lifecycle_tick()
+
+        assert calls["exit_eval"] == 1

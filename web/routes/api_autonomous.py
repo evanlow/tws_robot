@@ -551,6 +551,10 @@ def _paper_lifecycle_tick() -> None:
 def _live_lifecycle_tick() -> None:
     if not _live_mode_state().is_on:
         return
+    try:
+        _build_live_runner(_live_runner_config(), continuous_mode=False).evaluate_gates()
+    except Exception:
+        logger.exception("Live lifecycle gate evaluation failed")
     _reconcile_live_trades()
     try:
         manager = _build_live_exit_manager()

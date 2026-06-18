@@ -66,6 +66,10 @@ class TradeReconciler:
         orders = self._safe_orders()
 
         for trade in self._store.list_all():
+            trade_type = str(getattr(trade, "trade_type", "") or "").upper()
+            if trade_type != "BUY_SHARES":
+                continue
+
             if trade.status == OPEN and trade.entry_filled_price is None:
                 fill = self._find_filled_order(trade.entry_order_id, orders)
                 if fill is not None:
