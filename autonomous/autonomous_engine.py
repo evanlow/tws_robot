@@ -291,6 +291,7 @@ class AutonomousTradingEngine:
             positions=positions,
             equity=equity,
             today=today,
+            market_gate=decision.market_gate,
         )
         decision.shortlist = [rc.to_dict() for rc in ranked]
         decision.rejected_candidates = rejected
@@ -504,6 +505,7 @@ class AutonomousTradingEngine:
             stop_price=plan_dict.get("stop_price"),
             required_cash=float(plan_dict.get("required_cash") or 0.0),
             target_mode=str(plan_dict.get("target_mode") or ""),
+            sizing=dict(plan_dict.get("sizing") or {}),
         )
 
     @staticmethod
