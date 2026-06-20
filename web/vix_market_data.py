@@ -69,8 +69,12 @@ def spy_vix_price_from_yfinance() -> Dict[str, Any]:
     }
     if spy_open <= 0 or spy_current <= 0:
         payload["error"] = "SPY data unavailable — failing SPY gate closed"
-    if vix_open <= 0 or vix_current <= 0:
+    if vix_open <= 0 and vix_current <= 0:
         payload["vix_error"] = "VIX data unavailable"
+    elif vix_open <= 0:
+        payload["vix_error"] = "VIX open price unavailable; intraday direction check disabled"
+    elif vix_current <= 0:
+        payload["vix_error"] = "VIX current price unavailable"
     return payload
 
 

@@ -169,6 +169,9 @@ class AutonomousTradingConfig:
                 raise ValueError(
                     f"{label} must be greater than 0 and at most 1; got {value!r}"
                 )
+        # A multiplier of exactly 1.0 is a valid no-op: the engine only applies
+        # the multiplier when size_multiplier < 1.0, so 1.0 leaves deployable
+        # cash unchanged while still being a legal configuration value.
 
     def deployable_cash_cap_pct(self) -> float:
         """Effective per-trade cap as a fraction of deployable cash."""
