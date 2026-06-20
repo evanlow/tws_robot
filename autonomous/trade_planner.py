@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from autonomous.adr_calculator import compute_adr_target_price
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
+from autonomous.position_sizing import PositionSizer
 
 _OPTION_MULTIPLIER = 100
 
@@ -77,6 +78,7 @@ class TradePlan:
     adr: Optional[float] = None
     adr_pct: Optional[float] = None
     adr_target_fraction: Optional[float] = None
+    sizing: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -99,6 +101,7 @@ class TradePlan:
             "adr": round(self.adr, 4) if self.adr is not None else None,
             "adr_pct": round(self.adr_pct, 6) if self.adr_pct is not None else None,
             "adr_target_fraction": self.adr_target_fraction,
+            "sizing": dict(self.sizing or {}),
         }
 
 
@@ -107,6 +110,13 @@ class TradePlanner:
 
     def __init__(self, config: AutonomousTradingConfig) -> None:
         self.config = config
+        self.sizer = PositionSizer(
+            risk_per_trade_sizing_enabled=config.risk_per_trade_sizing_enabled,
+            max_risk_per_trade_equity_pct=config.max_risk_per_trade_equity_pct,
+            volatility_sizing_enabled=config.volatility_sizing_enabled,
+            volatility_reference_pct=config.volatility_reference_pct,
+            volatility_min_size_multiplier=config.volatility_min_size_multiplier,
+        )
 
     def plan(
         self,
@@ -182,12 +192,6 @@ class TradePlanner:
             )
             return None
 
-        quantity = int(math.floor(cap / price))
-        if quantity <= 0:
-            _add(reasons, f"{candidate.symbol}: floor(cap ${cap:,.2f} / price ${price:,.2f}) = 0")
-            return None
-
-        required_cash = quantity * price
         limit_price = round(price, 2)
         target_price, target_mode, adr_val, adr_pct_val, adr_frac = self._compute_target(
             candidate, price
@@ -209,6 +213,25 @@ class TradePlanner:
             )
             return None
 
+        sizing = self.sizer.size_buy_shares(
+            symbol=candidate.symbol,
+            entry_price=limit_price,
+            stop_price=stop_price,
+            base_cap_value=cap,
+            equity=equity,
+            adr_pct=_positive_float(candidate.extras.get("adr_pct")),
+        )
+        quantity = sizing.quantity
+        if quantity <= 0:
+            _add(
+                reasons,
+                f"{candidate.symbol}: final sizing cap cannot buy 1 share; binding_cap={sizing.binding_cap}"
+            )
+            return None
+
+        required_cash = sizing.required_cash
+        sizing_dict = sizing.to_dict()
+
         return TradePlan(
             symbol=candidate.symbol,
             trade_type=TradeType.BUY_SHARES,
@@ -222,6 +245,7 @@ class TradePlanner:
             adr=adr_val,
             adr_pct=adr_pct_val,
             adr_target_fraction=adr_frac,
+            sizing=sizing_dict,
             reason=(
                 f"{candidate.signal_label} (strength={candidate.strength_score}); "
                 f"buy {quantity} shares at limit {limit_price}"
@@ -232,18 +256,15 @@ class TradePlanner:
                     f"Sized to <= {self.config.equity_cap_pct():.0%} of equity "
                     f"and <= {self.config.deployable_cash_cap_pct():.0%} of deployable cash."
                 ),
-            ],
+                f"Binding sizing cap: {sizing.binding_cap}.",
+            ] + list(sizing.notes),
             exit_plan=(
                 f"Exit on target_price ({target_mode}) or stop_price; "
                 "review on next Strong(100) re-evaluation."
             ),
         )
 
-    def _compute_target(
-        self,
-        candidate: CandidateSignal,
-        entry_price: float,
-    ) -> tuple:
+    def _compute_target(self, candidate: CandidateSignal, entry_price: float) -> tuple:
         mode = self.config.exit_target_mode
         if mode == "adr_intraday":
             adr_val = candidate.extras.get("adr")
@@ -374,3 +395,11 @@ class TradePlanner:
                 "on technical breakdown below support."
             ),
         )
+
+
+def _positive_float(value: Any) -> Optional[float]:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0 else None
