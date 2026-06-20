@@ -46,6 +46,14 @@ class AutonomousTradingConfig:
     execution_max_price_move_pct: float = 0.01
     execution_block_on_missing_quote: bool = False
 
+    risk_lifecycle_guard_enabled: bool = True
+    risk_lifecycle_recent_record_limit: int = 1000
+    max_daily_loss_r: float = 2.0
+    max_weekly_loss_r: float = 4.0
+    max_monthly_loss_r: float = 6.0
+    max_consecutive_losses: int = 3
+    max_strategy_drawdown_r: float = 6.0
+
     edge_ranking_enabled: bool = True
     min_expected_r: float = -1.0
     min_edge_confidence: float = 0.0
@@ -132,6 +140,18 @@ class AutonomousTradingConfig:
         ):
             if value < 0 or value > 1:
                 raise ValueError(f"{label} must be in [0, 1]")
+        if self.risk_lifecycle_recent_record_limit < 1:
+            raise ValueError("risk_lifecycle_recent_record_limit must be >= 1")
+        for label, value in (
+            ("max_daily_loss_r", self.max_daily_loss_r),
+            ("max_weekly_loss_r", self.max_weekly_loss_r),
+            ("max_monthly_loss_r", self.max_monthly_loss_r),
+            ("max_strategy_drawdown_r", self.max_strategy_drawdown_r),
+        ):
+            if value < 0:
+                raise ValueError(f"{label} must be >= 0")
+        if self.max_consecutive_losses < 0:
+            raise ValueError("max_consecutive_losses must be >= 0")
         if self.edge_score_weight < 0:
             raise ValueError("edge_score_weight must be >= 0")
         if self.min_edge_confidence < 0 or self.min_edge_confidence > 1:
@@ -194,6 +214,13 @@ class AutonomousTradingConfig:
             "execution_max_slippage_pct": self.execution_max_slippage_pct,
             "execution_max_price_move_pct": self.execution_max_price_move_pct,
             "execution_block_on_missing_quote": self.execution_block_on_missing_quote,
+            "risk_lifecycle_guard_enabled": self.risk_lifecycle_guard_enabled,
+            "risk_lifecycle_recent_record_limit": self.risk_lifecycle_recent_record_limit,
+            "max_daily_loss_r": self.max_daily_loss_r,
+            "max_weekly_loss_r": self.max_weekly_loss_r,
+            "max_monthly_loss_r": self.max_monthly_loss_r,
+            "max_consecutive_losses": self.max_consecutive_losses,
+            "max_strategy_drawdown_r": self.max_strategy_drawdown_r,
             "edge_ranking_enabled": self.edge_ranking_enabled,
             "min_expected_r": self.min_expected_r,
             "min_edge_confidence": self.min_edge_confidence,
