@@ -17,10 +17,12 @@ from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDec
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.outcome_reconciliation import FillSummary, OutcomeReconciliation, OutcomeReconciler
 from autonomous.position_sizing import PositionSizer, SizingDecision
+from autonomous.regime_context import build_regime_context, classify_time_of_day, sector_etf_for
 from autonomous.risk_lifecycle import LossLimitDecision, LossLimitGuard, StrategyEquityCurveBuilder, StrategyEquityPoint
 from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
 from autonomous.validation_framework import ValidationFramework, ValidationReport, ValidationThresholds
+from autonomous.walk_forward_report import ChronoValidationReport, ChronoValidationWindow, ChronoValidator
 from autonomous.signal_provider import SignalProvider, StaticSignalProvider
 from autonomous.technical_analysis_signal_provider import TechnicalAnalysisSignalProvider
 from autonomous.autonomous_engine import AutonomousTradingEngine, AutonomousDecision, DecisionStatus
@@ -48,6 +50,9 @@ __all__ = [
     "CandidateScanner",
     "CandidateSignal",
     "CandidateRanker",
+    "ChronoValidationReport",
+    "ChronoValidationWindow",
+    "ChronoValidator",
     "DrawdownDecision",
     "DrawdownGovernor",
     "EdgeEstimate",
@@ -75,6 +80,9 @@ __all__ = [
     "ValidationFramework",
     "ValidationReport",
     "ValidationThresholds",
+    "build_regime_context",
+    "classify_time_of_day",
+    "sector_etf_for",
     "SignalProvider",
     "StaticSignalProvider",
     "TechnicalAnalysisSignalProvider",
