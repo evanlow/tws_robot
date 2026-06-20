@@ -10,6 +10,7 @@ This config object holds **all** safety thresholds and feature flags for
 * Only limit orders are permitted.
 * Assisted-live trade plans require a valid stop/invalidation level.
 * Basket planning is disabled by default and must be explicitly enabled.
+* Risk-per-trade and volatility sizing can only reduce position size.
 * The market-regime guard requires a bullish SPY backdrop and can reduce or
   block exposure when VIX indicates volatility stress.
 
@@ -53,14 +54,16 @@ class AutonomousTradingConfig:
     # ---- Trade frequency / sizing -------------------------------------
     max_trades_per_day: int = 1
     max_new_position_pct: float = 0.10  # of equity
-    # Optional split caps.  When set, override max_new_position_pct on
-    # the deployable-cash and equity sides independently so a single
-    # high-priced share is not blocked by a tight deployable-cash cap
-    # while a tight equity guard still protects total exposure.  Each
-    # must be in (0, 1].  ``None`` falls back to max_new_position_pct.
     max_position_deployable_cash_pct: Optional[float] = None
     max_position_equity_pct: Optional[float] = None
     min_deployable_cash: float = 1000.0
+
+    # ---- Risk-per-trade / volatility sizing ----------------------------
+    risk_per_trade_sizing_enabled: bool = True
+    max_risk_per_trade_equity_pct: float = 0.002  # 0.2% of equity per leg
+    volatility_sizing_enabled: bool = True
+    volatility_reference_pct: float = 0.02  # ADR/ATR reference: 2% daily range
+    volatility_min_size_multiplier: float = 0.25
 
     # ---- Basket planning -----------------------------------------------
     basket_enabled: bool = False
@@ -85,8 +88,6 @@ class AutonomousTradingConfig:
     avoid_earnings_within_days: int = 7
 
     # ---- Market-regime guard ------------------------------------------
-    # The existing SPY gate stays active whenever a provider is wired.
-    # These VIX settings add a volatility/fear overlay to the same gate.
     vix_guard_enabled: bool = True
     vix_missing_blocks_trade: bool = False
     vix_caution_level: float = 20.0
@@ -98,9 +99,6 @@ class AutonomousTradingConfig:
     apply_market_regime_size_multiplier: bool = True
 
     # ---- Technical levels ---------------------------------------------
-    # Used by TechnicalAnalysisSignalProvider when the screener row does not
-    # already include support/resistance.  A value of 0 disables provider-side
-    # level enrichment.
     support_resistance_lookback_days: int = 30
 
     # ---- Exit target / stop policy -------------------------------------
@@ -127,11 +125,9 @@ class AutonomousTradingConfig:
     symbol_blacklist: List[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        # Normalise mode to enum if a string was provided.
         if isinstance(self.mode, str):
             self.mode = AutonomousMode(self.mode)
 
-        # Defensive numeric guards.
         if self.max_new_position_pct <= 0 or self.max_new_position_pct > 1:
             raise ValueError(
                 "max_new_position_pct must be in (0, 1]; got "
@@ -144,19 +140,17 @@ class AutonomousTradingConfig:
             if value is None:
                 continue
             if value <= 0 or value > 1:
-                raise ValueError(
-                    f"{label} must be in (0, 1]; got {value!r}"
-                )
+                raise ValueError(f"{label} must be in (0, 1]; got {value!r}")
         if self.max_trades_per_day < 0:
-            raise ValueError(
-                "max_trades_per_day must be >= 0; got "
-                f"{self.max_trades_per_day!r}"
-            )
+            raise ValueError("max_trades_per_day must be >= 0")
         if self.min_deployable_cash < 0:
-            raise ValueError(
-                "min_deployable_cash must be >= 0; got "
-                f"{self.min_deployable_cash!r}"
-            )
+            raise ValueError("min_deployable_cash must be >= 0")
+        if self.max_risk_per_trade_equity_pct <= 0 or self.max_risk_per_trade_equity_pct > 1:
+            raise ValueError("max_risk_per_trade_equity_pct must be in (0, 1]")
+        if self.volatility_reference_pct <= 0:
+            raise ValueError("volatility_reference_pct must be > 0")
+        if self.volatility_min_size_multiplier <= 0 or self.volatility_min_size_multiplier > 1:
+            raise ValueError("volatility_min_size_multiplier must be in (0, 1]")
         if self.basket_max_size < 1:
             raise ValueError("basket_max_size must be >= 1")
         if self.basket_max_same_sector_positions < 1:
@@ -173,15 +167,9 @@ class AutonomousTradingConfig:
                 "basket_total_deployable_cash_pct"
             )
         if self.min_signal_strength < 0:
-            raise ValueError(
-                "min_signal_strength must be >= 0; got "
-                f"{self.min_signal_strength!r}"
-            )
+            raise ValueError("min_signal_strength must be >= 0")
         if self.support_resistance_lookback_days < 0:
-            raise ValueError(
-                "support_resistance_lookback_days must be >= 0; got "
-                f"{self.support_resistance_lookback_days!r}"
-            )
+            raise ValueError("support_resistance_lookback_days must be >= 0")
         if self.vix_caution_level <= 0 or self.vix_block_level <= 0:
             raise ValueError("VIX levels must be positive")
         if self.vix_caution_level > self.vix_block_level:
@@ -205,9 +193,6 @@ class AutonomousTradingConfig:
                 raise ValueError(
                     f"{label} must be greater than 0 and at most 1.0; got {value!r}"
                 )
-        # A multiplier of exactly 1.0 is a valid no-op: the engine only applies
-        # the multiplier when size_multiplier < 1.0, so 1.0 leaves deployable
-        # cash unchanged while still being a legal configuration value.
 
     def deployable_cash_cap_pct(self) -> float:
         """Effective per-trade cap as a fraction of deployable cash."""
@@ -232,6 +217,11 @@ class AutonomousTradingConfig:
             "max_position_deployable_cash_pct": self.max_position_deployable_cash_pct,
             "max_position_equity_pct": self.max_position_equity_pct,
             "min_deployable_cash": self.min_deployable_cash,
+            "risk_per_trade_sizing_enabled": self.risk_per_trade_sizing_enabled,
+            "max_risk_per_trade_equity_pct": self.max_risk_per_trade_equity_pct,
+            "volatility_sizing_enabled": self.volatility_sizing_enabled,
+            "volatility_reference_pct": self.volatility_reference_pct,
+            "volatility_min_size_multiplier": self.volatility_min_size_multiplier,
             "basket_enabled": self.basket_enabled,
             "basket_max_size": self.basket_max_size,
             "basket_total_deployable_cash_pct": self.basket_total_deployable_cash_pct,
