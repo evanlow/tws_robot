@@ -23,6 +23,9 @@ Hard rules baked into the live defaults:
   confirmation is required before any live order is sent.
 * ``max_deployable_cash_pct = 0.005`` — first live experiments are capped to
   0.5% of deployable cash unless the operator explicitly overrides it.
+* ``require_plan_stop_for_live = True`` — planner-derived stop/invalidation
+  levels are preferred for live entries.  If a live plan still reaches the
+  runner without ``stop_price``, it falls back to the generic stop.
 """
 
 from __future__ import annotations
@@ -159,11 +162,15 @@ class AutonomousLiveRunnerConfig:
     ``AUTONOMOUS_LIVE_DRY_RUN``
         When ``true``, the full live lifecycle runs but no order is sent
         to TWS.  Defaults to ``false``.
+    ``AUTONOMOUS_REQUIRE_PLAN_STOP_FOR_LIVE``
+        When ``true`` (default), actual live and live dry-run entries prefer
+        a planner-provided ``stop_price``.  If a live plan still reaches the
+        runner without it, the runner falls back to the generic stop derived
+        from ``AUTONOMOUS_DEFAULT_STOP_PCT``.
     ``AUTONOMOUS_DEFAULT_STOP_PCT``
         Fallback stop-loss distance below the entry limit price used
-        when the planner does not supply ``stop_price`` (e.g. no
-        support level available).  Default ``0.05`` (5 %).  Must be in
-        ``(0, 1)``.
+        when a live plan reaches the runner without ``stop_price``.  Default
+        ``0.05`` (5 %).  Must be in ``(0, 1)``.
     """
 
     # ---- Master live-mode switches ------------------------------------
@@ -181,15 +188,14 @@ class AutonomousLiveRunnerConfig:
     # ---- Order safety rules ------------------------------------------
     live_limit_orders_only: bool = True
     live_require_account_confirmation: bool = True
+    require_plan_stop_for_live: bool = True
 
     # ---- Dry-run (rehearsal) mode ------------------------------------
     live_dry_run: bool = False
 
     # ---- Bracket exit defaults ---------------------------------------
     # Fallback stop-loss distance below entry when the planner does not
-    # supply a stop_price.  Used by AutonomousLiveRunner to synthesise
-    # the stop leg of the bracket so every live entry has a defined
-    # exit on both sides.
+    # supply a stop_price.
     default_stop_pct: float = 0.05
 
     # ---- Shared with paper runner ------------------------------------
@@ -240,6 +246,7 @@ class AutonomousLiveRunnerConfig:
             "max_live_trades_per_day": self.max_live_trades_per_day,
             "live_limit_orders_only": self.live_limit_orders_only,
             "live_require_account_confirmation": self.live_require_account_confirmation,
+            "require_plan_stop_for_live": self.require_plan_stop_for_live,
             "live_dry_run": self.live_dry_run,
             "default_stop_pct": self.default_stop_pct,
             "buy_shares_only": self.buy_shares_only,
@@ -277,6 +284,9 @@ class AutonomousLiveRunnerConfig:
             ),
             live_require_account_confirmation=_env_bool(
                 "AUTONOMOUS_LIVE_REQUIRE_ACCOUNT_CONFIRMATION", True
+            ),
+            require_plan_stop_for_live=_env_bool(
+                "AUTONOMOUS_REQUIRE_PLAN_STOP_FOR_LIVE", True
             ),
             live_dry_run=_env_bool("AUTONOMOUS_LIVE_DRY_RUN", False),
             default_stop_pct=_env_float("AUTONOMOUS_DEFAULT_STOP_PCT", 0.05),

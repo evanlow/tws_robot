@@ -8,6 +8,7 @@ This config object holds **all** safety thresholds and feature flags for
 * User confirmation is required.
 * Only one trade per day is allowed.
 * Only limit orders are permitted.
+* Assisted-live trade plans require a valid stop/invalidation level.
 * The market-regime guard requires a bullish SPY backdrop and can reduce or
   block exposure when VIX indicates volatility stress.
 
@@ -88,7 +89,13 @@ class AutonomousTradingConfig:
     vix_high_size_multiplier: float = 0.25
     apply_market_regime_size_multiplier: bool = True
 
-    # ---- Exit target mode ---------------------------------------------
+    # ---- Technical levels ---------------------------------------------
+    # Used by TechnicalAnalysisSignalProvider when the screener row does not
+    # already include support/resistance.  A value of 0 disables provider-side
+    # level enrichment.
+    support_resistance_lookback_days: int = 30
+
+    # ---- Exit target / stop policy -------------------------------------
     exit_target_mode: str = "resistance"  # "resistance" | "percent" | "adr_intraday"
     take_profit_pct: float = 0.08  # fallback percent target
     adr_lookback_days: int = 0
@@ -96,6 +103,7 @@ class AutonomousTradingConfig:
     adr_max_target_pct: float = 0.03
     adr_min_target_pct: float = 0.005
     adr_respect_resistance_cap: bool = True
+    require_stop_price_for_assisted_live: bool = True
 
     # ---- Order style --------------------------------------------------
     use_limit_orders_only: bool = True
@@ -145,6 +153,11 @@ class AutonomousTradingConfig:
             raise ValueError(
                 "min_signal_strength must be >= 0; got "
                 f"{self.min_signal_strength!r}"
+            )
+        if self.support_resistance_lookback_days < 0:
+            raise ValueError(
+                "support_resistance_lookback_days must be >= 0; got "
+                f"{self.support_resistance_lookback_days!r}"
             )
         if self.vix_caution_level <= 0 or self.vix_block_level <= 0:
             raise ValueError("VIX levels must be positive")
@@ -212,6 +225,7 @@ class AutonomousTradingConfig:
             "vix_caution_size_multiplier": self.vix_caution_size_multiplier,
             "vix_high_size_multiplier": self.vix_high_size_multiplier,
             "apply_market_regime_size_multiplier": self.apply_market_regime_size_multiplier,
+            "support_resistance_lookback_days": self.support_resistance_lookback_days,
             "exit_target_mode": self.exit_target_mode,
             "take_profit_pct": self.take_profit_pct,
             "adr_lookback_days": self.adr_lookback_days,
@@ -219,6 +233,7 @@ class AutonomousTradingConfig:
             "adr_max_target_pct": self.adr_max_target_pct,
             "adr_min_target_pct": self.adr_min_target_pct,
             "adr_respect_resistance_cap": self.adr_respect_resistance_cap,
+            "require_stop_price_for_assisted_live": self.require_stop_price_for_assisted_live,
             "use_limit_orders_only": self.use_limit_orders_only,
             "emergency_stop_file": self.emergency_stop_file,
             "audit_log_dir": self.audit_log_dir,

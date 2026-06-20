@@ -320,6 +320,9 @@ def _resolve_signal_provider(config: AutonomousTradingConfig | None = None):
     kwargs: Dict[str, Any] = {}
     if config is not None:
         kwargs["adr_lookback_days"] = int(config.adr_lookback_days)
+        kwargs["support_resistance_lookback_days"] = int(
+            config.support_resistance_lookback_days
+        )
     provider = TechnicalAnalysisSignalProvider.try_build(**kwargs)
     if provider is not None:
         return provider
