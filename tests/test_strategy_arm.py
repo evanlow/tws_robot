@@ -42,6 +42,20 @@ def test_strategy_arm_learner_ignores_unrealized_records():
     assert sum(arm.trades for arm in stats.values()) == 1
 
 
+def test_strategy_arm_learner_ignores_nonfinite_r():
+    learner = StrategyArmLearner()
+    records = [
+        _record(1.0),
+        _record(float("nan")),
+        _record(float("inf")),
+        _record(float("-inf")),
+    ]
+
+    stats = learner.build_stats(records)
+
+    assert sum(arm.trades for arm in stats.values()) == 1
+
+
 def test_strategy_arm_learner_ranks_by_ucb_score():
     learner = StrategyArmLearner(exploration=0.5)
     records = [

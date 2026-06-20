@@ -56,6 +56,20 @@ def test_validation_framework_detects_drawdown_failure():
     assert any("max_drawdown" in reason for reason in report.reasons)
 
 
+def test_validation_framework_ignores_nonfinite_r():
+    records = [
+        _record(1.0),
+        _record(float("nan")),
+        _record(float("inf")),
+        _record(float("-inf")),
+    ]
+
+    report = ValidationFramework(ValidationThresholds(min_trades=1)).evaluate(records)
+
+    assert report.trades == 1
+    assert report.total_r == 1.0
+
+
 def test_validation_framework_ignores_unrealized_records():
     records = [_record(1.0), {"outcome": {"realized": False, "realized_r_multiple": 5.0}}]
 
