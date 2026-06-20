@@ -318,6 +318,14 @@ class TradePlanner:
             return None
 
         cap, equity_cap, cash_cap, cash_pct, eq_pct = self._position_cap(deployable_cash, equity)
+        dd_decision = self.sizer.drawdown_governor.evaluate(
+            _positive_float(candidate.extras.get("strategy_drawdown_pct"))
+        )
+        if dd_decision.halted:
+            _add(reasons, f"{candidate.symbol}: drawdown governor halted new entries ({dd_decision.reason})")
+            return None
+        if dd_decision.multiplier < 1.0:
+            cap = cap * dd_decision.multiplier
         max_contracts_by_cash = int(math.floor(cap / per_contract_cash))
         contracts = min(max_contracts_by_cash, option_hint.contracts_available)
         if contracts <= 0:

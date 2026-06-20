@@ -145,8 +145,8 @@ class AutonomousTradingConfig:
         ):
             if value <= 0 or value > 1:
                 raise ValueError(f"{label} must be in (0, 1]")
-        if self.strategy_drawdown_pct < 0:
-            raise ValueError("strategy_drawdown_pct must be >= 0")
+        if self.strategy_drawdown_pct < 0 or self.strategy_drawdown_pct > 1:
+            raise ValueError("strategy_drawdown_pct must be in [0, 1]")
         if self.edge_score_weight < 0:
             raise ValueError("edge_score_weight must be >= 0")
         if self.min_edge_confidence < 0 or self.min_edge_confidence > 1:

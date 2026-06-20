@@ -140,7 +140,8 @@ class PositionSizer:
         caps["drawdown_governor"] = dd_decision.to_dict()
         notes.append(f"drawdown_governor: {dd_decision.reason}")
         if dd_decision.multiplier < 1.0:
-            cap_values["drawdown_cap"] = base_cap_value * dd_decision.multiplier
+            current_cap = min(cap_values.values()) if cap_values else base_cap_value
+            cap_values["drawdown_cap"] = current_cap * dd_decision.multiplier
 
         binding_cap = min(cap_values, key=cap_values.get)
         final_cap = cap_values[binding_cap]
