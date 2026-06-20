@@ -1,16 +1,4 @@
-"""Trade-plan generation for autonomous trading candidates.
-
-Given a selected :class:`CandidateSignal` plus deployable cash and optional
-option-chain hints, decide between:
-
-* ``BUY_SHARES`` — straight long stock with a limit price.
-* ``SELL_CASH_SECURED_PUT`` — sell-to-open an OTM put fully cash-secured by
-  ``strike * 100 * contracts``.
-
-The planner never places an order, never talks to a broker; it only produces a
-structured :class:`TradePlan` that the engine later validates and optionally
-executes.
-"""
+"""Trade-plan generation for autonomous trading candidates."""
 
 from __future__ import annotations
 
@@ -23,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from autonomous.adr_calculator import compute_adr_target_price
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
+from autonomous.execution_quality import ExecutionQualityGuard
 from autonomous.position_sizing import PositionSizer
 
 _OPTION_MULTIPLIER = 100
@@ -79,6 +68,7 @@ class TradePlan:
     adr_pct: Optional[float] = None
     adr_target_fraction: Optional[float] = None
     sizing: Dict[str, Any] = field(default_factory=dict)
+    execution_quality: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -102,11 +92,12 @@ class TradePlan:
             "adr_pct": round(self.adr_pct, 6) if self.adr_pct is not None else None,
             "adr_target_fraction": self.adr_target_fraction,
             "sizing": dict(self.sizing or {}),
+            "execution_quality": dict(self.execution_quality or {}),
         }
 
 
 class TradePlanner:
-    """Translate a selected candidate + deployable cash → a trade plan."""
+    """Translate a selected candidate + deployable cash into a trade plan."""
 
     def __init__(self, config: AutonomousTradingConfig) -> None:
         self.config = config
@@ -126,6 +117,13 @@ class TradePlanner:
             drawdown_governor_enabled=config.drawdown_governor_enabled,
             strategy_drawdown_pct=config.strategy_drawdown_pct,
         )
+        self.execution_guard = ExecutionQualityGuard(
+            enabled=config.execution_quality_guard_enabled,
+            max_spread_pct=config.execution_max_spread_pct,
+            max_slippage_pct=config.execution_max_slippage_pct,
+            max_price_move_pct=config.execution_max_price_move_pct,
+            block_on_missing_quote=config.execution_block_on_missing_quote,
+        )
 
     def plan(
         self,
@@ -139,11 +137,7 @@ class TradePlanner:
             _add(reasons, f"candidate.last_price invalid ({candidate.last_price!r})")
             return None
 
-        if (
-            self.config.prefer_cash_secured_put
-            and self.config.allow_short_put
-            and option_hint is not None
-        ):
+        if self.config.prefer_cash_secured_put and self.config.allow_short_put and option_hint is not None:
             put_plan = self._plan_short_put(candidate, deployable_cash, equity, option_hint, reasons=reasons)
             if put_plan is not None:
                 return put_plan
@@ -154,11 +148,7 @@ class TradePlanner:
         _add(reasons, "config.allow_share_buy=False and no put plan produced")
         return None
 
-    def _position_cap(
-        self,
-        deployable_cash: float,
-        equity: float,
-    ) -> tuple[float, Optional[float], float, float, float]:
+    def _position_cap(self, deployable_cash: float, equity: float) -> tuple[float, Optional[float], float, float, float]:
         cash_pct = self.config.deployable_cash_cap_pct()
         eq_pct = self.config.equity_cap_pct()
         cash_cap = deployable_cash * cash_pct
@@ -183,31 +173,24 @@ class TradePlanner:
 
         cap, equity_cap, cash_cap, cash_pct, eq_pct = self._position_cap(deployable_cash, equity)
         if cap < price:
-            equity_str = (
-                f", equity_cap=${equity_cap:,.2f} (equity ${equity:,.2f} * {eq_pct:.0%})"
-                if equity_cap is not None else ""
-            )
+            equity_str = f", equity_cap=${equity_cap:,.2f} (equity ${equity:,.2f} * {eq_pct:.0%})" if equity_cap is not None else ""
             _add(
                 reasons,
                 f"{candidate.symbol}: position cap ${cap:,.2f} < share price ${price:,.2f} "
-                f"[deployable ${deployable_cash:,.2f} * {cash_pct:.0%} = ${cash_cap:,.2f}"
-                f"{equity_str}] — can't afford 1 share within sizing cap"
+                f"[deployable ${deployable_cash:,.2f} * {cash_pct:.0%} = ${cash_cap:,.2f}{equity_str}] — can't afford 1 share within sizing cap"
             )
             return None
 
         limit_price = round(price, 2)
-        target_price, target_mode, adr_val, adr_pct_val, adr_frac = self._compute_target(candidate, price)
-        stop_price = (
-            round(candidate.support_price * 0.97, 2)
-            if candidate.support_price and candidate.support_price > 0
-            else None
-        )
+        quality = self._execution_quality(candidate, limit_price)
+        if not quality.get("allowed", True):
+            _add(reasons, f"{candidate.symbol}: execution quality rejected — {quality.get('reason')}")
+            return None
 
-        if (
-            self.config.mode == AutonomousMode.ASSISTED_LIVE
-            and self.config.require_stop_price_for_assisted_live
-            and (stop_price is None or stop_price <= 0 or stop_price >= limit_price)
-        ):
+        target_price, target_mode, adr_val, adr_pct_val, adr_frac = self._compute_target(candidate, price)
+        stop_price = round(candidate.support_price * 0.97, 2) if candidate.support_price and candidate.support_price > 0 else None
+
+        if self.config.mode == AutonomousMode.ASSISTED_LIVE and self.config.require_stop_price_for_assisted_live and (stop_price is None or stop_price <= 0 or stop_price >= limit_price):
             _add(reasons, f"{candidate.symbol}: assisted_live requires valid stop_price from support/invalidation level")
             return None
 
@@ -228,8 +211,6 @@ class TradePlanner:
             return None
 
         required_cash = sizing.required_cash
-        sizing_dict = sizing.to_dict()
-
         return TradePlan(
             symbol=candidate.symbol,
             trade_type=TradeType.BUY_SHARES,
@@ -243,15 +224,29 @@ class TradePlanner:
             adr=adr_val,
             adr_pct=adr_pct_val,
             adr_target_fraction=adr_frac,
-            sizing=sizing_dict,
+            sizing=sizing.to_dict(),
+            execution_quality=quality,
             reason=f"{candidate.signal_label} (strength={candidate.strength_score}); buy {quantity} shares at limit {limit_price}",
             risk_notes=[
                 "Limit order only; never market.",
                 f"Sized to <= {self.config.equity_cap_pct():.0%} of equity and <= {self.config.deployable_cash_cap_pct():.0%} of deployable cash.",
                 f"Binding sizing cap: {sizing.binding_cap}.",
-            ] + list(sizing.notes),
+                f"Execution quality: {quality.get('reason')}.",
+            ] + list(sizing.notes) + [f"execution_quality: {w}" for w in quality.get("warnings", [])],
             exit_plan=f"Exit on target_price ({target_mode}) or stop_price; review on next Strong(100) re-evaluation.",
         )
+
+    def _execution_quality(self, candidate: CandidateSignal, limit_price: float) -> Dict[str, Any]:
+        extras = candidate.extras or {}
+        decision = self.execution_guard.evaluate_buy_limit(
+            symbol=candidate.symbol,
+            limit_price=limit_price,
+            reference_price=candidate.last_price,
+            bid=_first(extras, "bid", "quote_bid", "execution_bid"),
+            ask=_first(extras, "ask", "quote_ask", "execution_ask"),
+            last=_first(extras, "last", "quote_last", "execution_last", "current_price"),
+        )
+        return decision.to_dict()
 
     def _compute_target(self, candidate: CandidateSignal, entry_price: float) -> tuple:
         mode = self.config.exit_target_mode
@@ -266,11 +261,7 @@ class TradePlanner:
                     target_fraction=self.config.adr_target_fraction,
                     min_target_pct=self.config.adr_min_target_pct,
                     max_target_pct=self.config.adr_max_target_pct,
-                    resistance_price=(
-                        candidate.resistance_price
-                        if candidate.resistance_price and candidate.resistance_price > entry_price
-                        else None
-                    ),
+                    resistance_price=candidate.resistance_price if candidate.resistance_price and candidate.resistance_price > entry_price else None,
                     respect_resistance_cap=self.config.adr_respect_resistance_cap,
                 )
                 if target is not None and target > entry_price:
@@ -294,14 +285,7 @@ class TradePlanner:
             return (target, "percent_fallback", None, None, None)
         return (None, "none", None, None, None)
 
-    def _plan_short_put(
-        self,
-        candidate: CandidateSignal,
-        deployable_cash: float,
-        equity: float,
-        option_hint: OptionChainHint,
-        reasons: Optional[List[str]] = None,
-    ) -> Optional[TradePlan]:
+    def _plan_short_put(self, candidate: CandidateSignal, deployable_cash: float, equity: float, option_hint: OptionChainHint, reasons: Optional[List[str]] = None) -> Optional[TradePlan]:
         if option_hint.contracts_available <= 0:
             _add(reasons, f"{candidate.symbol}: option_hint.contracts_available = {option_hint.contracts_available} (need > 0)")
             return None
@@ -318,9 +302,7 @@ class TradePlanner:
             return None
 
         cap, equity_cap, cash_cap, cash_pct, eq_pct = self._position_cap(deployable_cash, equity)
-        dd_decision = self.sizer.drawdown_governor.evaluate(
-            _positive_float(candidate.extras.get("strategy_drawdown_pct"))
-        )
+        dd_decision = self.sizer.drawdown_governor.evaluate(_positive_float(candidate.extras.get("strategy_drawdown_pct")))
         if dd_decision.halted:
             _add(reasons, f"{candidate.symbol}: drawdown governor halted new entries ({dd_decision.reason})")
             return None
@@ -330,10 +312,7 @@ class TradePlanner:
         contracts = min(max_contracts_by_cash, option_hint.contracts_available)
         if contracts <= 0:
             equity_str = f", equity ${equity:,.2f} * {eq_pct:.0%} = ${equity_cap:,.2f}" if equity_cap is not None else ""
-            _add(
-                reasons,
-                f"{candidate.symbol}: 0 affordable put contracts — floor(cap ${cap:,.2f} / ${per_contract_cash:,.2f} per contract) = {max_contracts_by_cash} [deployable ${deployable_cash:,.2f} * {cash_pct:.0%} = ${cash_cap:,.2f}{equity_str}]"
-            )
+            _add(reasons, f"{candidate.symbol}: 0 affordable put contracts — floor(cap ${cap:,.2f} / ${per_contract_cash:,.2f} per contract) = {max_contracts_by_cash} [deployable ${deployable_cash:,.2f} * {cash_pct:.0%} = ${cash_cap:,.2f}{equity_str}]")
             return None
 
         limit_price = round(option_hint.midpoint, 2)
@@ -377,3 +356,11 @@ def _int(value: Any, default: int = 0) -> int:
 
 def _dict_or_none(value: Any) -> Optional[Dict[str, Any]]:
     return value if isinstance(value, dict) else None
+
+
+def _first(mapping: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return value
+    return None
