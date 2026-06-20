@@ -15,7 +15,9 @@ from autonomous.execution_quality import ExecutionQualityDecision, ExecutionQual
 from autonomous.feature_builder import FeatureBuilder
 from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDecision
 from autonomous.position_sizing import PositionSizer, SizingDecision
+from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
+from autonomous.validation_framework import ValidationFramework, ValidationReport, ValidationThresholds
 from autonomous.signal_provider import SignalProvider, StaticSignalProvider
 from autonomous.technical_analysis_signal_provider import TechnicalAnalysisSignalProvider
 from autonomous.autonomous_engine import AutonomousTradingEngine, AutonomousDecision, DecisionStatus
@@ -54,9 +56,14 @@ __all__ = [
     "FractionalSizingDecision",
     "PositionSizer",
     "SizingDecision",
+    "StrategyArmLearner",
+    "StrategyArmStats",
     "TradePlan",
     "TradePlanner",
     "TradeType",
+    "ValidationFramework",
+    "ValidationReport",
+    "ValidationThresholds",
     "SignalProvider",
     "StaticSignalProvider",
     "TechnicalAnalysisSignalProvider",
