@@ -33,6 +33,7 @@ from autonomous.autonomous_engine import (
     DecisionStatus,
 )
 from autonomous.audit import AuditLogger
+from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.runner_config import AutonomousRunnerConfig, AutonomousLiveRunnerConfig
 from autonomous.trade_store import AutonomousTrade, TradeStore
 from autonomous.exit_manager import AutonomousExitManager, ExitDecision
@@ -63,6 +64,7 @@ __all__ = [
     "StaticSignalProvider",
     "TechnicalAnalysisSignalProvider",
     "AuditLogger",
+    "TradeEvidenceStore",
     "AutonomousRunnerConfig",
     "AutonomousLiveRunnerConfig",
     "AutonomousTrade",
