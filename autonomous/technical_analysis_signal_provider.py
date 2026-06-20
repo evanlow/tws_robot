@@ -38,27 +38,15 @@ service, missing rows) are converted to ``None`` so the upstream
 :class:`CandidateScanner` simply skips the symbol; **the provider must
 never raise into the scanner loop**.
 
-Known limitation: support / resistance
---------------------------------------
+Support / resistance enrichment
+-------------------------------
 
-The S&P 500 screener service does not yet publish explicit support /
-resistance price levels, so every signal produced here carries
-``support_price = None`` and ``resistance_price = None``.
-
-This is acceptable for the initial paper-trading MVP because:
-
-* ``BUY_SHARES`` planning in :class:`TradePlanner` does not require
-  support/resistance — it sizes off ``last_price`` and the configured
-  ``max_new_position_pct``.
-* :class:`TradePlanner._plan_short_put` deliberately **refuses to plan**
-  a cash-secured short put when ``support_price`` is missing or the
-  candidate strike is above support, rather than guessing.  The planner
-  therefore falls back to ``BUY_SHARES`` (or returns ``None`` when
-  share-buying is disabled) — there is no silent unsafe path.
-
-Once the screener exposes support / resistance, ``_row_to_signal``
-should be updated to forward those fields so cash-secured short-put
-planning can engage automatically.
+When the screener row already publishes ``support_price`` and
+``resistance_price``, this provider forwards them.  Otherwise, qualifying
+signals can be enriched by fetching daily bars and selecting the nearest
+recent low below current price and nearest recent high above current price.
+This enrichment is controlled by ``support_resistance_lookback_days``.  A
+value of 0 disables provider-side enrichment.
 """
 
 from __future__ import annotations
@@ -68,6 +56,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from autonomous.adr_calculator import ADRResult, calculate_adr
 from autonomous.candidate_scanner import CandidateSignal
+from autonomous.technical_levels import compute_support_resistance_levels
 
 logger = logging.getLogger(__name__)
 
@@ -91,26 +80,21 @@ class TechnicalAnalysisSignalProvider:
     refresh_on_first_call:
         When ``True`` (default) the first :meth:`analyze` call triggers a
         fresh scan via ``get_screener_data(refresh=True)``.  Subsequent
-        calls within the same provider instance reuse the cached rows
-        (the scanner iterates the whole universe once per ``run_once``,
-        so we never want to re-trigger a full scan per symbol).  Tests
-        can set this to ``False`` to avoid network I/O.
+        calls within the same provider instance reuse the cached rows.
     rows_loader:
         Optional callable returning ``List[Dict[str, Any]]`` of screener
-        rows.  Provided as an explicit injection point for tests that
-        prefer not to construct a screener-service stub.
+        rows.  Provided as an explicit injection point for tests.
     adr_lookback_days:
         Number of trading days to use for ADR calculation.  Defaults to 0
-        (ADR computation disabled).  Set to a positive integer (e.g. 14) to
-        enable ADR calculation — note that this triggers a
-        :func:`data.fundamentals.fetch_price_history` call for every symbol
-        in the scan universe, which is slow and rate-limit prone for large
-        universes such as the S&P 500.  Only enable when the engine/config
-        explicitly requires ADR-based exit targets.
+        (ADR computation disabled).
+    support_resistance_lookback_days:
+        Number of recent daily bars used to derive support/resistance when
+        the screener row does not already provide them.  Defaults to 0 for
+        direct/test construction; production wiring passes config default 30.
     price_history_fetcher:
         Callable ``(symbol: str, period: str, interval: str) → List[Dict]``
         for retrieving daily bars.  Defaults to
-        :func:`data.fundamentals.fetch_price_history`.
+        :func:`data.fundamentals.fetch_price_history` when enrichment is used.
     """
 
     def __init__(
@@ -119,6 +103,7 @@ class TechnicalAnalysisSignalProvider:
         refresh_on_first_call: bool = True,
         rows_loader: Optional[Callable[[], Any]] = None,
         adr_lookback_days: int = 0,
+        support_resistance_lookback_days: int = 0,
         price_history_fetcher: Optional[Callable[..., List[Dict[str, Any]]]] = None,
     ) -> None:
         if screener_service is None and rows_loader is None:
@@ -129,7 +114,8 @@ class TechnicalAnalysisSignalProvider:
         self._screener_service = screener_service
         self._rows_loader = rows_loader
         self._refresh_on_first_call = refresh_on_first_call
-        self._adr_lookback_days = adr_lookback_days
+        self._adr_lookback_days = int(adr_lookback_days or 0)
+        self._support_resistance_lookback_days = int(support_resistance_lookback_days or 0)
         self._price_history_fetcher = price_history_fetcher
 
         # Lazily-populated symbol → row index.  ``None`` means "not yet
@@ -151,9 +137,7 @@ class TechnicalAnalysisSignalProvider:
         For rows that exist but do not satisfy the strong/rebound rule
         we still return a :class:`CandidateSignal` (with
         ``strength_score=0``) so the engine's ranker records a stable
-        rejection reason in the audit log.  This keeps the dashboard's
-        "rejected candidates" panel informative even when no symbol
-        currently qualifies.
+        rejection reason in the audit log.
         """
         try:
             row = self._lookup_row(symbol)
@@ -175,6 +159,9 @@ class TechnicalAnalysisSignalProvider:
                 symbol,
             )
             return None
+
+        if signal is not None and signal.strength_score >= STRONG_REBOUND_STRENGTH_SCORE:
+            self._enrich_support_resistance(signal)
 
         # Compute ADR during scanning if configured
         if signal is not None and self._adr_lookback_days > 0:
@@ -217,6 +204,53 @@ class TechnicalAnalysisSignalProvider:
                 out[sym] = row
         return out
 
+    def _history_fetcher(self):
+        fetcher = self._price_history_fetcher
+        if fetcher is not None:
+            return fetcher
+        try:
+            from data.fundamentals import fetch_price_history
+            return fetch_price_history
+        except ImportError:
+            return None
+
+    def _enrich_support_resistance(self, signal: CandidateSignal) -> None:
+        if signal.support_price and signal.resistance_price:
+            signal.extras.setdefault("levels_source", "screener_row")
+            return
+        lookback = self._support_resistance_lookback_days
+        if lookback <= 0 or signal.last_price <= 0:
+            return
+        fetcher = self._history_fetcher()
+        if fetcher is None:
+            signal.extras["levels_valid"] = False
+            signal.extras["levels_reason"] = "price history fetcher unavailable"
+            return
+        try:
+            period_days = max(lookback * 2, 30)
+            period = f"{period_days}d" if period_days <= 60 else "3mo"
+            bars = fetcher(signal.symbol, period=period, interval="1d")
+        except Exception:
+            logger.debug("support/resistance price history fetch failed for %s", signal.symbol)
+            signal.extras["levels_valid"] = False
+            signal.extras["levels_reason"] = "price history fetch failed"
+            return
+        levels = compute_support_resistance_levels(
+            daily_bars=bars or [],
+            current_price=signal.last_price,
+            lookback_days=lookback,
+        )
+        if levels.get("support_price") is not None:
+            signal.support_price = levels["support_price"]
+        if levels.get("resistance_price") is not None:
+            signal.resistance_price = levels["resistance_price"]
+        signal.extras["support_source"] = levels.get("support_source")
+        signal.extras["resistance_source"] = levels.get("resistance_source")
+        signal.extras["levels_lookback_days"] = levels.get("lookback_days")
+        signal.extras["levels_bars_used"] = levels.get("bars_used")
+        signal.extras["levels_valid"] = bool(levels.get("valid"))
+        signal.extras["levels_reason"] = levels.get("reason")
+
     def _compute_adr_for_symbol(
         self, symbol: str, last_price: float
     ) -> Optional[ADRResult]:
@@ -227,14 +261,10 @@ class TechnicalAnalysisSignalProvider:
         """
         if last_price <= 0:
             return None
-        fetcher = self._price_history_fetcher
+        fetcher = self._history_fetcher()
         if fetcher is None:
-            try:
-                from data.fundamentals import fetch_price_history
-                fetcher = fetch_price_history
-            except ImportError:
-                logger.debug("Cannot import fetch_price_history for ADR")
-                return None
+            logger.debug("Cannot import fetch_price_history for ADR")
+            return None
         try:
             # Request enough days of history to cover the lookback
             # (add margin for weekends/holidays)
@@ -277,8 +307,7 @@ class TechnicalAnalysisSignalProvider:
         else:
             strength_score = 0
             # Surface the *actual* momentum label so the ranker's
-            # rejection reason ("signal_label 'X' != required 'Confirmed
-            # Rebound'") tells the operator what really happened.
+            # rejection reason tells the operator what really happened.
             signal_label = momentum_label or "No Signal"
 
         reasons = []
@@ -290,6 +319,9 @@ class TechnicalAnalysisSignalProvider:
                 reasons.append(r)
         technical_reason = "; ".join(reasons)
 
+        support_price = _positive_float(row.get("support_price"))
+        resistance_price = _positive_float(row.get("resistance_price"))
+
         return CandidateSignal(
             symbol=symbol.upper(),
             strength_score=strength_score,
@@ -298,15 +330,8 @@ class TechnicalAnalysisSignalProvider:
             sector=row.get("sector") or "",
             last_price=float(row.get("current_price") or 0.0),
             technical_reason=technical_reason,
-            # The screener does not currently expose explicit support /
-            # resistance levels (see module docstring → "Known
-            # limitation: support / resistance").  Leaving these as
-            # ``None`` causes ``TradePlanner._plan_short_put`` to
-            # decline the candidate and fall back to ``BUY_SHARES`` —
-            # the planner never guesses a strike when support is
-            # unknown, so the safety boundary is preserved.
-            support_price=None,
-            resistance_price=None,
+            support_price=support_price,
+            resistance_price=resistance_price,
             volume_ok=True,
             trend_ok=True,
             earnings_date=None,
@@ -318,6 +343,9 @@ class TechnicalAnalysisSignalProvider:
                 "bollinger_status": row.get("bollinger_status"),
                 "rsi_14": row.get("rsi_14"),
                 "rsi_status": row.get("rsi_status"),
+                "support_source": row.get("support_source") if support_price else None,
+                "resistance_source": row.get("resistance_source") if resistance_price else None,
+                "levels_valid": bool(support_price or resistance_price),
             },
         )
 
@@ -342,3 +370,11 @@ class TechnicalAnalysisSignalProvider:
                 "caller should fall back to StaticSignalProvider"
             )
             return None
+
+
+def _positive_float(value: Any) -> Optional[float]:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0 else None
