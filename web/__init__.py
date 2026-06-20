@@ -139,6 +139,12 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_autonomous import bp as api_autonomous_bp
     from web.routes.api_trading_readiness import bp as api_trading_readiness_bp
 
+    # Patch the default autonomous market provider so the existing SPY gate
+    # receives VIX values as an additional regime/sizing safeguard. Operator
+    # overrides via app.config['autonomous_spy_price_provider'] still win.
+    from web.vix_market_data import install_spy_vix_provider
+    install_spy_vix_provider()
+
     api_blueprints = [
         api_connection_bp, api_disclaimer_bp, api_account_bp, api_emergency_bp,
         api_strategies_bp, api_orders_bp, api_events_bp,
