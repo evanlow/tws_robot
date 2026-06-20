@@ -21,6 +21,8 @@ Hard rules baked into the live defaults:
 * ``live_limit_orders_only = True`` — market orders are never used.
 * ``live_require_account_confirmation = True`` — explicit account ID
   confirmation is required before any live order is sent.
+* ``max_deployable_cash_pct = 0.005`` — first live experiments are capped to
+  0.5% of deployable cash unless the operator explicitly overrides it.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+
+
+FIRST_LIVE_EXPERIMENT_MAX_DEPLOYABLE_CASH_PCT = 0.005
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -135,7 +140,9 @@ class AutonomousLiveRunnerConfig:
         Allows repeated live cycles.  Defaults to ``false``.
     ``AUTONOMOUS_MAX_DEPLOYABLE_CASH_PCT``
         Fraction of deployable cash that may be deployed per trade.
-        Default ``0.10`` (10 %).  Must be in ``(0, 1]``.
+        Default ``0.005`` (0.5 %) for first live experiments. Must be in
+        ``(0, 1]``. Operators can explicitly override this only after the
+        first-live checklist is complete.
     ``AUTONOMOUS_MIN_DEPLOYABLE_CASH``
         Minimum deployable-cash balance below which live trading is
         refused.  Default ``1000.0``.
@@ -164,7 +171,7 @@ class AutonomousLiveRunnerConfig:
     live_continuous_enabled: bool = False
 
     # ---- Deployable-cash sizing cap ----------------------------------
-    max_deployable_cash_pct: float = 0.10   # fraction, e.g. 0.10 = 10 %
+    max_deployable_cash_pct: float = FIRST_LIVE_EXPERIMENT_MAX_DEPLOYABLE_CASH_PCT
     min_deployable_cash: float = 1000.0
 
     # ---- Concurrency / frequency limits ------------------------------
@@ -196,7 +203,7 @@ class AutonomousLiveRunnerConfig:
     def __post_init__(self) -> None:
         # max_deployable_cash_pct must be in the range (0, 1].
         # Values above 0 and up to and including 1.0 (100%) are intentionally
-        # allowed; the default of 0.10 (10%) is recommended for safety.
+        # allowed, but the default is deliberately tiny for first live tests.
         if not (0 < self.max_deployable_cash_pct <= 1):
             raise ValueError(
                 "max_deployable_cash_pct must be in (0, 1] (exclusive of 0, "
@@ -255,7 +262,8 @@ class AutonomousLiveRunnerConfig:
                 "AUTONOMOUS_LIVE_CONTINUOUS_ENABLED", False
             ),
             max_deployable_cash_pct=_env_float(
-                "AUTONOMOUS_MAX_DEPLOYABLE_CASH_PCT", 0.10
+                "AUTONOMOUS_MAX_DEPLOYABLE_CASH_PCT",
+                FIRST_LIVE_EXPERIMENT_MAX_DEPLOYABLE_CASH_PCT,
             ),
             min_deployable_cash=_env_float(
                 "AUTONOMOUS_MIN_DEPLOYABLE_CASH", 1000.0
