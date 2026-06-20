@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from autonomous.evidence_store import SCHEMA_VERSION
+
+logger = logging.getLogger(__name__)
 
 
 class OutcomeEvidenceWriter:
@@ -28,7 +33,7 @@ class OutcomeEvidenceWriter:
     ) -> Optional[Path]:
         moment = when or datetime.now(timezone.utc)
         record = dict(outcome_record)
-        record.setdefault("schema_version", 1)
+        record.setdefault("schema_version", SCHEMA_VERSION)
         record.setdefault("evidence_type", "autonomous_outcome")
         record.setdefault("timestamp", moment.isoformat())
         path = self._path_for(moment)
@@ -38,5 +43,6 @@ class OutcomeEvidenceWriter:
                 with path.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps(record, default=str, sort_keys=True) + "\n")
             return path
-        except OSError:
+        except OSError as exc:
+            logger.error("Failed to write outcome evidence log: %s", exc)
             return None

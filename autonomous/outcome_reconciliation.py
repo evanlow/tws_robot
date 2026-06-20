@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
+from autonomous.evidence_store import SCHEMA_VERSION
 from autonomous.trade_store import AutonomousTrade, CLOSED
 
 
@@ -56,6 +57,8 @@ class OutcomeReconciliation:
     partial_fill: bool
     entry_fill: FillSummary
     exit_fill: FillSummary
+    entry_order_id: Optional[int] = None
+    exit_order_id: Optional[int] = None
     notes: List[str] = field(default_factory=list)
 
     def to_outcome_dict(self) -> Dict[str, Any]:
@@ -83,8 +86,14 @@ class OutcomeReconciliation:
 
     def to_evidence_record(self, *, base_record: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         base_record = base_record or {}
+        base_order = base_record.get("order") or {}
+        order_block = dict(base_order)
+        if self.entry_order_id is not None:
+            order_block.setdefault("order_id", self.entry_order_id)
+        if self.exit_order_id is not None:
+            order_block["exit_order_id"] = self.exit_order_id
         return {
-            "schema_version": 1,
+            "schema_version": SCHEMA_VERSION,
             "evidence_type": "autonomous_outcome",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "autonomous_trade_id": self.autonomous_trade_id,
@@ -92,7 +101,7 @@ class OutcomeReconciliation:
             "strategy_bucket": base_record.get("strategy_bucket") or {},
             "planned_risk": base_record.get("planned_risk") or {},
             "trade_plan": base_record.get("trade_plan") or {},
-            "order": base_record.get("order") or {},
+            "order": order_block,
             "outcome": self.to_outcome_dict(),
         }
 
@@ -134,8 +143,9 @@ class OutcomeReconciler:
         planned_risk = (base_evidence_record or {}).get("planned_risk") or {}
         risk_per_share = _positive_float(planned_risk.get("risk_per_share"))
         realized_r = None
-        if risk_per_share is not None and risk_per_share > 0:
-            realized_r = (exit_fill.avg_price - entry_fill.avg_price) / risk_per_share
+        matched_qty = min(entry_fill.quantity, exit_fill.quantity)
+        if risk_per_share is not None and risk_per_share > 0 and matched_qty > 0:
+            realized_r = realized_pnl / (risk_per_share * matched_qty)
 
         entry_slippage = None
         entry_slippage_pct = None
@@ -159,7 +169,7 @@ class OutcomeReconciler:
             autonomous_trade_id=trade.autonomous_trade_id,
             symbol=trade.symbol,
             realized=True,
-            quantity=min(entry_fill.quantity, exit_fill.quantity),
+            quantity=matched_qty,
             entry_price=entry_fill.avg_price,
             exit_price=exit_fill.avg_price,
             realized_pnl=realized_pnl,
@@ -172,6 +182,8 @@ class OutcomeReconciler:
             partial_fill=partial,
             entry_fill=entry_fill,
             exit_fill=exit_fill,
+            entry_order_id=trade.entry_order_id,
+            exit_order_id=trade.exit_order_id,
             notes=notes,
         )
 
@@ -181,10 +193,10 @@ class OutcomeReconciler:
         *,
         evidence_records: Optional[Iterable[Dict[str, Any]]] = None,
     ) -> List[OutcomeReconciliation]:
-        evidence_by_symbol = _latest_evidence_by_symbol(evidence_records or [])
+        evidence_by_order = _evidence_by_order_id(evidence_records or [])
         out: List[OutcomeReconciliation] = []
         for trade in trades:
-            base = evidence_by_symbol.get(trade.symbol)
+            base = evidence_by_order.get(trade.entry_order_id)
             result = self.reconcile_trade(trade, base_evidence_record=base)
             if result is not None:
                 out.append(result)
@@ -244,11 +256,34 @@ def aggregate_fills(
 
 
 def _latest_evidence_by_symbol(records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Index evidence records by symbol, keeping the first (newest) record per symbol.
+
+    Assumes *records* are ordered newest-first (as returned by
+    ``TradeEvidenceStore.recent()``).
+    """
     out: Dict[str, Dict[str, Any]] = {}
     for record in records:
         symbol = record.get("symbol")
         if symbol:
-            out[str(symbol)] = record
+            out.setdefault(str(symbol), record)
+    return out
+
+
+def _evidence_by_order_id(records: Iterable[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+    """Index evidence records by their entry order_id, keeping the first (newest) match.
+
+    Assumes *records* are ordered newest-first (as returned by
+    ``TradeEvidenceStore.recent()``).
+    """
+    out: Dict[int, Dict[str, Any]] = {}
+    for record in records:
+        order_id = (record.get("order") or {}).get("order_id")
+        if order_id is not None:
+            try:
+                key = int(order_id)
+            except (TypeError, ValueError):
+                continue
+            out.setdefault(key, record)
     return out
 
 
