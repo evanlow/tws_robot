@@ -8,8 +8,10 @@ not automatically change live execution.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
+
+from autonomous.evidence_utils import _realized_r
 
 
 @dataclass
@@ -22,7 +24,6 @@ class StrategyArmStats:
     losses: int = 0
     total_r: float = 0.0
     sum_sq_r: float = 0.0
-    r_values: List[float] = field(default_factory=list)
 
     def add_r(self, r_multiple: float) -> None:
         self.trades += 1
@@ -32,7 +33,6 @@ class StrategyArmStats:
             self.losses += 1
         self.total_r += r_multiple
         self.sum_sq_r += r_multiple * r_multiple
-        self.r_values.append(r_multiple)
 
     @property
     def avg_r(self) -> float:
@@ -109,14 +109,3 @@ class StrategyArmLearner:
         ]
         ranked.sort(key=lambda row: row.get("ucb_score", row.get("avg_r", 0.0)), reverse=True)
         return ranked
-
-
-def _realized_r(record: Dict[str, Any]) -> Optional[float]:
-    outcome = record.get("outcome") or {}
-    if not outcome.get("realized"):
-        return None
-    value = outcome.get("realized_r_multiple")
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None

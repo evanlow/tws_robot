@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
+from autonomous.evidence_utils import _realized_r
+
 
 @dataclass
 class ValidationThresholds:
@@ -82,8 +84,6 @@ class ValidationFramework:
             reasons.append(f"max_drawdown_r {max_dd:.4f} > max {t.max_drawdown_r:.4f}")
 
         passed = not reasons
-        if passed:
-            reasons.append("validation thresholds passed")
 
         return ValidationReport(
             trades=trades,
@@ -96,16 +96,6 @@ class ValidationFramework:
             passed=passed,
             reasons=reasons,
         )
-
-
-def _realized_r(record: Dict[str, Any]) -> Optional[float]:
-    outcome = record.get("outcome") or {}
-    if not outcome.get("realized"):
-        return None
-    try:
-        return float(outcome.get("realized_r_multiple"))
-    except (TypeError, ValueError):
-        return None
 
 
 def _max_drawdown(values: List[float]) -> float:
