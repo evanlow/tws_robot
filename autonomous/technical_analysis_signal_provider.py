@@ -157,9 +157,9 @@ class TechnicalAnalysisSignalProvider:
             current_price=signal.last_price,
             lookback_days=lookback,
         )
-        if levels.get("support_price") is not None:
+        if signal.support_price is None and levels.get("support_price") is not None:
             signal.support_price = levels["support_price"]
-        if levels.get("resistance_price") is not None:
+        if signal.resistance_price is None and levels.get("resistance_price") is not None:
             signal.resistance_price = levels["resistance_price"]
         signal.extras["support_source"] = levels.get("support_source")
         signal.extras["resistance_source"] = levels.get("resistance_source")

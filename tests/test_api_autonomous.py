@@ -401,6 +401,29 @@ class TestADREnvConfig:
             _build_engine()
 
         assert captured["adr_lookback_days"] == 20
+        assert captured["support_resistance_lookback_days"] == 30
+
+    def test_support_resistance_lookback_passed_to_production_signal_provider(
+        self, monkeypatch, app
+    ):
+        captured = {}
+
+        def fake_try_build(cls, **kwargs):
+            captured.update(kwargs)
+            return StaticSignalProvider()
+
+        monkeypatch.setattr(
+            "web.routes.api_autonomous.TechnicalAnalysisSignalProvider.try_build",
+            classmethod(fake_try_build),
+        )
+
+        from web.routes.api_autonomous import _resolve_signal_provider
+        with app.app_context():
+            _resolve_signal_provider(
+                AutonomousTradingConfig(support_resistance_lookback_days=0)
+            )
+
+        assert captured["support_resistance_lookback_days"] == 0
 
     def test_invalid_env_vars_use_defaults(self, monkeypatch, app):
         """Invalid env values should not crash — defaults apply."""

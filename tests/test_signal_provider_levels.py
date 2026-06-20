@@ -79,3 +79,21 @@ def test_provider_prefers_levels_from_screener_row_without_fetching():
     assert signal.resistance_price == 112.0
     assert signal.extras["levels_source"] == "screener_row"
     assert calls["count"] == 0
+
+
+def test_provider_preserves_existing_screener_level_when_only_other_side_missing():
+    row = _row("AAA")
+    row["support_price"] = 98.5
+
+    provider = TechnicalAnalysisSignalProvider(
+        screener_service=_StubScreener([row]),
+        refresh_on_first_call=False,
+        support_resistance_lookback_days=6,
+        price_history_fetcher=_bars,
+    )
+
+    signal = provider.analyze("AAA")
+
+    assert signal is not None
+    assert signal.support_price == 98.5
+    assert signal.resistance_price == 107.0

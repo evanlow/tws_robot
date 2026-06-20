@@ -23,8 +23,9 @@ Hard rules baked into the live defaults:
   confirmation is required before any live order is sent.
 * ``max_deployable_cash_pct = 0.005`` — first live experiments are capped to
   0.5% of deployable cash unless the operator explicitly overrides it.
-* ``require_plan_stop_for_live = True`` — live entries require a planner-derived
-  stop/invalidation level rather than a generic fallback stop.
+* ``require_plan_stop_for_live = True`` — planner-derived stop/invalidation
+  levels are preferred for live entries, but the runner still falls back to the
+  generic stop when a plan omits ``stop_price``.
 """
 
 from __future__ import annotations
@@ -162,14 +163,14 @@ class AutonomousLiveRunnerConfig:
         When ``true``, the full live lifecycle runs but no order is sent
         to TWS.  Defaults to ``false``.
     ``AUTONOMOUS_REQUIRE_PLAN_STOP_FOR_LIVE``
-        When ``true`` (default), actual live and live dry-run entries require
-        the planner to provide a valid ``stop_price``.  Set to ``false`` only
-        to restore the older generic fallback stop behaviour.
+        When ``true`` (default), actual live and live dry-run entries prefer
+        a planner-provided ``stop_price``.  If the plan omits it, the runner
+        still falls back to the generic stop derived from
+        ``AUTONOMOUS_DEFAULT_STOP_PCT``.
     ``AUTONOMOUS_DEFAULT_STOP_PCT``
         Fallback stop-loss distance below the entry limit price used
-        when ``require_plan_stop_for_live`` is ``false`` and the planner does
-        not supply ``stop_price``.  Default ``0.05`` (5 %).  Must be in
-        ``(0, 1)``.
+        when the planner does not supply ``stop_price``.  Default ``0.05``
+        (5 %).  Must be in ``(0, 1)``.
     """
 
     # ---- Master live-mode switches ------------------------------------
@@ -194,7 +195,7 @@ class AutonomousLiveRunnerConfig:
 
     # ---- Bracket exit defaults ---------------------------------------
     # Fallback stop-loss distance below entry when the planner does not
-    # supply a stop_price.  Used only when require_plan_stop_for_live=False.
+    # supply a stop_price.
     default_stop_pct: float = 0.05
 
     # ---- Shared with paper runner ------------------------------------
