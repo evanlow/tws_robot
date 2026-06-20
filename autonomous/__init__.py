@@ -14,6 +14,12 @@ from autonomous.edge_estimator import EdgeEstimate, RuleBasedEdgeEstimator
 from autonomous.execution_quality import ExecutionQualityDecision, ExecutionQualityGuard
 from autonomous.feature_builder import FeatureBuilder
 from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDecision
+from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
+from autonomous.outcome_reconciliation import (
+    FillSummary,
+    OutcomeReconciliation,
+    OutcomeReconciler,
+)
 from autonomous.position_sizing import PositionSizer, SizingDecision
 from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
@@ -52,8 +58,12 @@ __all__ = [
     "ExecutionQualityDecision",
     "ExecutionQualityGuard",
     "FeatureBuilder",
+    "FillSummary",
     "FractionalEdgeSizer",
     "FractionalSizingDecision",
+    "OutcomeEvidenceWriter",
+    "OutcomeReconciliation",
+    "OutcomeReconciler",
     "PositionSizer",
     "SizingDecision",
     "StrategyArmLearner",
