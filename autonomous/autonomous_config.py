@@ -9,6 +9,7 @@ This config object holds **all** safety thresholds and feature flags for
 * Only one trade per day is allowed.
 * Only limit orders are permitted.
 * Assisted-live trade plans require a valid stop/invalidation level.
+* Basket planning is disabled by default and must be explicitly enabled.
 * The market-regime guard requires a bullish SPY backdrop and can reduce or
   block exposure when VIX indicates volatility stress.
 
@@ -60,6 +61,13 @@ class AutonomousTradingConfig:
     max_position_deployable_cash_pct: Optional[float] = None
     max_position_equity_pct: Optional[float] = None
     min_deployable_cash: float = 1000.0
+
+    # ---- Basket planning -----------------------------------------------
+    basket_enabled: bool = False
+    basket_max_size: int = 3
+    basket_total_deployable_cash_pct: float = 0.005
+    basket_single_position_deployable_cash_pct: float = 0.002
+    basket_max_same_sector_positions: int = 1
 
     # ---- Signal filter ------------------------------------------------
     min_signal_strength: int = 100
@@ -149,6 +157,21 @@ class AutonomousTradingConfig:
                 "min_deployable_cash must be >= 0; got "
                 f"{self.min_deployable_cash!r}"
             )
+        if self.basket_max_size < 1:
+            raise ValueError("basket_max_size must be >= 1")
+        if self.basket_max_same_sector_positions < 1:
+            raise ValueError("basket_max_same_sector_positions must be >= 1")
+        for label, value in (
+            ("basket_total_deployable_cash_pct", self.basket_total_deployable_cash_pct),
+            ("basket_single_position_deployable_cash_pct", self.basket_single_position_deployable_cash_pct),
+        ):
+            if value <= 0 or value > 1:
+                raise ValueError(f"{label} must be in (0, 1]; got {value!r}")
+        if self.basket_single_position_deployable_cash_pct > self.basket_total_deployable_cash_pct:
+            raise ValueError(
+                "basket_single_position_deployable_cash_pct must be <= "
+                "basket_total_deployable_cash_pct"
+            )
         if self.min_signal_strength < 0:
             raise ValueError(
                 "min_signal_strength must be >= 0; got "
@@ -209,6 +232,11 @@ class AutonomousTradingConfig:
             "max_position_deployable_cash_pct": self.max_position_deployable_cash_pct,
             "max_position_equity_pct": self.max_position_equity_pct,
             "min_deployable_cash": self.min_deployable_cash,
+            "basket_enabled": self.basket_enabled,
+            "basket_max_size": self.basket_max_size,
+            "basket_total_deployable_cash_pct": self.basket_total_deployable_cash_pct,
+            "basket_single_position_deployable_cash_pct": self.basket_single_position_deployable_cash_pct,
+            "basket_max_same_sector_positions": self.basket_max_same_sector_positions,
             "min_signal_strength": self.min_signal_strength,
             "required_signal_label": self.required_signal_label,
             "stock_universe": self.stock_universe,
