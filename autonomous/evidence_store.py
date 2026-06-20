@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import threading
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -129,7 +130,7 @@ class TradeEvidenceStore:
             "risk_check": decision.get("risk_check"),
             "order": {
                 "order_id": decision.get("order_id"),
-                "status": decision.get("status"),
+                "status": None,
             },
             "candidate_counts": {
                 "shortlist": len(decision.get("shortlist") or []),
@@ -163,8 +164,7 @@ class TradeEvidenceStore:
             with self._lock:
                 os.makedirs(self._log_dir, exist_ok=True)
                 with path.open("a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(record, default=str, sort_keys=True))
-                    fh.write("\n")
+                    fh.write(json.dumps(record, default=str, sort_keys=True) + "\n")
             return path
         except OSError as exc:  # pragma: no cover - defensive
             logger.error("Failed to write autonomous evidence log: %s", exc)
@@ -187,19 +187,22 @@ class TradeEvidenceStore:
             reverse=True,
         )
         for path in paths:
+            remaining = limit - len(records)
+            if remaining <= 0:
+                break
             try:
                 with self._lock:
-                    lines = path.read_text(encoding="utf-8").splitlines()
+                    file_records: deque = deque(maxlen=remaining)
+                    with path.open("r", encoding="utf-8") as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                file_records.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                continue
             except OSError:
                 continue
-            for line in reversed(lines):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-                if len(records) >= limit:
-                    return records
+            records.extend(reversed(file_records))
         return records

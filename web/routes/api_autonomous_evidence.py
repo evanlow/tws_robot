@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
+from autonomous import AutonomousTradingConfig
 from autonomous.evidence_store import TradeEvidenceStore
-from web.routes.api_autonomous import EMERGENCY_STOP_FILE
 
 bp = Blueprint(
     "api_autonomous_evidence",
@@ -15,11 +15,11 @@ bp = Blueprint(
 
 
 def _evidence_store() -> TradeEvidenceStore:
-    # Use the same default root as the autonomous engine/audit logger.  The
-    # emergency-stop path is anchored in the repository root, so parent is a
-    # stable fallback when the process working directory changes.
-    default_log_dir = str(EMERGENCY_STOP_FILE.parent / "logs")
-    return TradeEvidenceStore(default_log_dir)
+    log_dir = (
+        current_app.config.get("autonomous_audit_log_dir")
+        or AutonomousTradingConfig().audit_log_dir
+    )
+    return TradeEvidenceStore(log_dir)
 
 
 @bp.route("", methods=["GET"])
