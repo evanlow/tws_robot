@@ -20,12 +20,6 @@ def _float(value: Any) -> Optional[float]:
     return out
 
 
-def _pct(numerator: Optional[float], denominator: Optional[float]) -> Optional[float]:
-    if numerator is None or denominator is None or denominator <= 0:
-        return None
-    return numerator / denominator
-
-
 class FeatureBuilder:
     """Build candidate-level features for expected-edge estimation."""
 
@@ -83,7 +77,11 @@ class FeatureBuilder:
             "rsi_14": _float(extras.get("rsi_14")),
             "rsi_status": extras.get("rsi_status"),
             "adr_pct": _float(extras.get("adr_pct")),
-            "levels_valid": bool(extras.get("levels_valid")) or bool(support or resistance),
+            "levels_valid": (
+                bool(support or resistance)
+                if extras.get("levels_valid") is None
+                else bool(extras.get("levels_valid"))
+            ),
             "market_classification": market_gate.get("classification"),
             "spy_bullish": market_gate.get("bullish"),
             "vix_available": vix.get("available"),

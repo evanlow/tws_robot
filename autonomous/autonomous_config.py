@@ -125,13 +125,13 @@ class AutonomousTradingConfig:
             self.mode = AutonomousMode(self.mode)
 
         if self.max_new_position_pct <= 0 or self.max_new_position_pct > 1:
-            raise ValueError("max_new_position_pct must be in (0, 1]")
+            raise ValueError(f"max_new_position_pct must be in (0, 1], got {self.max_new_position_pct}")
         for label, value in (
             ("max_position_deployable_cash_pct", self.max_position_deployable_cash_pct),
             ("max_position_equity_pct", self.max_position_equity_pct),
         ):
             if value is not None and (value <= 0 or value > 1):
-                raise ValueError(f"{label} must be in (0, 1]")
+                raise ValueError(f"{label} must be in (0, 1], got {value}")
         if self.max_trades_per_day < 0:
             raise ValueError("max_trades_per_day must be >= 0")
         if self.min_deployable_cash < 0:

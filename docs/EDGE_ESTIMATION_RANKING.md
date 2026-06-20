@@ -45,12 +45,13 @@ step until enough realized trade evidence exists.
 
 ### Candidate ranking
 
-`CandidateRanker` now attaches:
+When `edge_ranking_enabled=True`, `CandidateRanker` attaches:
 
-- `features`
-- `edge_estimate`
+- `features` (populated feature dict from `FeatureBuilder`)
+- `edge_estimate` (result from `RuleBasedEdgeEstimator`)
 
-and, when `edge_ranking_enabled=True`, adds expected-R contribution to the score:
+Otherwise `features` stays as an empty dict and `edge_estimate` is `None`.
+When enabled, expected-R contributes to the score:
 
 ```text
 score = base_score + expected_r * edge_score_weight
