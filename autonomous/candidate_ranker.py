@@ -40,9 +40,7 @@ class RankedCandidate:
             "score": round(self.score, 6),
             "reasons": list(self.reasons),
             "features": dict(self.features),
-            "edge_estimate": (
-                self.edge_estimate.to_dict() if self.edge_estimate is not None else None
-            ),
+            "edge_estimate": self.edge_estimate.to_dict() if self.edge_estimate is not None else None,
         }
 
 
@@ -141,14 +139,16 @@ class CandidateRanker:
                 features = {}
 
             if edge_estimate is not None:
+                candidate.extras["features"] = dict(features)
+                candidate.extras["edge_estimate"] = edge_estimate.to_dict()
+                # Later evidence calibration can set this value.  Keep an
+                # explicit zero so the fractional sizing overlay knows that
+                # bootstrap estimates are not yet evidence-backed.
+                candidate.extras.setdefault("edge_observed_trades", 0)
                 if edge_estimate.expected_r < self.config.min_expected_r:
-                    return None, (
-                        f"expected_r {edge_estimate.expected_r:.4f} < min {self.config.min_expected_r:.4f}"
-                    )
+                    return None, f"expected_r {edge_estimate.expected_r:.4f} < min {self.config.min_expected_r:.4f}"
                 if edge_estimate.confidence < self.config.min_edge_confidence:
-                    return None, (
-                        f"edge_confidence {edge_estimate.confidence:.4f} < min {self.config.min_edge_confidence:.4f}"
-                    )
+                    return None, f"edge_confidence {edge_estimate.confidence:.4f} < min {self.config.min_edge_confidence:.4f}"
                 edge_component = edge_estimate.expected_r * self.config.edge_score_weight
                 score = base_score + edge_component
                 reasons.append(f"expected_r={edge_estimate.expected_r:.4f}")
@@ -196,10 +196,7 @@ class CandidateRanker:
             if reason is not None:
                 rejected.append({"symbol": candidate.symbol, "reason": reason})
                 continue
-            ranked_candidate, edge_rejection = self._ranked_candidate(
-                candidate,
-                market_gate=market_gate,
-            )
+            ranked_candidate, edge_rejection = self._ranked_candidate(candidate, market_gate=market_gate)
             if edge_rejection is not None:
                 rejected.append({"symbol": candidate.symbol, "reason": edge_rejection})
                 continue
