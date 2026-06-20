@@ -55,6 +55,13 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.auth import init_auth
     init_auth(app)
 
+    # ---- Runtime safety guards ----
+    # The live dry-run path intentionally avoids attaching a live TWS adapter;
+    # install a reconciliation guard so rehearsal remains order-free but does
+    # not fail before returning a DRY_RUN result.
+    from execution.live_dry_run_guard import install_live_dry_run_reconciliation_guard
+    install_live_dry_run_reconciliation_guard()
+
     # Singleton service manager — shared across all routes
     from web.services import ServiceManager
     if "services" not in app.config:
@@ -130,6 +137,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_sti_screener import bp as api_sti_screener_bp
     from web.routes.api_hsi_screener import bp as api_hsi_screener_bp
     from web.routes.api_autonomous import bp as api_autonomous_bp
+    from web.routes.api_trading_readiness import bp as api_trading_readiness_bp
 
     api_blueprints = [
         api_connection_bp, api_disclaimer_bp, api_account_bp, api_emergency_bp,
@@ -138,6 +146,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
         api_portfolio_analysis_bp, api_account_intelligence_bp,
         api_market_events_bp, api_stock_analysis_bp, api_sp500_screener_bp,
         api_sti_screener_bp, api_hsi_screener_bp, api_autonomous_bp,
+        api_trading_readiness_bp,
     ]
     for api_bp in api_blueprints:
         app.register_blueprint(api_bp)
