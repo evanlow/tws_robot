@@ -101,3 +101,40 @@ def test_engine_keeps_legacy_spy_only_provider_working(tmp_path):
     assert decision.status == DecisionStatus.RECOMMENDED
     assert decision.market_gate["vix"]["available"] is False
     assert decision.market_gate["trade_allowed"] is True
+
+
+def test_engine_rejects_when_zero_size_multiplier_is_returned(tmp_path):
+    """A gate with trade_allowed=True but size_multiplier=0.0 must not place a full-size trade.
+
+    When a provider (e.g. a legacy or custom one) returns size_multiplier=0.0
+    for a regime that nominally allows trading, the engine should apply the
+    multiplier (0.0 * deployable_cash = 0), fail the min_deployable_cash check,
+    and return NO_DEPLOYABLE_CASH instead of executing at full size.
+    """
+    config = AutonomousTradingConfig(
+        mode=AutonomousMode.RECOMMEND_ONLY,
+        audit_log_dir=str(tmp_path),
+        apply_market_regime_size_multiplier=True,
+    )
+    engine = _engine(
+        market_payload={"open": 500.0, "current": 505.0},
+        config=config,
+    )
+
+    # Inject a gate that says trading is allowed but requests zero position size.
+    engine._check_spy_gate = lambda: {
+        "symbol": "SPY",
+        "open": 500.0,
+        "current": 505.0,
+        "bullish": True,
+        "trade_allowed": True,
+        "size_multiplier": 0.0,
+        "classification": "Bullish / Volatility Caution",
+        "reasons": [],
+        "warnings": ["zero size multiplier injected by test"],
+        "vix": {"available": False, "guard_enabled": True},
+    }
+
+    decision = engine.run_once()
+
+    assert decision.status == DecisionStatus.NO_DEPLOYABLE_CASH

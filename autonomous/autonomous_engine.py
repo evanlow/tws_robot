@@ -339,10 +339,11 @@ class AutonomousTradingEngine:
                 )
                 return self._emit(decision)
 
-            size_multiplier = float(spy_gate.get("size_multiplier") or 1.0)
+            _raw_mult = spy_gate.get("size_multiplier")
+            size_multiplier = float(_raw_mult) if _raw_mult is not None else 1.0
             if (
                 self.config.apply_market_regime_size_multiplier
-                and 0 < size_multiplier < 1.0
+                and size_multiplier < 1.0
             ):
                 original_deployable_cash = decision.deployable_cash
                 decision.deployable_cash = original_deployable_cash * size_multiplier

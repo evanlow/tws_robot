@@ -58,3 +58,39 @@ def test_market_regime_can_fail_closed_when_vix_missing():
     assert gate["trade_allowed"] is False
     assert gate["vix"]["level_regime"] == "unavailable"
     assert "VIX data unavailable" in gate["reasons"]
+
+
+def test_market_regime_applies_vix_block_with_current_only_no_open():
+    """VIX absolute-level block fires even when vix_open is absent."""
+    gate = evaluate_market_regime(
+        {
+            "open": 500.0,
+            "current": 505.0,
+            "vix_current": 35.0,
+            # vix_open intentionally omitted
+        }
+    )
+
+    assert gate["trade_allowed"] is False
+    assert gate["vix"]["available"] is True
+    assert gate["vix"]["level_regime"] == "block"
+    assert gate["vix"]["direction_regime"] == "unknown"
+    assert any("block level" in reason for reason in gate["reasons"])
+
+
+def test_market_regime_applies_vix_caution_with_current_only_no_open():
+    """VIX caution-level size reduction fires even when vix_open is absent."""
+    gate = evaluate_market_regime(
+        {
+            "open": 500.0,
+            "current": 505.0,
+            "vix_current": 22.0,
+            # vix_open intentionally omitted
+        }
+    )
+
+    assert gate["trade_allowed"] is True
+    assert gate["vix"]["available"] is True
+    assert gate["vix"]["level_regime"] == "caution"
+    assert gate["vix"]["direction_regime"] == "unknown"
+    assert gate["size_multiplier"] < 1.0

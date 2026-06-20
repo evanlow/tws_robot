@@ -71,8 +71,8 @@ def evaluate_market_regime(
         payload,
         ("vix_current", "vix_last", "vix_last_price"),
     )
-    vix_change_pct = _pct_change(vix_open, vix_current)
-    vix_available = vix_open > 0 and vix_current > 0
+    vix_available = vix_current > 0
+    vix_change_pct = _pct_change(vix_open, vix_current) if vix_open > 0 else None
 
     reasons = []
     warnings = []
