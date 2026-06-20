@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _strategy_bucket(decision: Dict[str, Any]) -> Dict[str, Any]:

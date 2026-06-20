@@ -19,6 +19,8 @@ See ``autonomous.autonomous_engine.AutonomousTradingEngine`` for the entry
 point.
 """
 
+import logging as _logging
+
 from autonomous.autonomous_config import AutonomousTradingConfig, AutonomousMode
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.candidate_ranker import CandidateRanker
@@ -54,7 +56,9 @@ from autonomous.autonomous_live_runner import (
 try:  # pragma: no cover - import-time integration shim
     import autonomous.live_basket_patch  # noqa: F401
 except Exception:
-    pass
+    _logging.getLogger(__name__).exception(
+        "live_basket_patch import failed; basket live execution will be unavailable"
+    )
 
 __all__ = [
     "AutonomousTradingConfig",

@@ -36,14 +36,15 @@ logger = logging.getLogger(__name__)
 
 def _execute_one_live_plan(self: AutonomousLiveRunner, decision, plan: Dict[str, Any], quantity: int, gates, deployable_cash: float, max_trade_value: float):
     symbol = str(plan.get("symbol") or "")
+    trade_type = plan.get("trade_type")
+    if trade_type != TradeType.BUY_SHARES.value:
+        return None, None, f"{symbol}: basket leg trade_type {trade_type!r} is not BUY_SHARES; only BUY_SHARES is supported"
     limit_price = float(plan.get("limit_price") or 0.0)
     plan_target_price = _as_float(plan.get("target_price"))
     plan_stop_price = _as_float(plan.get("stop_price"))
     bracket_notes: List[str] = []
 
     if plan_stop_price is None or plan_stop_price <= 0:
-        if getattr(self._config, "require_plan_stop_for_live", True):
-            return None, None, f"{symbol}: live basket leg has no valid planner stop_price"
         synthesized_stop = round(limit_price * (1.0 - self._config.default_stop_pct), 2)
         if synthesized_stop > 0 and synthesized_stop < limit_price:
             bracket_notes.append(

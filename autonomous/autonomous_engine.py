@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from autonomous.audit import AuditLogger
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
-from autonomous.basket_planner import BasketPlan, BasketPlanner
+from autonomous.basket_planner import BasketPlanner
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.evidence_store import TradeEvidenceStore
