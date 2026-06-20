@@ -3,6 +3,7 @@ import json
 from autonomous import AutonomousMode, AutonomousTradingConfig
 from autonomous.autonomous_engine import AutonomousTradingEngine, DecisionStatus
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
+from autonomous.evidence_store import SCHEMA_VERSION
 from data.cash_availability import CashAvailabilityAnalyzer
 
 
@@ -65,7 +66,7 @@ def test_engine_writes_evidence_record_for_recommended_trade(tmp_path):
     evidence_files = list(tmp_path.glob("autonomous_evidence_*.jsonl"))
     assert evidence_files
     record = json.loads(evidence_files[0].read_text(encoding="utf-8").strip())
-    assert record["schema_version"] == 1
+    assert record["schema_version"] == SCHEMA_VERSION
     assert record["status"] == "recommended"
     assert record["symbol"] == "AAA"
     assert record["strategy_bucket"]["quality_label"] == "Strong"
@@ -97,5 +98,5 @@ def test_engine_writes_evidence_record_for_no_trade(tmp_path):
     record = json.loads(evidence_files[0].read_text(encoding="utf-8").strip())
     assert record["status"] == "market_not_suitable"
     assert record["symbol"] is None
-    assert record["candidate_counts"] == {"shortlist": 0, "rejected": 0}
+    assert record["candidate_counts"] == {"shortlist": 0, "rejected": 0, "basket_legs": 0}
     assert record["market_gate"]["classification"] == "Bearish / Not Suitable"

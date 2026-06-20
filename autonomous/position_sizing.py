@@ -71,14 +71,16 @@ class PositionSizer:
         cap_values = {"cash_equity_cap": max(0.0, base_cap_value)}
 
         if self.risk_per_trade_sizing_enabled:
-            risk_per_share = None
-            if stop_price is not None and stop_price > 0 and entry_price > stop_price:
+            if stop_price is not None and stop_price > 0 and entry_price > stop_price and equity > 0:
                 risk_per_share = entry_price - stop_price
                 max_risk_dollars = max(0.0, equity * self.max_risk_per_trade_equity_pct)
                 risk_cap_value = math.floor(max_risk_dollars / risk_per_share) * entry_price
                 cap_values["risk_per_trade_cap"] = max(0.0, risk_cap_value)
                 caps["risk_per_share"] = round(risk_per_share, 4)
                 caps["max_risk_dollars"] = round(max_risk_dollars, 2)
+            elif stop_price is not None and stop_price > 0 and entry_price > stop_price:
+                notes.append("risk_per_trade sizing skipped: equity unavailable")
+                caps["risk_per_trade_skipped"] = True
             else:
                 notes.append("risk_per_trade sizing skipped: no valid stop_price")
                 caps["risk_per_trade_skipped"] = True
