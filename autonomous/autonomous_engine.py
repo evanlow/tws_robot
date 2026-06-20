@@ -22,6 +22,8 @@ Safety invariants:
 * Cash availability is always computed via
   ``CashAvailabilityAnalyzer.analyze`` — raw broker cash is never used.
 * Every run writes one JSONL audit-log entry, including rejected runs.
+* Every run also writes one schema-versioned evidence record for future
+  edge estimation, basket construction, and sizing intelligence.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from autonomous.audit import AuditLogger
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
+from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.market_regime import evaluate_market_regime
 from autonomous.trade_planner import OptionChainHint, TradePlan, TradePlanner, TradeType
 
@@ -151,6 +154,9 @@ class AutonomousTradingEngine:
     audit_logger:
         Optional :class:`AuditLogger`.  Defaults to one rooted at
         ``config.audit_log_dir``.
+    evidence_store:
+        Optional :class:`TradeEvidenceStore`.  Defaults to one rooted at
+        ``config.audit_log_dir`` so audit and evidence files rotate together.
     """
 
     def __init__(
@@ -166,6 +172,7 @@ class AutonomousTradingEngine:
         option_hint_provider: Optional[OptionHintProvider] = None,
         spy_price_provider: Optional[SpyPriceProvider] = None,
         audit_logger: Optional[AuditLogger] = None,
+        evidence_store: Optional[TradeEvidenceStore] = None,
     ) -> None:
         self.config = config or AutonomousTradingConfig()
         self.scanner = scanner
@@ -181,6 +188,7 @@ class AutonomousTradingEngine:
         self.ranker = CandidateRanker(self.config)
         self.planner = TradePlanner(self.config)
         self.audit = audit_logger or AuditLogger(self.config.audit_log_dir)
+        self.evidence = evidence_store or TradeEvidenceStore(self.config.audit_log_dir)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -199,13 +207,17 @@ class AutonomousTradingEngine:
         return False
 
     def _emit(self, decision: AutonomousDecision) -> AutonomousDecision:
-        """Write one audit log entry and return the decision unchanged."""
+        """Write audit/evidence log entries and return the decision unchanged."""
         record = {
             "engine": "AutonomousTradingEngine",
             "config": self.config.to_dict(),
             "decision": decision.to_dict(),
         }
         self.audit.log_decision(record, when=decision.timestamp)
+        try:
+            self.evidence.log_decision(record, when=decision.timestamp)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to write autonomous evidence record")
         return decision
 
     def _daily_limit_reached(self, when: datetime) -> bool:
