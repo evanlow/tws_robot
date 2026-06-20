@@ -126,6 +126,7 @@ class LossLimitGuard:
             return LossLimitDecision(True, "risk lifecycle guard disabled")
 
         ref = now or datetime.now(timezone.utc)
+        records = list(records)
         rows = [_outcome_row(record) for record in records]
         rows = [row for row in rows if row is not None]
         curve = self.curve_builder.build(records)
@@ -136,11 +137,11 @@ class LossLimitGuard:
         max_dd = self.curve_builder.max_drawdown_r(curve)
         curve_dict = [point.to_dict() for point in curve]
 
-        if daily_r <= -abs(self.max_daily_loss_r):
+        if self.max_daily_loss_r > 0 and daily_r <= -abs(self.max_daily_loss_r):
             return LossLimitDecision(False, f"daily loss {daily_r:.2f}R breached limit", daily_r, weekly_r, monthly_r, consecutive_losses, max_dd, curve_dict)
-        if weekly_r <= -abs(self.max_weekly_loss_r):
+        if self.max_weekly_loss_r > 0 and weekly_r <= -abs(self.max_weekly_loss_r):
             return LossLimitDecision(False, f"weekly loss {weekly_r:.2f}R breached limit", daily_r, weekly_r, monthly_r, consecutive_losses, max_dd, curve_dict)
-        if monthly_r <= -abs(self.max_monthly_loss_r):
+        if self.max_monthly_loss_r > 0 and monthly_r <= -abs(self.max_monthly_loss_r):
             return LossLimitDecision(False, f"monthly loss {monthly_r:.2f}R breached limit", daily_r, weekly_r, monthly_r, consecutive_losses, max_dd, curve_dict)
         if consecutive_losses >= self.max_consecutive_losses > 0:
             return LossLimitDecision(False, f"consecutive losses {consecutive_losses} breached limit", daily_r, weekly_r, monthly_r, consecutive_losses, max_dd, curve_dict)

@@ -212,3 +212,41 @@ class TradeEvidenceStore:
                 continue
             records.extend(reversed(file_records))
         return records
+
+    def recent_outcomes(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return recent autonomous_outcome records only, newest first.
+
+        Unlike ``recent()``, this method skips all non-outcome records (e.g.
+        ``autonomous_decision`` entries written when a trade is rejected) so
+        that a high volume of rejection records cannot evict realized outcome
+        records from the evaluation window.
+        """
+
+        limit = max(1, min(int(limit or 100), 1000))
+        if not self._log_dir.exists():
+            return []
+
+        records: List[Dict[str, Any]] = []
+        paths = sorted(self._log_dir.glob("autonomous_evidence_*.jsonl"), reverse=True)
+        for path in paths:
+            remaining = limit - len(records)
+            if remaining <= 0:
+                break
+            try:
+                with self._lock:
+                    file_outcomes: List[Dict[str, Any]] = []
+                    with path.open("r", encoding="utf-8") as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                rec = json.loads(line)
+                                if rec.get("evidence_type") == "autonomous_outcome":
+                                    file_outcomes.append(rec)
+                            except json.JSONDecodeError:
+                                continue
+            except OSError:
+                continue
+            records.extend(reversed(file_outcomes[-remaining:]))
+        return records

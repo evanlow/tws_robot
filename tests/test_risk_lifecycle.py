@@ -59,3 +59,36 @@ def test_loss_limit_guard_allows_when_limits_clear():
 
     assert decision.allowed is True
     assert decision.reason == "risk lifecycle limits clear"
+
+
+def test_loss_limit_guard_accepts_generator_without_double_consume():
+    """evaluate() must materialise records before iterating so a generator works."""
+    guard = LossLimitGuard(max_daily_loss_r=2.0)
+    records = (_outcome(r) for r in [-1.0, -1.5])  # generator, can only be consumed once
+    decision = guard.evaluate(records, now=datetime(2026, 1, 10, tzinfo=timezone.utc))
+
+    # The equity curve must have been built from the same data; if records were
+    # consumed twice the curve would be empty and the drawdown would be 0.
+    assert decision.allowed is False
+    assert len(decision.equity_curve) == 2
+
+
+def test_loss_limit_guard_zero_daily_limit_does_not_block():
+    """max_daily_loss_r=0 should disable the daily check, not block everything."""
+    guard = LossLimitGuard(max_daily_loss_r=0, max_weekly_loss_r=0, max_monthly_loss_r=0)
+    decision = guard.evaluate(
+        [_outcome(-5.0)],
+        now=datetime(2026, 1, 10, tzinfo=timezone.utc),
+    )
+
+    assert decision.allowed is True
+
+
+def test_loss_limit_guard_zero_weekly_limit_does_not_block():
+    guard = LossLimitGuard(max_daily_loss_r=0, max_weekly_loss_r=0, max_monthly_loss_r=0)
+    decision = guard.evaluate(
+        [_outcome(-3.0, days_ago=3)],
+        now=datetime(2026, 1, 10, tzinfo=timezone.utc),
+    )
+
+    assert decision.allowed is True

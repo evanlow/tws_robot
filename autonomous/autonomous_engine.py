@@ -165,8 +165,11 @@ class AutonomousTradingEngine:
         return executed >= limit
 
     def _check_risk_lifecycle(self, decision: AutonomousDecision) -> bool:
+        if not self.loss_limit_guard.enabled:
+            decision.risk_lifecycle = {"allowed": True, "reason": "risk lifecycle guard disabled"}
+            return True
         try:
-            records = self.evidence.recent(self.config.risk_lifecycle_recent_record_limit)
+            records = self.evidence.recent_outcomes(self.config.risk_lifecycle_recent_record_limit)
             lifecycle = self.loss_limit_guard.evaluate(records, now=decision.timestamp)
         except Exception:
             logger.exception("risk lifecycle guard raised")
