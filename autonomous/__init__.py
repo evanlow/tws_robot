@@ -48,6 +48,14 @@ from autonomous.autonomous_live_runner import (
     LiveReadinessGates,
 )
 
+# Install basket-aware run_once behaviour after the live-runner class is loaded.
+# This keeps the feature opt-in through engine config while making it available
+# to assisted-live users once they choose to enable basket mode.
+try:  # pragma: no cover - import-time integration shim
+    import autonomous.live_basket_patch  # noqa: F401
+except Exception:
+    pass
+
 __all__ = [
     "AutonomousTradingConfig",
     "AutonomousMode",
