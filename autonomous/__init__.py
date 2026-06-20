@@ -24,6 +24,7 @@ import logging as _logging
 from autonomous.autonomous_config import AutonomousTradingConfig, AutonomousMode
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.candidate_ranker import CandidateRanker
+from autonomous.position_sizing import PositionSizer, SizingDecision
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
 from autonomous.signal_provider import SignalProvider, StaticSignalProvider
 from autonomous.technical_analysis_signal_provider import (
@@ -50,9 +51,6 @@ from autonomous.autonomous_live_runner import (
     LiveReadinessGates,
 )
 
-# Install basket-aware run_once behaviour after the live-runner class is loaded.
-# This keeps the feature opt-in through engine config while making it available
-# to assisted-live users once they choose to enable basket mode.
 try:  # pragma: no cover - import-time integration shim
     import autonomous.live_basket_patch  # noqa: F401
 except Exception:
@@ -69,6 +67,8 @@ __all__ = [
     "CandidateScanner",
     "CandidateSignal",
     "CandidateRanker",
+    "PositionSizer",
+    "SizingDecision",
     "TradePlan",
     "TradePlanner",
     "TradeType",
