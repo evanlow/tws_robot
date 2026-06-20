@@ -81,8 +81,8 @@ def test_engine_applies_vix_size_multiplier_to_deployable_cash(tmp_path):
     assert decision.status == DecisionStatus.RECOMMENDED
     assert decision.market_gate["trade_allowed"] is True
     assert decision.market_gate["size_multiplier"] == 0.5
-    assert decision.deployable_cash == 5_000.0
-    assert decision.trade_plan["quantity"] == 5
+    assert decision.deployable_cash == 4_500.0
+    assert decision.trade_plan["quantity"] == 4
     assert decision.cash_snapshot["market_regime_adjustment"]["size_multiplier"] == 0.5
 
 

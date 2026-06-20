@@ -165,8 +165,10 @@ class AutonomousTradingConfig:
             ("vix_caution_size_multiplier", self.vix_caution_size_multiplier),
             ("vix_high_size_multiplier", self.vix_high_size_multiplier),
         ):
-            if value < 0 or value > 1:
-                raise ValueError(f"{label} must be in [0, 1]; got {value!r}")
+            if value <= 0 or value > 1:
+                raise ValueError(
+                    f"{label} must be greater than 0 and at most 1; got {value!r}"
+                )
 
     def deployable_cash_cap_pct(self) -> float:
         """Effective per-trade cap as a fraction of deployable cash."""

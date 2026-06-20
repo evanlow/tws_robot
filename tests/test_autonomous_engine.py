@@ -139,7 +139,8 @@ def test_spy_bearish_gate_blocks_before_scan(tmp_path):
     d = engine.run_once()
     assert d.status is DecisionStatus.MARKET_NOT_SUITABLE
     assert d.shortlist == []
-    assert "bearish market" in d.rejection_reason
+    assert "market regime" in d.rejection_reason
+    assert "SPY is not bullish intraday" in d.market_gate.get("reasons", [])
     assert d.market_gate["classification"] == "Bearish / Not Suitable"
 
 

@@ -330,7 +330,7 @@ class AutonomousTradingEngine:
                 if open_p > 0 or curr_p > 0:
                     price_info = f" (SPY Open: ${open_p:.2f}, Current: ${curr_p:.2f})"
                 else:
-                    price_info = " (SPY price unavailable from yfinance)"
+                    price_info = " (SPY price unavailable)"
                 reasons = "; ".join(spy_gate.get("reasons") or [])
                 reason_suffix = f" {reasons}." if reasons else ""
                 decision.rejection_reason = (
@@ -357,6 +357,14 @@ class AutonomousTradingEngine:
                     "market regime size multiplier applied: "
                     f"{size_multiplier:.2f}x"
                 )
+                if decision.deployable_cash < self.config.min_deployable_cash:
+                    decision.status = DecisionStatus.NO_DEPLOYABLE_CASH
+                    decision.rejection_reason = (
+                        f"deployable_cash {decision.deployable_cash:.2f} < "
+                        f"min {self.config.min_deployable_cash:.2f} after "
+                        "market regime adjustment"
+                    )
+                    return self._emit(decision)
 
         # 6-8. Scan + filter + rank ---------------------------------------
         equity = float(account_summary.get("equity") or 0.0)
