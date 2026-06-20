@@ -18,20 +18,11 @@ import threading
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
-
-
-def _safe_get(mapping: Dict[str, Any] | None, *keys: str) -> Any:
-    value: Any = mapping or {}
-    for key in keys:
-        if not isinstance(value, dict):
-            return None
-        value = value.get(key)
-    return value
+SCHEMA_VERSION = 2
 
 
 def _strategy_bucket(decision: Dict[str, Any]) -> Dict[str, Any]:
@@ -53,8 +44,7 @@ def _strategy_bucket(decision: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _planned_risk(decision: Dict[str, Any]) -> Dict[str, Any]:
-    plan = decision.get("trade_plan") or {}
+def _risk_for_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     entry = plan.get("limit_price")
     target = plan.get("target_price")
     stop = plan.get("stop_price")
@@ -86,6 +76,19 @@ def _planned_risk(decision: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _planned_risk(decision: Dict[str, Any]) -> Dict[str, Any]:
+    return _risk_for_plan(decision.get("trade_plan") or {})
+
+
+def _basket_risk(decision: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out = []
+    for plan in decision.get("trade_plans") or []:
+        risk = _risk_for_plan(plan)
+        risk["symbol"] = plan.get("symbol")
+        out.append(risk)
+    return out
+
+
 class TradeEvidenceStore:
     """Append-only JSONL store for autonomous evidence records."""
 
@@ -110,6 +113,7 @@ class TradeEvidenceStore:
         selected = decision.get("selected") or {}
         candidate = selected.get("candidate") or {}
         trade_plan = decision.get("trade_plan") or {}
+        trade_plans = decision.get("trade_plans") or []
 
         return {
             "schema_version": SCHEMA_VERSION,
@@ -125,16 +129,22 @@ class TradeEvidenceStore:
             "cash_snapshot": decision.get("cash_snapshot") or {},
             "deployable_cash": decision.get("deployable_cash"),
             "selected": selected,
+            "selected_basket": decision.get("selected_basket") or [],
             "trade_plan": trade_plan,
+            "trade_plans": trade_plans,
+            "basket_plan": decision.get("basket_plan"),
             "planned_risk": _planned_risk(decision),
+            "basket_planned_risk": _basket_risk(decision),
             "risk_check": decision.get("risk_check"),
             "order": {
                 "order_id": decision.get("order_id"),
+                "order_ids": decision.get("order_ids") or [],
                 "status": None,
             },
             "candidate_counts": {
                 "shortlist": len(decision.get("shortlist") or []),
                 "rejected": len(decision.get("rejected_candidates") or []),
+                "basket_legs": len(trade_plans),
             },
             "shortlist": decision.get("shortlist") or [],
             "rejected_candidates": decision.get("rejected_candidates") or [],
@@ -171,21 +181,14 @@ class TradeEvidenceStore:
             return None
 
     def recent(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Return recent evidence records, newest first.
-
-        Reads date-rotated JSONL files in reverse filename order.  Malformed
-        lines are skipped defensively.
-        """
+        """Return recent evidence records, newest first."""
 
         limit = max(1, min(int(limit or 100), 1000))
         if not self._log_dir.exists():
             return []
 
         records: List[Dict[str, Any]] = []
-        paths = sorted(
-            self._log_dir.glob("autonomous_evidence_*.jsonl"),
-            reverse=True,
-        )
+        paths = sorted(self._log_dir.glob("autonomous_evidence_*.jsonl"), reverse=True)
         for path in paths:
             remaining = limit - len(records)
             if remaining <= 0:
