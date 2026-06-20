@@ -8,6 +8,8 @@ This config object holds **all** safety thresholds and feature flags for
 * User confirmation is required.
 * Only one trade per day is allowed.
 * Only limit orders are permitted.
+* The market-regime guard requires a bullish SPY backdrop and can reduce or
+  block exposure when VIX indicates volatility stress.
 
 All numeric thresholds are documented inline; callers may override any of
 them when constructing ``AutonomousTradingConfig``.
@@ -73,6 +75,19 @@ class AutonomousTradingConfig:
     # ---- Earnings avoidance ------------------------------------------
     avoid_earnings_within_days: int = 7
 
+    # ---- Market-regime guard ------------------------------------------
+    # The existing SPY gate stays active whenever a provider is wired.
+    # These VIX settings add a volatility/fear overlay to the same gate.
+    vix_guard_enabled: bool = True
+    vix_missing_blocks_trade: bool = False
+    vix_caution_level: float = 20.0
+    vix_block_level: float = 30.0
+    vix_caution_intraday_rise_pct: float = 2.5
+    vix_block_intraday_rise_pct: float = 5.0
+    vix_caution_size_multiplier: float = 0.50
+    vix_high_size_multiplier: float = 0.25
+    apply_market_regime_size_multiplier: bool = True
+
     # ---- Exit target mode ---------------------------------------------
     exit_target_mode: str = "resistance"  # "resistance" | "percent" | "adr_intraday"
     take_profit_pct: float = 0.08  # fallback percent target
@@ -131,6 +146,27 @@ class AutonomousTradingConfig:
                 "min_signal_strength must be >= 0; got "
                 f"{self.min_signal_strength!r}"
             )
+        if self.vix_caution_level <= 0 or self.vix_block_level <= 0:
+            raise ValueError("VIX levels must be positive")
+        if self.vix_caution_level > self.vix_block_level:
+            raise ValueError("vix_caution_level must be <= vix_block_level")
+        for label, value in (
+            ("vix_caution_intraday_rise_pct", self.vix_caution_intraday_rise_pct),
+            ("vix_block_intraday_rise_pct", self.vix_block_intraday_rise_pct),
+        ):
+            if value < 0:
+                raise ValueError(f"{label} must be >= 0; got {value!r}")
+        if self.vix_caution_intraday_rise_pct > self.vix_block_intraday_rise_pct:
+            raise ValueError(
+                "vix_caution_intraday_rise_pct must be <= "
+                "vix_block_intraday_rise_pct"
+            )
+        for label, value in (
+            ("vix_caution_size_multiplier", self.vix_caution_size_multiplier),
+            ("vix_high_size_multiplier", self.vix_high_size_multiplier),
+        ):
+            if value < 0 or value > 1:
+                raise ValueError(f"{label} must be in [0, 1]; got {value!r}")
 
     def deployable_cash_cap_pct(self) -> float:
         """Effective per-trade cap as a fraction of deployable cash."""
@@ -162,6 +198,15 @@ class AutonomousTradingConfig:
             "allow_share_buy": self.allow_share_buy,
             "allow_short_put": self.allow_short_put,
             "avoid_earnings_within_days": self.avoid_earnings_within_days,
+            "vix_guard_enabled": self.vix_guard_enabled,
+            "vix_missing_blocks_trade": self.vix_missing_blocks_trade,
+            "vix_caution_level": self.vix_caution_level,
+            "vix_block_level": self.vix_block_level,
+            "vix_caution_intraday_rise_pct": self.vix_caution_intraday_rise_pct,
+            "vix_block_intraday_rise_pct": self.vix_block_intraday_rise_pct,
+            "vix_caution_size_multiplier": self.vix_caution_size_multiplier,
+            "vix_high_size_multiplier": self.vix_high_size_multiplier,
+            "apply_market_regime_size_multiplier": self.apply_market_regime_size_multiplier,
             "exit_target_mode": self.exit_target_mode,
             "take_profit_pct": self.take_profit_pct,
             "adr_lookback_days": self.adr_lookback_days,
