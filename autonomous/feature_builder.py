@@ -1,8 +1,7 @@
 """Feature extraction for autonomous edge estimation.
 
 The feature builder converts a ``CandidateSignal`` plus market-regime context
-into a stable JSON-serialisable feature dict.  It deliberately does not score or
-rank anything; downstream edge estimators consume the features.
+into a stable JSON-serialisable feature dict.
 """
 
 from __future__ import annotations
@@ -10,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from autonomous.candidate_scanner import CandidateSignal
+from autonomous.regime_context import build_regime_context
 
 
 def _float(value: Any) -> Optional[float]:
@@ -35,6 +35,11 @@ class FeatureBuilder:
         extras = candidate.extras or {}
         market_gate = market_gate or {}
         vix = market_gate.get("vix") or {}
+        regime = build_regime_context(
+            sector=candidate.sector,
+            extras=extras,
+            market_gate=market_gate,
+        )
 
         support_distance_pct = None
         if last is not None and support is not None and last > 0:
@@ -45,13 +50,7 @@ class FeatureBuilder:
             resistance_room_pct = (resistance - last) / last
 
         risk_reward = None
-        if (
-            last is not None
-            and support is not None
-            and resistance is not None
-            and last > support
-            and resistance > last
-        ):
+        if last is not None and support is not None and resistance is not None and last > support and resistance > last:
             stop = support * 0.97
             risk = last - stop
             reward = resistance - last
@@ -61,6 +60,11 @@ class FeatureBuilder:
         return {
             "symbol": candidate.symbol,
             "sector": candidate.sector,
+            "sector_etf": regime.get("sector_etf"),
+            "sector_bullish": regime.get("sector_bullish"),
+            "sector_relative_strength_pct": regime.get("sector_relative_strength_pct"),
+            "sector_regime": regime.get("sector_regime"),
+            "time_of_day_regime": regime.get("time_of_day_regime"),
             "signal_label": candidate.signal_label,
             "strength_score": candidate.strength_score,
             "last_price": last,
@@ -77,11 +81,7 @@ class FeatureBuilder:
             "rsi_14": _float(extras.get("rsi_14")),
             "rsi_status": extras.get("rsi_status"),
             "adr_pct": _float(extras.get("adr_pct")),
-            "levels_valid": (
-                bool(support or resistance)
-                if extras.get("levels_valid") is None
-                else bool(extras.get("levels_valid"))
-            ),
+            "levels_valid": bool(support or resistance) if extras.get("levels_valid") is None else bool(extras.get("levels_valid")),
             "market_classification": market_gate.get("classification"),
             "spy_bullish": market_gate.get("bullish"),
             "vix_available": vix.get("available"),
