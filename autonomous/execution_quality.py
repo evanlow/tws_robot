@@ -70,6 +70,8 @@ class ExecutionQualityGuard:
         ask_f = _positive_float(ask)
         last_f = _positive_float(last) or reference_price
         warnings: list[str] = []
+        spread_pct: Optional[float] = None
+        slippage_pct: Optional[float] = None
 
         if bid_f is None or ask_f is None:
             msg = f"{symbol}: bid/ask unavailable"
@@ -77,6 +79,9 @@ class ExecutionQualityGuard:
                 return ExecutionQualityDecision(False, msg, warnings=[msg])
             warnings.append(msg)
         else:
+            if ask_f < bid_f:
+                msg = f"{symbol}: crossed quotes (ask {ask_f} < bid {bid_f})"
+                return ExecutionQualityDecision(False, msg, warnings=warnings)
             mid = (bid_f + ask_f) / 2.0
             if mid > 0:
                 spread_pct = (ask_f - bid_f) / mid
@@ -87,8 +92,6 @@ class ExecutionQualityGuard:
                         spread_pct=spread_pct,
                         warnings=warnings,
                     )
-            else:
-                spread_pct = None
 
             if ask_f > 0 and limit_price > 0:
                 slippage_pct = max(0.0, (ask_f - limit_price) / limit_price)
@@ -100,8 +103,6 @@ class ExecutionQualityGuard:
                         slippage_pct=slippage_pct,
                         warnings=warnings,
                     )
-            else:
-                slippage_pct = None
 
         price_move_pct = None
         if last_f is not None and reference_price > 0:
@@ -117,8 +118,8 @@ class ExecutionQualityGuard:
         return ExecutionQualityDecision(
             True,
             "execution quality acceptable",
-            spread_pct=spread_pct if 'spread_pct' in locals() else None,
-            slippage_pct=slippage_pct if 'slippage_pct' in locals() else None,
+            spread_pct=spread_pct,
+            slippage_pct=slippage_pct,
             price_move_pct=price_move_pct,
             warnings=warnings,
         )

@@ -184,7 +184,7 @@ class TradePlanner:
         limit_price = round(price, 2)
         quality = self._execution_quality(candidate, limit_price)
         if not quality.get("allowed", True):
-            _add(reasons, f"{candidate.symbol}: execution quality rejected — {quality.get('reason')}")
+            _add(reasons, f"execution quality rejected — {quality.get('reason')}")
             return None
 
         target_price, target_mode, adr_val, adr_pct_val, adr_frac = self._compute_target(candidate, price)

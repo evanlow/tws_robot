@@ -72,3 +72,18 @@ def test_execution_quality_allows_good_quote():
 
     assert decision.allowed is True
     assert decision.spread_pct is not None
+
+
+def test_execution_quality_blocks_crossed_quotes():
+    guard = ExecutionQualityGuard()
+
+    decision = guard.evaluate_buy_limit(
+        symbol="AAA",
+        limit_price=100.0,
+        reference_price=100.0,
+        bid=100.05,
+        ask=99.95,
+    )
+
+    assert decision.allowed is False
+    assert "crossed" in decision.reason

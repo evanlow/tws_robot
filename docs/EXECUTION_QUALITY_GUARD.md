@@ -14,8 +14,8 @@ The guard evaluates a BUY limit plan against available quote data:
 - latest price movement above the plan reference price.
 
 If quote data is unavailable, the default behaviour is to warn but not block.
-Operators can choose to fail closed by setting `execution_block_on_missing_quote`
-to `True`.
+This can be changed to fail closed via the `execution_block_on_missing_quote`
+field in `AutonomousTradingConfig`.
 
 ## Config
 
