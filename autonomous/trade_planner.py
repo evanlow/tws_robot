@@ -116,6 +116,15 @@ class TradePlanner:
             volatility_sizing_enabled=config.volatility_sizing_enabled,
             volatility_reference_pct=config.volatility_reference_pct,
             volatility_min_size_multiplier=config.volatility_min_size_multiplier,
+            fractional_edge_sizing_enabled=config.fractional_edge_sizing_enabled,
+            fractional_edge_fraction=config.fractional_edge_fraction,
+            fractional_edge_min_trades=config.fractional_edge_min_trades,
+            fractional_edge_max_position_pct=config.fractional_edge_max_position_pct,
+            fractional_edge_retirement_mode_max_pct=config.fractional_edge_retirement_mode_max_pct,
+            fractional_edge_allow_size_increase=config.fractional_edge_allow_size_increase,
+            fractional_edge_can_reduce_size=config.fractional_edge_can_reduce_size,
+            drawdown_governor_enabled=config.drawdown_governor_enabled,
+            strategy_drawdown_pct=config.strategy_drawdown_pct,
         )
 
     def plan(
@@ -135,16 +144,12 @@ class TradePlanner:
             and self.config.allow_short_put
             and option_hint is not None
         ):
-            put_plan = self._plan_short_put(
-                candidate, deployable_cash, equity, option_hint, reasons=reasons
-            )
+            put_plan = self._plan_short_put(candidate, deployable_cash, equity, option_hint, reasons=reasons)
             if put_plan is not None:
                 return put_plan
 
         if self.config.allow_share_buy:
-            return self._plan_buy_shares(
-                candidate, deployable_cash, equity, reasons=reasons
-            )
+            return self._plan_buy_shares(candidate, deployable_cash, equity, reasons=reasons)
 
         _add(reasons, "config.allow_share_buy=False and no put plan produced")
         return None
@@ -176,9 +181,7 @@ class TradePlanner:
             _add(reasons, f"{candidate.symbol}: price <= 0 ({price})")
             return None
 
-        cap, equity_cap, cash_cap, cash_pct, eq_pct = self._position_cap(
-            deployable_cash, equity
-        )
+        cap, equity_cap, cash_cap, cash_pct, eq_pct = self._position_cap(deployable_cash, equity)
         if cap < price:
             equity_str = (
                 f", equity_cap=${equity_cap:,.2f} (equity ${equity:,.2f} * {eq_pct:.0%})"
@@ -193,9 +196,7 @@ class TradePlanner:
             return None
 
         limit_price = round(price, 2)
-        target_price, target_mode, adr_val, adr_pct_val, adr_frac = self._compute_target(
-            candidate, price
-        )
+        target_price, target_mode, adr_val, adr_pct_val, adr_frac = self._compute_target(candidate, price)
         stop_price = (
             round(candidate.support_price * 0.97, 2)
             if candidate.support_price and candidate.support_price > 0
@@ -207,10 +208,7 @@ class TradePlanner:
             and self.config.require_stop_price_for_assisted_live
             and (stop_price is None or stop_price <= 0 or stop_price >= limit_price)
         ):
-            _add(
-                reasons,
-                f"{candidate.symbol}: assisted_live requires valid stop_price from support/invalidation level"
-            )
+            _add(reasons, f"{candidate.symbol}: assisted_live requires valid stop_price from support/invalidation level")
             return None
 
         sizing = self.sizer.size_buy_shares(
@@ -220,13 +218,13 @@ class TradePlanner:
             base_cap_value=cap,
             equity=equity,
             adr_pct=_positive_float(candidate.extras.get("adr_pct")),
+            edge_estimate=_dict_or_none(candidate.extras.get("edge_estimate")),
+            observed_edge_trades=_int(candidate.extras.get("edge_observed_trades"), default=0),
+            strategy_drawdown_pct=_positive_float(candidate.extras.get("strategy_drawdown_pct")),
         )
         quantity = sizing.quantity
         if quantity <= 0:
-            _add(
-                reasons,
-                f"{candidate.symbol}: final sizing cap cannot buy 1 share; binding_cap={sizing.binding_cap}"
-            )
+            _add(reasons, f"{candidate.symbol}: final sizing cap cannot buy 1 share; binding_cap={sizing.binding_cap}")
             return None
 
         required_cash = sizing.required_cash
@@ -246,22 +244,13 @@ class TradePlanner:
             adr_pct=adr_pct_val,
             adr_target_fraction=adr_frac,
             sizing=sizing_dict,
-            reason=(
-                f"{candidate.signal_label} (strength={candidate.strength_score}); "
-                f"buy {quantity} shares at limit {limit_price}"
-            ),
+            reason=f"{candidate.signal_label} (strength={candidate.strength_score}); buy {quantity} shares at limit {limit_price}",
             risk_notes=[
                 "Limit order only; never market.",
-                (
-                    f"Sized to <= {self.config.equity_cap_pct():.0%} of equity "
-                    f"and <= {self.config.deployable_cash_cap_pct():.0%} of deployable cash."
-                ),
+                f"Sized to <= {self.config.equity_cap_pct():.0%} of equity and <= {self.config.deployable_cash_cap_pct():.0%} of deployable cash.",
                 f"Binding sizing cap: {sizing.binding_cap}.",
             ] + list(sizing.notes),
-            exit_plan=(
-                f"Exit on target_price ({target_mode}) or stop_price; "
-                "review on next Strong(100) re-evaluation."
-            ),
+            exit_plan=f"Exit on target_price ({target_mode}) or stop_price; review on next Strong(100) re-evaluation.",
         )
 
     def _compute_target(self, candidate: CandidateSignal, entry_price: float) -> tuple:
@@ -285,13 +274,7 @@ class TradePlanner:
                     respect_resistance_cap=self.config.adr_respect_resistance_cap,
                 )
                 if target is not None and target > entry_price:
-                    return (
-                        target,
-                        "adr_intraday",
-                        adr_val,
-                        adr_pct_val,
-                        self.config.adr_target_fraction,
-                    )
+                    return (target, "adr_intraday", adr_val, adr_pct_val, self.config.adr_target_fraction)
             return self._fallback_target(candidate, entry_price)
         if mode == "percent":
             target = round(entry_price * (1.0 + self.config.take_profit_pct), 2)
@@ -325,15 +308,8 @@ class TradePlanner:
         if option_hint.strike <= 0:
             _add(reasons, f"{candidate.symbol}: option_hint.strike = {option_hint.strike}")
             return None
-        if (
-            candidate.support_price is None
-            or candidate.support_price <= 0
-            or option_hint.strike > candidate.support_price
-        ):
-            _add(
-                reasons,
-                f"{candidate.symbol}: strike {option_hint.strike} > support {candidate.support_price} (require strike <= support)"
-            )
+        if candidate.support_price is None or candidate.support_price <= 0 or option_hint.strike > candidate.support_price:
+            _add(reasons, f"{candidate.symbol}: strike {option_hint.strike} > support {candidate.support_price} (require strike <= support)")
             return None
 
         per_contract_cash = option_hint.strike * _OPTION_MULTIPLIER
@@ -341,31 +317,20 @@ class TradePlanner:
             _add(reasons, f"{candidate.symbol}: per_contract_cash = {per_contract_cash}")
             return None
 
-        cap, equity_cap, cash_cap, cash_pct, eq_pct = self._position_cap(
-            deployable_cash, equity
-        )
+        cap, equity_cap, cash_cap, cash_pct, eq_pct = self._position_cap(deployable_cash, equity)
         max_contracts_by_cash = int(math.floor(cap / per_contract_cash))
         contracts = min(max_contracts_by_cash, option_hint.contracts_available)
         if contracts <= 0:
-            equity_str = (
-                f", equity ${equity:,.2f} * {eq_pct:.0%} = ${equity_cap:,.2f}"
-                if equity_cap is not None else ""
-            )
+            equity_str = f", equity ${equity:,.2f} * {eq_pct:.0%} = ${equity_cap:,.2f}" if equity_cap is not None else ""
             _add(
                 reasons,
-                f"{candidate.symbol}: 0 affordable put contracts — "
-                f"floor(cap ${cap:,.2f} / ${per_contract_cash:,.2f} per contract) = "
-                f"{max_contracts_by_cash} [deployable ${deployable_cash:,.2f} * "
-                f"{cash_pct:.0%} = ${cash_cap:,.2f}{equity_str}]"
+                f"{candidate.symbol}: 0 affordable put contracts — floor(cap ${cap:,.2f} / ${per_contract_cash:,.2f} per contract) = {max_contracts_by_cash} [deployable ${deployable_cash:,.2f} * {cash_pct:.0%} = ${cash_cap:,.2f}{equity_str}]"
             )
             return None
 
         limit_price = round(option_hint.midpoint, 2)
         if limit_price <= 0:
-            _add(
-                reasons,
-                f"{candidate.symbol}: option midpoint <= 0 (bid={option_hint.bid}, ask={option_hint.ask})"
-            )
+            _add(reasons, f"{candidate.symbol}: option midpoint <= 0 (bid={option_hint.bid}, ask={option_hint.ask})")
             return None
 
         required_cash = per_contract_cash * contracts
@@ -381,19 +346,9 @@ class TradePlanner:
             contracts=contracts,
             required_cash=required_cash,
             expected_premium=expected_premium,
-            reason=(
-                f"{candidate.signal_label}; sell {contracts}x "
-                f"{candidate.symbol} {option_hint.expiry} {option_hint.strike}P @ limit {limit_price}"
-            ),
-            risk_notes=[
-                "Sell-to-open limit only; never market.",
-                "Strike at-or-below technical support (OTM).",
-                "Cash-secured: full strike * 100 * contracts reserved.",
-            ],
-            exit_plan=(
-                "Plan buy-to-close at 50% of premium captured or "
-                "on technical breakdown below support."
-            ),
+            reason=f"{candidate.signal_label}; sell {contracts}x {candidate.symbol} {option_hint.expiry} {option_hint.strike}P @ limit {limit_price}",
+            risk_notes=["Sell-to-open limit only; never market.", "Strike at-or-below technical support (OTM).", "Cash-secured: full strike * 100 * contracts reserved."],
+            exit_plan="Plan buy-to-close at 50% of premium captured or on technical breakdown below support.",
         )
 
 
@@ -402,4 +357,15 @@ def _positive_float(value: Any) -> Optional[float]:
         out = float(value)
     except (TypeError, ValueError):
         return None
-    return out if out > 0 else None
+    return out if out >= 0 else None
+
+
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _dict_or_none(value: Any) -> Optional[Dict[str, Any]]:
+    return value if isinstance(value, dict) else None
