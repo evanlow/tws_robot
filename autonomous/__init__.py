@@ -24,8 +24,10 @@ import logging as _logging
 from autonomous.autonomous_config import AutonomousTradingConfig, AutonomousMode
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.candidate_ranker import CandidateRanker
+from autonomous.drawdown_governor import DrawdownDecision, DrawdownGovernor
 from autonomous.edge_estimator import EdgeEstimate, RuleBasedEdgeEstimator
 from autonomous.feature_builder import FeatureBuilder
+from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDecision
 from autonomous.position_sizing import PositionSizer, SizingDecision
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
 from autonomous.signal_provider import SignalProvider, StaticSignalProvider
@@ -69,9 +71,13 @@ __all__ = [
     "CandidateScanner",
     "CandidateSignal",
     "CandidateRanker",
+    "DrawdownDecision",
+    "DrawdownGovernor",
     "EdgeEstimate",
     "RuleBasedEdgeEstimator",
     "FeatureBuilder",
+    "FractionalEdgeSizer",
+    "FractionalSizingDecision",
     "PositionSizer",
     "SizingDecision",
     "TradePlan",
