@@ -15,7 +15,7 @@ from backtest.strategy_templates import (
     MovingAverageCrossStrategy, MACrossConfig,
     MeanReversionStrategy, MeanReversionConfig,
     MomentumStrategy, MomentumConfig,
-    get_template, list_templates, STRATEGY_TEMPLATES
+    get_template, get_strategy_class, list_templates, STRATEGY_TEMPLATES
 )
 from backtest.strategy import StrategyConfig
 from backtest.data_models import Bar
@@ -572,6 +572,16 @@ class TestTemplateRegistry:
         """Test getting invalid template raises error"""
         with pytest.raises(ValueError, match="Unknown template 'invalid'"):
             get_template('invalid')
+
+    def test_get_template_ui_strategy_name_alias(self):
+        """Backtest UI names should resolve to canonical templates."""
+        template = get_template('MovingAverageCross')
+        assert template == MovingAverageCrossStrategy
+
+    def test_get_strategy_class_backward_compatible(self):
+        """Legacy API helper should remain available."""
+        template = get_strategy_class('MovingAverageCross')
+        assert template == MovingAverageCrossStrategy
     
     def test_template_registry_complete(self):
         """Test all templates are in registry"""

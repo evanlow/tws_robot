@@ -587,6 +587,39 @@ STRATEGY_TEMPLATES = {
 }
 
 
+_STRATEGY_NAME_ALIASES = {
+    # Human-readable names used by the Backtest UI
+    'movingaveragecross': 'ma_cross',
+    'moving_average_cross': 'ma_cross',
+    'moving-average-cross': 'ma_cross',
+    # Class names
+    'movingaveragecrossstrategy': 'ma_cross',
+    'meanreversionstrategy': 'mean_reversion',
+    'momentumstrategy': 'momentum',
+}
+
+
+def _normalize_template_name(name: str) -> str:
+    """Normalize strategy/template name to a canonical registry key."""
+    raw = (name or '').strip()
+    if not raw:
+        return raw
+
+    lowered = raw.lower()
+    if lowered in STRATEGY_TEMPLATES:
+        return lowered
+
+    compact = lowered.replace(' ', '').replace('-', '').replace('_', '')
+    if compact in _STRATEGY_NAME_ALIASES:
+        return _STRATEGY_NAME_ALIASES[compact]
+
+    # Preserve compatibility with alias values that already include separators.
+    if lowered in _STRATEGY_NAME_ALIASES:
+        return _STRATEGY_NAME_ALIASES[lowered]
+
+    return lowered
+
+
 def get_template(name: str):
     """
     Get a strategy template by name
@@ -600,11 +633,21 @@ def get_template(name: str):
     Raises:
         ValueError: If template name not found
     """
-    if name not in STRATEGY_TEMPLATES:
+    canonical_name = _normalize_template_name(name)
+    if canonical_name not in STRATEGY_TEMPLATES:
         available = ', '.join(STRATEGY_TEMPLATES.keys())
         raise ValueError(f"Unknown template '{name}'. Available: {available}")
     
-    return STRATEGY_TEMPLATES[name]
+    return STRATEGY_TEMPLATES[canonical_name]
+
+
+def get_strategy_class(name: str):
+    """Backward-compatible alias used by backtest API routes.
+
+    Historically, callers imported ``get_strategy_class``. Keep this symbol
+    available and delegate to :func:`get_template`.
+    """
+    return get_template(name)
 
 
 def list_templates() -> List[str]:

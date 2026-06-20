@@ -10,7 +10,7 @@ GET  /api/backtest/compare                — side-by-side comparison
 import logging
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 
@@ -19,6 +19,55 @@ from web.services import get_services
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("api_backtest", __name__, url_prefix="/api/backtest")
+
+
+def _load_backtest_symbol_data(data_manager, symbol: str, start_dt: datetime, end_dt: datetime) -> int:
+    """Load daily OHLCV bars for one symbol into ``data_manager``.
+
+    Returns number of bars loaded. Raises ``RuntimeError`` when data cannot be
+    fetched/loaded.
+    """
+    clean_symbol = str(symbol or "").strip().upper()
+    if not clean_symbol:
+        raise RuntimeError("empty symbol")
+
+    try:
+        import yfinance as yf  # type: ignore[import]
+    except Exception as exc:
+        raise RuntimeError("yfinance not available for backtest data fetch") from exc
+
+    # yfinance uses an exclusive end date for download(), so include one extra day
+    # to ensure the requested ``end_dt`` session is included.
+    dl_end = end_dt + timedelta(days=1)
+    hist = yf.download(
+        clean_symbol,
+        start=start_dt.strftime("%Y-%m-%d"),
+        end=dl_end.strftime("%Y-%m-%d"),
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+    )
+
+    if hist is None or hist.empty:
+        raise RuntimeError(f"no historical data returned for {clean_symbol}")
+
+    # yfinance may return MultiIndex columns like ('Close', 'AAPL'). Flatten
+    # to plain OHLCV labels expected by the loader.
+    if getattr(hist.columns, "nlevels", 1) > 1:
+        hist.columns = [col[0] if isinstance(col, tuple) else col for col in hist.columns]
+
+    # Normalize index/date column shape for HistoricalDataManager.load_dataframe().
+    df = hist.reset_index().rename(columns={"Date": "date"})
+    required_cols = {"date", "Open", "High", "Low", "Close", "Volume"}
+    if not required_cols.issubset(set(df.columns)):
+        missing = sorted(required_cols - set(df.columns))
+        raise RuntimeError(f"historical data missing required columns for {clean_symbol}: {missing}")
+
+    ok = data_manager.load_dataframe(clean_symbol, df, date_column="date")
+    if not ok:
+        raise RuntimeError(f"failed to load historical bars for {clean_symbol}")
+
+    return data_manager.get_bar_count(clean_symbol)
 
 
 @bp.route("/runs", methods=["GET"])
@@ -154,6 +203,23 @@ def _run_backtest_thread(svc, run_id, strategy_name, symbols, start_date, end_da
         data_manager = HistoricalDataManager()
         engine = BacktestEngine(config, data_manager)
 
+        # Load historical bars for each requested symbol before replay.
+        loaded_counts = {}
+        for symbol in symbols:
+            bar_count = _load_backtest_symbol_data(
+                data_manager=data_manager,
+                symbol=symbol,
+                start_dt=config.start_date,
+                end_dt=config.end_date,
+            )
+            loaded_counts[str(symbol).strip().upper()] = bar_count
+
+        if not loaded_counts:
+            raise RuntimeError("no symbols provided for backtest")
+
+        if all(count <= 0 for count in loaded_counts.values()):
+            raise RuntimeError(f"no historical bars loaded for symbols: {', '.join(loaded_counts.keys())}")
+
         strategy_config = StrategyConfig(name=strategy_name, symbols=symbols)
 
         # Try to import the named strategy
@@ -189,6 +255,7 @@ def _run_backtest_thread(svc, run_id, strategy_name, symbols, start_date, end_da
 
         run = svc.get_backtest_run(run_id) or {}
         run["status"] = "complete"
+        run["data_summary"] = {"bar_counts": loaded_counts}
         run["results"] = results_dict
         svc.store_backtest_run(run_id, run)
 

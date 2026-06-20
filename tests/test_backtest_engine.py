@@ -66,6 +66,23 @@ class SimpleTestStrategy(Strategy):
         self.trade_count += 1
 
 
+class LegacySymbolBarStrategy(Strategy):
+    """Legacy callback style strategy: on_bar(symbol, bar)."""
+
+    def __init__(self, config: StrategyConfig):
+        super().__init__(config)
+        self.bar_count = 0
+        self.bought = False
+
+    def on_bar(self, symbol: str, bar: Bar):
+        self.bar_count += 1
+        if not self.bought and not self.has_position(symbol):
+            shares = self.calculate_position_size(symbol, bar.close, 0.10)
+            if shares > 0:
+                self.buy(symbol, shares, 'MARKET')
+                self.bought = True
+
+
 class TestStrategyConfig(unittest.TestCase):
     """Test StrategyConfig"""
     
@@ -274,6 +291,17 @@ class TestBacktestEngine(unittest.TestCase):
         self.assertEqual(engine.strategy, strategy)
         self.assertIsNotNone(strategy._submit_order_callback)
         self.assertIsNotNone(strategy._get_position_callback)
+
+    def test_legacy_symbol_bar_strategy_signature(self):
+        """Engine should support on_bar(symbol, bar) strategy signature."""
+        engine = BacktestEngine(self.backtest_config, self.data_mgr)
+        strategy = LegacySymbolBarStrategy(self.strategy_config)
+
+        engine.set_strategy(strategy)
+        result = engine.run()
+
+        self.assertGreater(strategy.bar_count, 0)
+        self.assertGreater(result.total_trades, 0)
     
     def test_backtest_execution(self):
         """Test running a backtest"""

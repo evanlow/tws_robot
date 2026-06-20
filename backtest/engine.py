@@ -18,6 +18,7 @@ Week 4 Day 2
 """
 
 import sys
+import inspect
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
@@ -147,6 +148,7 @@ class BacktestEngine:
         
         # Strategy
         self.strategy: Optional[Strategy] = None
+        self._strategy_on_bar_mode: str = "market_data"
         
         # Risk management components (Week 3) - optional
         self.risk_manager = None
@@ -178,6 +180,22 @@ class BacktestEngine:
             strategy: Strategy instance
         """
         self.strategy = strategy
+
+        # Support both historical callback styles:
+        # 1) on_bar(market_data)
+        # 2) on_bar(symbol, bar)
+        # Existing strategy templates in this repository use (symbol, bar),
+        # while newer base strategies use (market_data).
+        param_count = len(inspect.signature(strategy.on_bar).parameters)
+        if param_count == 1:
+            self._strategy_on_bar_mode = "market_data"
+        elif param_count == 2:
+            self._strategy_on_bar_mode = "symbol_bar"
+        else:
+            raise ValueError(
+                f"Unsupported strategy.on_bar signature for {strategy.__class__.__name__}: "
+                f"expected 1 or 2 params after self, got {param_count}"
+            )
         
         # Connect strategy to engine callbacks
         strategy._submit_order_callback = self._handle_strategy_order
@@ -253,7 +271,7 @@ class BacktestEngine:
             self.strategy._update_bar(market_data)
             
             # Call strategy
-            self.strategy.on_bar(market_data)
+            self._invoke_strategy_on_bar(market_data)
             
             # Update positions and equity
             self._update_portfolio(market_data)
@@ -273,6 +291,20 @@ class BacktestEngine:
         result = self._generate_result()
         
         return result
+
+    def _invoke_strategy_on_bar(self, market_data: MarketData) -> None:
+        """Invoke strategy callback in whichever signature it implements."""
+        if not self.strategy:
+            return
+        if self._strategy_on_bar_mode == "market_data":
+            self.strategy.on_bar(market_data)
+            return
+
+        # symbol_bar mode
+        for symbol in market_data.symbols:
+            bar = market_data.get_bar(symbol)
+            if bar is not None:
+                self.strategy.on_bar(symbol, bar)
     
     def _initialize(self):
         """Initialize backtest state"""
@@ -284,9 +316,12 @@ class BacktestEngine:
         self.max_drawdown_value = 0.0
         self.max_drawdown_pct = 0.0
         
-        # Register market simulator callbacks
-        self.market_sim.register_bar_callback(self._on_bar)
-        self.market_sim.register_trade_callback(self._on_trade)
+        # Register market simulator callbacks once. Repeated registration can
+        # double-count trade events and distort PnL/trade statistics.
+        if self._on_bar not in self.market_sim.on_bar_callbacks:
+            self.market_sim.register_bar_callback(self._on_bar)
+        if self._on_trade not in self.market_sim.on_trade_callbacks:
+            self.market_sim.register_trade_callback(self._on_trade)
     
     # ==================== Event Handlers ====================
     
