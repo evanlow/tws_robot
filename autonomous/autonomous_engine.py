@@ -37,6 +37,7 @@ from autonomous.audit import AuditLogger
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
+from autonomous.market_regime import evaluate_market_regime
 from autonomous.trade_planner import OptionChainHint, TradePlan, TradePlanner, TradeType
 
 logger = logging.getLogger(__name__)
@@ -223,46 +224,28 @@ class AutonomousTradingEngine:
         return executed >= limit
 
     def _check_spy_gate(self) -> Optional[Dict[str, Any]]:
-        """Return SPY intraday gate payload when a provider is configured.
+        """Return SPY/VIX market-regime payload when a provider is configured.
 
-        ``None`` means no provider was supplied.  This only occurs for
-        recommend-only calls and unit tests that construct the engine directly
-        without a provider.  All order-opening production routes build the
-        engine via :func:`_build_engine`, which always supplies the yfinance-
-        backed provider returned by :func:`_resolve_spy_price_provider` (or an
-        explicit test override).  A ``None`` return therefore cannot occur on
-        any order-opening path in production.
-
-        When supplied, the provider must return ``{"open": ..., "current": ...}``;
-        ``current > open`` is classified as *Bullish*; any other result
-        (including zero prices from a failed fetch) is *Bearish / Not Suitable*,
-        which blocks the trade.
-
-        .. note::
-
-           The default provider uses **yfinance**, a third-party data source
-           that may differ slightly from TWS/IBKR broker market data.  For
-           production use, wiring this provider to the TWS real-time market-
-           data feed (via a ``reqMktData`` snapshot) is preferred.  yfinance
-           is used here as a reliable, zero-configuration default while a
-           TWS-backed provider is not yet implemented.
+        The provider historically returned only ``{"open": ..., "current": ...}``
+        for SPY.  It may now also return VIX fields (``vix_open`` and
+        ``vix_current``).  The evaluator preserves the legacy SPY fields while
+        adding ``trade_allowed`` and ``size_multiplier`` for the VIX overlay.
         """
 
         if self.spy_price_provider is None:
             return None
         payload = self.spy_price_provider() or {}
-        open_price = float(payload.get("open") or payload.get("day_open") or 0.0)
-        current_price = float(
-            payload.get("current") or payload.get("last") or payload.get("last_price") or 0.0
+        return evaluate_market_regime(
+            payload,
+            vix_guard_enabled=self.config.vix_guard_enabled,
+            vix_caution_level=self.config.vix_caution_level,
+            vix_block_level=self.config.vix_block_level,
+            vix_caution_intraday_rise_pct=self.config.vix_caution_intraday_rise_pct,
+            vix_block_intraday_rise_pct=self.config.vix_block_intraday_rise_pct,
+            vix_missing_blocks_trade=self.config.vix_missing_blocks_trade,
+            vix_caution_size_multiplier=self.config.vix_caution_size_multiplier,
+            vix_high_size_multiplier=self.config.vix_high_size_multiplier,
         )
-        bullish = open_price > 0 and current_price > open_price
-        return {
-            "symbol": "SPY",
-            "open": open_price,
-            "current": current_price,
-            "classification": "Bullish" if bullish else "Bearish / Not Suitable",
-            "bullish": bullish,
-        }
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -323,20 +306,24 @@ class AutonomousTradingEngine:
             )
             return self._emit(decision)
 
-        # 5. SPY intraday bullish/bearish gate ----------------------------
+        # 5. SPY + VIX market-regime gate ---------------------------------
         try:
             spy_gate = self._check_spy_gate()
         except Exception:
-            logger.exception("spy_price_provider raised")
+            logger.exception("market-regime provider raised")
             spy_gate = {
                 "symbol": "SPY",
                 "classification": "Bearish / Not Suitable",
                 "bullish": False,
-                "error": "SPY price provider raised an exception",
+                "trade_allowed": False,
+                "size_multiplier": 0.0,
+                "reasons": ["Market-regime provider raised an exception"],
+                "error": "market-regime provider raised an exception",
             }
         if spy_gate is not None:
             decision.market_gate = spy_gate
-            if not spy_gate.get("bullish"):
+            trade_allowed = bool(spy_gate.get("trade_allowed", spy_gate.get("bullish")))
+            if not trade_allowed:
                 decision.status = DecisionStatus.MARKET_NOT_SUITABLE
                 open_p = float(spy_gate.get("open") or 0.0)
                 curr_p = float(spy_gate.get("current") or 0.0)
@@ -344,11 +331,32 @@ class AutonomousTradingEngine:
                     price_info = f" (SPY Open: ${open_p:.2f}, Current: ${curr_p:.2f})"
                 else:
                     price_info = " (SPY price unavailable from yfinance)"
+                reasons = "; ".join(spy_gate.get("reasons") or [])
+                reason_suffix = f" {reasons}." if reasons else ""
                 decision.rejection_reason = (
-                    "Autonomous Mode strategy doesn't work well in current bearish market."
-                    f"{price_info} Terminating Autonomous Mode."
+                    "Autonomous Mode strategy doesn't work well in current market regime."
+                    f"{price_info}{reason_suffix} Terminating Autonomous Mode."
                 )
                 return self._emit(decision)
+
+            size_multiplier = float(spy_gate.get("size_multiplier") or 1.0)
+            if (
+                self.config.apply_market_regime_size_multiplier
+                and 0 < size_multiplier < 1.0
+            ):
+                original_deployable_cash = decision.deployable_cash
+                decision.deployable_cash = original_deployable_cash * size_multiplier
+                decision.cash_snapshot["market_regime_adjustment"] = {
+                    "original_deployable_cash": round(original_deployable_cash, 2),
+                    "size_multiplier": size_multiplier,
+                    "adjusted_deployable_cash": round(decision.deployable_cash, 2),
+                    "classification": spy_gate.get("classification"),
+                    "warnings": list(spy_gate.get("warnings") or []),
+                }
+                decision.notes.append(
+                    "market regime size multiplier applied: "
+                    f"{size_multiplier:.2f}x"
+                )
 
         # 6-8. Scan + filter + rank ---------------------------------------
         equity = float(account_summary.get("equity") or 0.0)
