@@ -1,21 +1,4 @@
-"""Configuration for the Autonomous Trading module.
-
-This config object holds **all** safety thresholds and feature flags for
-``AutonomousTradingEngine``.  Defaults are deliberately conservative:
-
-* Default mode is ``recommend_only`` (no orders ever placed).
-* Live execution is disabled.
-* User confirmation is required.
-* Only one trade per day is allowed.
-* Only limit orders are permitted.
-* Assisted-live trade plans require a valid stop/invalidation level.
-* Basket planning is disabled by default and must be explicitly enabled.
-* Risk-per-trade, volatility, fractional-edge, and drawdown sizing can only
-  reduce position size by default.
-* Expected-edge ranking is transparent and cannot bypass hard filters.
-* The market-regime guard requires a bullish SPY backdrop and can reduce or
-  block exposure when VIX indicates volatility stress.
-"""
+"""Configuration for the Autonomous Trading module."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -23,8 +6,6 @@ from typing import List, Optional
 
 
 class AutonomousMode(str, Enum):
-    """Operating mode for the autonomous engine."""
-
     RECOMMEND_ONLY = "recommend_only"
     PAPER_EXECUTE = "paper_execute"
     ASSISTED_LIVE = "assisted_live"
@@ -32,8 +13,6 @@ class AutonomousMode(str, Enum):
 
 @dataclass
 class AutonomousTradingConfig:
-    """Runtime configuration for the autonomous trading engine."""
-
     mode: AutonomousMode = AutonomousMode.RECOMMEND_ONLY
     allow_live_execution: bool = False
     require_user_confirmation: bool = True
@@ -44,14 +23,12 @@ class AutonomousTradingConfig:
     max_position_equity_pct: Optional[float] = None
     min_deployable_cash: float = 1000.0
 
-    # ---- Risk-per-trade / volatility sizing ----------------------------
     risk_per_trade_sizing_enabled: bool = True
     max_risk_per_trade_equity_pct: float = 0.002
     volatility_sizing_enabled: bool = True
     volatility_reference_pct: float = 0.02
     volatility_min_size_multiplier: float = 0.25
 
-    # ---- Fractional edge sizing overlay --------------------------------
     fractional_edge_sizing_enabled: bool = False
     fractional_edge_fraction: float = 0.10
     fractional_edge_min_trades: int = 100
@@ -60,17 +37,20 @@ class AutonomousTradingConfig:
     fractional_edge_allow_size_increase: bool = False
     fractional_edge_can_reduce_size: bool = True
 
-    # ---- Drawdown governor ---------------------------------------------
     drawdown_governor_enabled: bool = True
     strategy_drawdown_pct: float = 0.0
 
-    # ---- Edge estimation / ranking -------------------------------------
+    execution_quality_guard_enabled: bool = True
+    execution_max_spread_pct: float = 0.003
+    execution_max_slippage_pct: float = 0.005
+    execution_max_price_move_pct: float = 0.01
+    execution_block_on_missing_quote: bool = False
+
     edge_ranking_enabled: bool = True
     min_expected_r: float = -1.0
     min_edge_confidence: float = 0.0
     edge_score_weight: float = 10.0
 
-    # ---- Basket planning -----------------------------------------------
     basket_enabled: bool = False
     basket_max_size: int = 3
     basket_total_deployable_cash_pct: float = 0.005
@@ -118,43 +98,46 @@ class AutonomousTradingConfig:
         if isinstance(self.mode, str):
             self.mode = AutonomousMode(self.mode)
         if self.max_new_position_pct <= 0 or self.max_new_position_pct > 1:
-            raise ValueError(f"max_new_position_pct must be in (0, 1], got {self.max_new_position_pct}")
+            raise ValueError("max_new_position_pct must be in (0, 1]")
         for label, value in (
             ("max_position_deployable_cash_pct", self.max_position_deployable_cash_pct),
             ("max_position_equity_pct", self.max_position_equity_pct),
         ):
             if value is not None and (value <= 0 or value > 1):
-                raise ValueError(f"{label} must be in (0, 1], got {value}")
+                raise ValueError(f"{label} must be in (0, 1]")
         if self.max_trades_per_day < 0:
             raise ValueError("max_trades_per_day must be >= 0")
         if self.min_deployable_cash < 0:
             raise ValueError("min_deployable_cash must be >= 0")
-        if self.max_risk_per_trade_equity_pct <= 0 or self.max_risk_per_trade_equity_pct > 1:
-            raise ValueError("max_risk_per_trade_equity_pct must be in (0, 1]")
-        if self.volatility_reference_pct <= 0:
-            raise ValueError("volatility_reference_pct must be > 0")
-        if self.volatility_min_size_multiplier <= 0 or self.volatility_min_size_multiplier > 1:
-            raise ValueError("volatility_min_size_multiplier must be in (0, 1]")
-        if self.fractional_edge_fraction <= 0 or self.fractional_edge_fraction > 1:
-            raise ValueError("fractional_edge_fraction must be in (0, 1]")
-        if self.fractional_edge_min_trades < 0:
-            raise ValueError("fractional_edge_min_trades must be >= 0")
         for label, value in (
+            ("max_risk_per_trade_equity_pct", self.max_risk_per_trade_equity_pct),
+            ("volatility_reference_pct", self.volatility_reference_pct),
+            ("volatility_min_size_multiplier", self.volatility_min_size_multiplier),
+            ("fractional_edge_fraction", self.fractional_edge_fraction),
             ("fractional_edge_max_position_pct", self.fractional_edge_max_position_pct),
             ("fractional_edge_retirement_mode_max_pct", self.fractional_edge_retirement_mode_max_pct),
+            ("vix_caution_size_multiplier", self.vix_caution_size_multiplier),
+            ("vix_high_size_multiplier", self.vix_high_size_multiplier),
         ):
             if value <= 0 or value > 1:
                 raise ValueError(f"{label} must be in (0, 1]")
+        if self.fractional_edge_min_trades < 0:
+            raise ValueError("fractional_edge_min_trades must be >= 0")
         if self.strategy_drawdown_pct < 0 or self.strategy_drawdown_pct > 1:
             raise ValueError("strategy_drawdown_pct must be in [0, 1]")
+        for label, value in (
+            ("execution_max_spread_pct", self.execution_max_spread_pct),
+            ("execution_max_slippage_pct", self.execution_max_slippage_pct),
+            ("execution_max_price_move_pct", self.execution_max_price_move_pct),
+        ):
+            if value < 0 or value > 1:
+                raise ValueError(f"{label} must be in [0, 1]")
         if self.edge_score_weight < 0:
             raise ValueError("edge_score_weight must be >= 0")
         if self.min_edge_confidence < 0 or self.min_edge_confidence > 1:
             raise ValueError("min_edge_confidence must be in [0, 1]")
-        if self.basket_max_size < 1:
-            raise ValueError("basket_max_size must be >= 1")
-        if self.basket_max_same_sector_positions < 1:
-            raise ValueError("basket_max_same_sector_positions must be >= 1")
+        if self.basket_max_size < 1 or self.basket_max_same_sector_positions < 1:
+            raise ValueError("basket counts must be >= 1")
         for label, value in (
             ("basket_total_deployable_cash_pct", self.basket_total_deployable_cash_pct),
             ("basket_single_position_deployable_cash_pct", self.basket_single_position_deployable_cash_pct),
@@ -162,7 +145,7 @@ class AutonomousTradingConfig:
             if value <= 0 or value > 1:
                 raise ValueError(f"{label} must be in (0, 1]")
         if self.basket_single_position_deployable_cash_pct > self.basket_total_deployable_cash_pct:
-            raise ValueError("basket_single_position_deployable_cash_pct must be <= basket_total_deployable_cash_pct")
+            raise ValueError("basket single-position pct must be <= basket total pct")
         if self.min_signal_strength < 0:
             raise ValueError("min_signal_strength must be >= 0")
         if self.support_resistance_lookback_days < 0:
@@ -171,30 +154,16 @@ class AutonomousTradingConfig:
             raise ValueError("VIX levels must be positive")
         if self.vix_caution_level > self.vix_block_level:
             raise ValueError("vix_caution_level must be <= vix_block_level")
-        for label, value in (
-            ("vix_caution_intraday_rise_pct", self.vix_caution_intraday_rise_pct),
-            ("vix_block_intraday_rise_pct", self.vix_block_intraday_rise_pct),
-        ):
-            if value < 0:
-                raise ValueError(f"{label} must be >= 0")
+        if self.vix_caution_intraday_rise_pct < 0 or self.vix_block_intraday_rise_pct < 0:
+            raise ValueError("VIX rise thresholds must be >= 0")
         if self.vix_caution_intraday_rise_pct > self.vix_block_intraday_rise_pct:
-            raise ValueError("vix_caution_intraday_rise_pct must be <= vix_block_intraday_rise_pct")
-        for label, value in (
-            ("vix_caution_size_multiplier", self.vix_caution_size_multiplier),
-            ("vix_high_size_multiplier", self.vix_high_size_multiplier),
-        ):
-            if value <= 0 or value > 1:
-                raise ValueError(f"{label} must be greater than 0 and at most 1.0")
+            raise ValueError("VIX caution rise threshold must be <= block threshold")
 
     def deployable_cash_cap_pct(self) -> float:
-        if self.max_position_deployable_cash_pct is not None:
-            return self.max_position_deployable_cash_pct
-        return self.max_new_position_pct
+        return self.max_position_deployable_cash_pct if self.max_position_deployable_cash_pct is not None else self.max_new_position_pct
 
     def equity_cap_pct(self) -> float:
-        if self.max_position_equity_pct is not None:
-            return self.max_position_equity_pct
-        return self.max_new_position_pct
+        return self.max_position_equity_pct if self.max_position_equity_pct is not None else self.max_new_position_pct
 
     def to_dict(self) -> dict:
         return {
@@ -220,6 +189,11 @@ class AutonomousTradingConfig:
             "fractional_edge_can_reduce_size": self.fractional_edge_can_reduce_size,
             "drawdown_governor_enabled": self.drawdown_governor_enabled,
             "strategy_drawdown_pct": self.strategy_drawdown_pct,
+            "execution_quality_guard_enabled": self.execution_quality_guard_enabled,
+            "execution_max_spread_pct": self.execution_max_spread_pct,
+            "execution_max_slippage_pct": self.execution_max_slippage_pct,
+            "execution_max_price_move_pct": self.execution_max_price_move_pct,
+            "execution_block_on_missing_quote": self.execution_block_on_missing_quote,
             "edge_ranking_enabled": self.edge_ranking_enabled,
             "min_expected_r": self.min_expected_r,
             "min_edge_confidence": self.min_edge_confidence,
