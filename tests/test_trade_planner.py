@@ -19,10 +19,18 @@ def _candidate(**kw):
     )
 
 
+def _legacy_cfg(**kwargs):
+    return AutonomousTradingConfig(
+        risk_per_trade_sizing_enabled=False,
+        volatility_sizing_enabled=False,
+        **kwargs,
+    )
+
+
 def test_buy_shares_respects_max_position_pct():
     # 10% cap on $100k equity = $10k → at $100/share that is 100 shares max,
     # even though deployable cash could fund many more.
-    cfg = AutonomousTradingConfig(max_new_position_pct=0.10)
+    cfg = _legacy_cfg(max_new_position_pct=0.10)
     plan = TradePlanner(cfg).plan(
         _candidate(last_price=100.0),
         deployable_cash=1_000_000.0,
@@ -203,7 +211,7 @@ def test_split_caps_loose_deployable_lets_high_priced_share_through():
     """With a tight equity cap (10%) but loose deployable-cash cap (50%),
     a high-priced share that the old single-pct rule would have blocked
     should now be fundable from a small deployable-cash balance."""
-    cfg = AutonomousTradingConfig(
+    cfg = _legacy_cfg(
         max_position_deployable_cash_pct=0.50,
         max_position_equity_pct=0.10,
     )
@@ -221,7 +229,7 @@ def test_split_caps_loose_deployable_lets_high_priced_share_through():
 
 def test_split_caps_equity_side_still_binds():
     """A loose deployable cap must not bypass the equity guard."""
-    cfg = AutonomousTradingConfig(
+    cfg = _legacy_cfg(
         max_position_deployable_cash_pct=0.99,
         max_position_equity_pct=0.05,
     )

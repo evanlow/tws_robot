@@ -102,6 +102,8 @@ def _sanitize_config_overrides(overrides: Dict[str, Any]) -> Dict[str, Any]:
             "max_new_position_pct",
             "max_position_deployable_cash_pct",
             "max_position_equity_pct",
+            "max_risk_per_trade_equity_pct",
+            "volatility_min_size_multiplier",
         }:
             if (
                 isinstance(value, (int, float))
@@ -128,6 +130,7 @@ def _sanitize_config_overrides(overrides: Dict[str, Any]) -> Dict[str, Any]:
             "adr_target_fraction",
             "adr_max_target_pct",
             "adr_min_target_pct",
+            "volatility_reference_pct",
         }:
             if (
                 isinstance(value, (int, float))
@@ -135,6 +138,12 @@ def _sanitize_config_overrides(overrides: Dict[str, Any]) -> Dict[str, Any]:
                 and float(value) > 0
             ):
                 cleaned[key] = float(value)
+        elif key in {
+            "risk_per_trade_sizing_enabled",
+            "volatility_sizing_enabled",
+        }:
+            if isinstance(value, bool):
+                cleaned[key] = value
         elif key == "adr_lookback_days":
             if isinstance(value, int) and not isinstance(value, bool) and value > 0:
                 cleaned[key] = value
@@ -257,6 +266,11 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
             "max_position_deployable_cash_pct",
             "max_position_equity_pct",
             "min_deployable_cash",
+            "risk_per_trade_sizing_enabled",
+            "max_risk_per_trade_equity_pct",
+            "volatility_sizing_enabled",
+            "volatility_reference_pct",
+            "volatility_min_size_multiplier",
             "min_signal_strength",
             "required_signal_label",
             "exit_target_mode",

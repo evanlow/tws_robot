@@ -355,6 +355,34 @@ class TestConfigOverrideValidation:
         assert "max_position_deployable_cash_pct" not in cleaned
         assert "max_position_equity_pct" not in cleaned
 
+    def test_sizing_overrides_accepted(self):
+        cleaned = _sanitize_config_overrides({
+            "risk_per_trade_sizing_enabled": False,
+            "max_risk_per_trade_equity_pct": 0.003,
+            "volatility_sizing_enabled": False,
+            "volatility_reference_pct": 0.03,
+            "volatility_min_size_multiplier": 0.4,
+        })
+        assert cleaned["risk_per_trade_sizing_enabled"] is False
+        assert cleaned["max_risk_per_trade_equity_pct"] == 0.003
+        assert cleaned["volatility_sizing_enabled"] is False
+        assert cleaned["volatility_reference_pct"] == 0.03
+        assert cleaned["volatility_min_size_multiplier"] == 0.4
+
+    def test_sizing_overrides_reject_invalid_types_and_ranges(self):
+        cleaned = _sanitize_config_overrides({
+            "risk_per_trade_sizing_enabled": "false",
+            "max_risk_per_trade_equity_pct": 0.0,
+            "volatility_sizing_enabled": "false",
+            "volatility_reference_pct": 0.0,
+            "volatility_min_size_multiplier": 1.5,
+        })
+        assert "risk_per_trade_sizing_enabled" not in cleaned
+        assert "max_risk_per_trade_equity_pct" not in cleaned
+        assert "volatility_sizing_enabled" not in cleaned
+        assert "volatility_reference_pct" not in cleaned
+        assert "volatility_min_size_multiplier" not in cleaned
+
 
 class TestADREnvConfig:
     """Tests proving env vars affect the built engine config."""
@@ -459,3 +487,21 @@ class TestADREnvConfig:
         with app.app_context():
             engine = _build_engine({"exit_target_mode": "percent"})
         assert engine.config.exit_target_mode == "percent"
+
+    def test_api_override_changes_sizing_config(self, app):
+        from web.routes.api_autonomous import _build_engine
+
+        with app.app_context():
+            engine = _build_engine({
+                "risk_per_trade_sizing_enabled": False,
+                "max_risk_per_trade_equity_pct": 0.003,
+                "volatility_sizing_enabled": False,
+                "volatility_reference_pct": 0.03,
+                "volatility_min_size_multiplier": 0.4,
+            })
+        cfg = engine.config
+        assert cfg.risk_per_trade_sizing_enabled is False
+        assert cfg.max_risk_per_trade_equity_pct == 0.003
+        assert cfg.volatility_sizing_enabled is False
+        assert cfg.volatility_reference_pct == 0.03
+        assert cfg.volatility_min_size_multiplier == 0.4

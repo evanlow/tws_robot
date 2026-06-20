@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _strategy_bucket(decision: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,6 +49,7 @@ def _risk_for_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     target = plan.get("target_price")
     stop = plan.get("stop_price")
     quantity = plan.get("quantity") or 0
+    sizing = plan.get("sizing") or {}
     out: Dict[str, Any] = {
         "entry_price": entry,
         "target_price": target,
@@ -56,6 +57,8 @@ def _risk_for_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         "quantity": quantity,
         "required_cash": plan.get("required_cash"),
         "target_mode": plan.get("target_mode"),
+        "sizing": sizing,
+        "binding_cap": sizing.get("binding_cap"),
     }
     try:
         entry_f = float(entry)

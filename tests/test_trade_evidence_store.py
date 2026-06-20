@@ -66,7 +66,7 @@ def test_evidence_store_builds_schema_versioned_learning_record(tmp_path):
     assert record["planned_risk"]["risk_per_share"] == 4.0
     assert record["planned_risk"]["planned_dollar_risk"] == 40.0
     assert record["planned_risk"]["planned_r_multiple"] == 2.0
-    assert record["candidate_counts"] == {"shortlist": 1, "rejected": 1}
+    assert record["candidate_counts"] == {"shortlist": 1, "rejected": 1, "basket_legs": 0}
     assert record["outcome"]["realized"] is False
 
 
