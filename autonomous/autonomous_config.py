@@ -11,6 +11,7 @@ This config object holds **all** safety thresholds and feature flags for
 * Assisted-live trade plans require a valid stop/invalidation level.
 * Basket planning is disabled by default and must be explicitly enabled.
 * Risk-per-trade and volatility sizing can only reduce position size.
+* Expected-edge ranking is transparent and cannot bypass hard filters.
 * The market-regime guard requires a bullish SPY backdrop and can reduce or
   block exposure when VIX indicates volatility stress.
 
@@ -24,14 +25,7 @@ from typing import List, Optional
 
 
 class AutonomousMode(str, Enum):
-    """Operating mode for the autonomous engine.
-
-    * ``RECOMMEND_ONLY`` — return a trade plan but never place any order.
-    * ``PAPER_EXECUTE`` — place the trade only via the paper-trading adapter.
-    * ``ASSISTED_LIVE`` — may place a live order, *but* only when
-      ``AutonomousTradingConfig.allow_live_execution`` is True **and** the
-      caller passes ``confirm=True`` to the engine.
-    """
+    """Operating mode for the autonomous engine."""
 
     RECOMMEND_ONLY = "recommend_only"
     PAPER_EXECUTE = "paper_execute"
@@ -40,11 +34,7 @@ class AutonomousMode(str, Enum):
 
 @dataclass
 class AutonomousTradingConfig:
-    """Runtime configuration for the autonomous trading engine.
-
-    Hard rule: live execution must default to disabled.  ``allow_live_execution``
-    is False by default and must be explicitly opted into.
-    """
+    """Runtime configuration for the autonomous trading engine."""
 
     # ---- Mode and execution gating ------------------------------------
     mode: AutonomousMode = AutonomousMode.RECOMMEND_ONLY
@@ -53,17 +43,23 @@ class AutonomousTradingConfig:
 
     # ---- Trade frequency / sizing -------------------------------------
     max_trades_per_day: int = 1
-    max_new_position_pct: float = 0.10  # of equity
+    max_new_position_pct: float = 0.10
     max_position_deployable_cash_pct: Optional[float] = None
     max_position_equity_pct: Optional[float] = None
     min_deployable_cash: float = 1000.0
 
     # ---- Risk-per-trade / volatility sizing ----------------------------
     risk_per_trade_sizing_enabled: bool = True
-    max_risk_per_trade_equity_pct: float = 0.002  # 0.2% of equity per leg
+    max_risk_per_trade_equity_pct: float = 0.002
     volatility_sizing_enabled: bool = True
-    volatility_reference_pct: float = 0.02  # ADR/ATR reference: 2% daily range
+    volatility_reference_pct: float = 0.02
     volatility_min_size_multiplier: float = 0.25
+
+    # ---- Edge estimation / ranking -------------------------------------
+    edge_ranking_enabled: bool = True
+    min_expected_r: float = -1.0
+    min_edge_confidence: float = 0.0
+    edge_score_weight: float = 10.0
 
     # ---- Basket planning -----------------------------------------------
     basket_enabled: bool = False
@@ -102,8 +98,8 @@ class AutonomousTradingConfig:
     support_resistance_lookback_days: int = 30
 
     # ---- Exit target / stop policy -------------------------------------
-    exit_target_mode: str = "resistance"  # "resistance" | "percent" | "adr_intraday"
-    take_profit_pct: float = 0.08  # fallback percent target
+    exit_target_mode: str = "resistance"
+    take_profit_pct: float = 0.08
     adr_lookback_days: int = 0
     adr_target_fraction: float = 0.50
     adr_max_target_pct: float = 0.03
@@ -129,18 +125,13 @@ class AutonomousTradingConfig:
             self.mode = AutonomousMode(self.mode)
 
         if self.max_new_position_pct <= 0 or self.max_new_position_pct > 1:
-            raise ValueError(
-                "max_new_position_pct must be in (0, 1]; got "
-                f"{self.max_new_position_pct!r}"
-            )
+            raise ValueError("max_new_position_pct must be in (0, 1]")
         for label, value in (
             ("max_position_deployable_cash_pct", self.max_position_deployable_cash_pct),
             ("max_position_equity_pct", self.max_position_equity_pct),
         ):
-            if value is None:
-                continue
-            if value <= 0 or value > 1:
-                raise ValueError(f"{label} must be in (0, 1]; got {value!r}")
+            if value is not None and (value <= 0 or value > 1):
+                raise ValueError(f"{label} must be in (0, 1]")
         if self.max_trades_per_day < 0:
             raise ValueError("max_trades_per_day must be >= 0")
         if self.min_deployable_cash < 0:
@@ -151,6 +142,10 @@ class AutonomousTradingConfig:
             raise ValueError("volatility_reference_pct must be > 0")
         if self.volatility_min_size_multiplier <= 0 or self.volatility_min_size_multiplier > 1:
             raise ValueError("volatility_min_size_multiplier must be in (0, 1]")
+        if self.edge_score_weight < 0:
+            raise ValueError("edge_score_weight must be >= 0")
+        if self.min_edge_confidence < 0 or self.min_edge_confidence > 1:
+            raise ValueError("min_edge_confidence must be in [0, 1]")
         if self.basket_max_size < 1:
             raise ValueError("basket_max_size must be >= 1")
         if self.basket_max_same_sector_positions < 1:
@@ -160,11 +155,10 @@ class AutonomousTradingConfig:
             ("basket_single_position_deployable_cash_pct", self.basket_single_position_deployable_cash_pct),
         ):
             if value <= 0 or value > 1:
-                raise ValueError(f"{label} must be in (0, 1]; got {value!r}")
+                raise ValueError(f"{label} must be in (0, 1]")
         if self.basket_single_position_deployable_cash_pct > self.basket_total_deployable_cash_pct:
             raise ValueError(
-                "basket_single_position_deployable_cash_pct must be <= "
-                "basket_total_deployable_cash_pct"
+                "basket_single_position_deployable_cash_pct must be <= basket_total_deployable_cash_pct"
             )
         if self.min_signal_strength < 0:
             raise ValueError("min_signal_strength must be >= 0")
@@ -179,35 +173,27 @@ class AutonomousTradingConfig:
             ("vix_block_intraday_rise_pct", self.vix_block_intraday_rise_pct),
         ):
             if value < 0:
-                raise ValueError(f"{label} must be >= 0; got {value!r}")
+                raise ValueError(f"{label} must be >= 0")
         if self.vix_caution_intraday_rise_pct > self.vix_block_intraday_rise_pct:
-            raise ValueError(
-                "vix_caution_intraday_rise_pct must be <= "
-                "vix_block_intraday_rise_pct"
-            )
+            raise ValueError("vix_caution_intraday_rise_pct must be <= vix_block_intraday_rise_pct")
         for label, value in (
             ("vix_caution_size_multiplier", self.vix_caution_size_multiplier),
             ("vix_high_size_multiplier", self.vix_high_size_multiplier),
         ):
             if value <= 0 or value > 1:
-                raise ValueError(
-                    f"{label} must be greater than 0 and at most 1.0; got {value!r}"
-                )
+                raise ValueError(f"{label} must be greater than 0 and at most 1.0")
 
     def deployable_cash_cap_pct(self) -> float:
-        """Effective per-trade cap as a fraction of deployable cash."""
         if self.max_position_deployable_cash_pct is not None:
             return self.max_position_deployable_cash_pct
         return self.max_new_position_pct
 
     def equity_cap_pct(self) -> float:
-        """Effective per-trade cap as a fraction of account equity."""
         if self.max_position_equity_pct is not None:
             return self.max_position_equity_pct
         return self.max_new_position_pct
 
     def to_dict(self) -> dict:
-        """Return a JSON-serialisable representation (used in audit log)."""
         return {
             "mode": self.mode.value,
             "allow_live_execution": self.allow_live_execution,
@@ -222,6 +208,10 @@ class AutonomousTradingConfig:
             "volatility_sizing_enabled": self.volatility_sizing_enabled,
             "volatility_reference_pct": self.volatility_reference_pct,
             "volatility_min_size_multiplier": self.volatility_min_size_multiplier,
+            "edge_ranking_enabled": self.edge_ranking_enabled,
+            "min_expected_r": self.min_expected_r,
+            "min_edge_confidence": self.min_edge_confidence,
+            "edge_score_weight": self.edge_score_weight,
             "basket_enabled": self.basket_enabled,
             "basket_max_size": self.basket_max_size,
             "basket_total_deployable_cash_pct": self.basket_total_deployable_cash_pct,
@@ -256,9 +246,7 @@ class AutonomousTradingConfig:
             "emergency_stop_file": self.emergency_stop_file,
             "audit_log_dir": self.audit_log_dir,
             "symbol_whitelist": (
-                list(self.symbol_whitelist)
-                if self.symbol_whitelist is not None
-                else None
+                list(self.symbol_whitelist) if self.symbol_whitelist is not None else None
             ),
             "symbol_blacklist": list(self.symbol_blacklist),
         }
