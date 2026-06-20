@@ -1,18 +1,7 @@
 """Autonomous trading engine.
 
-Top-level orchestrator that combines:
-
-* :class:`data.cash_availability.CashAvailabilityAnalyzer` (deployable cash)
-* :class:`autonomous.candidate_scanner.CandidateScanner` (S&P 500 universe)
-* :class:`autonomous.candidate_ranker.CandidateRanker` (Strong/Rebound filter)
-* :class:`autonomous.trade_planner.TradePlanner` (buy-shares / short-put plan)
-* Optional :class:`risk.risk_manager.RiskManager` (final risk-check gate)
-* Optional paper / live execution adapters
-
-Default behaviour is **recommendation only**: the engine returns a structured
-:class:`AutonomousDecision` and never places an order.  Paper execution requires
-``mode=PAPER_EXECUTE`` and a paper adapter; live execution additionally requires
-``allow_live_execution=True`` and explicit confirmation.
+Top-level orchestrator that combines scanner, ranking, planning, risk gates,
+market-regime gates, evidence logging, and optional paper/live execution.
 """
 
 from __future__ import annotations
@@ -31,14 +20,13 @@ from autonomous.candidate_ranker import CandidateRanker
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.market_regime import evaluate_market_regime
+from autonomous.risk_lifecycle import LossLimitGuard
 from autonomous.trade_planner import OptionChainHint, TradePlan, TradePlanner, TradeType
 
 logger = logging.getLogger(__name__)
 
 
 class DecisionStatus(str, Enum):
-    """Outcome of one ``run_once()`` invocation."""
-
     EMERGENCY_STOP = "emergency_stop"
     NO_DEPLOYABLE_CASH = "no_deployable_cash"
     NO_CANDIDATE = "no_candidate"
@@ -57,8 +45,6 @@ class DecisionStatus(str, Enum):
 
 @dataclass
 class AutonomousDecision:
-    """Structured outcome of one ``AutonomousTradingEngine.run_once()`` call."""
-
     status: DecisionStatus
     mode: AutonomousMode
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -73,6 +59,7 @@ class AutonomousDecision:
     trade_plans: List[Dict[str, Any]] = field(default_factory=list)
     basket_plan: Optional[Dict[str, Any]] = None
     risk_check: Optional[Dict[str, Any]] = None
+    risk_lifecycle: Optional[Dict[str, Any]] = None
     order_id: Optional[int] = None
     order_ids: List[int] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
@@ -94,6 +81,7 @@ class AutonomousDecision:
             "trade_plans": list(self.trade_plans),
             "basket_plan": self.basket_plan,
             "risk_check": self.risk_check,
+            "risk_lifecycle": self.risk_lifecycle,
             "order_id": self.order_id,
             "order_ids": list(self.order_ids),
             "notes": list(self.notes),
@@ -106,8 +94,6 @@ SpyPriceProvider = Callable[[], Optional[Dict[str, Any]]]
 
 
 class AutonomousTradingEngine:
-    """Top-level orchestrator for the guarded autonomous trading flow."""
-
     def __init__(
         self,
         scanner: CandidateScanner,
@@ -133,12 +119,19 @@ class AutonomousTradingEngine:
         self.paper_adapter = paper_adapter
         self.option_hint_provider = option_hint_provider
         self.spy_price_provider = spy_price_provider
-
         self.ranker = CandidateRanker(self.config)
         self.planner = TradePlanner(self.config)
         self.basket_planner = BasketPlanner(self.config)
         self.audit = audit_logger or AuditLogger(self.config.audit_log_dir)
         self.evidence = evidence_store or TradeEvidenceStore(self.config.audit_log_dir)
+        self.loss_limit_guard = LossLimitGuard(
+            enabled=self.config.risk_lifecycle_guard_enabled,
+            max_daily_loss_r=self.config.max_daily_loss_r,
+            max_weekly_loss_r=self.config.max_weekly_loss_r,
+            max_monthly_loss_r=self.config.max_monthly_loss_r,
+            max_consecutive_losses=self.config.max_consecutive_losses,
+            max_drawdown_r=self.config.max_strategy_drawdown_r,
+        )
 
     def _emergency_stop_active(self) -> bool:
         try:
@@ -171,6 +164,29 @@ class AutonomousTradingEngine:
         executed = self.audit.count_executions_on(when=when)
         return executed >= limit
 
+    def _check_risk_lifecycle(self, decision: AutonomousDecision) -> bool:
+        if not self.loss_limit_guard.enabled:
+            decision.risk_lifecycle = {"allowed": True, "reason": "risk lifecycle guard disabled"}
+            return True
+        try:
+            records = self.evidence.recent_outcomes(self.config.risk_lifecycle_recent_record_limit)
+            lifecycle = self.loss_limit_guard.evaluate(records, now=decision.timestamp)
+        except Exception:
+            logger.exception("risk lifecycle guard raised")
+            decision.risk_lifecycle = {
+                "allowed": False,
+                "reason": "risk lifecycle guard raised an exception",
+            }
+            decision.status = DecisionStatus.RISK_REJECTED
+            decision.rejection_reason = "risk lifecycle guard raised an exception"
+            return False
+        decision.risk_lifecycle = lifecycle.to_dict()
+        if not lifecycle.allowed:
+            decision.status = DecisionStatus.RISK_REJECTED
+            decision.rejection_reason = lifecycle.reason
+            return False
+        return True
+
     def _check_spy_gate(self) -> Optional[Dict[str, Any]]:
         if self.spy_price_provider is None:
             return None
@@ -193,14 +209,14 @@ class AutonomousTradingEngine:
         today: Optional[date] = None,
         max_symbols: Optional[int] = None,
     ) -> AutonomousDecision:
-        decision = AutonomousDecision(
-            status=DecisionStatus.NO_CANDIDATE,
-            mode=self.config.mode,
-        )
+        decision = AutonomousDecision(status=DecisionStatus.NO_CANDIDATE, mode=self.config.mode)
 
         if self._emergency_stop_active():
             decision.status = DecisionStatus.EMERGENCY_STOP
             decision.rejection_reason = "EMERGENCY_STOP active (file or RiskManager flag)"
+            return self._emit(decision)
+
+        if not self._check_risk_lifecycle(decision):
             return self._emit(decision)
 
         account_summary = self._account_provider() or {}
@@ -218,8 +234,7 @@ class AutonomousTradingEngine:
         if decision.deployable_cash < self.config.min_deployable_cash:
             decision.status = DecisionStatus.NO_DEPLOYABLE_CASH
             decision.rejection_reason = (
-                f"deployable_cash {decision.deployable_cash:.2f} < "
-                f"min {self.config.min_deployable_cash:.2f}"
+                f"deployable_cash {decision.deployable_cash:.2f} < min {self.config.min_deployable_cash:.2f}"
             )
             return self._emit(decision)
 
@@ -243,11 +258,7 @@ class AutonomousTradingEngine:
                 decision.status = DecisionStatus.MARKET_NOT_SUITABLE
                 open_p = float(spy_gate.get("open") or 0.0)
                 curr_p = float(spy_gate.get("current") or 0.0)
-                price_info = (
-                    f" (SPY Open: ${open_p:.2f}, Current: ${curr_p:.2f})"
-                    if open_p > 0 or curr_p > 0
-                    else " (SPY price unavailable)"
-                )
+                price_info = f" (SPY Open: ${open_p:.2f}, Current: ${curr_p:.2f})" if open_p > 0 or curr_p > 0 else " (SPY price unavailable)"
                 reasons = "; ".join(spy_gate.get("reasons") or [])
                 reason_suffix = f" {reasons}." if reasons else ""
                 decision.rejection_reason = (
@@ -272,8 +283,7 @@ class AutonomousTradingEngine:
                 if decision.deployable_cash < self.config.min_deployable_cash:
                     decision.status = DecisionStatus.NO_DEPLOYABLE_CASH
                     decision.rejection_reason = (
-                        f"deployable_cash {decision.deployable_cash:.2f} < "
-                        f"min {self.config.min_deployable_cash:.2f} after market regime adjustment"
+                        f"deployable_cash {decision.deployable_cash:.2f} < min {self.config.min_deployable_cash:.2f} after market regime adjustment"
                     )
                     return self._emit(decision)
 
@@ -299,8 +309,7 @@ class AutonomousTradingEngine:
         if not ranked:
             decision.status = DecisionStatus.NO_CANDIDATE
             decision.rejection_reason = (
-                f"no candidates matched strength>={self.config.min_signal_strength} "
-                f"+ label={self.config.required_signal_label!r}"
+                f"no candidates matched strength>={self.config.min_signal_strength} + label={self.config.required_signal_label!r}"
             )
             return self._emit(decision)
 
@@ -318,9 +327,7 @@ class AutonomousTradingEngine:
                 decision.trade_plans = list(decision.basket_plan["trade_plans"])
                 decision.selected = decision.selected_basket[0] if decision.selected_basket else None
                 decision.trade_plan = decision.trade_plans[0] if decision.trade_plans else None
-                decision.notes.append(
-                    f"basket mode — {len(decision.trade_plans)} planned legs"
-                )
+                decision.notes.append(f"basket mode — {len(decision.trade_plans)} planned legs")
             else:
                 decision.notes.append("basket mode enabled but no basket plan produced; falling back to top candidate")
 
@@ -371,9 +378,7 @@ class AutonomousTradingEngine:
                 return self._emit(decision)
             if self._daily_limit_reached(decision.timestamp):
                 decision.status = DecisionStatus.DAILY_LIMIT_REACHED
-                decision.rejection_reason = (
-                    f"max_trades_per_day ({self.config.max_trades_per_day}) already reached for today"
-                )
+                decision.rejection_reason = f"max_trades_per_day ({self.config.max_trades_per_day}) already reached for today"
                 return self._emit(decision)
             if len(decision.trade_plans) > 1:
                 return self._emit(self._execute_paper_basket(decision))
@@ -390,9 +395,7 @@ class AutonomousTradingEngine:
                 return self._emit(decision)
             if self._daily_limit_reached(decision.timestamp):
                 decision.status = DecisionStatus.DAILY_LIMIT_REACHED
-                decision.rejection_reason = (
-                    f"max_trades_per_day ({self.config.max_trades_per_day}) already reached for today"
-                )
+                decision.rejection_reason = f"max_trades_per_day ({self.config.max_trades_per_day}) already reached for today"
                 return self._emit(decision)
             decision.status = DecisionStatus.LIVE_PLAN_READY
             decision.notes.append("live_plan_ready — AutonomousLiveRunner must submit via OrderExecutor")
@@ -488,9 +491,7 @@ class AutonomousTradingEngine:
         decision.status = DecisionStatus.PAPER_EXECUTED
         decision.order_ids = order_ids
         decision.order_id = order_ids[0] if order_ids else None
-        decision.notes.append(
-            f"paper basket executed: {len(executed_symbols)} legs ({', '.join(executed_symbols)})"
-        )
+        decision.notes.append(f"paper basket executed: {len(executed_symbols)} legs ({', '.join(executed_symbols)})")
         return decision
 
     @staticmethod
@@ -506,6 +507,7 @@ class AutonomousTradingEngine:
             required_cash=float(plan_dict.get("required_cash") or 0.0),
             target_mode=str(plan_dict.get("target_mode") or ""),
             sizing=dict(plan_dict.get("sizing") or {}),
+            execution_quality=dict(plan_dict.get("execution_quality") or {}),
         )
 
     @staticmethod

@@ -15,12 +15,9 @@ from autonomous.execution_quality import ExecutionQualityDecision, ExecutionQual
 from autonomous.feature_builder import FeatureBuilder
 from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDecision
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
-from autonomous.outcome_reconciliation import (
-    FillSummary,
-    OutcomeReconciliation,
-    OutcomeReconciler,
-)
+from autonomous.outcome_reconciliation import FillSummary, OutcomeReconciliation, OutcomeReconciler
 from autonomous.position_sizing import PositionSizer, SizingDecision
+from autonomous.risk_lifecycle import LossLimitDecision, LossLimitGuard, StrategyEquityCurveBuilder, StrategyEquityPoint
 from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
 from autonomous.validation_framework import ValidationFramework, ValidationReport, ValidationThresholds
@@ -61,11 +58,15 @@ __all__ = [
     "FillSummary",
     "FractionalEdgeSizer",
     "FractionalSizingDecision",
+    "LossLimitDecision",
+    "LossLimitGuard",
     "OutcomeEvidenceWriter",
     "OutcomeReconciliation",
     "OutcomeReconciler",
     "PositionSizer",
     "SizingDecision",
+    "StrategyEquityCurveBuilder",
+    "StrategyEquityPoint",
     "StrategyArmLearner",
     "StrategyArmStats",
     "TradePlan",
