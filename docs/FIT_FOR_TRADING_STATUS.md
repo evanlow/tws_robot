@@ -12,7 +12,7 @@ The dashboard/backend exposes a read-only status matrix:
 GET /api/trading-readiness/status
 ```
 
-The endpoint does not place orders.  It reports the current readiness of five
+The endpoint does not place orders.  It reports the current readiness of six
 operating modes:
 
 | Mode | Meaning | Target status |

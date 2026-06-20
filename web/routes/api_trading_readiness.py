@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Tuple
 
-from flask import Blueprint, current_app, jsonify
+from flask import Blueprint, jsonify
 
 from autonomous.runner_config import (
     AutonomousLiveRunnerConfig,
@@ -31,7 +31,6 @@ bp = Blueprint(
 YES = "YES"
 NO = "NO"
 BLOCKED = "BLOCKED"
-INFO = "INFO"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -340,7 +339,7 @@ def _build_status_payload() -> Dict[str, Any]:
     criteria["actual_live_continuous"] = _criterion(
         "actual_live_continuous",
         "Actual live continuous trading",
-        YES if continuous_allowed and not continuous_reasons else BLOCKED,
+        YES if continuous_allowed and not continuous_reasons else (NO if continuous_allowed else BLOCKED),
         continuous_reasons,
         evidence={
             **connection_evidence,
@@ -391,13 +390,19 @@ def _build_status_payload() -> Dict[str, Any]:
             + criteria["actual_live_single_trade"]["reasons"]
         )
 
+    live_config_dict = live_config.to_dict()
+    if "expected_account_id" in live_config_dict:
+        live_config_dict["expected_account_id"] = _mask_account(
+            live_config_dict["expected_account_id"] or ""
+        )
+
     return {
         "overall_status": overall,
         "overall_fit": small_live_ready,
         "scope": "small_single_trade_live_experiment",
         "overall_reasons": overall_reasons,
         "connection": connection_evidence,
-        "live_config": live_config.to_dict(),
+        "live_config": live_config_dict,
         "criteria": criteria,
     }
 

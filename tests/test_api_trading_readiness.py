@@ -106,3 +106,18 @@ def test_status_blocks_single_trade_when_trade_value_cap_is_too_high(monkeypatch
     single = body["criteria"]["actual_live_single_trade"]
     assert single["status"] == "NO"
     assert any("exceeds first-live cap" in r for r in single["reasons"])
+
+
+def test_status_continuous_returns_no_when_policy_enabled_but_gates_fail(monkeypatch):
+    """Policy-enabled continuous mode with failing gates returns NO, not BLOCKED."""
+    monkeypatch.setenv("FIT_FOR_TRADING_ALLOW_CONTINUOUS_EXPERIMENT", "true")
+    app = _make_app(monkeypatch)
+    client = app.test_client()
+
+    resp = client.get("/api/trading-readiness/status")
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    continuous = body["criteria"]["actual_live_continuous"]
+    assert continuous["status"] == "NO"
+    assert continuous["fit"] is False
