@@ -8,6 +8,7 @@ This config object holds **all** safety thresholds and feature flags for
 * User confirmation is required.
 * Only one trade per day is allowed.
 * Only limit orders are permitted.
+* Assisted-live trade plans require a valid stop/invalidation level.
 * The market-regime guard requires a bullish SPY backdrop and can reduce or
   block exposure when VIX indicates volatility stress.
 
@@ -91,10 +92,10 @@ class AutonomousTradingConfig:
     # ---- Technical levels ---------------------------------------------
     # Used by TechnicalAnalysisSignalProvider when the screener row does not
     # already include support/resistance.  A value of 0 disables provider-side
-    # level enrichment; production wiring passes this default value through.
+    # level enrichment.
     support_resistance_lookback_days: int = 30
 
-    # ---- Exit target mode ---------------------------------------------
+    # ---- Exit target / stop policy -------------------------------------
     exit_target_mode: str = "resistance"  # "resistance" | "percent" | "adr_intraday"
     take_profit_pct: float = 0.08  # fallback percent target
     adr_lookback_days: int = 0
@@ -102,6 +103,7 @@ class AutonomousTradingConfig:
     adr_max_target_pct: float = 0.03
     adr_min_target_pct: float = 0.005
     adr_respect_resistance_cap: bool = True
+    require_stop_price_for_assisted_live: bool = True
 
     # ---- Order style --------------------------------------------------
     use_limit_orders_only: bool = True
@@ -231,6 +233,7 @@ class AutonomousTradingConfig:
             "adr_max_target_pct": self.adr_max_target_pct,
             "adr_min_target_pct": self.adr_min_target_pct,
             "adr_respect_resistance_cap": self.adr_respect_resistance_cap,
+            "require_stop_price_for_assisted_live": self.require_stop_price_for_assisted_live,
             "use_limit_orders_only": self.use_limit_orders_only,
             "emergency_stop_file": self.emergency_stop_file,
             "audit_log_dir": self.audit_log_dir,
