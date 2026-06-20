@@ -90,10 +90,13 @@ def _row(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     outcome = record.get("outcome") or {}
     if not outcome.get("realized") or outcome.get("realized_r_multiple") is None:
         return None
-    return {"timestamp": _parse_ts(record.get("timestamp")), "record": record}
+    ts = _parse_ts(record.get("timestamp"))
+    if ts is None:
+        return None
+    return {"timestamp": ts, "record": record}
 
 
-def _parse_ts(value: Any) -> datetime:
+def _parse_ts(value: Any) -> Optional[datetime]:
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     if isinstance(value, str):
@@ -101,5 +104,5 @@ def _parse_ts(value: Any) -> datetime:
             parsed = datetime.fromisoformat(value)
             return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
         except ValueError:
-            return datetime.now(timezone.utc)
-    return datetime.now(timezone.utc)
+            return None
+    return None

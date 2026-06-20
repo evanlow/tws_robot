@@ -36,10 +36,10 @@ def sector_etf_for(sector: Optional[str]) -> Optional[str]:
 def classify_sector_regime(*, sector_bullish: Optional[bool], relative_strength_pct: Optional[float]) -> str:
     if sector_bullish is False:
         return "sector_hostile"
-    if sector_bullish is True and relative_strength_pct is not None and relative_strength_pct >= 0:
-        return "sector_supportive"
     if sector_bullish is True:
-        return "sector_bullish_unknown_rs"
+        if relative_strength_pct is not None and relative_strength_pct < 0:
+            return "sector_relative_weakness"
+        return "sector_supportive"
     if relative_strength_pct is not None:
         return "sector_relative_strength" if relative_strength_pct >= 0 else "sector_relative_weakness"
     return "sector_unknown"
@@ -47,7 +47,7 @@ def classify_sector_regime(*, sector_bullish: Optional[bool], relative_strength_
 
 def classify_time_of_day(moment: Optional[Any] = None) -> str:
     dt = _parse_datetime(moment) or datetime.now(timezone.utc)
-    t = dt.time()
+    t = dt.astimezone(timezone.utc).replace(tzinfo=None).time()
     if time(13, 30) <= t < time(14, 30):
         return "opening_volatility"
     if time(14, 30) <= t < time(19, 0):
