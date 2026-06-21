@@ -1,0 +1,221 @@
+# Autonomous Evidence-Learning Implementation Tracker
+
+This tracker complements:
+
+- `docs/AUTONOMOUS_TRADING_SYSTEM_SPEC.md`
+- `docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md`
+- `docs/AUTONOMOUS_EVIDENCE_LEARNING_SPEC.md`
+
+It tracks the implementation of TWS Robot's evidence-based learning objective:
+
+> learn from realized evidence, know which setups work best, size more intelligently, reject weak conditions, and recommend capital increases only when evidence supports them.
+
+Legend:
+
+| Status | Meaning |
+|---|---|
+| Done | Implemented and merged |
+| Partial | Implemented in part, or implemented but not fully evidence-calibrated |
+| Pending | Accepted roadmap item, not yet implemented |
+| Planned | Future accepted roadmap item |
+
+## 1. Existing foundations
+
+| Capability | Status | Notes |
+|---|---|---|
+| Realized outcome evidence | Done | Implemented in PR #170 |
+| Realized R-multiple | Done | Implemented in PR #170 |
+| Slippage / commission / partial-fill fields | Done | Implemented in PR #170 |
+| Strategy-arm analytics | Done | Implemented in PR #169 |
+| Rule-based edge estimator | Done | Implemented in PR #166 |
+| Feature builder | Done | Implemented in PR #166 and expanded in PR #172 |
+| Sector / time-of-day regime context | Done | Implemented in PR #172 |
+| Risk lifecycle using outcome records | Done | Implemented in PR #171 |
+| Chronological validation report | Done | Implemented in PR #172 |
+| Evidence-based adaptive edge estimator | Pending | Not yet implemented |
+| Setup registry | Pending | Not yet implemented |
+| Setup eligibility gate | Pending | Not yet implemented |
+| Evidence-aware sizing overlay | Pending | Not yet implemented |
+| Capital promotion report | Pending | Not yet implemented |
+| Sharpe / Sortino / profit-factor metrics | Pending | Not yet implemented as dedicated metrics module |
+
+## 2. Evidence-learning phases
+
+| Phase | Work item | Status | Target PR |
+|---:|---|---|---|
+| EL1 | Performance metrics | Pending | TBD |
+| EL2 | Setup identity and registry | Pending | TBD |
+| EL3 | Evidence calibrator | Pending | TBD |
+| EL4 | Adaptive edge estimator | Pending | TBD |
+| EL5 | Setup eligibility gate | Pending | TBD |
+| EL6 | Evidence-aware sizing overlay | Pending | TBD |
+| EL7 | Capital promotion report | Pending | TBD |
+| EL8 | Dashboard/API exposure | Pending | TBD |
+
+## 3. Phase detail tracker
+
+### EL1 — Performance metrics
+
+Status: Pending
+
+Goal:
+
+- Calculate risk-adjusted and trade-quality metrics from realized `autonomous_outcome` evidence.
+
+Checklist:
+
+- [ ] Add `autonomous/performance_metrics.py`.
+- [ ] Calculate trade count, win rate, avg R, median R, total R.
+- [ ] Calculate avg win R and avg loss R.
+- [ ] Calculate expected R.
+- [ ] Calculate profit factor.
+- [ ] Calculate per-trade Sharpe using R-multiples.
+- [ ] Calculate rolling Sharpe.
+- [ ] Calculate Sortino ratio.
+- [ ] Calculate max drawdown in R.
+- [ ] Add tests using realized outcome records.
+- [ ] Add docs.
+
+### EL2 — Setup identity and registry
+
+Status: Pending
+
+Goal:
+
+- Give every realized trade a deterministic setup ID and metadata record.
+
+Checklist:
+
+- [ ] Add `autonomous/setup_registry.py`.
+- [ ] Define setup dimensions.
+- [ ] Generate deterministic setup IDs.
+- [ ] Include market, VIX, sector, time-of-day, support/resistance, volatility, and basket context.
+- [ ] Add setup metadata model.
+- [ ] Add tests.
+
+### EL3 — Evidence calibrator
+
+Status: Pending
+
+Goal:
+
+- Aggregate realized evidence by setup and determine setup quality.
+
+Checklist:
+
+- [ ] Add `autonomous/evidence_calibrator.py`.
+- [ ] Group outcomes by setup ID.
+- [ ] Calculate setup-level performance metrics.
+- [ ] Apply minimum sample-size threshold.
+- [ ] Add Bayesian/shrinkage confidence scoring.
+- [ ] Classify setups as `INSUFFICIENT_EVIDENCE`, `WEAK`, `ACCEPTABLE`, `STRONG`, `RETIRED`, `PAPER_ONLY`, or `LIVE_ELIGIBLE`.
+- [ ] Add tests.
+
+### EL4 — Adaptive edge estimator
+
+Status: Pending
+
+Goal:
+
+- Blend the current rule-based prior with realized setup performance.
+
+Checklist:
+
+- [ ] Add `autonomous/adaptive_edge_estimator.py`.
+- [ ] Accept current `EdgeEstimate` prior.
+- [ ] Accept setup evidence summary.
+- [ ] Compute prior weight and evidence weight.
+- [ ] Output calibrated `p_win`, `avg_win_r`, `avg_loss_r`, `expected_r`, and confidence.
+- [ ] Include setup ID and sample size.
+- [ ] Preserve transparent reasons.
+- [ ] Add tests.
+
+### EL5 — Setup eligibility gate
+
+Status: Pending
+
+Goal:
+
+- Reject or downgrade weak setups before execution.
+
+Checklist:
+
+- [ ] Add `autonomous/setup_eligibility.py`.
+- [ ] Reject `expected_r <= 0` when evidence is sufficient.
+- [ ] Reject retired setups.
+- [ ] Restrict `PAPER_ONLY` setups from live execution.
+- [ ] Downgrade insufficient-evidence setups to recommend/paper/tiny-live only.
+- [ ] Add evidence diagnostics to decisions.
+- [ ] Add tests.
+
+### EL6 — Evidence-aware sizing overlay
+
+Status: Pending
+
+Goal:
+
+- Let evidence reduce, hold, or modestly increase size within hard caps.
+
+Checklist:
+
+- [ ] Extend sizing diagnostics with evidence score.
+- [ ] Use setup confidence, expected R, rolling Sharpe, drawdown, and slippage history.
+- [ ] Never bypass deployable cash, basket risk, risk-per-trade, drawdown, or operator caps.
+- [ ] Add size-state output: `NO_TRADE`, `PAPER_ONLY`, `TINY_LIVE`, `NORMAL_CAPPED`, `REDUCED_SIZE`, `RETIRED`.
+- [ ] Add tests.
+
+### EL7 — Capital promotion report
+
+Status: Pending
+
+Goal:
+
+- Recommend capital increases only when evidence supports them.
+
+Checklist:
+
+- [ ] Add `autonomous/capital_promotion.py`.
+- [ ] Define promotion levels.
+- [ ] Calculate report from realized evidence and operational metrics.
+- [ ] Include trade count, avg R, expected R, win rate, profit factor, rolling Sharpe, Sortino, max drawdown, slippage, partial-fill rate, and operational incidents.
+- [ ] Recommend approve/hold/demote.
+- [ ] Require operator approval; no auto-promotion.
+- [ ] Add tests.
+
+### EL8 — Dashboard/API exposure
+
+Status: Pending
+
+Goal:
+
+- Make learning status visible to the operator.
+
+Checklist:
+
+- [ ] Add setup performance API.
+- [ ] Add promotion report API.
+- [ ] Add weak setup report API.
+- [ ] Add evidence drift report API.
+- [ ] Update dashboard/control tower when available.
+
+## 4. Maintenance rules
+
+Future evidence-learning PRs should update this tracker when they complete work.
+
+A PR that implements an EL phase should update:
+
+- phase status;
+- completed checklist items;
+- PR number / notes;
+- new limitations discovered;
+- any spec deviations.
+
+If an implementation changes live trading behaviour, the PR description should explicitly state:
+
+```text
+Live behaviour changed: yes/no
+Order submission path changed: yes/no
+Sizing changed: yes/no
+Risk gates changed: yes/no
+Evidence-learning behaviour changed: yes/no
+```
