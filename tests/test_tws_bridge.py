@@ -9,10 +9,12 @@ import threading
 import time
 from unittest.mock import Mock, MagicMock, patch, call
 from datetime import datetime
+from types import SimpleNamespace
 
 from core.tws_bridge import TWSBridge, _BridgeApp, _to_float
 from core.event_bus import EventBus, Event, EventType
 from ibapi.contract import Contract
+from ibapi.order import Order
 from ibapi.order_cancel import OrderCancel
 
 
@@ -1091,6 +1093,147 @@ class TestBridgeFilledOrderTracking:
     def test_pop_when_no_app_returns_empty(self, bridge):
         bridge._app = None
         assert bridge.pop_filled_order_ids() == set()
+
+
+# ==============================================================================
+# Rich broker fill snapshots for autonomous fill ingestion
+# ==============================================================================
+
+
+class TestBridgeBrokerFillEvents:
+    """Tests for TWSBridge.pop_broker_fill_events."""
+
+    @pytest.mark.unit
+    def test_exec_details_and_commission_report_emit_enriched_fill_event(
+        self, bridge, mock_service_manager
+    ):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+        contract = SimpleNamespace(symbol="AAPL", secType="STK")
+        execution = SimpleNamespace(
+            execId="0001",
+            orderId=101,
+            side="BOT",
+            shares=25,
+            price=100.5,
+            time="20260101 14:30:00",
+            exchange="NASDAQ",
+            lastLiquidity=1,
+        )
+
+        app.execDetails(1, contract, execution)
+        rows = bridge.pop_broker_fill_events()
+
+        assert len(rows) == 1
+        assert rows[0]["execution_id"] == "0001"
+        assert rows[0]["order_id"] == 101
+        assert rows[0]["symbol"] == "AAPL"
+        assert rows[0]["quantity"] == 25
+        assert rows[0]["price"] == 100.5
+        assert rows[0]["commission"] is None
+
+        app.commissionReport(
+            SimpleNamespace(
+                execId="0001",
+                commission=0.25,
+                realizedPNL=0.0,
+                currency="USD",
+                yield_=0.0,
+            )
+        )
+        rows = bridge.pop_broker_fill_events()
+
+        assert len(rows) == 1
+        assert rows[0]["execution_id"] == "0001"
+        assert rows[0]["order_id"] == 101
+        assert rows[0]["commission"] == 0.25
+        assert bridge.pop_broker_fill_events() == []
+
+    @pytest.mark.unit
+    def test_commission_before_exec_details_is_preserved(self, bridge, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+
+        app.commissionReport(
+            SimpleNamespace(
+                execId="0002",
+                commission=0.35,
+                realizedPNL=1.5,
+                currency="USD",
+                yield_=0.0,
+            )
+        )
+        bridge.pop_broker_fill_events()
+
+        contract = SimpleNamespace(symbol="MSFT", secType="STK")
+        execution = SimpleNamespace(
+            execId="0002",
+            orderId=202,
+            side="BOT",
+            shares=10,
+            price=250.0,
+            time="20260101 14:30:00",
+            exchange="NASDAQ",
+            lastLiquidity=2,
+        )
+        app.execDetails(1, contract, execution)
+
+        rows = bridge.pop_broker_fill_events()
+        assert len(rows) == 1
+        assert rows[0]["execution_id"] == "0002"
+        assert rows[0]["order_id"] == 202
+        assert rows[0]["commission"] == 0.35
+
+    @pytest.mark.unit
+    def test_pop_when_no_app_returns_empty(self, bridge):
+        bridge._app = None
+        assert bridge.pop_broker_fill_events() == []
+
+
+# ==============================================================================
+# Open-order snapshots for autonomous protection verification
+# ==============================================================================
+
+
+class TestBridgeOpenOrderSnapshots:
+    """Tests for broker-visible open-order snapshots."""
+
+    @pytest.mark.unit
+    def test_open_order_snapshot_records_and_terminal_status_removes(
+        self, bridge, mock_service_manager
+    ):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+        contract = Contract()
+        contract.symbol = "AAA"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.currency = "USD"
+        order = Order()
+        order.action = "SELL"
+        order.orderType = "STP"
+        order.totalQuantity = 2
+        order.parentId = 700
+        order.auxPrice = 95.0
+
+        app.openOrder(702, contract, order, Mock(status="Submitted"))
+
+        snapshots = bridge.get_open_order_snapshots()
+        assert len(snapshots) == 1
+        assert snapshots[0]["order_id"] == 702
+        assert snapshots[0]["symbol"] == "AAA"
+        assert snapshots[0]["action"] == "SELL"
+        assert snapshots[0]["order_type"] == "STP"
+        assert snapshots[0]["quantity"] == 2.0
+        assert snapshots[0]["parent_id"] == 700
+        mock_service_manager.add_order.assert_called()
+
+        app.orderStatus(
+            orderId=702, status="Cancelled", filled=0.0, remaining=0.0,
+            avgFillPrice=0.0, permId=0, parentId=700, lastFillPrice=0.0,
+            clientId=1, whyHeld="", mktCapPrice=0.0,
+        )
+        assert bridge.get_open_order_snapshots() == []
 
 
 # ==============================================================================

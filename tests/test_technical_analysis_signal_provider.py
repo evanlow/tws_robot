@@ -68,6 +68,30 @@ class TestQualifyingRows:
         sig = provider.analyze("AAPL")
         assert sig is not None and sig.symbol == "AAPL"
 
+    def test_quote_health_metadata_maps_to_signal_extras(self):
+        screener = _StubScreener([
+            _row(
+                "AAA",
+                bid=99.95,
+                ask=100.05,
+                quote_timestamp="2026-01-01T14:30:00+00:00",
+                market_data_status="healthy",
+                market_is_open=True,
+            )
+        ])
+        provider = TechnicalAnalysisSignalProvider(
+            screener_service=screener, refresh_on_first_call=False
+        )
+
+        sig = provider.analyze("AAA")
+
+        assert sig is not None
+        assert sig.extras["bid"] == 99.95
+        assert sig.extras["ask"] == 100.05
+        assert sig.extras["quote_timestamp"] == "2026-01-01T14:30:00+00:00"
+        assert sig.extras["market_data_status"] == "healthy"
+        assert sig.extras["market_is_open"] is True
+
 
 class TestNonQualifyingRows:
     def test_non_strong_quality_returns_low_strength_signal(self):

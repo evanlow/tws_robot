@@ -12,6 +12,7 @@ from autonomous.adr_calculator import compute_adr_target_price
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
 from autonomous.execution_quality import ExecutionQualityGuard
+from autonomous.market_data_health import MarketDataHealthGuard
 from autonomous.position_sizing import PositionSizer
 
 _OPTION_MULTIPLIER = 100
@@ -68,6 +69,7 @@ class TradePlan:
     adr_pct: Optional[float] = None
     adr_target_fraction: Optional[float] = None
     sizing: Dict[str, Any] = field(default_factory=dict)
+    market_data_health: Dict[str, Any] = field(default_factory=dict)
     execution_quality: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -92,6 +94,7 @@ class TradePlan:
             "adr_pct": round(self.adr_pct, 6) if self.adr_pct is not None else None,
             "adr_target_fraction": self.adr_target_fraction,
             "sizing": dict(self.sizing or {}),
+            "market_data_health": dict(self.market_data_health or {}),
             "execution_quality": dict(self.execution_quality or {}),
         }
 
@@ -123,6 +126,17 @@ class TradePlanner:
             max_slippage_pct=config.execution_max_slippage_pct,
             max_price_move_pct=config.execution_max_price_move_pct,
             block_on_missing_quote=config.execution_block_on_missing_quote,
+        )
+        self.market_data_guard = MarketDataHealthGuard(
+            enabled=config.market_data_health_guard_enabled,
+            max_quote_age_seconds=config.market_data_max_quote_age_seconds,
+            max_spread_pct=config.market_data_max_spread_pct,
+            max_last_mid_deviation_pct=config.market_data_max_last_mid_deviation_pct,
+            block_stale_quotes_live=config.market_data_block_stale_quotes_live,
+            block_missing_bid_ask_live=config.market_data_block_missing_bid_ask_live,
+            block_missing_timestamp_live=config.market_data_block_missing_timestamp_live,
+            block_feed_unhealthy_live=config.market_data_block_feed_unhealthy_live,
+            block_market_closed_live=config.market_data_block_market_closed_live,
         )
 
     def plan(
@@ -182,6 +196,10 @@ class TradePlanner:
             return None
 
         limit_price = round(price, 2)
+        market_data_health = self._market_data_health(candidate)
+        if not market_data_health.get("allowed", True):
+            _add(reasons, f"market data health rejected - {market_data_health.get('reason')}")
+            return None
         quality = self._execution_quality(candidate, limit_price)
         if not quality.get("allowed", True):
             _add(reasons, f"execution quality rejected — {quality.get('reason')}")
@@ -225,16 +243,47 @@ class TradePlanner:
             adr_pct=adr_pct_val,
             adr_target_fraction=adr_frac,
             sizing=sizing.to_dict(),
+            market_data_health=market_data_health,
             execution_quality=quality,
             reason=f"{candidate.signal_label} (strength={candidate.strength_score}); buy {quantity} shares at limit {limit_price}",
             risk_notes=[
                 "Limit order only; never market.",
                 f"Sized to <= {self.config.equity_cap_pct():.0%} of equity and <= {self.config.deployable_cash_cap_pct():.0%} of deployable cash.",
                 f"Binding sizing cap: {sizing.binding_cap}.",
+                f"Market-data health: {market_data_health.get('reason')}.",
                 f"Execution quality: {quality.get('reason')}.",
-            ] + list(sizing.notes) + [f"execution_quality: {w}" for w in quality.get("warnings", [])],
+            ] + list(sizing.notes)
+            + [f"market_data_health: {w}" for w in market_data_health.get("warnings", [])]
+            + [f"execution_quality: {w}" for w in quality.get("warnings", [])],
             exit_plan=f"Exit on target_price ({target_mode}) or stop_price; review on next Strong(100) re-evaluation.",
         )
+
+    def _market_data_health(self, candidate: CandidateSignal) -> Dict[str, Any]:
+        extras = candidate.extras or {}
+        decision = self.market_data_guard.evaluate(
+            symbol=candidate.symbol,
+            mode=self.config.mode,
+            bid=_first(extras, "bid", "quote_bid", "execution_bid"),
+            ask=_first(extras, "ask", "quote_ask", "execution_ask"),
+            last=_first(extras, "last", "quote_last", "execution_last", "current_price"),
+            reference_price=candidate.last_price,
+            bid_timestamp=_first(extras, "bid_timestamp", "quote_bid_timestamp", "bid_ts"),
+            ask_timestamp=_first(extras, "ask_timestamp", "quote_ask_timestamp", "ask_ts"),
+            last_timestamp=_first(extras, "last_timestamp", "quote_last_timestamp", "last_ts"),
+            quote_timestamp=_first(
+                extras,
+                "quote_timestamp",
+                "market_data_timestamp",
+                "updated_at",
+                "last_updated",
+                "timestamp",
+                "as_of",
+            ),
+            feed_healthy=_first(extras, "market_data_feed_healthy", "feed_healthy"),
+            feed_status=_first(extras, "market_data_status", "feed_status", "data_status"),
+            market_open=_first(extras, "market_is_open", "market_open"),
+        )
+        return decision.to_dict()
 
     def _execution_quality(self, candidate: CandidateSignal, limit_price: float) -> Dict[str, Any]:
         extras = candidate.extras or {}

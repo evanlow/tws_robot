@@ -76,6 +76,17 @@ class AutonomousTrade:
     # to reconcile a target/stop fill into a CLOSED status.
     target_order_id: Optional[int] = None
     stop_order_id: Optional[int] = None
+    # Order-lifecycle event IDs (live trades only).  These link the coarse
+    # trade record to append-only broker order transition records.
+    entry_lifecycle_id: Optional[str] = None
+    target_lifecycle_id: Optional[str] = None
+    stop_lifecycle_id: Optional[str] = None
+    # Broker fill snapshots captured from IBKR execution/commission callbacks.
+    # These are persisted on the trade record so outcome reconciliation can
+    # survive restarts and can aggregate partial fills without manual handoff.
+    entry_fills: List[Dict[str, Any]] = field(default_factory=list)
+    exit_fills: List[Dict[str, Any]] = field(default_factory=list)
+    outcome_emitted: bool = False
 
     @staticmethod
     def new_id() -> str:

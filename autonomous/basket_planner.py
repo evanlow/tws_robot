@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional
 
 from autonomous.autonomous_config import AutonomousTradingConfig
+from autonomous.basket_risk_allocator import BasketRiskAllocation, BasketRiskAllocator
 from autonomous.candidate_ranker import RankedCandidate
 from autonomous.trade_planner import TradePlan, TradePlanner
 
@@ -24,6 +25,7 @@ class BasketPlan:
     rejected: List[Dict[str, Any]]
     total_required_cash: float
     max_basket_value: float
+    risk_allocation: Optional[BasketRiskAllocation] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -32,6 +34,7 @@ class BasketPlan:
             "rejected": list(self.rejected),
             "total_required_cash": round(self.total_required_cash, 2),
             "max_basket_value": round(self.max_basket_value, 2),
+            "risk_allocation": self.risk_allocation.to_dict() if self.risk_allocation else None,
         }
 
 
@@ -40,6 +43,12 @@ class BasketPlanner:
 
     def __init__(self, config: AutonomousTradingConfig) -> None:
         self.config = config
+        self.risk_allocator = BasketRiskAllocator(
+            enabled=config.basket_risk_allocator_enabled,
+            max_basket_risk_equity_pct=config.max_basket_risk_equity_pct,
+            allocation_mode=config.basket_risk_allocation_mode,
+            min_leg_risk_dollars=config.basket_min_leg_risk_dollars,
+        )
 
     def plan(
         self,
@@ -131,10 +140,24 @@ class BasketPlanner:
         if not plans:
             return None
 
+        plans, risk_rejected, risk_allocation = self.risk_allocator.allocate(plans, equity=equity)
+        if risk_rejected:
+            rejected.extend(risk_rejected)
+        if not plans:
+            return None
+        allowed_symbols = {plan.symbol for plan in plans}
+        selected = [
+            item
+            for item in selected
+            if (item.get("candidate") or {}).get("symbol") in allowed_symbols
+        ]
+        total_required_cash = sum(float(plan.required_cash or 0.0) for plan in plans)
+
         return BasketPlan(
             trade_plans=plans,
             selected=selected,
             rejected=rejected,
             total_required_cash=total_required_cash,
             max_basket_value=max_basket_value,
+            risk_allocation=risk_allocation,
         )

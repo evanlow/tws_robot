@@ -208,6 +208,17 @@ class TechnicalAnalysisSignalProvider:
 
         support_price = _positive_float(row.get("support_price"))
         resistance_price = _positive_float(row.get("resistance_price"))
+        bid = _positive_float(_first(row, "bid", "quote_bid", "execution_bid"))
+        ask = _positive_float(_first(row, "ask", "quote_ask", "execution_ask"))
+        quote_timestamp = _first(
+            row,
+            "quote_timestamp",
+            "market_data_timestamp",
+            "updated_at",
+            "last_updated",
+            "timestamp",
+            "as_of",
+        )
 
         return CandidateSignal(
             symbol=symbol.upper(),
@@ -233,6 +244,16 @@ class TechnicalAnalysisSignalProvider:
                 "support_source": row.get("support_source") if support_price else None,
                 "resistance_source": row.get("resistance_source") if resistance_price else None,
                 "levels_valid": bool(support_price or resistance_price),
+                "bid": bid,
+                "ask": ask,
+                "quote_last": _positive_float(_first(row, "last", "quote_last", "current_price")),
+                "quote_timestamp": quote_timestamp,
+                "bid_timestamp": _first(row, "bid_timestamp", "quote_bid_timestamp"),
+                "ask_timestamp": _first(row, "ask_timestamp", "quote_ask_timestamp"),
+                "last_timestamp": _first(row, "last_timestamp", "quote_last_timestamp"),
+                "market_data_status": _first(row, "market_data_status", "feed_status", "data_status"),
+                "market_data_feed_healthy": _first(row, "market_data_feed_healthy", "feed_healthy"),
+                "market_is_open": _first(row, "market_is_open", "market_open"),
             },
         )
 
@@ -253,3 +274,11 @@ def _positive_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return out if out > 0 else None
+
+
+def _first(mapping: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return value
+    return None

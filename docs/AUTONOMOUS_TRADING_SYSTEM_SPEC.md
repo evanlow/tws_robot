@@ -162,14 +162,15 @@ The current basket planner:
 - applies per-position exposure caps;
 - applies total basket notional/exposure cap;
 - applies same-sector concentration cap;
+- applies a shared basket-level stop-risk budget;
+- reduces or rejects legs that cannot fit the allocated stop-risk;
 - returns multiple `TradePlan` objects when possible;
 - falls back to a single candidate if no valid basket plan is produced.
 
-### 8.3 Required next enhancement
+### 8.3 Basket-level risk allocation
 
-The immediate next gap is basket-level risk allocation.
-
-Current basket mode controls notional/exposure but does not yet centrally allocate one shared stop-risk budget across all basket legs.
+Basket mode controls both notional/exposure and a centrally allocated shared
+stop-risk budget across all basket legs.
 
 Desired behaviour:
 
@@ -196,6 +197,14 @@ not:
 ```text
 more trades, same per-leg risk, multiplied total risk
 ```
+
+Current behaviour:
+
+- `BasketRiskAllocator` is enabled by default when basket mode is enabled.
+- The default allocation mode is `equal_risk`.
+- The allocator only supports `BUY_SHARES` legs with a valid stop below entry.
+- The allocator can reduce a leg quantity or reject a leg, but cannot increase size.
+- Basket diagnostics include budget, planned risk, budget usage, and per-leg decisions.
 
 ## 9. Evidence and audit requirements
 
@@ -277,13 +286,13 @@ Basket mode should not multiply risk simply because more candidates are selected
 
 A shared basket risk budget is allocated across selected legs.
 
-#### Proposed module
+#### Module
 
 ```text
 autonomous/basket_risk_allocator.py
 ```
 
-#### Proposed config
+#### Config
 
 ```python
 basket_risk_allocator_enabled: bool = True
@@ -299,6 +308,13 @@ basket_min_leg_risk_dollars: float = 20.0
 - Basket output shows total planned risk dollars and budget usage.
 - Legs that cannot fit the risk budget are rejected with reasons.
 - Existing sector and notional caps continue to apply.
+
+#### Current implementation status
+
+Implemented in the basket-level risk allocation PR continuing issue #161.
+
+The implementation is conservative: it only reduces or rejects basket legs and
+does not change order submission, live-gate, or broker execution paths.
 
 #### Test plan
 
@@ -317,6 +333,12 @@ Continuous trading requires explicit state tracking for every autonomous broker 
 
 ```text
 autonomous/order_lifecycle.py
+```
+
+#### Config
+
+```python
+order_lifecycle_store_path: str = "logs/autonomous_order_lifecycle.jsonl"
 ```
 
 #### Proposed states
@@ -356,6 +378,25 @@ RECOVERY_REQUIRED
 - Partial fills are visible and tied to order IDs.
 - Orphaned orders can be detected and flagged.
 
+#### Current implementation status
+
+Implemented in the current PR continuing issue #161.
+
+The implementation adds an append-only `OrderLifecycleStore` and records live
+runner lifecycle events for:
+
+- planned entry orders before the `OrderExecutor` call;
+- submitted parent entry orders;
+- bracket target and protective-stop child orders as pending;
+- `OrderExecutor` rejections;
+- broker-rejected entry reconciliation;
+- bracket target/stop fills;
+- stale local open trades whose broker position is no longer present.
+
+This is an audit/state-tracking layer. It does not add a new order submission
+path or enable live trading. Broker-side protective stop verification is
+implemented in Phase 3 below.
+
 ### Phase 3 — Broker-side protective stop / bracket verification
 
 #### Problem
@@ -384,6 +425,43 @@ autonomous/protection_verifier.py
 - Missing protection marks the trade/system as `RECOVERY_REQUIRED`.
 - New entries are blocked while protection is missing.
 - Partial-fill protection quantity is adjusted to actual filled quantity.
+
+#### Config
+
+```python
+require_broker_protection_confirmation: bool = True
+```
+
+Environment variable:
+
+```text
+AUTONOMOUS_REQUIRE_BROKER_PROTECTION_CONFIRMATION=true
+```
+
+#### Current implementation status
+
+Implemented in the current PR continuing issue #161.
+
+The implementation adds `autonomous/protection_verifier.py` and verifies open
+autonomous live trades against broker-visible open-order snapshots from
+`TWSBridge.get_open_order_snapshots()`.  A trade is marked protected only when
+the broker snapshot contains an active protective SELL stop/bracket order for
+the trade symbol with quantity at least as large as the broker-held position.
+
+When protection is missing or cannot be verified:
+
+- `AutonomousLiveRunner.evaluate_gates()` fails closed;
+- readiness output includes `protection_diagnostics`;
+- the order lifecycle store records `RECOVERY_REQUIRED`;
+- the open trade continues to consume its live slot so new entries remain
+  blocked until protection is restored or the trade is reconciled closed.
+
+When protection is verified, the stop lifecycle records
+`PROTECTIVE_STOP_CONFIRMED`.
+
+This does not submit replacement stop orders, cancel orders, or alter live
+order routing. Recovery remains an operator/manual follow-up until the later
+supervisor/recovery phases.
 
 ### Phase 4 — Idempotency and duplicate-order prevention
 
@@ -416,6 +494,48 @@ intended_action
 - Existing open autonomous trade for a symbol blocks duplicate entry unless explicitly allowed.
 - Operator can inspect and clear stale idempotency locks.
 
+#### Config
+
+```python
+allow_duplicate_symbol_live_entries: bool = False
+idempotency_store_path: str = "logs/autonomous_idempotency.jsonl"
+idempotency_stale_minutes: int = 120
+```
+
+Environment variables:
+
+```text
+AUTONOMOUS_ALLOW_DUPLICATE_SYMBOL_LIVE_ENTRIES=false
+AUTONOMOUS_IDEMPOTENCY_STORE_PATH=logs/autonomous_idempotency.jsonl
+AUTONOMOUS_IDEMPOTENCY_STALE_MINUTES=120
+```
+
+#### Current implementation status
+
+Implemented in the current PR continuing issue #161.
+
+The implementation adds `autonomous/idempotency.py`, an append-only JSONL
+lock store for live autonomous entry attempts.  Non-dry-run live execution now
+acquires a symbol/action idempotency lock before recording `PLANNED` and
+before calling `OrderExecutor`.  If an active lock already exists, or if a
+local open autonomous trade already exists for the same symbol, the runner
+fails closed with `duplicate_order_blocked` and records
+`DUPLICATE_ORDER_BLOCKED` in the order lifecycle store.
+
+The basket live-runner path preflights the full basket before submitting any
+leg.  A repeated symbol, existing open trade, or existing idempotency lock
+blocks the basket before the first broker submission, avoiding partial basket
+execution caused by duplicate-leg detection.
+
+Accepted broker submissions mark the lock `SUBMITTED` with the broker order ID
+and autonomous trade ID.  Rejections, lifecycle write failures, and executor
+exceptions clear the in-flight lock.  Locks for locally terminal trades are
+cleared during readiness reconciliation, and operators can inspect stale locks
+or explicitly clear a lock with the runner recovery helpers.
+
+This phase does not add any new live-order route, does not auto-clear stale
+locks, and does not weaken the existing live/dry-run/risk gates.
+
 ### Phase 5 — Quote freshness and market-data health guard
 
 #### Problem
@@ -445,6 +565,35 @@ autonomous/market_data_health.py
 - Decision/evidence records include market-data health diagnostics.
 - Missing bid/ask can be configured to block in live mode.
 - Stale-data reason is visible in rejection output.
+
+#### Current implementation status
+
+Implemented in the Issue #161 continuation PR:
+
+- `autonomous/market_data_health.py` evaluates quote freshness, bid/ask
+  presence, crossed/wide spreads, last-vs-mid deviation, market-open state,
+  and feed health.
+- `AutonomousTradingConfig` exposes market-data guard settings:
+  `market_data_health_guard_enabled`,
+  `market_data_max_quote_age_seconds`, `market_data_max_spread_pct`,
+  `market_data_max_last_mid_deviation_pct`,
+  `market_data_block_stale_quotes_live`,
+  `market_data_block_missing_bid_ask_live`,
+  `market_data_block_missing_timestamp_live`,
+  `market_data_block_feed_unhealthy_live`, and
+  `market_data_block_market_closed_live`.
+- `TradePlanner` evaluates market-data health before execution-quality
+  checks, blocks assisted-live stale/degraded/closed-market plans, records
+  rejection reasons, and attaches `market_data_health` diagnostics to
+  successful trade plans.
+- `TechnicalAnalysisSignalProvider` maps available quote metadata into
+  candidate `extras` so planner diagnostics can be evidence-ready.
+- Missing bid/ask blocking remains configurable; the default preserves
+  current recommend-only and assisted-live fixtures while allowing operators
+  to fail closed by setting `market_data_block_missing_bid_ask_live=True`.
+
+This phase does not add any new live-order submission path and does not
+enable live trading.
 
 ### Phase 6 — Automatic broker-fill ingestion
 
@@ -478,6 +627,29 @@ autonomous/broker_fill_ingestor.py
 - Closed trades automatically emit `autonomous_outcome` records.
 - Risk lifecycle and equity curve can consume outcomes without manual intervention.
 
+#### Current implementation status
+
+Implemented in the Issue #161 continuation PR:
+
+- `autonomous/broker_fill_ingestor.py` consumes execution-level broker fill
+  snapshots, merges repeated/enriched executions by execution ID, aggregates
+  partial entry and exit fills, and updates `TradeStore`.
+- `AutonomousTrade` persists `entry_fills`, `exit_fills`, and
+  `outcome_emitted` so fill evidence survives process restarts.
+- `TWSBridge` captures IBKR `execDetails` and `commissionReport` callbacks and
+  exposes `pop_broker_fill_events()` for idempotent ingestion.
+- `AutonomousLiveRunner` optionally drains broker fill events before readiness
+  checks so continuous-mode slot counts and outcome evidence reflect broker
+  fills before the next cycle.
+- `OrderLifecycleStore` receives `PARTIALLY_FILLED`, `FILLED`, and `CLOSED`
+  transitions from ingested fills.
+- Closed trades emit `autonomous_outcome` records through
+  `OutcomeReconciler` and `OutcomeEvidenceWriter` when an outcome writer is
+  configured.
+
+This phase is accounting-only. It does not add any order submission,
+cancel/replace, child-order resize, or live-mode enablement path.
+
 ### Phase 7 — Continuous-run supervisor
 
 #### Problem
@@ -507,6 +679,26 @@ autonomous/continuous_supervisor.py
 - Supervisor can pause/resume without changing strategy code.
 - Serious operational faults stop new entries.
 - Heartbeat is visible to API/dashboard.
+
+#### Current implementation status
+
+Implemented in the Issue #161 continuation PR:
+
+- `autonomous/continuous_supervisor.py` adds a dependency-injected
+  `ContinuousSupervisor` with non-overlap locking, cadence enforcement,
+  heartbeat/status snapshots, pause/resume controls, and structured
+  `SupervisorFault` / `SupervisorCycleResult` records.
+- The live lifecycle worker and `/api/autonomous/live/status` auto-advance path
+  route continuous cycles through the supervisor so status polling cannot
+  bypass overlap or cadence controls.
+- The supervisor pauses fail-closed on broker disconnect, emergency stop,
+  unreconciled protection/lifecycle recovery state, failed live trades, risk
+  lifecycle breach results, and tick exceptions.
+- `/api/autonomous/live/status` exposes `continuous_supervisor` state including
+  heartbeat, pause reason, last result, counters, and next eligible run time.
+
+This phase is a coordination layer only. It does not add order submission,
+automatic recovery, cancel/replace, live-mode enablement, or capital scaling.
 
 ### Phase 8 — Restart recovery and broker reconciliation
 
@@ -726,7 +918,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add basket-level risk allocation
+Add restart recovery and broker reconciliation
 ```
 
-This should implement Phase 1 of the continuous autonomous live readiness roadmap.
+This should implement Phase 8 of the continuous autonomous live readiness roadmap.

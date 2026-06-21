@@ -45,6 +45,15 @@ class AutonomousTradingConfig:
     execution_max_slippage_pct: float = 0.005
     execution_max_price_move_pct: float = 0.01
     execution_block_on_missing_quote: bool = False
+    market_data_health_guard_enabled: bool = True
+    market_data_max_quote_age_seconds: float = 60.0
+    market_data_max_spread_pct: float = 0.003
+    market_data_max_last_mid_deviation_pct: float = 0.01
+    market_data_block_stale_quotes_live: bool = True
+    market_data_block_missing_bid_ask_live: bool = False
+    market_data_block_missing_timestamp_live: bool = False
+    market_data_block_feed_unhealthy_live: bool = True
+    market_data_block_market_closed_live: bool = True
 
     risk_lifecycle_guard_enabled: bool = True
     risk_lifecycle_recent_record_limit: int = 1000
@@ -64,6 +73,10 @@ class AutonomousTradingConfig:
     basket_total_deployable_cash_pct: float = 0.005
     basket_single_position_deployable_cash_pct: float = 0.002
     basket_max_same_sector_positions: int = 1
+    basket_risk_allocator_enabled: bool = True
+    max_basket_risk_equity_pct: float = 0.002
+    basket_risk_allocation_mode: str = "equal_risk"
+    basket_min_leg_risk_dollars: float = 20.0
 
     min_signal_strength: int = 100
     required_signal_label: str = "Confirmed Rebound"
@@ -137,9 +150,13 @@ class AutonomousTradingConfig:
             ("execution_max_spread_pct", self.execution_max_spread_pct),
             ("execution_max_slippage_pct", self.execution_max_slippage_pct),
             ("execution_max_price_move_pct", self.execution_max_price_move_pct),
+            ("market_data_max_spread_pct", self.market_data_max_spread_pct),
+            ("market_data_max_last_mid_deviation_pct", self.market_data_max_last_mid_deviation_pct),
         ):
             if value < 0 or value > 1:
                 raise ValueError(f"{label} must be in [0, 1]")
+        if self.market_data_max_quote_age_seconds < 0:
+            raise ValueError("market_data_max_quote_age_seconds must be >= 0")
         if self.risk_lifecycle_recent_record_limit < 1:
             raise ValueError("risk_lifecycle_recent_record_limit must be >= 1")
         for label, value in (
@@ -161,11 +178,16 @@ class AutonomousTradingConfig:
         for label, value in (
             ("basket_total_deployable_cash_pct", self.basket_total_deployable_cash_pct),
             ("basket_single_position_deployable_cash_pct", self.basket_single_position_deployable_cash_pct),
+            ("max_basket_risk_equity_pct", self.max_basket_risk_equity_pct),
         ):
             if value <= 0 or value > 1:
                 raise ValueError(f"{label} must be in (0, 1]")
         if self.basket_single_position_deployable_cash_pct > self.basket_total_deployable_cash_pct:
             raise ValueError("basket single-position pct must be <= basket total pct")
+        if self.basket_risk_allocation_mode != "equal_risk":
+            raise ValueError("basket_risk_allocation_mode must be 'equal_risk'")
+        if self.basket_min_leg_risk_dollars < 0:
+            raise ValueError("basket_min_leg_risk_dollars must be >= 0")
         if self.min_signal_strength < 0:
             raise ValueError("min_signal_strength must be >= 0")
         if self.support_resistance_lookback_days < 0:
@@ -214,6 +236,15 @@ class AutonomousTradingConfig:
             "execution_max_slippage_pct": self.execution_max_slippage_pct,
             "execution_max_price_move_pct": self.execution_max_price_move_pct,
             "execution_block_on_missing_quote": self.execution_block_on_missing_quote,
+            "market_data_health_guard_enabled": self.market_data_health_guard_enabled,
+            "market_data_max_quote_age_seconds": self.market_data_max_quote_age_seconds,
+            "market_data_max_spread_pct": self.market_data_max_spread_pct,
+            "market_data_max_last_mid_deviation_pct": self.market_data_max_last_mid_deviation_pct,
+            "market_data_block_stale_quotes_live": self.market_data_block_stale_quotes_live,
+            "market_data_block_missing_bid_ask_live": self.market_data_block_missing_bid_ask_live,
+            "market_data_block_missing_timestamp_live": self.market_data_block_missing_timestamp_live,
+            "market_data_block_feed_unhealthy_live": self.market_data_block_feed_unhealthy_live,
+            "market_data_block_market_closed_live": self.market_data_block_market_closed_live,
             "risk_lifecycle_guard_enabled": self.risk_lifecycle_guard_enabled,
             "risk_lifecycle_recent_record_limit": self.risk_lifecycle_recent_record_limit,
             "max_daily_loss_r": self.max_daily_loss_r,
@@ -230,6 +261,10 @@ class AutonomousTradingConfig:
             "basket_total_deployable_cash_pct": self.basket_total_deployable_cash_pct,
             "basket_single_position_deployable_cash_pct": self.basket_single_position_deployable_cash_pct,
             "basket_max_same_sector_positions": self.basket_max_same_sector_positions,
+            "basket_risk_allocator_enabled": self.basket_risk_allocator_enabled,
+            "max_basket_risk_equity_pct": self.max_basket_risk_equity_pct,
+            "basket_risk_allocation_mode": self.basket_risk_allocation_mode,
+            "basket_min_leg_risk_dollars": self.basket_min_leg_risk_dollars,
             "min_signal_strength": self.min_signal_strength,
             "required_signal_label": self.required_signal_label,
             "stock_universe": self.stock_universe,

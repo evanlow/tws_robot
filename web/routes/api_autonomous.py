@@ -52,8 +52,17 @@ from autonomous.autonomous_mode import (
     infer_account_type,
     normalise_trading_cycle,
 )
+from autonomous.continuous_supervisor import (
+    ContinuousSupervisor,
+    PAUSED as SUPERVISOR_PAUSED,
+    RISK_LIFECYCLE_BREACH,
+    SupervisorCycleResult,
+    SupervisorFault,
+)
 from autonomous.exit_manager import AutonomousExitManager
 from autonomous.lifecycle_worker import AutonomousLifecycleWorker
+from autonomous.evidence_store import TradeEvidenceStore
+from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.runner_config import AutonomousRunnerConfig, AutonomousLiveRunnerConfig
 from autonomous.trade_store import CLOSED, EXIT_PENDING, FAILED, OPEN, TradeStore
 from autonomous.trade_reconciler import TradeReconciler
@@ -414,6 +423,79 @@ def _lifecycle_interval_seconds() -> float:
         return 60.0
 
 
+def _live_continuous_supervisor() -> ContinuousSupervisor:
+    supervisor = current_app.config.get("autonomous_live_continuous_supervisor")
+    if isinstance(supervisor, ContinuousSupervisor):
+        return supervisor
+    supervisor = ContinuousSupervisor(
+        name="AutonomousLiveContinuousSupervisor",
+        cadence_seconds=_lifecycle_interval_seconds(),
+    )
+    current_app.config["autonomous_live_continuous_supervisor"] = supervisor
+    return supervisor
+
+
+def _live_supervisor_faults() -> list[SupervisorFault]:
+    state = _live_mode_state()
+    if not state.is_on or state.trading_cycle != TradingCycle.CONTINUOUS:
+        return []
+    failed = [t.to_dict() for t in _live_trade_store().list_all() if t.status == FAILED]
+    if failed:
+        return [
+            SupervisorFault(
+                "failed_live_trade_detected",
+                "Failed live trade detected; continuous supervisor paused.",
+                {"failed_trades": failed},
+            )
+        ]
+    return []
+
+
+def _live_cycle_result_fault(result: Any) -> Optional[SupervisorFault]:
+    decision = getattr(result, "decision", None)
+    if not isinstance(decision, dict):
+        return None
+    risk_lifecycle = decision.get("risk_lifecycle") or {}
+    if isinstance(risk_lifecycle, dict) and risk_lifecycle.get("allowed") is False:
+        return SupervisorFault(
+            RISK_LIFECYCLE_BREACH,
+            "Risk lifecycle blocked continuous trading; supervisor paused.",
+            {"risk_lifecycle": risk_lifecycle},
+        )
+    return None
+
+
+def _supervised_live_lifecycle_tick() -> Optional[SupervisorCycleResult]:
+    state = _live_mode_state()
+    if not state.is_on or state.trading_cycle != TradingCycle.CONTINUOUS:
+        _live_lifecycle_tick()
+        return None
+    supervisor = _live_continuous_supervisor()
+    result = supervisor.run_cycle(
+        _live_lifecycle_tick,
+        gates_provider=lambda: _build_live_runner(
+            _live_runner_config(),
+            continuous_mode=True,
+        ).evaluate_gates(),
+        fault_provider=_live_supervisor_faults,
+        result_fault_provider=_live_cycle_result_fault,
+    )
+    if result.status == SUPERVISOR_PAUSED:
+        state.turn_off(
+            message=result.fault.message if result.fault else "Live continuous supervisor paused.",
+            status="Halted",
+        )
+        _audit_mode_event(
+            "halt",
+            {
+                "reason": result.reason,
+                "source": "live_continuous_supervisor",
+                "supervisor": result.to_dict(),
+            },
+        )
+    return result
+
+
 def _signal_provider_info(provider) -> Dict[str, Any]:
     """Describe the active signal provider for ``/status`` responses."""
     name = type(provider).__name__
@@ -523,7 +605,7 @@ def _start_live_lifecycle_worker() -> None:
         config_key="autonomous_live_lifecycle_worker",
         name="AutonomousLiveLifecycleWorker",
         state_getter=_live_mode_state,
-        tick=_live_lifecycle_tick,
+        tick=_supervised_live_lifecycle_tick,
     )
 
 
@@ -583,9 +665,9 @@ def _paper_lifecycle_tick() -> None:
     _maybe_advance_lifecycle()
 
 
-def _live_lifecycle_tick() -> None:
+def _live_lifecycle_tick():
     if not _live_mode_state().is_on:
-        return
+        return None
     try:
         _build_live_runner(_live_runner_config(), continuous_mode=False).evaluate_gates()
     except Exception:
@@ -598,7 +680,7 @@ def _live_lifecycle_tick() -> None:
     else:
         manager.evaluate_open_trades()
     _reconcile_live_trades()
-    _maybe_advance_live_lifecycle()
+    return _maybe_advance_live_lifecycle()
 
 
 def _spy_price_from_yfinance() -> Dict[str, Any]:
@@ -1523,6 +1605,24 @@ def _live_trade_store() -> TradeStore:
     return store
 
 
+def _evidence_store() -> TradeEvidenceStore:
+    store = current_app.config.get("autonomous_evidence_store")
+    if isinstance(store, TradeEvidenceStore):
+        return store
+    store = TradeEvidenceStore()
+    current_app.config["autonomous_evidence_store"] = store
+    return store
+
+
+def _outcome_writer() -> OutcomeEvidenceWriter:
+    writer = current_app.config.get("autonomous_outcome_writer")
+    if isinstance(writer, OutcomeEvidenceWriter):
+        return writer
+    writer = OutcomeEvidenceWriter()
+    current_app.config["autonomous_outcome_writer"] = writer
+    return writer
+
+
 class _LiveConnectionError(Exception):
     """Raised by ``_build_actual_live_executor`` when TWS/bridge is not connected."""
 
@@ -1808,6 +1908,20 @@ def _build_live_runner(
             if getattr(svc, "tws_bridge", None) is not None
             else None
         ),
+        broker_fill_events_provider=(
+            svc.tws_bridge.pop_broker_fill_events
+            if getattr(svc, "tws_bridge", None) is not None
+            and hasattr(svc.tws_bridge, "pop_broker_fill_events")
+            else None
+        ),
+        broker_open_orders_provider=(
+            svc.tws_bridge.get_open_order_snapshots
+            if getattr(svc, "tws_bridge", None) is not None
+            and hasattr(svc.tws_bridge, "get_open_order_snapshots")
+            else None
+        ),
+        outcome_writer=_outcome_writer(),
+        evidence_store=_evidence_store(),
         continuous_mode=continuous_mode,
     )
 
@@ -1822,7 +1936,7 @@ def _live_mode_state() -> AutonomousModeState:
     return state
 
 
-def _maybe_advance_live_lifecycle() -> None:
+def _maybe_advance_live_lifecycle():
     """Advance the live autonomous lifecycle after exit evaluation.
 
     Mirror of ``_maybe_advance_lifecycle`` but for the live runner.
@@ -1830,12 +1944,12 @@ def _maybe_advance_live_lifecycle() -> None:
     """
     state = _live_mode_state()
     if not state.is_on or state.cycles_started == 0:
-        return
+        return None
 
     try:
         activated_at_str = state.activated_at
         if not activated_at_str:
-            return
+            return None
         activated_at = datetime.fromisoformat(activated_at_str)
         live_store = _live_trade_store()
         since_activation = [
@@ -1844,11 +1958,11 @@ def _maybe_advance_live_lifecycle() -> None:
         ]
         if not since_activation:
             if state.trading_cycle == TradingCycle.CONTINUOUS:
-                _run_next_live_cycle(state)
-            return
+                return _run_next_live_cycle(state)
+            return None
         still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
         if still_active:
-            return
+            return None
 
         cycle = state.trading_cycle
         if cycle == TradingCycle.SINGLE_TRADE:
@@ -1861,16 +1975,17 @@ def _maybe_advance_live_lifecycle() -> None:
                 {"reason": "live_single_trade_completed", "source": "lifecycle", "account_mode": "live"},
             )
         elif cycle == TradingCycle.CONTINUOUS:
-            _run_next_live_cycle(state, since_activation=since_activation)
+            return _run_next_live_cycle(state, since_activation=since_activation)
     except Exception:
         logger.exception("Live lifecycle advancement check failed")
+    return None
 
 
 def _run_next_live_cycle(
     state: "AutonomousModeState",
     *,
     since_activation: Optional[list] = None,
-) -> None:
+) -> Any:
     live_config = _live_runner_config()
     live_config.live_dry_run = bool(getattr(state, "dry_run", live_config.live_dry_run))
 
@@ -1894,7 +2009,7 @@ def _run_next_live_cycle(
                     "account_mode": "live",
                 },
             )
-            return
+            return None
 
         expected_account_id = current_app.config.get(
             "autonomous_live_expected_account_id", ""
@@ -1925,7 +2040,7 @@ def _run_next_live_cycle(
                     "account_mode": "live",
                 },
             )
-            return
+            return None
         except Exception:
             logger.exception(
                 "Unexpected error building actual-live executor for continuous cycle; "
@@ -1946,7 +2061,7 @@ def _run_next_live_cycle(
                     "account_mode": "live",
                 },
             )
-            return
+            return None
 
     try:
         runner = _build_live_runner(
@@ -1962,7 +2077,7 @@ def _run_next_live_cycle(
         )
         decision_status = (result.decision or {}).get("status")
         if decision_status == "market_not_suitable":
-            msg = _format_bearish_spy_message(decision)
+            msg = _format_bearish_spy_message(result.decision or {})
             state.turn_off(message=msg, status="Halted")
             _audit_mode_event(
                 "halt",
@@ -1983,12 +2098,14 @@ def _run_next_live_cycle(
                     "account_mode": "live",
                 },
             )
+        return result
     except Exception:
         logger.exception("Live continuous lifecycle cycle failed")
         state.turn_off(
             message="Live continuous lifecycle error. Autonomous Mode turned OFF.",
             status="Halted",
         )
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -2020,7 +2137,7 @@ def live_runner_status():
     #   * CONTINUOUS:   the next cycle starts after the previous bracket
     #     fills, again without manual exit-evaluation.
     try:
-        _maybe_advance_live_lifecycle()
+        _supervised_live_lifecycle_tick()
     except Exception:
         logger.exception("Live lifecycle auto-advance failed on /live/status")
 
@@ -2029,6 +2146,7 @@ def live_runner_status():
         "live_runner_config": live_config.to_dict(),
         "gates": gates.to_dict(),
         "autonomous_live_mode": state.to_dict(),
+        "continuous_supervisor": _live_continuous_supervisor().status(),
     })
 
 

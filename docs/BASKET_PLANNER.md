@@ -30,6 +30,10 @@ basket_max_size = 3
 basket_total_deployable_cash_pct = 0.005
 basket_single_position_deployable_cash_pct = 0.002
 basket_max_same_sector_positions = 1
+basket_risk_allocator_enabled = True
+max_basket_risk_equity_pct = 0.002
+basket_risk_allocation_mode = "equal_risk"
+basket_min_leg_risk_dollars = 20.0
 ```
 
 ## Behaviour
@@ -41,13 +45,46 @@ When `basket_enabled=True`:
 3. It selects up to `basket_max_size` candidates.
 4. It applies same-sector caps.
 5. It applies per-leg and total basket deployable-cash caps.
-6. It emits:
+6. It applies the basket-level stop-risk allocator.
+7. It emits:
    - `selected_basket`
    - `trade_plans`
    - `basket_plan`
 
 For backward compatibility, `selected` and `trade_plan` continue to point to the
 first basket leg.
+
+## Basket-level risk allocation
+
+When `basket_risk_allocator_enabled=True`, the planner applies one shared
+stop-risk budget after preliminary leg planning:
+
+```text
+max basket risk dollars = account equity * max_basket_risk_equity_pct
+allocated leg risk = max basket risk dollars / planned leg count
+planned leg risk = (limit_price - stop_price) * quantity
+```
+
+The allocator is conservative:
+
+- it only supports `BUY_SHARES` legs with a valid stop below entry;
+- it can reduce a leg quantity to fit the allocated risk;
+- it can reject a leg when one share would exceed the allocated risk;
+- it never increases a leg beyond the existing TradePlanner/PositionSizer
+  output;
+- it does not change order submission, live gates, or broker execution paths.
+
+`basket_plan.risk_allocation` records:
+
+- total basket risk budget;
+- total planned stop-risk;
+- budget usage;
+- per-leg allocated risk;
+- per-leg planned risk;
+- resize/rejection reasons.
+
+Each adjusted `TradePlan.sizing` also receives a `basket_risk` diagnostic block.
+If basket risk is the binding cap, `binding_cap` becomes `basket_risk_cap`.
 
 ## Paper execution
 
@@ -89,6 +126,7 @@ This first version is intentionally simple:
 - no liquidity weighting yet;
 - no sector ETF confirmation yet;
 - sequential execution only.
+- equal-risk allocation only.
 
 Future phases should improve weighting and execution quality once sufficient
 evidence exists.

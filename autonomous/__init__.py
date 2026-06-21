@@ -7,16 +7,23 @@ execute it" loop on top of the existing TWS Robot building blocks.
 import logging as _logging
 
 from autonomous.autonomous_config import AutonomousTradingConfig, AutonomousMode
+from autonomous.basket_risk_allocator import BasketRiskAllocation, BasketRiskAllocator, BasketRiskLegDecision
+from autonomous.broker_fill_ingestor import BrokerFillIngestionResult, BrokerFillIngestor
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
+from autonomous.continuous_supervisor import ContinuousSupervisor, SupervisorCycleResult, SupervisorFault
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.drawdown_governor import DrawdownDecision, DrawdownGovernor
 from autonomous.edge_estimator import EdgeEstimate, RuleBasedEdgeEstimator
 from autonomous.execution_quality import ExecutionQualityDecision, ExecutionQualityGuard
 from autonomous.feature_builder import FeatureBuilder
 from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDecision
+from autonomous.idempotency import IdempotencyLock, IdempotencyStore, LockAcquisition
+from autonomous.market_data_health import MarketDataHealthDecision, MarketDataHealthGuard
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.outcome_reconciliation import FillSummary, OutcomeReconciliation, OutcomeReconciler
+from autonomous.order_lifecycle import OrderLifecycleEvent, OrderLifecycleState, OrderLifecycleStore
 from autonomous.position_sizing import PositionSizer, SizingDecision
+from autonomous.protection_verifier import BrokerOrderSnapshot, ProtectionVerifier, ProtectionVerificationResult
 from autonomous.regime_context import build_regime_context, classify_time_of_day, sector_etf_for
 from autonomous.risk_lifecycle import LossLimitDecision, LossLimitGuard, StrategyEquityCurveBuilder, StrategyEquityPoint
 from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
@@ -44,6 +51,14 @@ except Exception:
 __all__ = [
     "AutonomousTradingConfig",
     "AutonomousMode",
+    "BasketRiskAllocation",
+    "BasketRiskAllocator",
+    "BasketRiskLegDecision",
+    "BrokerFillIngestionResult",
+    "BrokerFillIngestor",
+    "ContinuousSupervisor",
+    "SupervisorCycleResult",
+    "SupervisorFault",
     "AutonomousTradingEngine",
     "AutonomousDecision",
     "DecisionStatus",
@@ -63,12 +78,23 @@ __all__ = [
     "FillSummary",
     "FractionalEdgeSizer",
     "FractionalSizingDecision",
+    "IdempotencyLock",
+    "IdempotencyStore",
+    "LockAcquisition",
+    "MarketDataHealthDecision",
+    "MarketDataHealthGuard",
     "LossLimitDecision",
     "LossLimitGuard",
     "OutcomeEvidenceWriter",
     "OutcomeReconciliation",
     "OutcomeReconciler",
+    "OrderLifecycleEvent",
+    "OrderLifecycleState",
+    "OrderLifecycleStore",
     "PositionSizer",
+    "BrokerOrderSnapshot",
+    "ProtectionVerifier",
+    "ProtectionVerificationResult",
     "SizingDecision",
     "StrategyEquityCurveBuilder",
     "StrategyEquityPoint",

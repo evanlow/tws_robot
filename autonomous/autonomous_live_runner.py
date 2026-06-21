@@ -39,8 +39,21 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from autonomous.autonomous_config import AutonomousMode
 from autonomous.autonomous_engine import AutonomousDecision, AutonomousTradingEngine, DecisionStatus
+from autonomous.broker_fill_ingestor import BrokerFillEventsProvider, BrokerFillIngestor
+from autonomous.evidence_store import TradeEvidenceStore
+from autonomous.idempotency import IdempotencyStore, LockAcquisition
+from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.signal_provider import StaticSignalProvider
+from autonomous.order_lifecycle import (
+    ENTRY,
+    STOP,
+    TARGET,
+    OrderLifecycleEvent,
+    OrderLifecycleState,
+    OrderLifecycleStore,
+)
+from autonomous.protection_verifier import ProtectionVerifier, ProtectionVerificationResult
 from autonomous.trade_planner import TradeType
 from autonomous.trade_store import (
     CLOSED,
@@ -76,6 +89,8 @@ DRY_RUN_EXECUTED = "dry_run_executed"
 NO_TRADE = "no_trade"
 ENGINE_REJECTED = "engine_rejected"
 EXECUTION_FAILED = "execution_failed"
+PROTECTION_RECOVERY_REQUIRED = "protection_recovery_required"
+DUPLICATE_ORDER_BLOCKED = "duplicate_order_blocked"
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +115,9 @@ class LiveReadinessGates:
     max_live_trades_per_day: int = 1
     deployable_cash: float = 0.0
     min_deployable_cash: float = 1000.0
+    protection_confirmed: bool = True
+    protection_recovery_required: int = 0
+    protection_diagnostics: List[Dict[str, Any]] = field(default_factory=list)
     # Set only when ``live_continuous_enabled`` check is skipped
     # (i.e. a non-continuous / single-cycle call).
     continuous_mode_required: bool = False
@@ -117,6 +135,7 @@ class LiveReadinessGates:
             and self.open_live_trades < self.max_open_live_trades
             and self.live_trades_today < self.max_live_trades_per_day
             and self.deployable_cash >= self.min_deployable_cash
+            and self.protection_confirmed
         )
         if self.continuous_mode_required:
             return base and self.live_continuous_enabled
@@ -160,6 +179,11 @@ class LiveReadinessGates:
                 f"Deployable cash {self.deployable_cash:.2f} is below the "
                 f"configured minimum {self.min_deployable_cash:.2f}"
             )
+        if not self.protection_confirmed:
+            out.append(
+                "Broker-side protection confirmation is missing for "
+                f"{self.protection_recovery_required} open autonomous trade(s)"
+            )
         return out
 
     def to_dict(self) -> Dict[str, Any]:
@@ -177,6 +201,9 @@ class LiveReadinessGates:
             "max_live_trades_per_day": self.max_live_trades_per_day,
             "deployable_cash": round(self.deployable_cash, 2),
             "min_deployable_cash": self.min_deployable_cash,
+            "protection_confirmed": self.protection_confirmed,
+            "protection_recovery_required": self.protection_recovery_required,
+            "protection_diagnostics": list(self.protection_diagnostics),
             "continuous_mode_required": self.continuous_mode_required,
             "ready": self.ready,
             "reasons": self.reasons(),
@@ -197,6 +224,7 @@ class AutonomousLiveRunResult:
     rejection_reason: Optional[str] = None
     decision: Optional[Dict[str, Any]] = None
     trade: Optional[Dict[str, Any]] = None
+    order_lifecycle: List[Dict[str, Any]] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     dry_run: bool = False
 
@@ -207,6 +235,7 @@ class AutonomousLiveRunResult:
             "gates": self.gates.to_dict(),
             "decision": self.decision,
             "trade": self.trade,
+            "order_lifecycle": list(self.order_lifecycle),
             "notes": list(self.notes),
             "dry_run": self.dry_run,
         }
@@ -223,6 +252,7 @@ EmergencyStopProvider = Callable[[], bool]
 SignalProviderProvider = Callable[[], Any]
 DeployableCashProvider = Callable[[], float]
 BrokerPositionsProvider = Callable[[], Dict[str, Any]]
+BrokerOpenOrdersProvider = Callable[[], Iterable[Any]]
 RejectedOrderIdsProvider = Callable[[], Iterable[int]]
 FilledOrderIdsProvider = Callable[[], Iterable[int]]
 
@@ -295,6 +325,10 @@ class AutonomousLiveRunner:
         :meth:`execution.order_executor.OrderExecutor.execute_signal`,
         which will cause reconciliation to reject any execution when the
         broker holds open positions.
+    broker_open_orders_provider:
+        Callable returning current broker-visible open orders.  When broker
+        protection confirmation is required, the runner uses this snapshot to
+        verify each open autonomous position has an active stop/bracket child.
     rejected_order_ids_provider:
         Callable returning an iterable of broker order IDs the broker
         has rejected since the last call (typically
@@ -311,6 +345,12 @@ class AutonomousLiveRunner:
         trade whose ``target_order_id`` or ``stop_order_id`` matches
         to ``CLOSED`` — so a bracket child fill (take-profit / stop)
         unblocks Continuous mode for the next cycle.
+    broker_fill_events_provider:
+        Callable returning execution-level broker fill snapshots
+        (typically ``svc.tws_bridge.pop_broker_fill_events``).  When
+        provided, the runner ingests fills before readiness gates so
+        trade prices, partial-fill status, lifecycle state, and outcome
+        evidence are reconciled from broker execution callbacks.
     continuous_mode:
         When ``True``, the ``AUTONOMOUS_LIVE_CONTINUOUS_ENABLED`` gate
         is also checked.  Set to ``True`` for continuous live cycles.
@@ -332,6 +372,13 @@ class AutonomousLiveRunner:
         broker_positions_provider: Optional[BrokerPositionsProvider] = None,
         rejected_order_ids_provider: Optional[RejectedOrderIdsProvider] = None,
         filled_order_ids_provider: Optional[FilledOrderIdsProvider] = None,
+        broker_fill_events_provider: Optional[BrokerFillEventsProvider] = None,
+        broker_open_orders_provider: Optional[BrokerOpenOrdersProvider] = None,
+        order_lifecycle_store: Optional[OrderLifecycleStore] = None,
+        protection_verifier: Optional[ProtectionVerifier] = None,
+        idempotency_store: Optional[IdempotencyStore] = None,
+        outcome_writer: Optional[OutcomeEvidenceWriter] = None,
+        evidence_store: Optional[TradeEvidenceStore] = None,
         continuous_mode: bool = False,
     ) -> None:
         self._engine = engine
@@ -345,8 +392,27 @@ class AutonomousLiveRunner:
         self._emergency_stop_provider = emergency_stop_provider
         self._deployable_cash_provider = deployable_cash_provider
         self._broker_positions_provider = broker_positions_provider
+        self._broker_open_orders_provider = broker_open_orders_provider
         self._rejected_order_ids_provider = rejected_order_ids_provider
         self._filled_order_ids_provider = filled_order_ids_provider
+        self._broker_fill_events_provider = broker_fill_events_provider
+        self._lifecycle_store = order_lifecycle_store or OrderLifecycleStore(
+            path=self._config.order_lifecycle_store_path
+        )
+        self._protection_verifier = protection_verifier or ProtectionVerifier()
+        self._idempotency_store = idempotency_store or IdempotencyStore(
+            path=self._config.idempotency_store_path
+        )
+        self._broker_fill_ingestor = (
+            BrokerFillIngestor(
+                self._store,
+                lifecycle_store=self._lifecycle_store,
+                outcome_writer=outcome_writer or OutcomeEvidenceWriter(),
+                evidence_store=evidence_store,
+            )
+            if broker_fill_events_provider is not None
+            else None
+        )
         self._continuous_mode = continuous_mode
 
     # ------------------------------------------------------------------
@@ -370,12 +436,26 @@ class AutonomousLiveRunner:
         """The :class:`execution.order_executor.OrderExecutor` wired to this runner."""
         return self._executor
 
+    @property
+    def order_lifecycle_store(self) -> OrderLifecycleStore:
+        """Append-only lifecycle event store for live autonomous broker orders."""
+        return self._lifecycle_store
+
+    @property
+    def idempotency_store(self) -> IdempotencyStore:
+        """Append-only idempotency lock store for live autonomous entries."""
+        return self._idempotency_store
+
     # ------------------------------------------------------------------
     # Readiness
     # ------------------------------------------------------------------
 
     def evaluate_gates(self) -> LiveReadinessGates:
         """Evaluate every readiness gate; never raises."""
+        # Consume rich broker execution/commission snapshots first when wired.
+        # This updates trade-store prices, partial fills, lifecycle records, and
+        # outcome evidence before open-trade caps are evaluated.
+        self._ingest_broker_fill_events()
         # Drain any broker-rejected order IDs first so the trade-store
         # counters reflect reality (rejected orders → FAILED, not OPEN).
         self._reconcile_rejected_trades()
@@ -387,6 +467,8 @@ class AutonomousLiveRunner:
         # between submit and confirm, etc.) so a stranded record never
         # blocks future autonomous trades.
         self._reconcile_stale_positions()
+        # Clear idempotency locks only after local trade state is terminal.
+        self._release_terminal_idempotency_locks()
 
         try:
             connected = bool(self._connected_provider())
@@ -424,6 +506,9 @@ class AutonomousLiveRunner:
         except Exception:  # pragma: no cover - defensive
             deployable_cash = 0.0
 
+        protection_results = self._verify_open_trade_protection()
+        protection_failures = [r for r in protection_results if r.recovery_required]
+
         return LiveReadinessGates(
             connected=connected,
             live_mode=(env == "live"),
@@ -438,6 +523,9 @@ class AutonomousLiveRunner:
             max_live_trades_per_day=self._config.max_live_trades_per_day,
             deployable_cash=deployable_cash,
             min_deployable_cash=self._config.min_deployable_cash,
+            protection_confirmed=not protection_failures,
+            protection_recovery_required=len(protection_failures),
+            protection_diagnostics=[r.to_dict() for r in protection_results],
             continuous_mode_required=self._continuous_mode,
         )
 
@@ -634,6 +722,88 @@ class AutonomousLiveRunner:
         if self._config.live_limit_orders_only:
             signal.strategy_name = "AutonomousLiveRunner:LIMIT"
 
+        lifecycle_events: List[Dict[str, Any]] = []
+        entry_lifecycle_id = OrderLifecycleEvent.new_id()
+        idempotency_acquisition: Optional[LockAcquisition] = None
+        if not self._config.live_dry_run:
+            duplicate_reason = self._duplicate_symbol_reason(symbol)
+            if duplicate_reason:
+                self._block_duplicate_plan(
+                    lifecycle_events=lifecycle_events,
+                    lifecycle_id=entry_lifecycle_id,
+                    symbol=symbol,
+                    reason=duplicate_reason,
+                )
+                return AutonomousLiveRunResult(
+                    status=DUPLICATE_ORDER_BLOCKED,
+                    gates=gates,
+                    rejection_reason=duplicate_reason,
+                    decision=decision_payload,
+                    order_lifecycle=lifecycle_events,
+                    dry_run=False,
+                )
+            try:
+                idempotency_acquisition = self._acquire_idempotency_for_plan(
+                    decision,
+                    plan,
+                )
+            except OSError as exc:
+                logger.exception("failed to acquire autonomous idempotency lock")
+                return AutonomousLiveRunResult(
+                    status=EXECUTION_FAILED,
+                    gates=gates,
+                    rejection_reason=f"idempotency lock write failed before submission: {exc}",
+                    decision=decision_payload,
+                    dry_run=False,
+                )
+            if not idempotency_acquisition.acquired:
+                reason = idempotency_acquisition.reason or "duplicate idempotency lock"
+                self._block_duplicate_plan(
+                    lifecycle_events=lifecycle_events,
+                    lifecycle_id=entry_lifecycle_id,
+                    symbol=symbol,
+                    reason=reason,
+                    idempotency_key=idempotency_acquisition.lock.key,
+                )
+                return AutonomousLiveRunResult(
+                    status=DUPLICATE_ORDER_BLOCKED,
+                    gates=gates,
+                    rejection_reason=reason,
+                    decision=decision_payload,
+                    order_lifecycle=lifecycle_events,
+                    dry_run=False,
+                )
+        try:
+            lifecycle_events.append(
+                self._record_order_lifecycle_transition(
+                    lifecycle_id=entry_lifecycle_id,
+                    state=OrderLifecycleState.PLANNED,
+                    symbol=symbol,
+                    order_role=ENTRY,
+                    reason="live runner prepared order for OrderExecutor",
+                    metadata={
+                        "quantity": quantity,
+                        "limit_price": limit_price,
+                        "target_price": plan_target_price,
+                        "stop_price": plan_stop_price,
+                        "dry_run": self._config.live_dry_run,
+                    },
+                )
+            )
+        except OSError as exc:
+            logger.exception("failed to record autonomous order lifecycle PLANNED event")
+            self._clear_idempotency_lock(
+                idempotency_acquisition,
+                reason="order lifecycle write failed before submission",
+            )
+            return AutonomousLiveRunResult(
+                status=EXECUTION_FAILED,
+                gates=gates,
+                rejection_reason=f"order lifecycle write failed before submission: {exc}",
+                decision=decision_payload,
+                dry_run=self._config.live_dry_run,
+            )
+
         try:
             broker_positions: Dict[str, Any] = (
                 self._broker_positions_provider()
@@ -656,18 +826,40 @@ class AutonomousLiveRunner:
             )
         except Exception:
             logger.exception("OrderExecutor.execute_signal raised")
+            self._clear_idempotency_lock(
+                idempotency_acquisition,
+                reason="OrderExecutor raised before returning a result",
+            )
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=entry_lifecycle_id,
+                state=OrderLifecycleState.BROKER_DISCONNECTED,
+                symbol=symbol,
+                order_role=ENTRY,
+                reason="OrderExecutor raised an exception before returning a result",
+            )
             return AutonomousLiveRunResult(
                 status=EXECUTION_FAILED,
                 gates=gates,
                 rejection_reason="OrderExecutor raised an exception",
                 decision=decision_payload,
+                order_lifecycle=lifecycle_events,
                 dry_run=self._config.live_dry_run,
             )
 
         if result.status == OrderStatus.DRY_RUN:
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=entry_lifecycle_id,
+                state=OrderLifecycleState.EXPIRED,
+                symbol=symbol,
+                order_role=ENTRY,
+                reason="dry-run preview; order was not submitted to broker",
+            )
             # Dry-run: record the would-be trade and return.
             trade = self._record_trade(
                 decision, plan, quantity, result.order_id,
+                entry_lifecycle_id=entry_lifecycle_id,
                 target_order_id=getattr(result, "bracket_target_order_id", None),
                 stop_order_id=getattr(result, "bracket_stop_order_id", None),
                 extra_notes=bracket_notes,
@@ -677,6 +869,7 @@ class AutonomousLiveRunner:
                 gates=gates,
                 decision=decision_payload,
                 trade=trade.to_dict() if trade else None,
+                order_lifecycle=lifecycle_events,
                 notes=[
                     "dry-run preview — order NOT submitted to TWS",
                     f"would-be quantity={quantity}",
@@ -690,11 +883,58 @@ class AutonomousLiveRunner:
         if result.status == OrderStatus.SUBMITTED:
             target_id = getattr(result, "bracket_target_order_id", None)
             stop_id = getattr(result, "bracket_stop_order_id", None)
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=entry_lifecycle_id,
+                state=OrderLifecycleState.SUBMITTED,
+                symbol=symbol,
+                order_role=ENTRY,
+                broker_order_id=result.order_id,
+                reason="OrderExecutor returned SUBMITTED",
+                metadata={"quantity": quantity, "limit_price": limit_price},
+            )
+            target_lifecycle_id = None
+            stop_lifecycle_id = None
+            if target_id is not None:
+                target_lifecycle_id = OrderLifecycleEvent.new_id()
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_events,
+                    lifecycle_id=target_lifecycle_id,
+                    state=OrderLifecycleState.TARGET_PENDING,
+                    symbol=symbol,
+                    order_role=TARGET,
+                    broker_order_id=target_id,
+                    parent_lifecycle_id=entry_lifecycle_id,
+                    reason="bracket target child order submitted with parent",
+                    metadata={"target_price": plan_target_price},
+                )
+            if stop_id is not None:
+                stop_lifecycle_id = OrderLifecycleEvent.new_id()
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_events,
+                    lifecycle_id=stop_lifecycle_id,
+                    state=OrderLifecycleState.PROTECTIVE_STOP_PENDING,
+                    symbol=symbol,
+                    order_role=STOP,
+                    broker_order_id=stop_id,
+                    parent_lifecycle_id=entry_lifecycle_id,
+                    reason="bracket protective stop child order submitted with parent",
+                    metadata={"stop_price": plan_stop_price},
+                )
             trade = self._record_trade(
                 decision, plan, quantity, result.order_id,
+                entry_lifecycle_id=entry_lifecycle_id,
+                target_lifecycle_id=target_lifecycle_id,
+                stop_lifecycle_id=stop_lifecycle_id,
                 target_order_id=target_id,
                 stop_order_id=stop_id,
                 extra_notes=bracket_notes,
+            )
+            self._mark_idempotency_submitted(
+                idempotency_acquisition,
+                broker_order_id=result.order_id,
+                autonomous_trade_id=trade.autonomous_trade_id if trade else None,
+                metadata={"symbol": symbol, "quantity": quantity},
             )
             submit_notes = [
                 "live order submitted via OrderExecutor",
@@ -716,22 +956,238 @@ class AutonomousLiveRunner:
                 gates=gates,
                 decision=decision_payload,
                 trade=trade.to_dict() if trade else None,
+                order_lifecycle=lifecycle_events,
                 notes=submit_notes,
                 dry_run=False,
             )
 
         # Rejected / blocked by OrderExecutor.
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.REJECTED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason=f"OrderExecutor rejected: {result.reason}",
+        )
+        self._clear_idempotency_lock(
+            idempotency_acquisition,
+            reason=f"OrderExecutor rejected: {result.reason}",
+        )
         return AutonomousLiveRunResult(
             status=EXECUTION_FAILED,
             gates=gates,
             rejection_reason=f"OrderExecutor rejected: {result.reason}",
             decision=decision_payload,
+            order_lifecycle=lifecycle_events,
             dry_run=self._config.live_dry_run,
         )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _record_order_lifecycle_transition(
+        self,
+        *,
+        lifecycle_id: str,
+        state: OrderLifecycleState,
+        symbol: str,
+        order_role: str = ENTRY,
+        broker_order_id: Optional[int] = None,
+        autonomous_trade_id: Optional[str] = None,
+        parent_lifecycle_id: Optional[str] = None,
+        reason: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        event = self._lifecycle_store.record_transition(
+            lifecycle_id=lifecycle_id,
+            state=state,
+            symbol=symbol,
+            order_role=order_role,
+            broker_order_id=broker_order_id,
+            autonomous_trade_id=autonomous_trade_id,
+            parent_lifecycle_id=parent_lifecycle_id,
+            reason=reason,
+            metadata=metadata,
+        )
+        return event.to_dict()
+
+    def _safe_record_order_lifecycle_transition(
+        self,
+        event_sink: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> None:
+        try:
+            event = self._record_order_lifecycle_transition(**kwargs)
+        except OSError:
+            logger.exception("failed to record autonomous order lifecycle event")
+            return
+        if event_sink is not None:
+            event_sink.append(event)
+
+    @staticmethod
+    def _fallback_lifecycle_id(trade: AutonomousTrade, role: str, order_id: Optional[int]) -> str:
+        trade_id = trade.autonomous_trade_id or "unknown-trade"
+        oid = order_id if order_id is not None else "unknown-order"
+        return f"legacy-{trade_id}-{role}-{oid}"
+
+    def _acquire_idempotency_for_plan(
+        self,
+        decision: AutonomousDecision,
+        plan: Dict[str, Any],
+        *,
+        leg_id: Optional[str] = None,
+        basket_id: Optional[str] = None,
+    ) -> LockAcquisition:
+        symbol = str(plan.get("symbol") or "").strip().upper()
+        return self._idempotency_store.acquire(
+            symbol=symbol,
+            intended_action="BUY",
+            run_id=decision.timestamp.isoformat(),
+            decision_id=self._decision_id(decision),
+            basket_id=basket_id,
+            leg_id=leg_id,
+            signal_timestamp=self._signal_timestamp(decision, plan),
+            metadata={
+                "trade_type": plan.get("trade_type"),
+                "limit_price": plan.get("limit_price"),
+                "quantity": plan.get("quantity"),
+                "basket_leg": leg_id is not None,
+            },
+        )
+
+    def _duplicate_symbol_reason(self, symbol: str) -> Optional[str]:
+        if self._config.allow_duplicate_symbol_live_entries:
+            return None
+        target = str(symbol or "").strip().upper()
+        if not target:
+            return "missing symbol for idempotency check"
+        try:
+            open_trades = self._store.list_open()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_open failed during duplicate-symbol check")
+            return "trade store unavailable during duplicate-symbol check"
+        for trade in open_trades:
+            if str(trade.symbol or "").strip().upper() == target:
+                return (
+                    f"open autonomous trade already exists for {target} "
+                    f"(trade_id={trade.autonomous_trade_id})"
+                )
+        return None
+
+    def _block_duplicate_plan(
+        self,
+        *,
+        lifecycle_events: List[Dict[str, Any]],
+        lifecycle_id: str,
+        symbol: str,
+        reason: str,
+        idempotency_key: Optional[str] = None,
+    ) -> None:
+        metadata: Dict[str, Any] = {}
+        if idempotency_key:
+            metadata["idempotency_key"] = idempotency_key
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=lifecycle_id,
+            state=OrderLifecycleState.DUPLICATE_ORDER_BLOCKED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason=reason,
+            metadata=metadata,
+        )
+
+    def _mark_idempotency_submitted(
+        self,
+        acquisition: Optional[LockAcquisition],
+        *,
+        broker_order_id: Optional[int],
+        autonomous_trade_id: Optional[str],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if acquisition is None or not acquisition.acquired:
+            return
+        try:
+            self._idempotency_store.mark_submitted(
+                acquisition.lock.key,
+                broker_order_id=broker_order_id,
+                autonomous_trade_id=autonomous_trade_id,
+                metadata=metadata,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to mark idempotency lock submitted")
+
+    def _clear_idempotency_lock(
+        self,
+        acquisition: Optional[LockAcquisition],
+        *,
+        reason: str,
+    ) -> None:
+        if acquisition is None or not acquisition.acquired:
+            return
+        try:
+            self._idempotency_store.clear(acquisition.lock.key, reason=reason)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to clear idempotency lock")
+
+    def _release_terminal_idempotency_locks(self) -> None:
+        try:
+            active = self._idempotency_store.active_locks()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to list active idempotency locks")
+            return
+        if not active:
+            return
+        try:
+            trades = {
+                trade.autonomous_trade_id: trade
+                for trade in self._store.list_all()
+            }
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to list trades for idempotency release")
+            return
+        for lock in active:
+            trade_id = lock.autonomous_trade_id
+            if not trade_id:
+                continue
+            trade = trades.get(trade_id)
+            if trade is None:
+                continue
+            if trade.status in {CLOSED, FAILED}:
+                try:
+                    self._idempotency_store.clear(
+                        lock.key,
+                        reason=f"trade terminal: {trade.status}",
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception("failed to clear terminal idempotency lock")
+
+    def stale_idempotency_locks(self) -> List[Dict[str, Any]]:
+        """Return active locks older than the configured stale threshold."""
+        locks = self._idempotency_store.list_stale(
+            older_than_minutes=self._config.idempotency_stale_minutes
+        )
+        return self._idempotency_store.serialise(locks)
+
+    def clear_idempotency_lock(self, key: str, *, reason: str = "operator cleared stale lock") -> bool:
+        """Clear a specific idempotency lock for operator recovery flows."""
+        return self._idempotency_store.clear(key, reason=reason) is not None
+
+    @staticmethod
+    def _decision_id(decision: AutonomousDecision) -> str:
+        selected = decision.selected or {}
+        symbol = selected.get("symbol") or "unknown"
+        return f"{decision.timestamp.isoformat()}:{symbol}:{decision.status.value}"
+
+    @staticmethod
+    def _signal_timestamp(decision: AutonomousDecision, plan: Dict[str, Any]) -> Optional[str]:
+        symbol = str(plan.get("symbol") or "").strip().upper()
+        for candidate in list(decision.shortlist or []) + list(decision.selected_basket or []):
+            if str(candidate.get("symbol") or "").strip().upper() == symbol:
+                value = candidate.get("timestamp") or candidate.get("signal_timestamp")
+                return str(value) if value is not None else None
+        return None
 
     def _count_live_trades_today(self, today: Optional[date] = None) -> int:
         """Count live trades with entry_time on ``today`` (UTC date).
@@ -772,6 +1228,31 @@ class AutonomousLiveRunner:
             )
             return self._config.max_live_trades_per_day
         return count
+
+    def _ingest_broker_fill_events(self) -> None:
+        """Update trade/evidence stores from rich broker fill snapshots."""
+        if self._broker_fill_events_provider is None or self._broker_fill_ingestor is None:
+            return
+        try:
+            events = list(self._broker_fill_events_provider() or [])
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker_fill_events_provider raised")
+            return
+        if not events:
+            return
+        try:
+            result = self._broker_fill_ingestor.ingest(events)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker fill ingestion failed")
+            return
+        if result.fills_seen:
+            logger.info(
+                "AutonomousLiveRunner: ingested %d broker fill event(s), "
+                "closed=%d outcomes=%d",
+                result.fills_seen,
+                result.trades_closed,
+                result.outcomes_emitted,
+            )
 
     def _reconcile_rejected_trades(self) -> None:
         """Mark trade-store entries as FAILED for broker-rejected orders.
@@ -820,6 +1301,18 @@ class AutonomousLiveRunner:
                         trade.entry_order_id,
                         trade.autonomous_trade_id,
                         trade.symbol,
+                    )
+                    self._safe_record_order_lifecycle_transition(
+                        lifecycle_id=(
+                            trade.entry_lifecycle_id
+                            or self._fallback_lifecycle_id(trade, ENTRY, trade.entry_order_id)
+                        ),
+                        state=OrderLifecycleState.REJECTED,
+                        symbol=trade.symbol,
+                        order_role=ENTRY,
+                        broker_order_id=trade.entry_order_id,
+                        autonomous_trade_id=trade.autonomous_trade_id,
+                        reason="broker rejection reconciled from rejected_order_ids_provider",
                     )
                 except Exception:  # pragma: no cover - defensive
                     logger.exception(
@@ -895,6 +1388,38 @@ class AutonomousLiveRunner:
                     trade.autonomous_trade_id,
                     trade.symbol,
                     matched_id,
+                )
+                child_lifecycle_id = (
+                    trade.target_lifecycle_id
+                    if exit_reason == "TAKE_PROFIT"
+                    else trade.stop_lifecycle_id
+                )
+                child_role = TARGET if exit_reason == "TAKE_PROFIT" else STOP
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=(
+                        child_lifecycle_id
+                        or self._fallback_lifecycle_id(trade, child_role, matched_id)
+                    ),
+                    state=OrderLifecycleState.FILLED,
+                    symbol=trade.symbol,
+                    order_role=child_role,
+                    broker_order_id=matched_id,
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    parent_lifecycle_id=trade.entry_lifecycle_id,
+                    reason=f"bracket {exit_reason} fill reconciled",
+                )
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=(
+                        trade.entry_lifecycle_id
+                        or self._fallback_lifecycle_id(trade, ENTRY, trade.entry_order_id)
+                    ),
+                    state=OrderLifecycleState.CLOSED,
+                    symbol=trade.symbol,
+                    order_role=ENTRY,
+                    broker_order_id=trade.entry_order_id,
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    reason=f"trade closed by bracket {exit_reason} order #{matched_id}",
+                    metadata={"exit_order_id": matched_id, "exit_reason": exit_reason},
                 )
             except Exception:  # pragma: no cover - defensive
                 logger.exception(
@@ -981,10 +1506,154 @@ class AutonomousLiveRunner:
                     trade.autonomous_trade_id,
                     trade.symbol,
                 )
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=(
+                        trade.entry_lifecycle_id
+                        or self._fallback_lifecycle_id(trade, ENTRY, trade.entry_order_id)
+                    ),
+                    state=OrderLifecycleState.ORPHANED_ORDER,
+                    symbol=trade.symbol,
+                    order_role=ENTRY,
+                    broker_order_id=trade.entry_order_id,
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    reason="broker no longer holds the symbol for an OPEN local trade",
+                    metadata={"exit_reason": "reconciled_no_broker_position"},
+                )
             except Exception:  # pragma: no cover - defensive
                 logger.exception(
                     "failed to mark stale trade %s as CLOSED",
                     trade.autonomous_trade_id,
+                )
+
+    def _verify_open_trade_protection(self) -> List[ProtectionVerificationResult]:
+        """Verify broker-side stop/bracket protection for open live trades.
+
+        Missing protection is treated as a readiness failure, not as a closed
+        trade.  The open trade continues to consume its live slot while the
+        lifecycle store records ``RECOVERY_REQUIRED`` for operator action.
+        """
+        if not self._config.require_broker_protection_confirmation:
+            return []
+        try:
+            open_trades = self._store.list_open()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_open failed during protection check")
+            return [
+                ProtectionVerificationResult(
+                    autonomous_trade_id="unknown",
+                    symbol="",
+                    protected=False,
+                    recovery_required=True,
+                    reason="trade store unavailable during protection verification",
+                )
+            ]
+        if not open_trades:
+            return []
+        if self._broker_open_orders_provider is None:
+            results = [
+                ProtectionVerificationResult(
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    symbol=trade.symbol,
+                    protected=False,
+                    recovery_required=True,
+                    reason="broker open-order provider is not configured",
+                    expected_quantity=float(abs(trade.quantity or 0)),
+                    stop_order_id=trade.stop_order_id,
+                )
+                for trade in open_trades
+                if not any(
+                    str(note).strip().lower() == "dry_run=true"
+                    for note in (trade.notes or [])
+                )
+            ]
+            self._record_protection_results(results)
+            return results
+        try:
+            broker_positions = (
+                self._broker_positions_provider()
+                if self._broker_positions_provider is not None
+                else {}
+            ) or {}
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker_positions_provider raised during protection check")
+            broker_positions = {}
+        try:
+            open_orders = list(self._broker_open_orders_provider() or [])
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker_open_orders_provider raised during protection check")
+            results = [
+                ProtectionVerificationResult(
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    symbol=trade.symbol,
+                    protected=False,
+                    recovery_required=True,
+                    reason="broker open-order provider raised during protection check",
+                    expected_quantity=float(abs(trade.quantity or 0)),
+                    stop_order_id=trade.stop_order_id,
+                )
+                for trade in open_trades
+            ]
+            self._record_protection_results(results)
+            return results
+
+        results = self._protection_verifier.verify_open_trades(
+            open_trades,
+            broker_positions=broker_positions,
+            open_orders=open_orders,
+        )
+        self._record_protection_results(results)
+        return results
+
+    def _record_protection_results(
+        self,
+        results: Iterable[ProtectionVerificationResult],
+    ) -> None:
+        by_trade: Dict[str, AutonomousTrade] = {}
+        try:
+            by_trade = {
+                trade.autonomous_trade_id: trade
+                for trade in self._store.list_all()
+            }
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_all failed during protection lifecycle write")
+        for result in results:
+            trade = by_trade.get(result.autonomous_trade_id)
+            lifecycle_id = (
+                getattr(trade, "stop_lifecycle_id", None)
+                or (
+                    self._fallback_lifecycle_id(trade, STOP, result.stop_order_id)
+                    if trade is not None
+                    else f"unknown-protection-{result.autonomous_trade_id}"
+                )
+            )
+            current = self._lifecycle_store.get_current(lifecycle_id)
+            if result.protected:
+                if current is not None and current.state == OrderLifecycleState.PROTECTIVE_STOP_CONFIRMED:
+                    continue
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=lifecycle_id,
+                    state=OrderLifecycleState.PROTECTIVE_STOP_CONFIRMED,
+                    symbol=result.symbol,
+                    order_role=STOP,
+                    broker_order_id=result.stop_order_id,
+                    autonomous_trade_id=result.autonomous_trade_id,
+                    parent_lifecycle_id=getattr(trade, "entry_lifecycle_id", None),
+                    reason=result.reason,
+                    metadata=result.to_dict(),
+                )
+            elif result.recovery_required:
+                if current is not None and current.state == OrderLifecycleState.RECOVERY_REQUIRED:
+                    continue
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=lifecycle_id,
+                    state=OrderLifecycleState.RECOVERY_REQUIRED,
+                    symbol=result.symbol,
+                    order_role=STOP,
+                    broker_order_id=result.stop_order_id,
+                    autonomous_trade_id=result.autonomous_trade_id,
+                    parent_lifecycle_id=getattr(trade, "entry_lifecycle_id", None),
+                    reason=result.reason,
+                    metadata=result.to_dict(),
                 )
 
     @staticmethod
@@ -1009,6 +1678,8 @@ class AutonomousLiveRunner:
             return DAILY_LIVE_TRADE_LIMIT_REACHED
         if gates.deployable_cash < gates.min_deployable_cash:
             return DEPLOYABLE_CASH_BELOW_MINIMUM
+        if not gates.protection_confirmed:
+            return PROTECTION_RECOVERY_REQUIRED
         return ENGINE_REJECTED
 
     def _record_trade(
@@ -1018,6 +1689,9 @@ class AutonomousLiveRunner:
         quantity: int,
         order_id: Optional[int],
         *,
+        entry_lifecycle_id: Optional[str] = None,
+        target_lifecycle_id: Optional[str] = None,
+        stop_lifecycle_id: Optional[str] = None,
         target_order_id: Optional[int] = None,
         stop_order_id: Optional[int] = None,
         extra_notes: Optional[List[str]] = None,
@@ -1055,6 +1729,9 @@ class AutonomousLiveRunner:
                 max_holding_days=int(self._config.max_holding_days),
                 target_order_id=int(target_order_id) if target_order_id is not None else None,
                 stop_order_id=int(stop_order_id) if stop_order_id is not None else None,
+                entry_lifecycle_id=entry_lifecycle_id,
+                target_lifecycle_id=target_lifecycle_id,
+                stop_lifecycle_id=stop_lifecycle_id,
                 notes=notes,
             )
         except Exception:  # pragma: no cover - defensive

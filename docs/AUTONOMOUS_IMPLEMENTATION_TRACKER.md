@@ -55,7 +55,7 @@ Legend:
 | Recommend-only autonomous analysis | Done | Safe default |
 | Paper execution | Done | Suitable for evidence collection |
 | Controlled assisted-live single trade | Partial | Feasible with conservative caps and all live gates passing |
-| Controlled assisted-live basket | Partial | Feasible but should wait for basket-level risk allocation before becoming preferred live mode |
+| Controlled assisted-live basket | Partial | Basket-level risk allocation is implemented, but broker lifecycle/protection/recovery phases are still required before this becomes preferred live mode |
 | Continuous live mode | Pending | Requires operational robustness phases below |
 | Automatic capital scaling | Pending | Must wait for promotion gates and evidence review |
 
@@ -63,13 +63,13 @@ Legend:
 
 | Phase | Work item | Status | Target PR |
 |---:|---|---|---|
-| 1 | Basket-level risk allocation | Pending | Next implementation PR |
-| 2 | Broker order lifecycle state machine | Planned | TBD |
-| 3 | Broker-side protective stop / bracket verification | Planned | TBD |
-| 4 | Idempotency and duplicate-order prevention | Planned | TBD |
-| 5 | Quote freshness and market-data health guard | Planned | TBD |
-| 6 | Automatic broker-fill ingestion | Planned | TBD |
-| 7 | Continuous-run supervisor | Planned | TBD |
+| 1 | Basket-level risk allocation | Done | Current PR continuing #161 |
+| 2 | Broker order lifecycle state machine | Done | Current PR continuing #161 |
+| 3 | Broker-side protective stop / bracket verification | Done | Current PR continuing #161 |
+| 4 | Idempotency and duplicate-order prevention | Done | Current PR continuing #161 |
+| 5 | Quote freshness and market-data health guard | Done | Current PR continuing #161 |
+| 6 | Automatic broker-fill ingestion | Done | Current PR continuing #161 |
+| 7 | Continuous-run supervisor | Done | Current PR continuing #161 |
 | 8 | Restart recovery and broker reconciliation | Planned | TBD |
 | 9 | Enhanced emergency stop operations | Planned | TBD |
 | 10 | Control tower dashboard/API | Planned | TBD |
@@ -80,7 +80,7 @@ Legend:
 
 ### Phase 1 — Basket-level risk allocation
 
-Status: Pending
+Status: Done in current PR; pending merge
 
 Target outcome:
 
@@ -89,91 +89,351 @@ Target outcome:
 
 Checklist:
 
-- [ ] Add `BasketRiskAllocator`.
-- [ ] Add basket risk config fields.
-- [ ] Compute planned risk dollars per leg.
-- [ ] Allocate shared basket risk budget across selected legs.
-- [ ] Resize or reject legs that exceed allocated risk budget.
-- [ ] Add basket-level diagnostics.
-- [ ] Add evidence fields for basket risk.
-- [ ] Add tests.
-- [ ] Update docs.
+- [x] Add `BasketRiskAllocator`.
+- [x] Add basket risk config fields.
+- [x] Compute planned risk dollars per leg.
+- [x] Allocate shared basket risk budget across selected legs.
+- [x] Resize or reject legs that exceed allocated risk budget.
+- [x] Add basket-level diagnostics.
+- [x] Add evidence fields for basket risk.
+- [x] Add tests.
+- [x] Update docs.
+
+Implementation notes:
+
+- Added `autonomous/basket_risk_allocator.py`.
+- Added `basket_risk_allocator_enabled`, `max_basket_risk_equity_pct`,
+  `basket_risk_allocation_mode`, and `basket_min_leg_risk_dollars` config.
+- `BasketPlanner` still applies sector and notional caps, then applies the
+  shared stop-risk budget.
+- The allocator supports `BUY_SHARES` legs with valid stops, can reduce
+  quantity, can reject over-risk legs, and cannot increase exposure.
+- `BasketPlan.to_dict()` includes `risk_allocation` diagnostics for evidence
+  and operator review.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp`
+- Initial run without `--basetemp=.pytest-tmp` failed before executing tests
+  because Windows denied access to `AppData\Local\Temp\pytest-of-evanl`.
+- Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
+  completed with `2799 passed`, `18 skipped`, and `6 failed`. The failures
+  were existing autonomous/live-runner expectation issues outside the basket
+  risk allocation path:
+  `tests/test_autonomous_engine.py::test_recommend_only_never_places_orders`,
+  `tests/test_autonomous_live_runner.py::test_live_runner_config_defaults`,
+  `tests/test_autonomous_live_runner.py::test_live_runner_config_from_env_defaults`,
+  `tests/test_autonomous_live_runner.py::test_record_trade_persists_bracket_child_ids`,
+  `tests/test_autonomous_live_runner.py::test_synthesized_stop_when_plan_lacks_stop_price`,
+  and
+  `tests/test_live_dry_run_guard.py::test_live_dry_run_with_no_adapter_reaches_dry_run_result`.
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
+  (`473 passed`). The command exited 0; it printed a non-failing sparkline
+  fallback message after pytest completed.
+
+Known limitations and manual checks:
+
+- Equal-risk allocation only.
+- Non-`BUY_SHARES` basket legs are rejected by the allocator because they do not
+  have planned per-share stop-risk.
+- Broker lifecycle state, broker-side protection verification, and idempotency
+  are now implemented later in this PR. Restart recovery, quote freshness,
+  broker-fill ingestion, and a continuous supervisor remain future phases
+  before unattended continuous live operation.
+- Human review should confirm the default basket risk budget is suitable before
+  assisted-live basket use.
 
 ### Phase 2 — Broker order lifecycle state machine
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Add lifecycle state model.
-- [ ] Persist lifecycle events.
-- [ ] Track submitted, acknowledged, partial, filled, cancelled, rejected, closed, reconciled states.
-- [ ] Add recovery states.
-- [ ] Add lifecycle diagnostics to live runner output.
-- [ ] Add tests for state transitions.
+- [x] Add lifecycle state model.
+- [x] Persist lifecycle events.
+- [x] Track submitted, filled, rejected, closed, and recovery states.
+- [x] Add recovery states.
+- [x] Add lifecycle diagnostics to live runner output.
+- [x] Add tests for state transitions.
+
+Implementation notes:
+
+- Added `autonomous/order_lifecycle.py` with `OrderLifecycleState`,
+  `OrderLifecycleEvent`, and append-only `OrderLifecycleStore`.
+- Added `order_lifecycle_store_path` to `AutonomousLiveRunnerConfig`.
+- `AutonomousLiveRunner` and the basket live-runner patch now write lifecycle
+  events around the existing `OrderExecutor` path.
+- Submitted entry orders emit `PLANNED` then `SUBMITTED`.
+- Bracket child orders emit `TARGET_PENDING` or
+  `PROTECTIVE_STOP_PENDING`.
+- Rejected orders emit `REJECTED`.
+- Bracket target/stop fills emit child `FILLED` and parent `CLOSED`.
+- Stale open trades whose broker position is no longer present emit
+  `ORPHANED_ORDER`.
+- Broker-side protection verification is implemented separately in Phase 3.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`4 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp -q`
+  (`49 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py::TestPortfolioPersistence --basetemp=.pytest-tmp -q`
+  (`9 passed`).
+- Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
+  (`473 passed`).
+
+Known limitations and manual checks:
+
+- Lifecycle recording is file-backed JSONL and does not yet reconcile entry
+  order acknowledgement callbacks into `ACKNOWLEDGED`.
+- Partial-fill state is modeled but not yet automatically ingested; automatic
+  fill ingestion remains Phase 6.
 
 ### Phase 3 — Broker-side protective stop / bracket verification
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Verify broker acknowledgement of protective stop/bracket orders.
-- [ ] Confirm protective quantity matches filled quantity.
-- [ ] Mark trade protected only after verification.
-- [ ] Block new entries when protection is missing.
-- [ ] Add recovery state for unprotected live position.
+- [x] Verify broker acknowledgement of protective stop/bracket orders.
+- [x] Confirm protective quantity matches filled quantity.
+- [x] Mark trade protected only after verification.
+- [x] Block new entries when protection is missing.
+- [x] Add recovery state for unprotected live position.
+
+Implementation notes:
+
+- Added `autonomous/protection_verifier.py` with broker open-order snapshot
+  normalisation and protection verification.
+- Added `require_broker_protection_confirmation` to
+  `AutonomousLiveRunnerConfig`; it defaults to `True` and can be overridden by
+  `AUTONOMOUS_REQUIRE_BROKER_PROTECTION_CONFIRMATION`.
+- `AutonomousLiveRunner.evaluate_gates()` verifies every open non-dry-run
+  autonomous live trade before allowing another entry.
+- Missing or unverifiable protection records `RECOVERY_REQUIRED` in the
+  lifecycle store and blocks new entries while the trade remains open.
+- Confirmed broker-visible stop/bracket protection records
+  `PROTECTIVE_STOP_CONFIRMED`.
+- `TWSBridge` now maintains broker-visible open-order snapshots from
+  `openOrder` and `orderStatus`, exposed through
+  `get_open_order_snapshots()`.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_tws_bridge.py::TestBridgeOpenOrderSnapshots --basetemp=.pytest-tmp -q`
+  (`8 passed`).
+- Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
+  (`473 passed`).
+
+Known limitations and manual checks:
+
+- The verifier is read-only; it does not submit replacement stops when
+  protection is missing.
+- Partial-fill quantity is inferred from the broker position snapshot when
+  present; automatic fill ingestion and child-order resizing remain future
+  phases.
+- If broker open-order snapshots are unavailable while an open live trade
+  exists, the system fails closed and requires operator recovery.
 
 ### Phase 4 — Idempotency and duplicate-order prevention
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Add run/decision/basket/leg identifiers.
-- [ ] Add idempotency lock store.
-- [ ] Block duplicate signal/basket-leg submission.
-- [ ] Handle restart after submission but before evidence write.
-- [ ] Add stale-lock inspection/clear path.
+- [x] Add run/decision/basket/leg identifiers.
+- [x] Add idempotency lock store.
+- [x] Block duplicate signal/basket-leg submission.
+- [x] Handle restart after submission but before evidence write.
+- [x] Add stale-lock inspection/clear path.
+
+Implementation notes:
+
+- Added `autonomous/idempotency.py` with append-only JSONL replay of
+  `IN_FLIGHT`, `SUBMITTED`, and `CLEARED` lock states.
+- Added `idempotency_store_path`, `idempotency_stale_minutes`, and
+  `allow_duplicate_symbol_live_entries` to `AutonomousLiveRunnerConfig`.
+  Duplicate symbol live entries remain blocked by default.
+- The base live runner and basket live-runner patch acquire a symbol/action
+  lock before broker submission for non-dry-run live entries.
+- Existing open autonomous trades for the same symbol fail closed with
+  `duplicate_order_blocked` unless explicitly allowed.
+- Active idempotency locks fail closed with `duplicate_order_blocked` and
+  write `DUPLICATE_ORDER_BLOCKED` lifecycle diagnostics.
+- Basket execution preflights all legs before submission so duplicate symbols
+  or active locks cannot produce a partial basket submit.
+- Submitted orders mark locks `SUBMITTED` with broker order and autonomous
+  trade IDs; executor failures, rejections, and lifecycle write failures clear
+  in-flight locks.
+- Readiness reconciliation clears locks only after the local autonomous trade
+  is terminal. Operators can inspect stale locks and explicitly clear a lock
+  through runner helpers.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_idempotency.py tests/test_order_lifecycle.py tests/test_autonomous_live_runner_basket.py --basetemp=.pytest-tmp -q`
+  (`15 passed`).
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`473 passed`).
+
+Known limitations and manual checks:
+
+- Stale locks are surfaced for operator inspection and manual clear; they are
+  not auto-cleared solely because they are old.
+- The idempotency key intentionally blocks by symbol/action for live entries,
+  not just by exact signal timestamp, to avoid duplicate exposure after a
+  restart window.
+- Automatic fill ingestion and continuous supervisor recovery are still
+  future phases.
 
 ### Phase 5 — Quote freshness and market-data health guard
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Track bid/ask/last timestamps.
-- [ ] Block stale quote in live mode.
-- [ ] Add feed-health diagnostics.
-- [ ] Add live-mode missing bid/ask block option.
-- [ ] Add tests for stale and missing quotes.
+- [x] Track bid/ask/last timestamps.
+- [x] Block stale quote in live mode.
+- [x] Add feed-health diagnostics.
+- [x] Add live-mode missing bid/ask block option.
+- [x] Add tests for stale and missing quotes.
+
+Implementation notes:
+
+- Added `autonomous/market_data_health.py` with a source-agnostic
+  `MarketDataHealthGuard` and serializable diagnostics.
+- Added configurable guard settings to `AutonomousTradingConfig`.
+- `TradePlanner` now runs market-data health before execution-quality
+  checks, rejects assisted-live stale/degraded/closed-market plans, records
+  rejection reasons, and attaches `market_data_health` to trade-plan output.
+- `TechnicalAnalysisSignalProvider` maps bid/ask/last timestamps, feed
+  status, feed-health, and market-open metadata into candidate extras when
+  those fields are available.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_market_data_health.py tests\test_trade_planner_execution_quality.py tests\test_trade_planner.py tests\test_technical_analysis_signal_provider.py tests\test_autonomous_engine_basket.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`57 passed`).
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`473 passed`).
+
+Known limitations and manual checks:
+
+- Missing bid/ask blocking is configurable and defaults to non-blocking to
+  preserve current assisted-live fixtures; operators can fail closed with
+  `market_data_block_missing_bid_ask_live=True`.
+- Missing quote timestamp blocking is configurable and defaults to
+  non-blocking for compatibility with providers that do not yet publish
+  quote timestamps.
+- The guard is pre-submission only; it does not subscribe to market data or
+  repair a degraded feed.
+- Automatic fill ingestion remains Phase 6.
 
 ### Phase 6 — Automatic broker-fill ingestion
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Consume broker execution/fill events.
-- [ ] Capture execution ID, order ID, symbol, side, quantity, price, commission, timestamp.
-- [ ] Update trade store automatically.
-- [ ] Update lifecycle state.
-- [ ] Emit outcome evidence when trade closes.
-- [ ] Add tests for full and partial fills.
+- [x] Consume broker execution/fill events.
+- [x] Capture execution ID, order ID, symbol, side, quantity, price, commission, timestamp.
+- [x] Update trade store automatically.
+- [x] Update lifecycle state.
+- [x] Emit outcome evidence when trade closes.
+- [x] Add tests for full and partial fills.
+
+Implementation notes:
+
+- Added `autonomous/broker_fill_ingestor.py` to normalize broker fill rows,
+  merge repeated/enriched executions by execution ID, aggregate partial fills,
+  update `TradeStore`, record lifecycle transitions, and emit outcome
+  evidence for closed trades.
+- Extended `AutonomousTrade` with persisted `entry_fills`, `exit_fills`, and
+  `outcome_emitted` fields.
+- Extended `TWSBridge` with `execDetails`, `commissionReport`, and
+  `pop_broker_fill_events()` so IBKR execution and commission callbacks can be
+  consumed without losing late commission reports.
+- Wired `AutonomousLiveRunner` to optionally ingest broker fill events before
+  readiness checks while retaining the existing filled-order-ID fallback.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_broker_fill_ingestor.py tests\test_tws_bridge.py::TestBridgeBrokerFillEvents tests\test_autonomous_trade_store.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`22 passed`).
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`476 passed`).
+
+Known limitations and manual checks:
+
+- The ingestor is accounting-only; it does not resize child orders after a
+  partial fill and does not submit replacement protection.
+- Outcome emission is append-only. If a broker reports commission after an
+  outcome has already been emitted, the trade store can be enriched but the
+  existing outcome record is not rewritten.
+- Continuous supervisor recovery, restart chaos tests, and dashboard drilldown
+  remain future phases.
 
 ### Phase 7 — Continuous-run supervisor
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Add supervisor module.
-- [ ] Prevent overlapping runs.
-- [ ] Maintain heartbeat.
-- [ ] Pause on serious errors.
-- [ ] Pause on broker disconnect.
-- [ ] Pause on unreconciled lifecycle state.
-- [ ] Pause on risk-lifecycle breach.
+- [x] Add supervisor module.
+- [x] Prevent overlapping runs.
+- [x] Maintain heartbeat.
+- [x] Pause on serious errors.
+- [x] Pause on broker disconnect.
+- [x] Pause on unreconciled lifecycle state.
+- [x] Pause on risk-lifecycle breach.
+
+Implementation notes:
+
+- Added `autonomous/continuous_supervisor.py` with non-overlap locking,
+  cadence enforcement, heartbeat/status snapshots, pause/resume controls, and
+  structured fault/result records.
+- Wired the live lifecycle worker and `/api/autonomous/live/status`
+  auto-advance path through the supervisor for continuous cycles.
+- Supervisor status is exposed in `/api/autonomous/live/status` under
+  `continuous_supervisor`.
+- Continuous cycles pause fail-closed on broker disconnect, emergency stop,
+  unreconciled protection/lifecycle state, failed live trades, risk lifecycle
+  breach results, or tick exceptions.
+- Fixed a continuous-cycle market-not-suitable halt path to format the runner
+  result decision payload instead of referencing an undefined local variable.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_continuous_supervisor.py tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveLifecycleTick --basetemp=.pytest-tmp -q`
+  (`13 passed`).
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`476 passed`).
+
+Known limitations and manual checks:
+
+- The supervisor is a coordinator only; it does not perform restart recovery,
+  broker/local reconciliation, automatic replacement protection, order
+  cancellation, or panic flattening.
+- The existing lifecycle worker still owns background threading; the supervisor
+  controls whether a continuous tick is allowed to run and why it pauses.
+- Dedicated dashboard controls for supervisor pause/resume remain part of the
+  future control tower phase.
 
 ### Phase 8 — Restart recovery and broker reconciliation
 

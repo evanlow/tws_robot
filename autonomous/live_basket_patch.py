@@ -19,6 +19,7 @@ from autonomous.autonomous_live_runner import (
     AutonomousLiveRunResult,
     AutonomousLiveRunner,
     DAILY_LIVE_TRADE_LIMIT_REACHED,
+    DUPLICATE_ORDER_BLOCKED,
     DRY_RUN_EXECUTED,
     EMERGENCY_STOP_ACTIVE,
     ENGINE_REJECTED,
@@ -27,6 +28,7 @@ from autonomous.autonomous_live_runner import (
     NO_TRADE,
     _as_float,
 )
+from autonomous.order_lifecycle import ENTRY, STOP, TARGET, OrderLifecycleEvent, OrderLifecycleState
 from autonomous.trade_planner import TradeType
 from execution.order_executor import OrderStatus
 from strategies.signal import Signal, SignalStrength, SignalType
@@ -38,7 +40,12 @@ def _execute_one_live_plan(self: AutonomousLiveRunner, decision, plan: Dict[str,
     symbol = str(plan.get("symbol") or "")
     trade_type = plan.get("trade_type")
     if trade_type != TradeType.BUY_SHARES.value:
-        return None, None, f"{symbol}: basket leg trade_type {trade_type!r} is not BUY_SHARES; only BUY_SHARES is supported"
+        return (
+            None,
+            None,
+            f"{symbol}: basket leg trade_type {trade_type!r} is not BUY_SHARES; only BUY_SHARES is supported",
+            [],
+        )
     limit_price = float(plan.get("limit_price") or 0.0)
     plan_target_price = _as_float(plan.get("target_price"))
     plan_stop_price = _as_float(plan.get("stop_price"))
@@ -66,6 +73,63 @@ def _execute_one_live_plan(self: AutonomousLiveRunner, decision, plan: Dict[str,
     if self._config.live_limit_orders_only:
         signal.strategy_name = "AutonomousLiveRunner:LIMIT"
 
+    lifecycle_events: List[Dict[str, Any]] = []
+    entry_lifecycle_id = OrderLifecycleEvent.new_id()
+    idempotency_acquisition = None
+    if not self._config.live_dry_run:
+        duplicate_reason = self._duplicate_symbol_reason(symbol)
+        if duplicate_reason:
+            self._block_duplicate_plan(
+                lifecycle_events=lifecycle_events,
+                lifecycle_id=entry_lifecycle_id,
+                symbol=symbol,
+                reason=duplicate_reason,
+            )
+            return None, None, duplicate_reason, lifecycle_events
+        try:
+            idempotency_acquisition = self._acquire_idempotency_for_plan(
+                decision,
+                plan,
+            )
+        except OSError as exc:
+            logger.exception("failed to acquire autonomous idempotency lock")
+            return None, None, f"idempotency lock write failed before submission: {exc}", lifecycle_events
+        if not idempotency_acquisition.acquired:
+            reason = idempotency_acquisition.reason or "duplicate idempotency lock"
+            self._block_duplicate_plan(
+                lifecycle_events=lifecycle_events,
+                lifecycle_id=entry_lifecycle_id,
+                symbol=symbol,
+                reason=reason,
+                idempotency_key=idempotency_acquisition.lock.key,
+            )
+            return None, None, reason, lifecycle_events
+    try:
+        lifecycle_events.append(
+            self._record_order_lifecycle_transition(
+                lifecycle_id=entry_lifecycle_id,
+                state=OrderLifecycleState.PLANNED,
+                symbol=symbol,
+                order_role=ENTRY,
+                reason="basket live runner prepared leg for OrderExecutor",
+                metadata={
+                    "quantity": quantity,
+                    "limit_price": limit_price,
+                    "target_price": plan_target_price,
+                    "stop_price": plan_stop_price,
+                    "dry_run": self._config.live_dry_run,
+                    "basket_leg": True,
+                },
+            )
+        )
+    except OSError as exc:
+        logger.exception("failed to record autonomous order lifecycle PLANNED event")
+        self._clear_idempotency_lock(
+            idempotency_acquisition,
+            reason="order lifecycle write failed before submission",
+        )
+        return None, None, f"order lifecycle write failed before submission: {exc}", lifecycle_events
+
     try:
         broker_positions: Dict[str, Any] = (
             self._broker_positions_provider()
@@ -80,21 +144,160 @@ def _execute_one_live_plan(self: AutonomousLiveRunner, decision, plan: Dict[str,
         )
     except Exception:
         logger.exception("OrderExecutor.execute_signal raised")
-        return None, None, "OrderExecutor raised an exception"
+        self._clear_idempotency_lock(
+            idempotency_acquisition,
+            reason="OrderExecutor raised before returning a result",
+        )
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.BROKER_DISCONNECTED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason="OrderExecutor raised an exception before returning a result",
+        )
+        return None, None, "OrderExecutor raised an exception", lifecycle_events
 
     if result.status not in {OrderStatus.SUBMITTED, OrderStatus.DRY_RUN}:
-        return result, None, f"OrderExecutor rejected {symbol}: {result.reason}"
+        self._clear_idempotency_lock(
+            idempotency_acquisition,
+            reason=f"OrderExecutor rejected: {result.reason}",
+        )
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.REJECTED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason=f"OrderExecutor rejected {symbol}: {result.reason}",
+        )
+        return result, None, f"OrderExecutor rejected {symbol}: {result.reason}", lifecycle_events
+
+    target_id = getattr(result, "bracket_target_order_id", None)
+    stop_id = getattr(result, "bracket_stop_order_id", None)
+    target_lifecycle_id = None
+    stop_lifecycle_id = None
+    if result.status == OrderStatus.DRY_RUN:
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.EXPIRED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason="dry-run preview; basket leg was not submitted to broker",
+        )
+    else:
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.SUBMITTED,
+            symbol=symbol,
+            order_role=ENTRY,
+            broker_order_id=result.order_id,
+            reason="OrderExecutor returned SUBMITTED for basket leg",
+            metadata={"quantity": quantity, "limit_price": limit_price},
+        )
+        if target_id is not None:
+            target_lifecycle_id = OrderLifecycleEvent.new_id()
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=target_lifecycle_id,
+                state=OrderLifecycleState.TARGET_PENDING,
+                symbol=symbol,
+                order_role=TARGET,
+                broker_order_id=target_id,
+                parent_lifecycle_id=entry_lifecycle_id,
+                reason="basket bracket target child order submitted with parent",
+                metadata={"target_price": plan_target_price},
+            )
+        if stop_id is not None:
+            stop_lifecycle_id = OrderLifecycleEvent.new_id()
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=stop_lifecycle_id,
+                state=OrderLifecycleState.PROTECTIVE_STOP_PENDING,
+                symbol=symbol,
+                order_role=STOP,
+                broker_order_id=stop_id,
+                parent_lifecycle_id=entry_lifecycle_id,
+                reason="basket bracket protective stop child order submitted with parent",
+                metadata={"stop_price": plan_stop_price},
+            )
 
     trade = self._record_trade(
         decision,
         plan,
         quantity,
         result.order_id,
-        target_order_id=getattr(result, "bracket_target_order_id", None),
-        stop_order_id=getattr(result, "bracket_stop_order_id", None),
+        entry_lifecycle_id=entry_lifecycle_id,
+        target_lifecycle_id=target_lifecycle_id,
+        stop_lifecycle_id=stop_lifecycle_id,
+        target_order_id=target_id,
+        stop_order_id=stop_id,
         extra_notes=bracket_notes,
     )
-    return result, trade, None
+    if result.status == OrderStatus.SUBMITTED:
+        self._mark_idempotency_submitted(
+            idempotency_acquisition,
+            broker_order_id=result.order_id,
+            autonomous_trade_id=trade.autonomous_trade_id if trade else None,
+            metadata={"symbol": symbol, "quantity": quantity, "basket_leg": True},
+        )
+    return result, trade, None, lifecycle_events
+
+
+def _duplicate_event_seen(events: List[Dict[str, Any]]) -> bool:
+    return any(
+        event.get("state") == OrderLifecycleState.DUPLICATE_ORDER_BLOCKED.value
+        for event in events
+    )
+
+
+def _preflight_duplicate_basket(self: AutonomousLiveRunner, trade_plans: List[Dict[str, Any]]) -> Optional[tuple[str, List[Dict[str, Any]]]]:
+    if self._config.live_dry_run or self._config.allow_duplicate_symbol_live_entries:
+        return None
+
+    lifecycle_events: List[Dict[str, Any]] = []
+    seen_symbols: set[str] = set()
+    try:
+        active_locks = self._idempotency_store.current_locks()
+    except OSError as exc:
+        logger.exception("failed to replay autonomous idempotency locks")
+        return f"idempotency lock replay failed before basket submission: {exc}", lifecycle_events
+
+    for plan in trade_plans:
+        symbol = str(plan.get("symbol") or "").strip().upper()
+        lifecycle_id = OrderLifecycleEvent.new_id()
+        reason = None
+        idempotency_key = None
+        if not symbol:
+            reason = "missing symbol for idempotency check"
+        elif symbol in seen_symbols:
+            reason = f"basket contains more than one live entry for {symbol}"
+        else:
+            duplicate_reason = self._duplicate_symbol_reason(symbol)
+            if duplicate_reason:
+                reason = duplicate_reason
+            else:
+                key = self._idempotency_store.build_key(
+                    symbol=symbol,
+                    intended_action="BUY",
+                )
+                lock = active_locks.get(key)
+                if lock is not None and lock.active:
+                    reason = f"active idempotency lock exists for {key}"
+                    idempotency_key = key
+        if reason:
+            self._block_duplicate_plan(
+                lifecycle_events=lifecycle_events,
+                lifecycle_id=lifecycle_id,
+                symbol=symbol,
+                reason=reason,
+                idempotency_key=idempotency_key,
+            )
+            return reason, lifecycle_events
+        seen_symbols.add(symbol)
+    return None
 
 
 def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResult:
@@ -176,6 +379,23 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
             dry_run=self._config.live_dry_run,
         )
 
+    duplicate_preflight = _preflight_duplicate_basket(self, trade_plans)
+    if duplicate_preflight is not None:
+        duplicate_reason, lifecycle_events = duplicate_preflight
+        status = (
+            DUPLICATE_ORDER_BLOCKED
+            if _duplicate_event_seen(lifecycle_events)
+            else EXECUTION_FAILED
+        )
+        return AutonomousLiveRunResult(
+            status=status,
+            gates=gates,
+            rejection_reason=duplicate_reason,
+            decision=decision_payload,
+            order_lifecycle=lifecycle_events,
+            dry_run=self._config.live_dry_run,
+        )
+
     deployable_cash = gates.deployable_cash
     max_trade_value = deployable_cash * self._config.max_deployable_cash_pct
     submitted_trades = []
@@ -187,6 +407,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
         f"max_trade_value={max_trade_value:.2f}",
     ]
     dry_run_seen = False
+    lifecycle_events: List[Dict[str, Any]] = []
 
     for plan in trade_plans:
         limit_price = float(plan.get("limit_price") or 0.0)
@@ -207,16 +428,23 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
                 notes=notes,
             )
 
-        result, trade, error = _execute_one_live_plan(
+        result, trade, error, leg_lifecycle_events = _execute_one_live_plan(
             self, decision, plan, quantity, gates, deployable_cash, max_trade_value
         )
+        lifecycle_events.extend(leg_lifecycle_events)
         if error:
+            status = (
+                DUPLICATE_ORDER_BLOCKED
+                if _duplicate_event_seen(leg_lifecycle_events)
+                else EXECUTION_FAILED
+            )
             return AutonomousLiveRunResult(
-                status=EXECUTION_FAILED,
+                status=status,
                 gates=gates,
                 rejection_reason=error,
                 decision=decision_payload,
                 trade={"submitted_trades": submitted_trades} if submitted_trades else None,
+                order_lifecycle=lifecycle_events,
                 dry_run=self._config.live_dry_run,
                 notes=notes,
             )
@@ -238,6 +466,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
             "submitted_trades": submitted_trades,
             "order_ids": order_ids,
         },
+        order_lifecycle=lifecycle_events,
         notes=notes,
         dry_run=dry_run_seen,
     )
