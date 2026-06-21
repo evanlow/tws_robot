@@ -494,6 +494,48 @@ intended_action
 - Existing open autonomous trade for a symbol blocks duplicate entry unless explicitly allowed.
 - Operator can inspect and clear stale idempotency locks.
 
+#### Config
+
+```python
+allow_duplicate_symbol_live_entries: bool = False
+idempotency_store_path: str = "logs/autonomous_idempotency.jsonl"
+idempotency_stale_minutes: int = 120
+```
+
+Environment variables:
+
+```text
+AUTONOMOUS_ALLOW_DUPLICATE_SYMBOL_LIVE_ENTRIES=false
+AUTONOMOUS_IDEMPOTENCY_STORE_PATH=logs/autonomous_idempotency.jsonl
+AUTONOMOUS_IDEMPOTENCY_STALE_MINUTES=120
+```
+
+#### Current implementation status
+
+Implemented in the current PR continuing issue #161.
+
+The implementation adds `autonomous/idempotency.py`, an append-only JSONL
+lock store for live autonomous entry attempts.  Non-dry-run live execution now
+acquires a symbol/action idempotency lock before recording `PLANNED` and
+before calling `OrderExecutor`.  If an active lock already exists, or if a
+local open autonomous trade already exists for the same symbol, the runner
+fails closed with `duplicate_order_blocked` and records
+`DUPLICATE_ORDER_BLOCKED` in the order lifecycle store.
+
+The basket live-runner path preflights the full basket before submitting any
+leg.  A repeated symbol, existing open trade, or existing idempotency lock
+blocks the basket before the first broker submission, avoiding partial basket
+execution caused by duplicate-leg detection.
+
+Accepted broker submissions mark the lock `SUBMITTED` with the broker order ID
+and autonomous trade ID.  Rejections, lifecycle write failures, and executor
+exceptions clear the in-flight lock.  Locks for locally terminal trades are
+cleared during readiness reconciliation, and operators can inspect stale locks
+or explicitly clear a lock with the runner recovery helpers.
+
+This phase does not add any new live-order route, does not auto-clear stale
+locks, and does not weaken the existing live/dry-run/risk gates.
+
 ### Phase 5 — Quote freshness and market-data health guard
 
 #### Problem
@@ -804,7 +846,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add idempotency and duplicate-order prevention
+Add quote freshness and market-data health guard
 ```
 
-This should implement Phase 4 of the continuous autonomous live readiness roadmap.
+This should implement Phase 5 of the continuous autonomous live readiness roadmap.

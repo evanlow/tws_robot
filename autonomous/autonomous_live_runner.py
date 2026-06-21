@@ -39,6 +39,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from autonomous.autonomous_config import AutonomousMode
 from autonomous.autonomous_engine import AutonomousDecision, AutonomousTradingEngine, DecisionStatus
+from autonomous.idempotency import IdempotencyStore, LockAcquisition
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.signal_provider import StaticSignalProvider
 from autonomous.order_lifecycle import (
@@ -86,6 +87,7 @@ NO_TRADE = "no_trade"
 ENGINE_REJECTED = "engine_rejected"
 EXECUTION_FAILED = "execution_failed"
 PROTECTION_RECOVERY_REQUIRED = "protection_recovery_required"
+DUPLICATE_ORDER_BLOCKED = "duplicate_order_blocked"
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +366,7 @@ class AutonomousLiveRunner:
         broker_open_orders_provider: Optional[BrokerOpenOrdersProvider] = None,
         order_lifecycle_store: Optional[OrderLifecycleStore] = None,
         protection_verifier: Optional[ProtectionVerifier] = None,
+        idempotency_store: Optional[IdempotencyStore] = None,
         continuous_mode: bool = False,
     ) -> None:
         self._engine = engine
@@ -384,6 +387,9 @@ class AutonomousLiveRunner:
             path=self._config.order_lifecycle_store_path
         )
         self._protection_verifier = protection_verifier or ProtectionVerifier()
+        self._idempotency_store = idempotency_store or IdempotencyStore(
+            path=self._config.idempotency_store_path
+        )
         self._continuous_mode = continuous_mode
 
     # ------------------------------------------------------------------
@@ -412,6 +418,11 @@ class AutonomousLiveRunner:
         """Append-only lifecycle event store for live autonomous broker orders."""
         return self._lifecycle_store
 
+    @property
+    def idempotency_store(self) -> IdempotencyStore:
+        """Append-only idempotency lock store for live autonomous entries."""
+        return self._idempotency_store
+
     # ------------------------------------------------------------------
     # Readiness
     # ------------------------------------------------------------------
@@ -429,6 +440,8 @@ class AutonomousLiveRunner:
         # between submit and confirm, etc.) so a stranded record never
         # blocks future autonomous trades.
         self._reconcile_stale_positions()
+        # Clear idempotency locks only after local trade state is terminal.
+        self._release_terminal_idempotency_locks()
 
         try:
             connected = bool(self._connected_provider())
@@ -684,6 +697,55 @@ class AutonomousLiveRunner:
 
         lifecycle_events: List[Dict[str, Any]] = []
         entry_lifecycle_id = OrderLifecycleEvent.new_id()
+        idempotency_acquisition: Optional[LockAcquisition] = None
+        if not self._config.live_dry_run:
+            duplicate_reason = self._duplicate_symbol_reason(symbol)
+            if duplicate_reason:
+                self._block_duplicate_plan(
+                    lifecycle_events=lifecycle_events,
+                    lifecycle_id=entry_lifecycle_id,
+                    symbol=symbol,
+                    reason=duplicate_reason,
+                )
+                return AutonomousLiveRunResult(
+                    status=DUPLICATE_ORDER_BLOCKED,
+                    gates=gates,
+                    rejection_reason=duplicate_reason,
+                    decision=decision_payload,
+                    order_lifecycle=lifecycle_events,
+                    dry_run=False,
+                )
+            try:
+                idempotency_acquisition = self._acquire_idempotency_for_plan(
+                    decision,
+                    plan,
+                )
+            except OSError as exc:
+                logger.exception("failed to acquire autonomous idempotency lock")
+                return AutonomousLiveRunResult(
+                    status=EXECUTION_FAILED,
+                    gates=gates,
+                    rejection_reason=f"idempotency lock write failed before submission: {exc}",
+                    decision=decision_payload,
+                    dry_run=False,
+                )
+            if not idempotency_acquisition.acquired:
+                reason = idempotency_acquisition.reason or "duplicate idempotency lock"
+                self._block_duplicate_plan(
+                    lifecycle_events=lifecycle_events,
+                    lifecycle_id=entry_lifecycle_id,
+                    symbol=symbol,
+                    reason=reason,
+                    idempotency_key=idempotency_acquisition.lock.key,
+                )
+                return AutonomousLiveRunResult(
+                    status=DUPLICATE_ORDER_BLOCKED,
+                    gates=gates,
+                    rejection_reason=reason,
+                    decision=decision_payload,
+                    order_lifecycle=lifecycle_events,
+                    dry_run=False,
+                )
         try:
             lifecycle_events.append(
                 self._record_order_lifecycle_transition(
@@ -703,6 +765,10 @@ class AutonomousLiveRunner:
             )
         except OSError as exc:
             logger.exception("failed to record autonomous order lifecycle PLANNED event")
+            self._clear_idempotency_lock(
+                idempotency_acquisition,
+                reason="order lifecycle write failed before submission",
+            )
             return AutonomousLiveRunResult(
                 status=EXECUTION_FAILED,
                 gates=gates,
@@ -733,6 +799,10 @@ class AutonomousLiveRunner:
             )
         except Exception:
             logger.exception("OrderExecutor.execute_signal raised")
+            self._clear_idempotency_lock(
+                idempotency_acquisition,
+                reason="OrderExecutor raised before returning a result",
+            )
             self._safe_record_order_lifecycle_transition(
                 lifecycle_events,
                 lifecycle_id=entry_lifecycle_id,
@@ -833,6 +903,12 @@ class AutonomousLiveRunner:
                 stop_order_id=stop_id,
                 extra_notes=bracket_notes,
             )
+            self._mark_idempotency_submitted(
+                idempotency_acquisition,
+                broker_order_id=result.order_id,
+                autonomous_trade_id=trade.autonomous_trade_id if trade else None,
+                metadata={"symbol": symbol, "quantity": quantity},
+            )
             submit_notes = [
                 "live order submitted via OrderExecutor",
                 f"order_id={result.order_id}",
@@ -865,6 +941,10 @@ class AutonomousLiveRunner:
             state=OrderLifecycleState.REJECTED,
             symbol=symbol,
             order_role=ENTRY,
+            reason=f"OrderExecutor rejected: {result.reason}",
+        )
+        self._clear_idempotency_lock(
+            idempotency_acquisition,
             reason=f"OrderExecutor rejected: {result.reason}",
         )
         return AutonomousLiveRunResult(
@@ -924,6 +1004,163 @@ class AutonomousLiveRunner:
         trade_id = trade.autonomous_trade_id or "unknown-trade"
         oid = order_id if order_id is not None else "unknown-order"
         return f"legacy-{trade_id}-{role}-{oid}"
+
+    def _acquire_idempotency_for_plan(
+        self,
+        decision: AutonomousDecision,
+        plan: Dict[str, Any],
+        *,
+        leg_id: Optional[str] = None,
+        basket_id: Optional[str] = None,
+    ) -> LockAcquisition:
+        symbol = str(plan.get("symbol") or "").strip().upper()
+        return self._idempotency_store.acquire(
+            symbol=symbol,
+            intended_action="BUY",
+            run_id=decision.timestamp.isoformat(),
+            decision_id=self._decision_id(decision),
+            basket_id=basket_id,
+            leg_id=leg_id,
+            signal_timestamp=self._signal_timestamp(decision, plan),
+            metadata={
+                "trade_type": plan.get("trade_type"),
+                "limit_price": plan.get("limit_price"),
+                "quantity": plan.get("quantity"),
+                "basket_leg": leg_id is not None,
+            },
+        )
+
+    def _duplicate_symbol_reason(self, symbol: str) -> Optional[str]:
+        if self._config.allow_duplicate_symbol_live_entries:
+            return None
+        target = str(symbol or "").strip().upper()
+        if not target:
+            return "missing symbol for idempotency check"
+        try:
+            open_trades = self._store.list_open()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_open failed during duplicate-symbol check")
+            return "trade store unavailable during duplicate-symbol check"
+        for trade in open_trades:
+            if str(trade.symbol or "").strip().upper() == target:
+                return (
+                    f"open autonomous trade already exists for {target} "
+                    f"(trade_id={trade.autonomous_trade_id})"
+                )
+        return None
+
+    def _block_duplicate_plan(
+        self,
+        *,
+        lifecycle_events: List[Dict[str, Any]],
+        lifecycle_id: str,
+        symbol: str,
+        reason: str,
+        idempotency_key: Optional[str] = None,
+    ) -> None:
+        metadata: Dict[str, Any] = {}
+        if idempotency_key:
+            metadata["idempotency_key"] = idempotency_key
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=lifecycle_id,
+            state=OrderLifecycleState.DUPLICATE_ORDER_BLOCKED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason=reason,
+            metadata=metadata,
+        )
+
+    def _mark_idempotency_submitted(
+        self,
+        acquisition: Optional[LockAcquisition],
+        *,
+        broker_order_id: Optional[int],
+        autonomous_trade_id: Optional[str],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if acquisition is None or not acquisition.acquired:
+            return
+        try:
+            self._idempotency_store.mark_submitted(
+                acquisition.lock.key,
+                broker_order_id=broker_order_id,
+                autonomous_trade_id=autonomous_trade_id,
+                metadata=metadata,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to mark idempotency lock submitted")
+
+    def _clear_idempotency_lock(
+        self,
+        acquisition: Optional[LockAcquisition],
+        *,
+        reason: str,
+    ) -> None:
+        if acquisition is None or not acquisition.acquired:
+            return
+        try:
+            self._idempotency_store.clear(acquisition.lock.key, reason=reason)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to clear idempotency lock")
+
+    def _release_terminal_idempotency_locks(self) -> None:
+        try:
+            active = self._idempotency_store.active_locks()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to list active idempotency locks")
+            return
+        if not active:
+            return
+        try:
+            trades = {
+                trade.autonomous_trade_id: trade
+                for trade in self._store.list_all()
+            }
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to list trades for idempotency release")
+            return
+        for lock in active:
+            trade_id = lock.autonomous_trade_id
+            if not trade_id:
+                continue
+            trade = trades.get(trade_id)
+            if trade is None:
+                continue
+            if trade.status in {CLOSED, FAILED}:
+                try:
+                    self._idempotency_store.clear(
+                        lock.key,
+                        reason=f"trade terminal: {trade.status}",
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception("failed to clear terminal idempotency lock")
+
+    def stale_idempotency_locks(self) -> List[Dict[str, Any]]:
+        """Return active locks older than the configured stale threshold."""
+        locks = self._idempotency_store.list_stale(
+            older_than_minutes=self._config.idempotency_stale_minutes
+        )
+        return self._idempotency_store.serialise(locks)
+
+    def clear_idempotency_lock(self, key: str, *, reason: str = "operator cleared stale lock") -> bool:
+        """Clear a specific idempotency lock for operator recovery flows."""
+        return self._idempotency_store.clear(key, reason=reason) is not None
+
+    @staticmethod
+    def _decision_id(decision: AutonomousDecision) -> str:
+        selected = decision.selected or {}
+        symbol = selected.get("symbol") or "unknown"
+        return f"{decision.timestamp.isoformat()}:{symbol}:{decision.status.value}"
+
+    @staticmethod
+    def _signal_timestamp(decision: AutonomousDecision, plan: Dict[str, Any]) -> Optional[str]:
+        symbol = str(plan.get("symbol") or "").strip().upper()
+        for candidate in list(decision.shortlist or []) + list(decision.selected_basket or []):
+            if str(candidate.get("symbol") or "").strip().upper() == symbol:
+                value = candidate.get("timestamp") or candidate.get("signal_timestamp")
+                return str(value) if value is not None else None
+        return None
 
     def _count_live_trades_today(self, today: Optional[date] = None) -> int:
         """Count live trades with entry_time on ``today`` (UTC date).

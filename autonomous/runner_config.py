@@ -178,6 +178,15 @@ class AutonomousLiveRunnerConfig:
         When ``true`` (default), open live autonomous positions must have a
         broker-visible protective stop/bracket order before new live entries
         are allowed.
+    ``AUTONOMOUS_IDEMPOTENCY_STORE_PATH``
+        Append-only idempotency lock log for live autonomous entries.
+        Default ``logs/autonomous_idempotency.jsonl``.
+    ``AUTONOMOUS_ALLOW_DUPLICATE_SYMBOL_LIVE_ENTRIES``
+        When ``false`` (default), an open autonomous live trade or active
+        idempotency lock for a symbol blocks another live entry for that
+        symbol.
+    ``AUTONOMOUS_IDEMPOTENCY_STALE_MINUTES``
+        Age threshold used by stale-lock inspection helpers.  Default ``120``.
     """
 
     # ---- Master live-mode switches ------------------------------------
@@ -197,6 +206,7 @@ class AutonomousLiveRunnerConfig:
     live_require_account_confirmation: bool = True
     require_plan_stop_for_live: bool = True
     require_broker_protection_confirmation: bool = True
+    allow_duplicate_symbol_live_entries: bool = False
 
     # ---- Dry-run (rehearsal) mode ------------------------------------
     live_dry_run: bool = False
@@ -211,6 +221,8 @@ class AutonomousLiveRunnerConfig:
     max_holding_days: int = 5
     trade_store_path: str = "logs/autonomous_live_trades.jsonl"
     order_lifecycle_store_path: str = "logs/autonomous_order_lifecycle.jsonl"
+    idempotency_store_path: str = "logs/autonomous_idempotency.jsonl"
+    idempotency_stale_minutes: int = 120
 
     # ---- Expected account ID (set at activation time) ----------------
     expected_account_id: Optional[str] = None
@@ -239,6 +251,11 @@ class AutonomousLiveRunnerConfig:
                 "max_live_trades_per_day must be >= 0; got "
                 f"{self.max_live_trades_per_day!r}"
             )
+        if self.idempotency_stale_minutes < 0:
+            raise ValueError(
+                "idempotency_stale_minutes must be >= 0; got "
+                f"{self.idempotency_stale_minutes!r}"
+            )
         if not (0 < self.default_stop_pct < 1):
             raise ValueError(
                 "default_stop_pct must be in (0, 1); got "
@@ -259,12 +276,15 @@ class AutonomousLiveRunnerConfig:
             "require_broker_protection_confirmation": (
                 self.require_broker_protection_confirmation
             ),
+            "allow_duplicate_symbol_live_entries": self.allow_duplicate_symbol_live_entries,
             "live_dry_run": self.live_dry_run,
             "default_stop_pct": self.default_stop_pct,
             "buy_shares_only": self.buy_shares_only,
             "max_holding_days": self.max_holding_days,
             "trade_store_path": self.trade_store_path,
             "order_lifecycle_store_path": self.order_lifecycle_store_path,
+            "idempotency_store_path": self.idempotency_store_path,
+            "idempotency_stale_minutes": self.idempotency_stale_minutes,
             "expected_account_id": self.expected_account_id,
         }
 
@@ -304,10 +324,20 @@ class AutonomousLiveRunnerConfig:
             require_broker_protection_confirmation=_env_bool(
                 "AUTONOMOUS_REQUIRE_BROKER_PROTECTION_CONFIRMATION", True
             ),
+            allow_duplicate_symbol_live_entries=_env_bool(
+                "AUTONOMOUS_ALLOW_DUPLICATE_SYMBOL_LIVE_ENTRIES", False
+            ),
             live_dry_run=_env_bool("AUTONOMOUS_LIVE_DRY_RUN", False),
             default_stop_pct=_env_float("AUTONOMOUS_DEFAULT_STOP_PCT", 0.05),
             order_lifecycle_store_path=os.environ.get(
                 "AUTONOMOUS_ORDER_LIFECYCLE_STORE_PATH",
                 "logs/autonomous_order_lifecycle.jsonl",
+            ),
+            idempotency_store_path=os.environ.get(
+                "AUTONOMOUS_IDEMPOTENCY_STORE_PATH",
+                "logs/autonomous_idempotency.jsonl",
+            ),
+            idempotency_stale_minutes=_env_int(
+                "AUTONOMOUS_IDEMPOTENCY_STALE_MINUTES", 120
             ),
         )

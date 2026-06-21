@@ -11,6 +11,7 @@ from autonomous import (
     AutonomousTradingEngine,
     CandidateScanner,
     CandidateSignal,
+    IdempotencyStore,
     OrderLifecycleState,
     OrderLifecycleStore,
     ProtectionVerifier,
@@ -31,8 +32,10 @@ class _BracketSubmittingExecutor:
         self.parent_id = parent_id
         self.target_id = target_id
         self.stop_id = stop_id
+        self.calls = []
 
     def execute_signal(self, strategy_name, signal, current_equity, positions):
+        self.calls.append(signal.symbol)
         result = OrderResult(
             status=OrderStatus.SUBMITTED,
             order_id=self.parent_id,
@@ -92,6 +95,8 @@ def _runner(
     filled_order_ids_provider=None,
     broker_positions_provider=None,
     broker_open_orders_provider=None,
+    idempotency_store: IdempotencyStore | None = None,
+    require_broker_protection_confirmation: bool = True,
 ) -> AutonomousLiveRunner:
     cfg = AutonomousLiveRunnerConfig(
         live_enabled=True,
@@ -99,8 +104,10 @@ def _runner(
         expected_account_id="U1234567",
         max_open_live_trades=5,
         max_live_trades_per_day=5,
+        require_broker_protection_confirmation=require_broker_protection_confirmation,
         trade_store_path=str(tmp_path / "live_trades.jsonl"),
         order_lifecycle_store_path=str(tmp_path / "lifecycle.jsonl"),
+        idempotency_store_path=str(tmp_path / "idempotency.jsonl"),
     )
     store = trade_store or TradeStore(path=str(tmp_path / "live_trades.jsonl"))
     return AutonomousLiveRunner(
@@ -119,6 +126,7 @@ def _runner(
         filled_order_ids_provider=filled_order_ids_provider,
         broker_open_orders_provider=broker_open_orders_provider,
         order_lifecycle_store=lifecycle_store,
+        idempotency_store=idempotency_store,
     )
 
 
@@ -166,6 +174,79 @@ def test_live_runner_records_submitted_entry_and_bracket_child_lifecycle(tmp_pat
         "TARGET_PENDING",
         "PROTECTIVE_STOP_PENDING",
     }
+
+
+def test_live_runner_marks_idempotency_lock_submitted_after_broker_acceptance(tmp_path):
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    idempotency_store = IdempotencyStore(path=str(tmp_path / "idempotency.jsonl"))
+    runner = _runner(
+        tmp_path,
+        lifecycle_store=lifecycle_store,
+        idempotency_store=idempotency_store,
+    )
+
+    result = runner.run_once()
+
+    assert result.status == "executed"
+    active = idempotency_store.active_locks()
+    assert len(active) == 1
+    lock = active[0]
+    assert lock.key == "autonomous-live:BUY:AAA"
+    assert lock.status == "SUBMITTED"
+    assert lock.broker_order_id == 700
+    assert lock.autonomous_trade_id == result.trade["submitted_trades"][0]["autonomous_trade_id"]
+
+
+def test_live_runner_blocks_entry_when_idempotency_lock_active(tmp_path):
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    idempotency_store = IdempotencyStore(path=str(tmp_path / "idempotency.jsonl"))
+    idempotency_store.acquire(symbol="AAA", intended_action="BUY", run_id="prior-run")
+    executor = _BracketSubmittingExecutor()
+    runner = _runner(
+        tmp_path,
+        lifecycle_store=lifecycle_store,
+        idempotency_store=idempotency_store,
+        executor=executor,
+    )
+
+    result = runner.run_once()
+
+    assert result.status == "duplicate_order_blocked"
+    assert executor.calls == []
+    assert result.order_lifecycle[0]["state"] == "DUPLICATE_ORDER_BLOCKED"
+    assert "active idempotency lock" in result.rejection_reason
+
+
+def test_live_runner_blocks_duplicate_symbol_open_trade_before_submission(tmp_path):
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    trade_store = TradeStore(path=str(tmp_path / "live_trades.jsonl"))
+    trade_store.record_trade(
+        AutonomousTrade(
+            autonomous_trade_id=AutonomousTrade.new_id(),
+            symbol="AAA",
+            trade_type="BUY_SHARES",
+            status=OPEN,
+            entry_order_id=7,
+            entry_time=datetime.now(timezone.utc),
+            entry_limit_price=100.0,
+            quantity=1,
+        )
+    )
+    executor = _BracketSubmittingExecutor()
+    runner = _runner(
+        tmp_path,
+        lifecycle_store=lifecycle_store,
+        trade_store=trade_store,
+        executor=executor,
+        require_broker_protection_confirmation=False,
+    )
+
+    result = runner.run_once()
+
+    assert result.status == "duplicate_order_blocked"
+    assert executor.calls == []
+    assert result.order_lifecycle[0]["state"] == "DUPLICATE_ORDER_BLOCKED"
+    assert "open autonomous trade already exists" in result.rejection_reason
 
 
 def test_rejected_order_reconciliation_writes_rejected_lifecycle(tmp_path):

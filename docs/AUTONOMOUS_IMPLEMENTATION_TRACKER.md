@@ -139,9 +139,10 @@ Known limitations and manual checks:
 - Equal-risk allocation only.
 - Non-`BUY_SHARES` basket legs are rejected by the allocator because they do not
   have planned per-share stop-risk.
-- Broker lifecycle state, broker-side protection verification, restart
-  recovery, and idempotency remain future phases before unattended continuous
-  live operation.
+- Broker lifecycle state, broker-side protection verification, and idempotency
+  are now implemented later in this PR. Restart recovery, quote freshness,
+  broker-fill ingestion, and a continuous supervisor remain future phases
+  before unattended continuous live operation.
 - Human review should confirm the default basket risk budget is suitable before
   assisted-live basket use.
 
@@ -240,15 +241,57 @@ Known limitations and manual checks:
 
 ### Phase 4 — Idempotency and duplicate-order prevention
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Add run/decision/basket/leg identifiers.
-- [ ] Add idempotency lock store.
-- [ ] Block duplicate signal/basket-leg submission.
-- [ ] Handle restart after submission but before evidence write.
-- [ ] Add stale-lock inspection/clear path.
+- [x] Add run/decision/basket/leg identifiers.
+- [x] Add idempotency lock store.
+- [x] Block duplicate signal/basket-leg submission.
+- [x] Handle restart after submission but before evidence write.
+- [x] Add stale-lock inspection/clear path.
+
+Implementation notes:
+
+- Added `autonomous/idempotency.py` with append-only JSONL replay of
+  `IN_FLIGHT`, `SUBMITTED`, and `CLEARED` lock states.
+- Added `idempotency_store_path`, `idempotency_stale_minutes`, and
+  `allow_duplicate_symbol_live_entries` to `AutonomousLiveRunnerConfig`.
+  Duplicate symbol live entries remain blocked by default.
+- The base live runner and basket live-runner patch acquire a symbol/action
+  lock before broker submission for non-dry-run live entries.
+- Existing open autonomous trades for the same symbol fail closed with
+  `duplicate_order_blocked` unless explicitly allowed.
+- Active idempotency locks fail closed with `duplicate_order_blocked` and
+  write `DUPLICATE_ORDER_BLOCKED` lifecycle diagnostics.
+- Basket execution preflights all legs before submission so duplicate symbols
+  or active locks cannot produce a partial basket submit.
+- Submitted orders mark locks `SUBMITTED` with broker order and autonomous
+  trade IDs; executor failures, rejections, and lifecycle write failures clear
+  in-flight locks.
+- Readiness reconciliation clears locks only after the local autonomous trade
+  is terminal. Operators can inspect stale locks and explicitly clear a lock
+  through runner helpers.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_idempotency.py tests/test_order_lifecycle.py tests/test_autonomous_live_runner_basket.py --basetemp=.pytest-tmp -q`
+  (`15 passed`).
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`473 passed`).
+
+Known limitations and manual checks:
+
+- Stale locks are surfaced for operator inspection and manual clear; they are
+  not auto-cleared solely because they are old.
+- The idempotency key intentionally blocks by symbol/action for live entries,
+  not just by exact signal timestamp, to avoid duplicate exposure after a
+  restart window.
+- Quote freshness, automatic fill ingestion, and continuous supervisor
+  recovery are still future phases.
 
 ### Phase 5 — Quote freshness and market-data health guard
 

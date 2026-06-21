@@ -15,6 +15,7 @@ from autonomous.edge_estimator import EdgeEstimate, RuleBasedEdgeEstimator
 from autonomous.execution_quality import ExecutionQualityDecision, ExecutionQualityGuard
 from autonomous.feature_builder import FeatureBuilder
 from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDecision
+from autonomous.idempotency import IdempotencyLock, IdempotencyStore, LockAcquisition
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.outcome_reconciliation import FillSummary, OutcomeReconciliation, OutcomeReconciler
 from autonomous.order_lifecycle import OrderLifecycleEvent, OrderLifecycleState, OrderLifecycleStore
@@ -69,6 +70,9 @@ __all__ = [
     "FillSummary",
     "FractionalEdgeSizer",
     "FractionalSizingDecision",
+    "IdempotencyLock",
+    "IdempotencyStore",
+    "LockAcquisition",
     "LossLimitDecision",
     "LossLimitGuard",
     "OutcomeEvidenceWriter",

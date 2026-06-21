@@ -35,6 +35,7 @@ Legend:
 | Basket risk diagnostics | Done | Current PR continuing #161; basket plans now emit shared risk budget, per-leg allocation, planned risk, and rejection/resize reasons for future evidence-aware sizing |
 | Order lifecycle diagnostics | Done | Current PR continuing #161; live-runner order lifecycle events now record planned, submitted, rejected, filled, closed, pending-protection, confirmed-protection, recovery-required, and orphaned states for future operational metrics |
 | Broker protection diagnostics | Done | Current PR continuing #161; open live trades now emit confirmed-protection or recovery-required diagnostics for future unconfirmed-protection metrics |
+| Duplicate-order diagnostics | Done | Current PR continuing #161; active idempotency locks and same-symbol open trades now emit duplicate-order-blocked lifecycle diagnostics for future operational incident metrics |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -213,9 +214,12 @@ sizing and by future operational metrics:
 - The allocator can only reduce or reject basket legs; it cannot bypass hard
   sizing, risk, drawdown, or operator caps.
 - `order_lifecycle` records live order state transitions for future rejected
-  order rate, protection-event, fill-state, and recovery-required metrics.
+  order rate, protection-event, fill-state, duplicate-order-blocked, and
+  recovery-required metrics.
 - Broker protection verification records `PROTECTIVE_STOP_CONFIRMED` or
   `RECOVERY_REQUIRED` lifecycle events for open live trades.
+- Idempotency locks record live submission attempts and duplicate-block
+  diagnostics without adding any new order submission path.
 
 Test evidence:
 
@@ -226,6 +230,8 @@ Test evidence:
   (`49 passed`).
 - Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_tws_bridge.py::TestBridgeOpenOrderSnapshots --basetemp=.pytest-tmp -q`
   (`8 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_idempotency.py tests/test_order_lifecycle.py tests/test_autonomous_live_runner_basket.py --basetemp=.pytest-tmp -q`
+  (`15 passed`).
 - Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
   completed with `2799 passed`, `18 skipped`, and `6 failed`; the failures
   were existing autonomous/live-runner expectation issues outside this PR's
@@ -233,9 +239,8 @@ Test evidence:
 
 Smoke-test evidence:
 
-- Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
-  (`473 passed`). The command exited 0; it printed a non-failing sparkline
-  fallback message after pytest completed.
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`473 passed`).
 
 Known limitations:
 
@@ -245,6 +250,8 @@ Known limitations:
   modules, but no automatic capital promotion or live-mode expansion is added.
 - Order lifecycle events are not yet surfaced through a dedicated setup
   calibrator, adaptive edge estimator, or promotion report.
+- Idempotency and duplicate-block events are operational diagnostics only in
+  this PR; they are not yet consumed by an adaptive evidence calibrator.
 
 ## 5. Maintenance rules
 
