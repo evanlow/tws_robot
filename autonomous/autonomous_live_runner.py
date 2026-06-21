@@ -39,7 +39,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from autonomous.autonomous_config import AutonomousMode
 from autonomous.autonomous_engine import AutonomousDecision, AutonomousTradingEngine, DecisionStatus
+from autonomous.broker_fill_ingestor import BrokerFillEventsProvider, BrokerFillIngestor
+from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.idempotency import IdempotencyStore, LockAcquisition
+from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.signal_provider import StaticSignalProvider
 from autonomous.order_lifecycle import (
@@ -342,6 +345,12 @@ class AutonomousLiveRunner:
         trade whose ``target_order_id`` or ``stop_order_id`` matches
         to ``CLOSED`` — so a bracket child fill (take-profit / stop)
         unblocks Continuous mode for the next cycle.
+    broker_fill_events_provider:
+        Callable returning execution-level broker fill snapshots
+        (typically ``svc.tws_bridge.pop_broker_fill_events``).  When
+        provided, the runner ingests fills before readiness gates so
+        trade prices, partial-fill status, lifecycle state, and outcome
+        evidence are reconciled from broker execution callbacks.
     continuous_mode:
         When ``True``, the ``AUTONOMOUS_LIVE_CONTINUOUS_ENABLED`` gate
         is also checked.  Set to ``True`` for continuous live cycles.
@@ -363,10 +372,13 @@ class AutonomousLiveRunner:
         broker_positions_provider: Optional[BrokerPositionsProvider] = None,
         rejected_order_ids_provider: Optional[RejectedOrderIdsProvider] = None,
         filled_order_ids_provider: Optional[FilledOrderIdsProvider] = None,
+        broker_fill_events_provider: Optional[BrokerFillEventsProvider] = None,
         broker_open_orders_provider: Optional[BrokerOpenOrdersProvider] = None,
         order_lifecycle_store: Optional[OrderLifecycleStore] = None,
         protection_verifier: Optional[ProtectionVerifier] = None,
         idempotency_store: Optional[IdempotencyStore] = None,
+        outcome_writer: Optional[OutcomeEvidenceWriter] = None,
+        evidence_store: Optional[TradeEvidenceStore] = None,
         continuous_mode: bool = False,
     ) -> None:
         self._engine = engine
@@ -383,12 +395,23 @@ class AutonomousLiveRunner:
         self._broker_open_orders_provider = broker_open_orders_provider
         self._rejected_order_ids_provider = rejected_order_ids_provider
         self._filled_order_ids_provider = filled_order_ids_provider
+        self._broker_fill_events_provider = broker_fill_events_provider
         self._lifecycle_store = order_lifecycle_store or OrderLifecycleStore(
             path=self._config.order_lifecycle_store_path
         )
         self._protection_verifier = protection_verifier or ProtectionVerifier()
         self._idempotency_store = idempotency_store or IdempotencyStore(
             path=self._config.idempotency_store_path
+        )
+        self._broker_fill_ingestor = (
+            BrokerFillIngestor(
+                self._store,
+                lifecycle_store=self._lifecycle_store,
+                outcome_writer=outcome_writer or OutcomeEvidenceWriter(),
+                evidence_store=evidence_store,
+            )
+            if broker_fill_events_provider is not None
+            else None
         )
         self._continuous_mode = continuous_mode
 
@@ -429,6 +452,10 @@ class AutonomousLiveRunner:
 
     def evaluate_gates(self) -> LiveReadinessGates:
         """Evaluate every readiness gate; never raises."""
+        # Consume rich broker execution/commission snapshots first when wired.
+        # This updates trade-store prices, partial fills, lifecycle records, and
+        # outcome evidence before open-trade caps are evaluated.
+        self._ingest_broker_fill_events()
         # Drain any broker-rejected order IDs first so the trade-store
         # counters reflect reality (rejected orders → FAILED, not OPEN).
         self._reconcile_rejected_trades()
@@ -1201,6 +1228,31 @@ class AutonomousLiveRunner:
             )
             return self._config.max_live_trades_per_day
         return count
+
+    def _ingest_broker_fill_events(self) -> None:
+        """Update trade/evidence stores from rich broker fill snapshots."""
+        if self._broker_fill_events_provider is None or self._broker_fill_ingestor is None:
+            return
+        try:
+            events = list(self._broker_fill_events_provider() or [])
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker_fill_events_provider raised")
+            return
+        if not events:
+            return
+        try:
+            result = self._broker_fill_ingestor.ingest(events)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker fill ingestion failed")
+            return
+        if result.fills_seen:
+            logger.info(
+                "AutonomousLiveRunner: ingested %d broker fill event(s), "
+                "closed=%d outcomes=%d",
+                result.fills_seen,
+                result.trades_closed,
+                result.outcomes_emitted,
+            )
 
     def _reconcile_rejected_trades(self) -> None:
         """Mark trade-store entries as FAILED for broker-rejected orders.

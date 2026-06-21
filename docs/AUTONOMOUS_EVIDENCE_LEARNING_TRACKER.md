@@ -37,6 +37,7 @@ Legend:
 | Broker protection diagnostics | Done | Current PR continuing #161; open live trades now emit confirmed-protection or recovery-required diagnostics for future unconfirmed-protection metrics |
 | Duplicate-order diagnostics | Done | Current PR continuing #161; active idempotency locks and same-symbol open trades now emit duplicate-order-blocked lifecycle diagnostics for future operational incident metrics |
 | Market-data health diagnostics | Done | Current PR continuing #161; trade plans now emit quote freshness, spread, last-vs-mid, feed-health, and market-open diagnostics for future stale-quote and degraded-feed metrics |
+| Broker fill ingestion diagnostics | Done | Current PR continuing #161; broker execution and commission callbacks now update trade fills, lifecycle states, and realized outcome evidence for future fill-quality and partial-fill metrics |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -224,6 +225,9 @@ evidence-aware sizing and by future operational metrics:
 - `trade_plan.market_data_health` records quote age, bid/ask/last age,
   spread, last-vs-mid deviation, feed-health, market-open status, warnings,
   and rejection reasons for stale/degraded quote analysis.
+- Broker fill ingestion records execution IDs, order IDs, side, quantity,
+  price, commission, timestamp, exchange/liquidity when available, partial-fill
+  aggregation, and closed-trade outcome evidence.
 
 Test evidence:
 
@@ -238,6 +242,8 @@ Test evidence:
   (`15 passed`).
 - Passed: `.venv\Scripts\python.exe -m pytest tests\test_market_data_health.py tests\test_trade_planner_execution_quality.py tests\test_trade_planner.py tests\test_technical_analysis_signal_provider.py tests\test_autonomous_engine_basket.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
   (`57 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_broker_fill_ingestor.py tests\test_tws_bridge.py::TestBridgeBrokerFillEvents tests\test_autonomous_trade_store.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`22 passed`).
 - Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
   completed with `2799 passed`, `18 skipped`, and `6 failed`; the failures
   were existing autonomous/live-runner expectation issues outside this PR's
@@ -246,7 +252,7 @@ Test evidence:
 Smoke-test evidence:
 
 - Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
-  (`473 passed`).
+  (`476 passed`).
 
 Known limitations:
 
@@ -260,6 +266,8 @@ Known limitations:
   this PR; they are not yet consumed by an adaptive evidence calibrator.
 - Market-data health events are pre-submission operational diagnostics only;
   they are not yet consumed by an adaptive evidence calibrator or dashboard.
+- Broker fill ingestion updates outcome evidence, but it does not yet resize
+  child orders after partial fills or expose a dedicated fill-quality dashboard.
 
 ## 5. Maintenance rules
 

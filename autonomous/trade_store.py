@@ -81,6 +81,12 @@ class AutonomousTrade:
     entry_lifecycle_id: Optional[str] = None
     target_lifecycle_id: Optional[str] = None
     stop_lifecycle_id: Optional[str] = None
+    # Broker fill snapshots captured from IBKR execution/commission callbacks.
+    # These are persisted on the trade record so outcome reconciliation can
+    # survive restarts and can aggregate partial fills without manual handoff.
+    entry_fills: List[Dict[str, Any]] = field(default_factory=list)
+    exit_fills: List[Dict[str, Any]] = field(default_factory=list)
+    outcome_emitted: bool = False
 
     @staticmethod
     def new_id() -> str:

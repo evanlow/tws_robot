@@ -54,6 +54,8 @@ from autonomous.autonomous_mode import (
 )
 from autonomous.exit_manager import AutonomousExitManager
 from autonomous.lifecycle_worker import AutonomousLifecycleWorker
+from autonomous.evidence_store import TradeEvidenceStore
+from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.runner_config import AutonomousRunnerConfig, AutonomousLiveRunnerConfig
 from autonomous.trade_store import CLOSED, EXIT_PENDING, FAILED, OPEN, TradeStore
 from autonomous.trade_reconciler import TradeReconciler
@@ -1523,6 +1525,24 @@ def _live_trade_store() -> TradeStore:
     return store
 
 
+def _evidence_store() -> TradeEvidenceStore:
+    store = current_app.config.get("autonomous_evidence_store")
+    if isinstance(store, TradeEvidenceStore):
+        return store
+    store = TradeEvidenceStore()
+    current_app.config["autonomous_evidence_store"] = store
+    return store
+
+
+def _outcome_writer() -> OutcomeEvidenceWriter:
+    writer = current_app.config.get("autonomous_outcome_writer")
+    if isinstance(writer, OutcomeEvidenceWriter):
+        return writer
+    writer = OutcomeEvidenceWriter()
+    current_app.config["autonomous_outcome_writer"] = writer
+    return writer
+
+
 class _LiveConnectionError(Exception):
     """Raised by ``_build_actual_live_executor`` when TWS/bridge is not connected."""
 
@@ -1808,12 +1828,20 @@ def _build_live_runner(
             if getattr(svc, "tws_bridge", None) is not None
             else None
         ),
+        broker_fill_events_provider=(
+            svc.tws_bridge.pop_broker_fill_events
+            if getattr(svc, "tws_bridge", None) is not None
+            and hasattr(svc.tws_bridge, "pop_broker_fill_events")
+            else None
+        ),
         broker_open_orders_provider=(
             svc.tws_bridge.get_open_order_snapshots
             if getattr(svc, "tws_bridge", None) is not None
             and hasattr(svc.tws_bridge, "get_open_order_snapshots")
             else None
         ),
+        outcome_writer=_outcome_writer(),
+        evidence_store=_evidence_store(),
         continuous_mode=continuous_mode,
     )
 

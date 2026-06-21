@@ -627,6 +627,29 @@ autonomous/broker_fill_ingestor.py
 - Closed trades automatically emit `autonomous_outcome` records.
 - Risk lifecycle and equity curve can consume outcomes without manual intervention.
 
+#### Current implementation status
+
+Implemented in the Issue #161 continuation PR:
+
+- `autonomous/broker_fill_ingestor.py` consumes execution-level broker fill
+  snapshots, merges repeated/enriched executions by execution ID, aggregates
+  partial entry and exit fills, and updates `TradeStore`.
+- `AutonomousTrade` persists `entry_fills`, `exit_fills`, and
+  `outcome_emitted` so fill evidence survives process restarts.
+- `TWSBridge` captures IBKR `execDetails` and `commissionReport` callbacks and
+  exposes `pop_broker_fill_events()` for idempotent ingestion.
+- `AutonomousLiveRunner` optionally drains broker fill events before readiness
+  checks so continuous-mode slot counts and outcome evidence reflect broker
+  fills before the next cycle.
+- `OrderLifecycleStore` receives `PARTIALLY_FILLED`, `FILLED`, and `CLOSED`
+  transitions from ingested fills.
+- Closed trades emit `autonomous_outcome` records through
+  `OutcomeReconciler` and `OutcomeEvidenceWriter` when an outcome writer is
+  configured.
+
+This phase is accounting-only. It does not add any order submission,
+cancel/replace, child-order resize, or live-mode enablement path.
+
 ### Phase 7 — Continuous-run supervisor
 
 #### Problem
@@ -875,7 +898,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add automatic broker-fill ingestion
+Add continuous-run supervisor
 ```
 
-This should implement Phase 6 of the continuous autonomous live readiness roadmap.
+This should implement Phase 7 of the continuous autonomous live readiness roadmap.

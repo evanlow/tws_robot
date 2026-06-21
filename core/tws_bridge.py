@@ -71,6 +71,13 @@ class _BridgeApp(EWrapper, EClient):
         self._filled_order_ids: set[int] = set()
         self._filled_order_ids_lock = threading.Lock()
 
+        # Rich broker execution snapshots keyed by execution ID.  Commission
+        # reports can arrive after execDetails, so snapshots are retained and
+        # a dirty-ID set controls what pop_broker_fill_events drains.
+        self._broker_fill_events: Dict[str, Dict[str, Any]] = {}
+        self._broker_fill_event_dirty_ids: set[str] = set()
+        self._broker_fill_events_lock = threading.Lock()
+
         # Latest broker-visible open-order snapshots keyed by order ID.
         # Consumed by AutonomousLiveRunner to verify that live positions have
         # confirmed protective stop/bracket children before new entries.
@@ -380,6 +387,66 @@ class _BridgeApp(EWrapper, EClient):
                 source="TWSBridge",
             ))
 
+    def execDetails(self, reqId: int, contract, execution) -> None:
+        exec_id = str(getattr(execution, "execId", "") or "").strip()
+        if not exec_id:
+            order_id = int(getattr(execution, "orderId", 0) or 0)
+            exec_id = f"order:{order_id}:{getattr(execution, 'time', '')}"
+        payload = {
+            "execution_id": exec_id,
+            "order_id": int(getattr(execution, "orderId", 0) or 0),
+            "broker_order_id": int(getattr(execution, "orderId", 0) or 0),
+            "symbol": str(getattr(contract, "symbol", "") or ""),
+            "sec_type": str(getattr(contract, "secType", "") or ""),
+            "exchange": str(getattr(execution, "exchange", "") or ""),
+            "side": str(getattr(execution, "side", "") or "").upper(),
+            "quantity": float(getattr(execution, "shares", 0) or 0.0),
+            "price": float(getattr(execution, "price", 0) or 0.0),
+            "timestamp": str(getattr(execution, "time", "") or ""),
+            "liquidity": getattr(execution, "lastLiquidity", None),
+            "commission": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source": "tws_exec_details",
+        }
+        with self._broker_fill_events_lock:
+            existing = self._broker_fill_events.get(exec_id, {})
+            if existing.get("commission") is not None:
+                payload["commission"] = existing["commission"]
+            existing.update(payload)
+            self._broker_fill_events[exec_id] = existing
+            self._broker_fill_event_dirty_ids.add(exec_id)
+        logger.info(
+            "TWSBridge: execution %s order=%s qty=%.4f price=%.4f",
+            exec_id,
+            payload["order_id"],
+            payload["quantity"],
+            payload["price"],
+        )
+
+    def commissionReport(self, commissionReport) -> None:
+        exec_id = str(getattr(commissionReport, "execId", "") or "").strip()
+        if not exec_id:
+            return
+        payload = {
+            "execution_id": exec_id,
+            "commission": float(getattr(commissionReport, "commission", 0) or 0.0),
+            "realized_pnl": float(getattr(commissionReport, "realizedPNL", 0) or 0.0),
+            "currency": str(getattr(commissionReport, "currency", "") or ""),
+            "yield": float(getattr(commissionReport, "yield_", 0) or 0.0),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "commission_source": "tws_commission_report",
+        }
+        with self._broker_fill_events_lock:
+            existing = self._broker_fill_events.get(exec_id, {"execution_id": exec_id})
+            existing.update(payload)
+            self._broker_fill_events[exec_id] = existing
+            self._broker_fill_event_dirty_ids.add(exec_id)
+        logger.info(
+            "TWSBridge: commission report %s commission=%.4f",
+            exec_id,
+            payload["commission"],
+        )
+
 
 # ---------------------------------------------------------------------------
 # Public bridge class
@@ -529,6 +596,27 @@ class TWSBridge:
             drained = set(self._app._filled_order_ids)
             self._app._filled_order_ids.clear()
         return drained
+
+    def pop_broker_fill_events(self) -> list[Dict[str, Any]]:
+        """Drain rich broker execution/commission snapshots.
+
+        Unlike ``pop_filled_order_ids()``, this returns execution-level
+        records with execution ID, order ID, symbol, side, quantity, price,
+        timestamp, exchange/liquidity, and commission when available.  The
+        bridge retains snapshots internally so a later commission report can
+        re-emit an enriched version of the same execution for idempotent
+        ingestion.
+        """
+        if self._app is None:
+            return []
+        with self._app._broker_fill_events_lock:
+            dirty = set(self._app._broker_fill_event_dirty_ids)
+            self._app._broker_fill_event_dirty_ids.clear()
+            return [
+                dict(self._app._broker_fill_events[exec_id])
+                for exec_id in sorted(dirty)
+                if exec_id in self._app._broker_fill_events
+            ]
 
     def get_open_order_snapshots(self) -> list[Dict[str, Any]]:
         """Return current broker-visible open order snapshots.

@@ -68,7 +68,7 @@ Legend:
 | 3 | Broker-side protective stop / bracket verification | Done | Current PR continuing #161 |
 | 4 | Idempotency and duplicate-order prevention | Done | Current PR continuing #161 |
 | 5 | Quote freshness and market-data health guard | Done | Current PR continuing #161 |
-| 6 | Automatic broker-fill ingestion | Planned | TBD |
+| 6 | Automatic broker-fill ingestion | Done | Current PR continuing #161 |
 | 7 | Continuous-run supervisor | Planned | TBD |
 | 8 | Restart recovery and broker reconciliation | Planned | TBD |
 | 9 | Enhanced emergency stop operations | Planned | TBD |
@@ -341,16 +341,50 @@ Known limitations and manual checks:
 
 ### Phase 6 — Automatic broker-fill ingestion
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Consume broker execution/fill events.
-- [ ] Capture execution ID, order ID, symbol, side, quantity, price, commission, timestamp.
-- [ ] Update trade store automatically.
-- [ ] Update lifecycle state.
-- [ ] Emit outcome evidence when trade closes.
-- [ ] Add tests for full and partial fills.
+- [x] Consume broker execution/fill events.
+- [x] Capture execution ID, order ID, symbol, side, quantity, price, commission, timestamp.
+- [x] Update trade store automatically.
+- [x] Update lifecycle state.
+- [x] Emit outcome evidence when trade closes.
+- [x] Add tests for full and partial fills.
+
+Implementation notes:
+
+- Added `autonomous/broker_fill_ingestor.py` to normalize broker fill rows,
+  merge repeated/enriched executions by execution ID, aggregate partial fills,
+  update `TradeStore`, record lifecycle transitions, and emit outcome
+  evidence for closed trades.
+- Extended `AutonomousTrade` with persisted `entry_fills`, `exit_fills`, and
+  `outcome_emitted` fields.
+- Extended `TWSBridge` with `execDetails`, `commissionReport`, and
+  `pop_broker_fill_events()` so IBKR execution and commission callbacks can be
+  consumed without losing late commission reports.
+- Wired `AutonomousLiveRunner` to optionally ingest broker fill events before
+  readiness checks while retaining the existing filled-order-ID fallback.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_broker_fill_ingestor.py tests\test_tws_bridge.py::TestBridgeBrokerFillEvents tests\test_autonomous_trade_store.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`22 passed`).
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`476 passed`).
+
+Known limitations and manual checks:
+
+- The ingestor is accounting-only; it does not resize child orders after a
+  partial fill and does not submit replacement protection.
+- Outcome emission is append-only. If a broker reports commission after an
+  outcome has already been emitted, the trade store can be enriched but the
+  existing outcome record is not rewritten.
+- Continuous supervisor recovery, restart chaos tests, and dashboard drilldown
+  remain future phases.
 
 ### Phase 7 — Continuous-run supervisor
 
