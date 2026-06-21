@@ -307,4 +307,18 @@ def _fault_from_gates(gates: Any) -> Optional[SupervisorFault]:
             "Unreconciled protection/lifecycle state requires recovery.",
             {"protection_recovery_required": protection_required},
         )
+    if bool(getattr(gates, "recovery_required", False)):
+        diagnostics = getattr(gates, "recovery_diagnostics", {}) or {}
+        return SupervisorFault(
+            UNRECONCILED_LIFECYCLE_STATE,
+            "Restart recovery/broker reconciliation requires operator action.",
+            {
+                "recovery_classification": getattr(
+                    gates,
+                    "recovery_classification",
+                    None,
+                ),
+                "recovery_diagnostics": diagnostics,
+            },
+        )
     return None

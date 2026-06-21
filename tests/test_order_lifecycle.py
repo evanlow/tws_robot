@@ -211,10 +211,10 @@ def test_live_runner_blocks_entry_when_idempotency_lock_active(tmp_path):
 
     result = runner.run_once()
 
-    assert result.status == "duplicate_order_blocked"
+    assert result.status == "restart_recovery_required"
     assert executor.calls == []
-    assert result.order_lifecycle[0]["state"] == "DUPLICATE_ORDER_BLOCKED"
-    assert "active idempotency lock" in result.rejection_reason
+    assert result.order_lifecycle == []
+    assert "idempotency lock" in result.rejection_reason
 
 
 def test_live_runner_blocks_duplicate_symbol_open_trade_before_submission(tmp_path):
@@ -239,6 +239,7 @@ def test_live_runner_blocks_duplicate_symbol_open_trade_before_submission(tmp_pa
         trade_store=trade_store,
         executor=executor,
         require_broker_protection_confirmation=False,
+        broker_positions_provider=lambda: {"AAA": {"quantity": 1}},
     )
 
     result = runner.run_once()

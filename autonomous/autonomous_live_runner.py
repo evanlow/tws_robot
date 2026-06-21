@@ -43,6 +43,7 @@ from autonomous.broker_fill_ingestor import BrokerFillEventsProvider, BrokerFill
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.idempotency import IdempotencyStore, LockAcquisition
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
+from autonomous.recovery_manager import RecoveryManager, RecoveryReport
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.signal_provider import StaticSignalProvider
 from autonomous.order_lifecycle import (
@@ -91,6 +92,7 @@ ENGINE_REJECTED = "engine_rejected"
 EXECUTION_FAILED = "execution_failed"
 PROTECTION_RECOVERY_REQUIRED = "protection_recovery_required"
 DUPLICATE_ORDER_BLOCKED = "duplicate_order_blocked"
+RESTART_RECOVERY_REQUIRED = "restart_recovery_required"
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +120,9 @@ class LiveReadinessGates:
     protection_confirmed: bool = True
     protection_recovery_required: int = 0
     protection_diagnostics: List[Dict[str, Any]] = field(default_factory=list)
+    recovery_classification: str = "SAFE_TO_TRADE"
+    recovery_required: bool = False
+    recovery_diagnostics: Dict[str, Any] = field(default_factory=dict)
     # Set only when ``live_continuous_enabled`` check is skipped
     # (i.e. a non-continuous / single-cycle call).
     continuous_mode_required: bool = False
@@ -136,6 +141,7 @@ class LiveReadinessGates:
             and self.live_trades_today < self.max_live_trades_per_day
             and self.deployable_cash >= self.min_deployable_cash
             and self.protection_confirmed
+            and not self.recovery_required
         )
         if self.continuous_mode_required:
             return base and self.live_continuous_enabled
@@ -184,6 +190,17 @@ class LiveReadinessGates:
                 "Broker-side protection confirmation is missing for "
                 f"{self.protection_recovery_required} open autonomous trade(s)"
             )
+        if self.recovery_required:
+            recovery_reasons = self.recovery_diagnostics.get("issues") or []
+            details = [
+                str(issue.get("message"))
+                for issue in recovery_reasons
+                if issue.get("message")
+            ]
+            out.append(
+                "Restart recovery/broker reconciliation requires operator action"
+                + (f": {'; '.join(details)}" if details else "")
+            )
         return out
 
     def to_dict(self) -> Dict[str, Any]:
@@ -204,6 +221,9 @@ class LiveReadinessGates:
             "protection_confirmed": self.protection_confirmed,
             "protection_recovery_required": self.protection_recovery_required,
             "protection_diagnostics": list(self.protection_diagnostics),
+            "recovery_classification": self.recovery_classification,
+            "recovery_required": self.recovery_required,
+            "recovery_diagnostics": dict(self.recovery_diagnostics),
             "continuous_mode_required": self.continuous_mode_required,
             "ready": self.ready,
             "reasons": self.reasons(),
@@ -377,6 +397,7 @@ class AutonomousLiveRunner:
         order_lifecycle_store: Optional[OrderLifecycleStore] = None,
         protection_verifier: Optional[ProtectionVerifier] = None,
         idempotency_store: Optional[IdempotencyStore] = None,
+        recovery_manager: Optional[RecoveryManager] = None,
         outcome_writer: Optional[OutcomeEvidenceWriter] = None,
         evidence_store: Optional[TradeEvidenceStore] = None,
         continuous_mode: bool = False,
@@ -402,6 +423,9 @@ class AutonomousLiveRunner:
         self._protection_verifier = protection_verifier or ProtectionVerifier()
         self._idempotency_store = idempotency_store or IdempotencyStore(
             path=self._config.idempotency_store_path
+        )
+        self._recovery_manager = recovery_manager or RecoveryManager(
+            idempotency_stale_minutes=self._config.idempotency_stale_minutes
         )
         self._broker_fill_ingestor = (
             BrokerFillIngestor(
@@ -508,6 +532,10 @@ class AutonomousLiveRunner:
 
         protection_results = self._verify_open_trade_protection()
         protection_failures = [r for r in protection_results if r.recovery_required]
+        recovery_report = self._evaluate_recovery(
+            protection_results=protection_results,
+            deployable_cash=deployable_cash,
+        )
 
         return LiveReadinessGates(
             connected=connected,
@@ -526,6 +554,9 @@ class AutonomousLiveRunner:
             protection_confirmed=not protection_failures,
             protection_recovery_required=len(protection_failures),
             protection_diagnostics=[r.to_dict() for r in protection_results],
+            recovery_classification=recovery_report.classification.value,
+            recovery_required=recovery_report.recovery_required,
+            recovery_diagnostics=recovery_report.to_dict(),
             continuous_mode_required=self._continuous_mode,
         )
 
@@ -1656,6 +1687,55 @@ class AutonomousLiveRunner:
                     metadata=result.to_dict(),
                 )
 
+    def _evaluate_recovery(
+        self,
+        *,
+        protection_results: Iterable[ProtectionVerificationResult],
+        deployable_cash: float,
+    ) -> RecoveryReport:
+        """Build a restart-recovery classification from local and broker state."""
+        try:
+            trades = self._store.list_all()
+            lifecycle_events = self._lifecycle_store.list_events()
+            idempotency_locks = list(self._idempotency_store.current_locks().values())
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("failed to load local autonomous recovery state")
+            return self._recovery_manager.manual_intervention_report(
+                f"Local autonomous recovery state is unavailable: {exc}"
+            )
+
+        try:
+            broker_positions = (
+                self._broker_positions_provider()
+                if self._broker_positions_provider is not None
+                else {}
+            ) or {}
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("broker_positions_provider raised during recovery check")
+            return self._recovery_manager.manual_intervention_report(
+                f"Broker positions snapshot is unavailable: {exc}"
+            )
+
+        try:
+            broker_open_orders = list(
+                self._broker_open_orders_provider() or []
+            ) if self._broker_open_orders_provider is not None else []
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("broker_open_orders_provider raised during recovery check")
+            return self._recovery_manager.manual_intervention_report(
+                f"Broker open-order snapshot is unavailable: {exc}"
+            )
+
+        return self._recovery_manager.evaluate(
+            trades=trades,
+            broker_positions=broker_positions,
+            broker_open_orders=broker_open_orders,
+            lifecycle_events=lifecycle_events,
+            idempotency_locks=idempotency_locks,
+            protection_results=protection_results,
+            deployable_cash=deployable_cash,
+        )
+
     @staticmethod
     def _first_gate_status(gates: LiveReadinessGates) -> str:
         if not gates.connected:
@@ -1680,6 +1760,8 @@ class AutonomousLiveRunner:
             return DEPLOYABLE_CASH_BELOW_MINIMUM
         if not gates.protection_confirmed:
             return PROTECTION_RECOVERY_REQUIRED
+        if gates.recovery_required:
+            return RESTART_RECOVERY_REQUIRED
         return ENGINE_REJECTED
 
     def _record_trade(

@@ -24,6 +24,7 @@ from autonomous.outcome_reconciliation import FillSummary, OutcomeReconciliation
 from autonomous.order_lifecycle import OrderLifecycleEvent, OrderLifecycleState, OrderLifecycleStore
 from autonomous.position_sizing import PositionSizer, SizingDecision
 from autonomous.protection_verifier import BrokerOrderSnapshot, ProtectionVerifier, ProtectionVerificationResult
+from autonomous.recovery_manager import RecoveryClassification, RecoveryIssue, RecoveryManager, RecoveryReport
 from autonomous.regime_context import build_regime_context, classify_time_of_day, sector_etf_for
 from autonomous.risk_lifecycle import LossLimitDecision, LossLimitGuard, StrategyEquityCurveBuilder, StrategyEquityPoint
 from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
@@ -95,6 +96,10 @@ __all__ = [
     "BrokerOrderSnapshot",
     "ProtectionVerifier",
     "ProtectionVerificationResult",
+    "RecoveryClassification",
+    "RecoveryIssue",
+    "RecoveryManager",
+    "RecoveryReport",
     "SizingDecision",
     "StrategyEquityCurveBuilder",
     "StrategyEquityPoint",

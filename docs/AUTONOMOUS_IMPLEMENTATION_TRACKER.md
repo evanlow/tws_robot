@@ -63,14 +63,14 @@ Legend:
 
 | Phase | Work item | Status | Target PR |
 |---:|---|---|---|
-| 1 | Basket-level risk allocation | Done | Current PR continuing #161 |
-| 2 | Broker order lifecycle state machine | Done | Current PR continuing #161 |
-| 3 | Broker-side protective stop / bracket verification | Done | Current PR continuing #161 |
-| 4 | Idempotency and duplicate-order prevention | Done | Current PR continuing #161 |
-| 5 | Quote freshness and market-data health guard | Done | Current PR continuing #161 |
-| 6 | Automatic broker-fill ingestion | Done | Current PR continuing #161 |
-| 7 | Continuous-run supervisor | Done | Current PR continuing #161 |
-| 8 | Restart recovery and broker reconciliation | Planned | TBD |
+| 1 | Basket-level risk allocation | Done | PR #175 |
+| 2 | Broker order lifecycle state machine | Done | PR #175 |
+| 3 | Broker-side protective stop / bracket verification | Done | PR #175 |
+| 4 | Idempotency and duplicate-order prevention | Done | PR #175 |
+| 5 | Quote freshness and market-data health guard | Done | PR #175 |
+| 6 | Automatic broker-fill ingestion | Done | PR #175 |
+| 7 | Continuous-run supervisor | Done | PR #175 |
+| 8 | Restart recovery and broker reconciliation | Done | Current PR continuing #161 |
 | 9 | Enhanced emergency stop operations | Planned | TBD |
 | 10 | Control tower dashboard/API | Planned | TBD |
 | 11 | Replay / chaos testing harness | Planned | TBD |
@@ -80,7 +80,7 @@ Legend:
 
 ### Phase 1 — Basket-level risk allocation
 
-Status: Done in current PR; pending merge
+Status: Done in PR #175
 
 Target outcome:
 
@@ -148,7 +148,7 @@ Known limitations and manual checks:
 
 ### Phase 2 — Broker order lifecycle state machine
 
-Status: Done in current PR; pending merge
+Status: Done in PR #175
 
 Checklist:
 
@@ -195,7 +195,7 @@ Known limitations and manual checks:
 
 ### Phase 3 — Broker-side protective stop / bracket verification
 
-Status: Done in current PR; pending merge
+Status: Done in PR #175
 
 Checklist:
 
@@ -241,7 +241,7 @@ Known limitations and manual checks:
 
 ### Phase 4 — Idempotency and duplicate-order prevention
 
-Status: Done in current PR; pending merge
+Status: Done in PR #175
 
 Checklist:
 
@@ -295,7 +295,7 @@ Known limitations and manual checks:
 
 ### Phase 5 — Quote freshness and market-data health guard
 
-Status: Done in current PR; pending merge
+Status: Done in PR #175
 
 Checklist:
 
@@ -341,7 +341,7 @@ Known limitations and manual checks:
 
 ### Phase 6 — Automatic broker-fill ingestion
 
-Status: Done in current PR; pending merge
+Status: Done in PR #175
 
 Checklist:
 
@@ -388,7 +388,7 @@ Known limitations and manual checks:
 
 ### Phase 7 — Continuous-run supervisor
 
-Status: Done in current PR; pending merge
+Status: Done in PR #175
 
 Checklist:
 
@@ -437,15 +437,68 @@ Known limitations and manual checks:
 
 ### Phase 8 — Restart recovery and broker reconciliation
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Reconcile local trade store against broker positions.
-- [ ] Reconcile local order records against broker open orders.
-- [ ] Reconcile recent broker executions.
-- [ ] Classify startup state: `SAFE_TO_TRADE`, `SAFE_TO_MONITOR_ONLY`, `RECOVERY_REQUIRED`, `MANUAL_INTERVENTION_REQUIRED`.
-- [ ] Block trading when recovery is required.
+- [x] Reconcile local trade store against broker positions.
+- [x] Reconcile local order records against broker open orders.
+- [x] Reconcile recent broker executions.
+- [x] Classify startup state: `SAFE_TO_TRADE`, `SAFE_TO_MONITOR_ONLY`, `RECOVERY_REQUIRED`, `MANUAL_INTERVENTION_REQUIRED`.
+- [x] Block trading when recovery is required.
+
+Implementation notes:
+
+- Added `autonomous/recovery_manager.py` with `RecoveryManager`,
+  `RecoveryReport`, `RecoveryIssue`, and `RecoveryClassification`.
+- `AutonomousLiveRunner.evaluate_gates()` now emits
+  `recovery_classification`, `recovery_required`, and
+  `recovery_diagnostics` in the readiness payload.
+- The recovery manager compares local autonomous open trades with broker
+  positions, broker-visible open orders, lifecycle current states, active
+  idempotency locks, broker protection diagnostics, and deployable cash.
+- Local/broker quantity mismatches, local open trades without broker
+  positions, unmatched active broker BUY orders, stale/trade-less idempotency
+  locks, missing broker-side protection, and recovery lifecycle states block
+  new entries.
+- Continuous supervisor fault inference now pauses on recovery-required
+  readiness diagnostics.
+- Recovery is read-only and defensive; it does not submit, cancel, replace,
+  flatten, auto-clear locks, or enable live trading.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_recovery_manager.py --basetemp=.pytest-tmp -q`
+  (`7 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_recovery_manager.py tests\test_continuous_supervisor.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`26 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveLifecycleTick tests\test_recovery_manager.py --basetemp=.pytest-tmp -q`
+  (`11 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification for the same smoke set used by PR #175:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+- A parallel smoke attempt using the same `.pytest-tmp` directory produced one
+  SQLite temp-file setup error in `tests/test_portfolio_analysis.py`; rerunning
+  the affected group by itself passed, so the error was treated as test
+  orchestration contention rather than a product failure.
+
+Known limitations and manual checks:
+
+- Recovery classification is read-only; operator action is required to clear
+  stale locks, resolve orphaned lifecycle states, or fix broker/local
+  mismatches.
+- It does not submit replacement stops, cancel pending orders, panic-flatten,
+  or auto-resize child orders after partial fills.
+- Recent execution reconciliation is supported by the recovery model, while
+  the live runner currently relies on the Phase 6 broker-fill ingestor for
+  execution snapshots before recovery classification.
 
 ### Phase 9 — Enhanced emergency stop operations
 
