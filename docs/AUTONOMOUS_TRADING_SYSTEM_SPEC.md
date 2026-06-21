@@ -4,6 +4,12 @@ This document is the design and implementation reference for the TWS Robot auton
 
 It consolidates the completed trading-intelligence tranche and the next roadmap for continuous autonomous live readiness.
 
+Implementation progress is tracked separately in:
+
+```text
+docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
+```
+
 ## 1. Objective
 
 TWS Robot should evolve from a guarded trading automation tool into a robust autonomous trading system that can identify, size, execute, monitor, and reconcile trades while preserving a safety-first operating model.
@@ -39,8 +45,8 @@ SignalProvider / CandidateScanner
 -> AutonomousTradingEngine gates
 -> AutonomousPaperRunner or AutonomousLiveRunner
 -> OrderExecutor
--> TradeStore / TradeEvidenceStore
--> OutcomeReconciler / LossLimitGuard / AutonomousExitManager
+-> TradeStore / EvidenceStore
+-> Outcome reconciliation / risk lifecycle
 ```
 
 Responsibilities:
@@ -48,18 +54,18 @@ Responsibilities:
 | Layer | Responsibility |
 |---|---|
 | Signal provider | Convert market data/screener rows into candidate signals |
-| CandidateScanner | Scan configured universe and produce candidates |
+| Scanner | Scan configured universe and produce candidates |
 | Ranker | Apply hard filters and edge-aware ranking |
 | Feature builder | Build candidate/regime features for edge estimation |
 | Trade planner | Build individual trade plans with targets, stops, and sizing |
 | Basket planner | Convert ranked candidates into capped multi-leg plans |
 | Engine | Apply gates and produce a structured autonomous decision |
-| AutonomousPaperRunner | Execute eligible plans in paper mode |
-| AutonomousLiveRunner | Submit live-ready plans through OrderExecutor when live gates pass |
+| Paper runner | Execute eligible plans in paper mode |
+| Live runner | Submit live-ready plans through OrderExecutor when live gates pass |
 | OrderExecutor | Submit broker orders with existing risk/reconciliation checks |
-| TradeEvidenceStore | Persist decision and outcome evidence |
-| OutcomeReconciler | Convert closed trades/fills into realized outcome records |
-| LossLimitGuard / AutonomousExitManager | Stop new entries after loss/drawdown events and manage open-risk exits |
+| Evidence store | Persist decision and outcome evidence |
+| Outcome reconciler | Convert closed trades/fills into realized outcome records |
+| Risk lifecycle | Stop new entries after loss/drawdown events |
 
 ## 4. Operating modes
 
@@ -707,6 +713,12 @@ Live behaviour changed: yes/no
 Order submission path changed: yes/no
 Sizing changed: yes/no
 Risk gates changed: yes/no
+```
+
+Future PRs that complete roadmap work should also update:
+
+```text
+docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 ```
 
 ## 14. Immediate next PR
