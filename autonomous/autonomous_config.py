@@ -64,6 +64,10 @@ class AutonomousTradingConfig:
     basket_total_deployable_cash_pct: float = 0.005
     basket_single_position_deployable_cash_pct: float = 0.002
     basket_max_same_sector_positions: int = 1
+    basket_risk_allocator_enabled: bool = True
+    max_basket_risk_equity_pct: float = 0.002
+    basket_risk_allocation_mode: str = "equal_risk"
+    basket_min_leg_risk_dollars: float = 20.0
 
     min_signal_strength: int = 100
     required_signal_label: str = "Confirmed Rebound"
@@ -161,11 +165,16 @@ class AutonomousTradingConfig:
         for label, value in (
             ("basket_total_deployable_cash_pct", self.basket_total_deployable_cash_pct),
             ("basket_single_position_deployable_cash_pct", self.basket_single_position_deployable_cash_pct),
+            ("max_basket_risk_equity_pct", self.max_basket_risk_equity_pct),
         ):
             if value <= 0 or value > 1:
                 raise ValueError(f"{label} must be in (0, 1]")
         if self.basket_single_position_deployable_cash_pct > self.basket_total_deployable_cash_pct:
             raise ValueError("basket single-position pct must be <= basket total pct")
+        if self.basket_risk_allocation_mode != "equal_risk":
+            raise ValueError("basket_risk_allocation_mode must be 'equal_risk'")
+        if self.basket_min_leg_risk_dollars < 0:
+            raise ValueError("basket_min_leg_risk_dollars must be >= 0")
         if self.min_signal_strength < 0:
             raise ValueError("min_signal_strength must be >= 0")
         if self.support_resistance_lookback_days < 0:
@@ -230,6 +239,10 @@ class AutonomousTradingConfig:
             "basket_total_deployable_cash_pct": self.basket_total_deployable_cash_pct,
             "basket_single_position_deployable_cash_pct": self.basket_single_position_deployable_cash_pct,
             "basket_max_same_sector_positions": self.basket_max_same_sector_positions,
+            "basket_risk_allocator_enabled": self.basket_risk_allocator_enabled,
+            "max_basket_risk_equity_pct": self.max_basket_risk_equity_pct,
+            "basket_risk_allocation_mode": self.basket_risk_allocation_mode,
+            "basket_min_leg_risk_dollars": self.basket_min_leg_risk_dollars,
             "min_signal_strength": self.min_signal_strength,
             "required_signal_label": self.required_signal_label,
             "stock_universe": self.stock_universe,

@@ -162,14 +162,15 @@ The current basket planner:
 - applies per-position exposure caps;
 - applies total basket notional/exposure cap;
 - applies same-sector concentration cap;
+- applies a shared basket-level stop-risk budget;
+- reduces or rejects legs that cannot fit the allocated stop-risk;
 - returns multiple `TradePlan` objects when possible;
 - falls back to a single candidate if no valid basket plan is produced.
 
-### 8.3 Required next enhancement
+### 8.3 Basket-level risk allocation
 
-The immediate next gap is basket-level risk allocation.
-
-Current basket mode controls notional/exposure but does not yet centrally allocate one shared stop-risk budget across all basket legs.
+Basket mode controls both notional/exposure and a centrally allocated shared
+stop-risk budget across all basket legs.
 
 Desired behaviour:
 
@@ -196,6 +197,14 @@ not:
 ```text
 more trades, same per-leg risk, multiplied total risk
 ```
+
+Current behaviour:
+
+- `BasketRiskAllocator` is enabled by default when basket mode is enabled.
+- The default allocation mode is `equal_risk`.
+- The allocator only supports `BUY_SHARES` legs with a valid stop below entry.
+- The allocator can reduce a leg quantity or reject a leg, but cannot increase size.
+- Basket diagnostics include budget, planned risk, budget usage, and per-leg decisions.
 
 ## 9. Evidence and audit requirements
 
@@ -277,13 +286,13 @@ Basket mode should not multiply risk simply because more candidates are selected
 
 A shared basket risk budget is allocated across selected legs.
 
-#### Proposed module
+#### Module
 
 ```text
 autonomous/basket_risk_allocator.py
 ```
 
-#### Proposed config
+#### Config
 
 ```python
 basket_risk_allocator_enabled: bool = True
@@ -299,6 +308,13 @@ basket_min_leg_risk_dollars: float = 20.0
 - Basket output shows total planned risk dollars and budget usage.
 - Legs that cannot fit the risk budget are rejected with reasons.
 - Existing sector and notional caps continue to apply.
+
+#### Current implementation status
+
+Implemented in the basket-level risk allocation PR continuing issue #161.
+
+The implementation is conservative: it only reduces or rejects basket legs and
+does not change order submission, live-gate, or broker execution paths.
 
 #### Test plan
 
@@ -726,7 +742,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add basket-level risk allocation
+Add broker order lifecycle state machine
 ```
 
-This should implement Phase 1 of the continuous autonomous live readiness roadmap.
+This should implement Phase 2 of the continuous autonomous live readiness roadmap.

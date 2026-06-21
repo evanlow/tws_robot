@@ -7,6 +7,7 @@ execute it" loop on top of the existing TWS Robot building blocks.
 import logging as _logging
 
 from autonomous.autonomous_config import AutonomousTradingConfig, AutonomousMode
+from autonomous.basket_risk_allocator import BasketRiskAllocation, BasketRiskAllocator, BasketRiskLegDecision
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.drawdown_governor import DrawdownDecision, DrawdownGovernor
@@ -44,6 +45,9 @@ except Exception:
 __all__ = [
     "AutonomousTradingConfig",
     "AutonomousMode",
+    "BasketRiskAllocation",
+    "BasketRiskAllocator",
+    "BasketRiskLegDecision",
     "AutonomousTradingEngine",
     "AutonomousDecision",
     "DecisionStatus",

@@ -101,6 +101,27 @@ def test_engine_recommend_only_returns_basket_plan(tmp_path):
     assert decision.basket_plan is not None
     assert decision.trade_plan == decision.trade_plans[0]
     assert "basket mode" in " ".join(decision.notes)
+    assert decision.basket_plan["risk_allocation"]["enabled"] is True
+    assert decision.basket_plan["risk_allocation"]["total_planned_risk_dollars"] <= 200.0
+
+
+def test_engine_evidence_record_includes_basket_risk_allocation(tmp_path):
+    import json
+
+    cfg = _basket_config(audit_log_dir=str(tmp_path))
+    engine = _engine(cfg)
+
+    decision = engine.run_once()
+
+    assert decision.status == DecisionStatus.RECOMMENDED
+    evidence_files = list(tmp_path.glob("autonomous_evidence_*.jsonl"))
+    assert evidence_files
+    record = json.loads(evidence_files[0].read_text(encoding="utf-8").strip())
+    allocation = record["basket_plan"]["risk_allocation"]
+    assert allocation["enabled"] is True
+    assert allocation["allocation_mode"] == "equal_risk"
+    assert allocation["total_planned_risk_dollars"] <= allocation["max_basket_risk_dollars"]
+    assert record["basket_planned_risk"]
 
 
 def test_engine_paper_executes_all_basket_legs(tmp_path):

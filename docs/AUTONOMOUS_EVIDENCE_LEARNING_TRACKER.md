@@ -32,6 +32,7 @@ Legend:
 | Sector / time-of-day regime context | Done | Implemented in PR #172 |
 | Risk lifecycle using outcome records | Done | Implemented in PR #171 |
 | Chronological validation report | Done | Implemented in PR #172 |
+| Basket risk diagnostics | Done | Current PR continuing #161; basket plans now emit shared risk budget, per-leg allocation, planned risk, and rejection/resize reasons for future evidence-aware sizing |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -198,7 +199,40 @@ Checklist:
 - [ ] Add evidence drift report API.
 - [ ] Update dashboard/control tower when available.
 
-## 4. Maintenance rules
+## 4. Current PR note
+
+The basket-level risk allocation PR does not complete an evidence-learning EL
+phase, but it improves the evidence substrate used by future EL6
+evidence-aware sizing:
+
+- `basket_plan.risk_allocation` records basket risk budget, total planned
+  stop-risk, budget usage, and per-leg risk decisions.
+- Adjusted leg `sizing` diagnostics include a `basket_risk` block.
+- The allocator can only reduce or reject basket legs; it cannot bypass hard
+  sizing, risk, drawdown, or operator caps.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp`
+- Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
+  completed with `2799 passed`, `18 skipped`, and `6 failed`; the failures
+  were existing autonomous/live-runner expectation issues outside this PR's
+  evidence-learning or basket-risk diagnostics path.
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
+  (`471 passed`). The command exited 0; it printed a non-failing sparkline
+  fallback message after pytest completed.
+
+Known limitations:
+
+- No adaptive edge estimator, setup eligibility gate, or evidence-aware sizing
+  overlay is implemented in this PR.
+- Basket risk diagnostics should be consumed by future evidence-learning
+  modules, but no automatic capital promotion or live-mode expansion is added.
+
+## 5. Maintenance rules
 
 Future evidence-learning PRs should update this tracker when they complete work.
 

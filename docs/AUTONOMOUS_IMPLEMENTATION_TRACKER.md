@@ -55,7 +55,7 @@ Legend:
 | Recommend-only autonomous analysis | Done | Safe default |
 | Paper execution | Done | Suitable for evidence collection |
 | Controlled assisted-live single trade | Partial | Feasible with conservative caps and all live gates passing |
-| Controlled assisted-live basket | Partial | Feasible but should wait for basket-level risk allocation before becoming preferred live mode |
+| Controlled assisted-live basket | Partial | Basket-level risk allocation is implemented, but broker lifecycle/protection/recovery phases are still required before this becomes preferred live mode |
 | Continuous live mode | Pending | Requires operational robustness phases below |
 | Automatic capital scaling | Pending | Must wait for promotion gates and evidence review |
 
@@ -63,8 +63,8 @@ Legend:
 
 | Phase | Work item | Status | Target PR |
 |---:|---|---|---|
-| 1 | Basket-level risk allocation | Pending | Next implementation PR |
-| 2 | Broker order lifecycle state machine | Planned | TBD |
+| 1 | Basket-level risk allocation | Done | Current PR continuing #161 |
+| 2 | Broker order lifecycle state machine | Planned | Next implementation PR |
 | 3 | Broker-side protective stop / bracket verification | Planned | TBD |
 | 4 | Idempotency and duplicate-order prevention | Planned | TBD |
 | 5 | Quote freshness and market-data health guard | Planned | TBD |
@@ -80,7 +80,7 @@ Legend:
 
 ### Phase 1 — Basket-level risk allocation
 
-Status: Pending
+Status: Done in current PR; pending merge
 
 Target outcome:
 
@@ -89,15 +89,61 @@ Target outcome:
 
 Checklist:
 
-- [ ] Add `BasketRiskAllocator`.
-- [ ] Add basket risk config fields.
-- [ ] Compute planned risk dollars per leg.
-- [ ] Allocate shared basket risk budget across selected legs.
-- [ ] Resize or reject legs that exceed allocated risk budget.
-- [ ] Add basket-level diagnostics.
-- [ ] Add evidence fields for basket risk.
-- [ ] Add tests.
-- [ ] Update docs.
+- [x] Add `BasketRiskAllocator`.
+- [x] Add basket risk config fields.
+- [x] Compute planned risk dollars per leg.
+- [x] Allocate shared basket risk budget across selected legs.
+- [x] Resize or reject legs that exceed allocated risk budget.
+- [x] Add basket-level diagnostics.
+- [x] Add evidence fields for basket risk.
+- [x] Add tests.
+- [x] Update docs.
+
+Implementation notes:
+
+- Added `autonomous/basket_risk_allocator.py`.
+- Added `basket_risk_allocator_enabled`, `max_basket_risk_equity_pct`,
+  `basket_risk_allocation_mode`, and `basket_min_leg_risk_dollars` config.
+- `BasketPlanner` still applies sector and notional caps, then applies the
+  shared stop-risk budget.
+- The allocator supports `BUY_SHARES` legs with valid stops, can reduce
+  quantity, can reject over-risk legs, and cannot increase exposure.
+- `BasketPlan.to_dict()` includes `risk_allocation` diagnostics for evidence
+  and operator review.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp`
+- Initial run without `--basetemp=.pytest-tmp` failed before executing tests
+  because Windows denied access to `AppData\Local\Temp\pytest-of-evanl`.
+- Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
+  completed with `2799 passed`, `18 skipped`, and `6 failed`. The failures
+  were existing autonomous/live-runner expectation issues outside the basket
+  risk allocation path:
+  `tests/test_autonomous_engine.py::test_recommend_only_never_places_orders`,
+  `tests/test_autonomous_live_runner.py::test_live_runner_config_defaults`,
+  `tests/test_autonomous_live_runner.py::test_live_runner_config_from_env_defaults`,
+  `tests/test_autonomous_live_runner.py::test_record_trade_persists_bracket_child_ids`,
+  `tests/test_autonomous_live_runner.py::test_synthesized_stop_when_plan_lacks_stop_price`,
+  and
+  `tests/test_live_dry_run_guard.py::test_live_dry_run_with_no_adapter_reaches_dry_run_result`.
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
+  (`471 passed`). The command exited 0; it printed a non-failing sparkline
+  fallback message after pytest completed.
+
+Known limitations and manual checks:
+
+- Equal-risk allocation only.
+- Non-`BUY_SHARES` basket legs are rejected by the allocator because they do not
+  have planned per-share stop-risk.
+- Broker lifecycle state, broker-side protection verification, restart
+  recovery, and idempotency remain future phases before unattended continuous
+  live operation.
+- Human review should confirm the default basket risk budget is suitable before
+  assisted-live basket use.
 
 ### Phase 2 — Broker order lifecycle state machine
 
