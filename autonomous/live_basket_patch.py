@@ -40,7 +40,12 @@ def _execute_one_live_plan(self: AutonomousLiveRunner, decision, plan: Dict[str,
     symbol = str(plan.get("symbol") or "")
     trade_type = plan.get("trade_type")
     if trade_type != TradeType.BUY_SHARES.value:
-        return None, None, f"{symbol}: basket leg trade_type {trade_type!r} is not BUY_SHARES; only BUY_SHARES is supported"
+        return (
+            None,
+            None,
+            f"{symbol}: basket leg trade_type {trade_type!r} is not BUY_SHARES; only BUY_SHARES is supported",
+            [],
+        )
     limit_price = float(plan.get("limit_price") or 0.0)
     plan_target_price = _as_float(plan.get("target_price"))
     plan_stop_price = _as_float(plan.get("stop_price"))

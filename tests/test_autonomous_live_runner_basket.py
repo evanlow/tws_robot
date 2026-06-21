@@ -1,8 +1,10 @@
 from autonomous import AutonomousMode, AutonomousTradingConfig
 from autonomous.autonomous_engine import AutonomousTradingEngine
 from autonomous.autonomous_live_runner import AutonomousLiveRunner, EXECUTED, NO_TRADE
+from autonomous.live_basket_patch import _execute_one_live_plan
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.runner_config import AutonomousLiveRunnerConfig
+from autonomous.trade_planner import TradeType
 from autonomous.trade_store import TradeStore
 from data.cash_availability import CashAvailabilityAnalyzer
 from execution.order_executor import OrderResult, OrderStatus
@@ -89,6 +91,7 @@ def test_live_runner_executes_all_basket_legs_when_slots_allow(tmp_path):
             max_open_live_trades=5,
             max_live_trades_per_day=5,
             trade_store_path=str(tmp_path / "live_trades.jsonl"),
+            idempotency_store_path=str(tmp_path / "idempotency.jsonl"),
         ),
         order_executor=executor,
         connected_provider=lambda: True,
@@ -147,6 +150,7 @@ def test_live_runner_blocks_basket_when_slots_insufficient(tmp_path):
             max_open_live_trades=1,
             max_live_trades_per_day=1,
             trade_store_path=str(tmp_path / "live_trades.jsonl"),
+            idempotency_store_path=str(tmp_path / "idempotency.jsonl"),
         ),
         order_executor=_Executor(),
         connected_provider=lambda: True,
@@ -162,3 +166,20 @@ def test_live_runner_blocks_basket_when_slots_insufficient(tmp_path):
 
     assert result.status == NO_TRADE
     assert "live trade slots" in result.rejection_reason
+
+
+def test_execute_one_live_plan_returns_lifecycle_tuple_for_unsupported_trade_type():
+    result, trade, error, lifecycle_events = _execute_one_live_plan(
+        None,
+        None,
+        {"symbol": "AAA", "trade_type": TradeType.SELL_CASH_SECURED_PUT.value},
+        1,
+        None,
+        0.0,
+        0.0,
+    )
+
+    assert result is None
+    assert trade is None
+    assert "not BUY_SHARES" in error
+    assert lifecycle_events == []
