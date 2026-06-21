@@ -394,8 +394,8 @@ runner lifecycle events for:
 - stale local open trades whose broker position is no longer present.
 
 This is an audit/state-tracking layer. It does not add a new order submission
-path, does not enable live trading, and does not verify broker-side protective
-stop acknowledgement yet.
+path or enable live trading. Broker-side protective stop verification is
+implemented in Phase 3 below.
 
 ### Phase 3 — Broker-side protective stop / bracket verification
 
@@ -425,6 +425,43 @@ autonomous/protection_verifier.py
 - Missing protection marks the trade/system as `RECOVERY_REQUIRED`.
 - New entries are blocked while protection is missing.
 - Partial-fill protection quantity is adjusted to actual filled quantity.
+
+#### Config
+
+```python
+require_broker_protection_confirmation: bool = True
+```
+
+Environment variable:
+
+```text
+AUTONOMOUS_REQUIRE_BROKER_PROTECTION_CONFIRMATION=true
+```
+
+#### Current implementation status
+
+Implemented in the current PR continuing issue #161.
+
+The implementation adds `autonomous/protection_verifier.py` and verifies open
+autonomous live trades against broker-visible open-order snapshots from
+`TWSBridge.get_open_order_snapshots()`.  A trade is marked protected only when
+the broker snapshot contains an active protective SELL stop/bracket order for
+the trade symbol with quantity at least as large as the broker-held position.
+
+When protection is missing or cannot be verified:
+
+- `AutonomousLiveRunner.evaluate_gates()` fails closed;
+- readiness output includes `protection_diagnostics`;
+- the order lifecycle store records `RECOVERY_REQUIRED`;
+- the open trade continues to consume its live slot so new entries remain
+  blocked until protection is restored or the trade is reconciled closed.
+
+When protection is verified, the stop lifecycle records
+`PROTECTIVE_STOP_CONFIRMED`.
+
+This does not submit replacement stop orders, cancel orders, or alter live
+order routing. Recovery remains an operator/manual follow-up until the later
+supervisor/recovery phases.
 
 ### Phase 4 — Idempotency and duplicate-order prevention
 
@@ -767,7 +804,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add broker-side protective stop / bracket verification
+Add idempotency and duplicate-order prevention
 ```
 
-This should implement Phase 3 of the continuous autonomous live readiness roadmap.
+This should implement Phase 4 of the continuous autonomous live readiness roadmap.

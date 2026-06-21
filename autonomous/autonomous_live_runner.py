@@ -49,6 +49,7 @@ from autonomous.order_lifecycle import (
     OrderLifecycleState,
     OrderLifecycleStore,
 )
+from autonomous.protection_verifier import ProtectionVerifier, ProtectionVerificationResult
 from autonomous.trade_planner import TradeType
 from autonomous.trade_store import (
     CLOSED,
@@ -84,6 +85,7 @@ DRY_RUN_EXECUTED = "dry_run_executed"
 NO_TRADE = "no_trade"
 ENGINE_REJECTED = "engine_rejected"
 EXECUTION_FAILED = "execution_failed"
+PROTECTION_RECOVERY_REQUIRED = "protection_recovery_required"
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +110,9 @@ class LiveReadinessGates:
     max_live_trades_per_day: int = 1
     deployable_cash: float = 0.0
     min_deployable_cash: float = 1000.0
+    protection_confirmed: bool = True
+    protection_recovery_required: int = 0
+    protection_diagnostics: List[Dict[str, Any]] = field(default_factory=list)
     # Set only when ``live_continuous_enabled`` check is skipped
     # (i.e. a non-continuous / single-cycle call).
     continuous_mode_required: bool = False
@@ -125,6 +130,7 @@ class LiveReadinessGates:
             and self.open_live_trades < self.max_open_live_trades
             and self.live_trades_today < self.max_live_trades_per_day
             and self.deployable_cash >= self.min_deployable_cash
+            and self.protection_confirmed
         )
         if self.continuous_mode_required:
             return base and self.live_continuous_enabled
@@ -168,6 +174,11 @@ class LiveReadinessGates:
                 f"Deployable cash {self.deployable_cash:.2f} is below the "
                 f"configured minimum {self.min_deployable_cash:.2f}"
             )
+        if not self.protection_confirmed:
+            out.append(
+                "Broker-side protection confirmation is missing for "
+                f"{self.protection_recovery_required} open autonomous trade(s)"
+            )
         return out
 
     def to_dict(self) -> Dict[str, Any]:
@@ -185,6 +196,9 @@ class LiveReadinessGates:
             "max_live_trades_per_day": self.max_live_trades_per_day,
             "deployable_cash": round(self.deployable_cash, 2),
             "min_deployable_cash": self.min_deployable_cash,
+            "protection_confirmed": self.protection_confirmed,
+            "protection_recovery_required": self.protection_recovery_required,
+            "protection_diagnostics": list(self.protection_diagnostics),
             "continuous_mode_required": self.continuous_mode_required,
             "ready": self.ready,
             "reasons": self.reasons(),
@@ -233,6 +247,7 @@ EmergencyStopProvider = Callable[[], bool]
 SignalProviderProvider = Callable[[], Any]
 DeployableCashProvider = Callable[[], float]
 BrokerPositionsProvider = Callable[[], Dict[str, Any]]
+BrokerOpenOrdersProvider = Callable[[], Iterable[Any]]
 RejectedOrderIdsProvider = Callable[[], Iterable[int]]
 FilledOrderIdsProvider = Callable[[], Iterable[int]]
 
@@ -305,6 +320,10 @@ class AutonomousLiveRunner:
         :meth:`execution.order_executor.OrderExecutor.execute_signal`,
         which will cause reconciliation to reject any execution when the
         broker holds open positions.
+    broker_open_orders_provider:
+        Callable returning current broker-visible open orders.  When broker
+        protection confirmation is required, the runner uses this snapshot to
+        verify each open autonomous position has an active stop/bracket child.
     rejected_order_ids_provider:
         Callable returning an iterable of broker order IDs the broker
         has rejected since the last call (typically
@@ -342,7 +361,9 @@ class AutonomousLiveRunner:
         broker_positions_provider: Optional[BrokerPositionsProvider] = None,
         rejected_order_ids_provider: Optional[RejectedOrderIdsProvider] = None,
         filled_order_ids_provider: Optional[FilledOrderIdsProvider] = None,
+        broker_open_orders_provider: Optional[BrokerOpenOrdersProvider] = None,
         order_lifecycle_store: Optional[OrderLifecycleStore] = None,
+        protection_verifier: Optional[ProtectionVerifier] = None,
         continuous_mode: bool = False,
     ) -> None:
         self._engine = engine
@@ -356,11 +377,13 @@ class AutonomousLiveRunner:
         self._emergency_stop_provider = emergency_stop_provider
         self._deployable_cash_provider = deployable_cash_provider
         self._broker_positions_provider = broker_positions_provider
+        self._broker_open_orders_provider = broker_open_orders_provider
         self._rejected_order_ids_provider = rejected_order_ids_provider
         self._filled_order_ids_provider = filled_order_ids_provider
         self._lifecycle_store = order_lifecycle_store or OrderLifecycleStore(
             path=self._config.order_lifecycle_store_path
         )
+        self._protection_verifier = protection_verifier or ProtectionVerifier()
         self._continuous_mode = continuous_mode
 
     # ------------------------------------------------------------------
@@ -443,6 +466,9 @@ class AutonomousLiveRunner:
         except Exception:  # pragma: no cover - defensive
             deployable_cash = 0.0
 
+        protection_results = self._verify_open_trade_protection()
+        protection_failures = [r for r in protection_results if r.recovery_required]
+
         return LiveReadinessGates(
             connected=connected,
             live_mode=(env == "live"),
@@ -457,6 +483,9 @@ class AutonomousLiveRunner:
             max_live_trades_per_day=self._config.max_live_trades_per_day,
             deployable_cash=deployable_cash,
             min_deployable_cash=self._config.min_deployable_cash,
+            protection_confirmed=not protection_failures,
+            protection_recovery_required=len(protection_failures),
+            protection_diagnostics=[r.to_dict() for r in protection_results],
             continuous_mode_required=self._continuous_mode,
         )
 
@@ -1207,6 +1236,137 @@ class AutonomousLiveRunner:
                     trade.autonomous_trade_id,
                 )
 
+    def _verify_open_trade_protection(self) -> List[ProtectionVerificationResult]:
+        """Verify broker-side stop/bracket protection for open live trades.
+
+        Missing protection is treated as a readiness failure, not as a closed
+        trade.  The open trade continues to consume its live slot while the
+        lifecycle store records ``RECOVERY_REQUIRED`` for operator action.
+        """
+        if not self._config.require_broker_protection_confirmation:
+            return []
+        try:
+            open_trades = self._store.list_open()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_open failed during protection check")
+            return [
+                ProtectionVerificationResult(
+                    autonomous_trade_id="unknown",
+                    symbol="",
+                    protected=False,
+                    recovery_required=True,
+                    reason="trade store unavailable during protection verification",
+                )
+            ]
+        if not open_trades:
+            return []
+        if self._broker_open_orders_provider is None:
+            results = [
+                ProtectionVerificationResult(
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    symbol=trade.symbol,
+                    protected=False,
+                    recovery_required=True,
+                    reason="broker open-order provider is not configured",
+                    expected_quantity=float(abs(trade.quantity or 0)),
+                    stop_order_id=trade.stop_order_id,
+                )
+                for trade in open_trades
+                if not any(
+                    str(note).strip().lower() == "dry_run=true"
+                    for note in (trade.notes or [])
+                )
+            ]
+            self._record_protection_results(results)
+            return results
+        try:
+            broker_positions = (
+                self._broker_positions_provider()
+                if self._broker_positions_provider is not None
+                else {}
+            ) or {}
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker_positions_provider raised during protection check")
+            broker_positions = {}
+        try:
+            open_orders = list(self._broker_open_orders_provider() or [])
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("broker_open_orders_provider raised during protection check")
+            results = [
+                ProtectionVerificationResult(
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    symbol=trade.symbol,
+                    protected=False,
+                    recovery_required=True,
+                    reason="broker open-order provider raised during protection check",
+                    expected_quantity=float(abs(trade.quantity or 0)),
+                    stop_order_id=trade.stop_order_id,
+                )
+                for trade in open_trades
+            ]
+            self._record_protection_results(results)
+            return results
+
+        results = self._protection_verifier.verify_open_trades(
+            open_trades,
+            broker_positions=broker_positions,
+            open_orders=open_orders,
+        )
+        self._record_protection_results(results)
+        return results
+
+    def _record_protection_results(
+        self,
+        results: Iterable[ProtectionVerificationResult],
+    ) -> None:
+        by_trade: Dict[str, AutonomousTrade] = {}
+        try:
+            by_trade = {
+                trade.autonomous_trade_id: trade
+                for trade in self._store.list_all()
+            }
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("trade store list_all failed during protection lifecycle write")
+        for result in results:
+            trade = by_trade.get(result.autonomous_trade_id)
+            lifecycle_id = (
+                getattr(trade, "stop_lifecycle_id", None)
+                or (
+                    self._fallback_lifecycle_id(trade, STOP, result.stop_order_id)
+                    if trade is not None
+                    else f"unknown-protection-{result.autonomous_trade_id}"
+                )
+            )
+            current = self._lifecycle_store.get_current(lifecycle_id)
+            if result.protected:
+                if current is not None and current.state == OrderLifecycleState.PROTECTIVE_STOP_CONFIRMED:
+                    continue
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=lifecycle_id,
+                    state=OrderLifecycleState.PROTECTIVE_STOP_CONFIRMED,
+                    symbol=result.symbol,
+                    order_role=STOP,
+                    broker_order_id=result.stop_order_id,
+                    autonomous_trade_id=result.autonomous_trade_id,
+                    parent_lifecycle_id=getattr(trade, "entry_lifecycle_id", None),
+                    reason=result.reason,
+                    metadata=result.to_dict(),
+                )
+            elif result.recovery_required:
+                if current is not None and current.state == OrderLifecycleState.RECOVERY_REQUIRED:
+                    continue
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=lifecycle_id,
+                    state=OrderLifecycleState.RECOVERY_REQUIRED,
+                    symbol=result.symbol,
+                    order_role=STOP,
+                    broker_order_id=result.stop_order_id,
+                    autonomous_trade_id=result.autonomous_trade_id,
+                    parent_lifecycle_id=getattr(trade, "entry_lifecycle_id", None),
+                    reason=result.reason,
+                    metadata=result.to_dict(),
+                )
+
     @staticmethod
     def _first_gate_status(gates: LiveReadinessGates) -> str:
         if not gates.connected:
@@ -1229,6 +1389,8 @@ class AutonomousLiveRunner:
             return DAILY_LIVE_TRADE_LIMIT_REACHED
         if gates.deployable_cash < gates.min_deployable_cash:
             return DEPLOYABLE_CASH_BELOW_MINIMUM
+        if not gates.protection_confirmed:
+            return PROTECTION_RECOVERY_REQUIRED
         return ENGINE_REJECTED
 
     def _record_trade(

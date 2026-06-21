@@ -33,7 +33,8 @@ Legend:
 | Risk lifecycle using outcome records | Done | Implemented in PR #171 |
 | Chronological validation report | Done | Implemented in PR #172 |
 | Basket risk diagnostics | Done | Current PR continuing #161; basket plans now emit shared risk budget, per-leg allocation, planned risk, and rejection/resize reasons for future evidence-aware sizing |
-| Order lifecycle diagnostics | Done | Current PR continuing #161; live-runner order lifecycle events now record planned, submitted, rejected, filled, closed, pending-protection, and orphaned states for future operational metrics |
+| Order lifecycle diagnostics | Done | Current PR continuing #161; live-runner order lifecycle events now record planned, submitted, rejected, filled, closed, pending-protection, confirmed-protection, recovery-required, and orphaned states for future operational metrics |
+| Broker protection diagnostics | Done | Current PR continuing #161; open live trades now emit confirmed-protection or recovery-required diagnostics for future unconfirmed-protection metrics |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -213,6 +214,8 @@ sizing and by future operational metrics:
   sizing, risk, drawdown, or operator caps.
 - `order_lifecycle` records live order state transitions for future rejected
   order rate, protection-event, fill-state, and recovery-required metrics.
+- Broker protection verification records `PROTECTIVE_STOP_CONFIRMED` or
+  `RECOVERY_REQUIRED` lifecycle events for open live trades.
 
 Test evidence:
 
@@ -221,6 +224,8 @@ Test evidence:
   (`4 passed`).
 - Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp -q`
   (`49 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_tws_bridge.py::TestBridgeOpenOrderSnapshots --basetemp=.pytest-tmp -q`
+  (`8 passed`).
 - Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
   completed with `2799 passed`, `18 skipped`, and `6 failed`; the failures
   were existing autonomous/live-runner expectation issues outside this PR's
@@ -229,7 +234,7 @@ Test evidence:
 Smoke-test evidence:
 
 - Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
-  (`472 passed`). The command exited 0; it printed a non-failing sparkline
+  (`473 passed`). The command exited 0; it printed a non-failing sparkline
   fallback message after pytest completed.
 
 Known limitations:

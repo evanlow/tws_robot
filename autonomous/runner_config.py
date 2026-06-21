@@ -174,6 +174,10 @@ class AutonomousLiveRunnerConfig:
     ``AUTONOMOUS_ORDER_LIFECYCLE_STORE_PATH``
         Append-only lifecycle event log for live autonomous broker orders.
         Default ``logs/autonomous_order_lifecycle.jsonl``.
+    ``AUTONOMOUS_REQUIRE_BROKER_PROTECTION_CONFIRMATION``
+        When ``true`` (default), open live autonomous positions must have a
+        broker-visible protective stop/bracket order before new live entries
+        are allowed.
     """
 
     # ---- Master live-mode switches ------------------------------------
@@ -192,6 +196,7 @@ class AutonomousLiveRunnerConfig:
     live_limit_orders_only: bool = True
     live_require_account_confirmation: bool = True
     require_plan_stop_for_live: bool = True
+    require_broker_protection_confirmation: bool = True
 
     # ---- Dry-run (rehearsal) mode ------------------------------------
     live_dry_run: bool = False
@@ -251,6 +256,9 @@ class AutonomousLiveRunnerConfig:
             "live_limit_orders_only": self.live_limit_orders_only,
             "live_require_account_confirmation": self.live_require_account_confirmation,
             "require_plan_stop_for_live": self.require_plan_stop_for_live,
+            "require_broker_protection_confirmation": (
+                self.require_broker_protection_confirmation
+            ),
             "live_dry_run": self.live_dry_run,
             "default_stop_pct": self.default_stop_pct,
             "buy_shares_only": self.buy_shares_only,
@@ -292,6 +300,9 @@ class AutonomousLiveRunnerConfig:
             ),
             require_plan_stop_for_live=_env_bool(
                 "AUTONOMOUS_REQUIRE_PLAN_STOP_FOR_LIVE", True
+            ),
+            require_broker_protection_confirmation=_env_bool(
+                "AUTONOMOUS_REQUIRE_BROKER_PROTECTION_CONFIRMATION", True
             ),
             live_dry_run=_env_bool("AUTONOMOUS_LIVE_DRY_RUN", False),
             default_stop_pct=_env_float("AUTONOMOUS_DEFAULT_STOP_PCT", 0.05),

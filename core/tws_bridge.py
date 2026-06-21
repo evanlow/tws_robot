@@ -71,6 +71,12 @@ class _BridgeApp(EWrapper, EClient):
         self._filled_order_ids: set[int] = set()
         self._filled_order_ids_lock = threading.Lock()
 
+        # Latest broker-visible open-order snapshots keyed by order ID.
+        # Consumed by AutonomousLiveRunner to verify that live positions have
+        # confirmed protective stop/bracket children before new entries.
+        self._open_order_snapshots: Dict[int, Dict[str, Any]] = {}
+        self._open_order_snapshots_lock = threading.Lock()
+
     # -- connection lifecycle -----------------------------------------------
 
     def connectAck(self) -> None:
@@ -297,6 +303,31 @@ class _BridgeApp(EWrapper, EClient):
     # ------------------------------------------------------------------
     # Order status — tracks fills for bracket reconciliation
     # ------------------------------------------------------------------
+    def openOrder(self, orderId: int, contract, order, orderState) -> None:
+        payload = {
+            "id": str(orderId),
+            "order_id": int(orderId),
+            "broker_order_id": int(orderId),
+            "symbol": str(getattr(contract, "symbol", "") or ""),
+            "sec_type": str(getattr(contract, "secType", "") or ""),
+            "exchange": str(getattr(contract, "exchange", "") or ""),
+            "currency": str(getattr(contract, "currency", "") or ""),
+            "action": str(getattr(order, "action", "") or "").upper(),
+            "order_type": str(getattr(order, "orderType", "") or "").upper(),
+            "quantity": float(getattr(order, "totalQuantity", 0) or 0.0),
+            "remaining": None,
+            "status": str(getattr(orderState, "status", "") or "Submitted"),
+            "parent_id": int(getattr(order, "parentId", 0) or 0),
+            "oca_group": str(getattr(order, "ocaGroup", "") or ""),
+            "limit_price": float(getattr(order, "lmtPrice", 0) or 0.0),
+            "stop_price": float(getattr(order, "auxPrice", 0) or 0.0),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source": "tws_open_order",
+        }
+        with self._open_order_snapshots_lock:
+            self._open_order_snapshots[int(orderId)] = payload
+        self._svc.add_order(payload)
+
     def orderStatus(self, orderId: int, status: str, filled: float,
                     remaining: float, avgFillPrice: float, permId: int,
                     parentId: int, lastFillPrice: float, clientId: int,
@@ -319,6 +350,17 @@ class _BridgeApp(EWrapper, EClient):
             "source": "tws_order_status",
         }
         self._svc.add_order(payload)
+        terminal = {"FILLED", "CANCELLED", "REJECTED", "INACTIVE"}
+        with self._open_order_snapshots_lock:
+            existing = self._open_order_snapshots.get(int(orderId), {})
+            existing.update(payload)
+            existing["remaining"] = payload["remaining"]
+            existing["status"] = status
+            existing["parent_id"] = payload["parent_id"]
+            if payload["status"] in terminal:
+                self._open_order_snapshots.pop(int(orderId), None)
+            else:
+                self._open_order_snapshots[int(orderId)] = existing
 
         # Record fully-filled orders so the live runner can reconcile
         # bracket children (target / stop) into CLOSED trade-store
@@ -487,6 +529,18 @@ class TWSBridge:
             drained = set(self._app._filled_order_ids)
             self._app._filled_order_ids.clear()
         return drained
+
+    def get_open_order_snapshots(self) -> list[Dict[str, Any]]:
+        """Return current broker-visible open order snapshots.
+
+        The list is a read-only snapshot of the latest ``openOrder`` /
+        ``orderStatus`` callback state.  It is used by autonomous protection
+        verification to prove a protective stop/bracket child is active.
+        """
+        if self._app is None:
+            return []
+        with self._app._open_order_snapshots_lock:
+            return [dict(order) for order in self._app._open_order_snapshots.values()]
 
     def cancel_order(self, broker_order_id: int) -> None:
         """Send a cancellation request to TWS for the given order ID.

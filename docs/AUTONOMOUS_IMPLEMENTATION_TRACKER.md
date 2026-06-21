@@ -65,8 +65,8 @@ Legend:
 |---:|---|---|---|
 | 1 | Basket-level risk allocation | Done | Current PR continuing #161 |
 | 2 | Broker order lifecycle state machine | Done | Current PR continuing #161 |
-| 3 | Broker-side protective stop / bracket verification | Planned | Next implementation PR |
-| 4 | Idempotency and duplicate-order prevention | Planned | TBD |
+| 3 | Broker-side protective stop / bracket verification | Done | Current PR continuing #161 |
+| 4 | Idempotency and duplicate-order prevention | Planned | Next implementation PR |
 | 5 | Quote freshness and market-data health guard | Planned | TBD |
 | 6 | Automatic broker-fill ingestion | Planned | TBD |
 | 7 | Continuous-run supervisor | Planned | TBD |
@@ -131,7 +131,7 @@ Test evidence:
 Smoke-test evidence:
 
 - Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
-  (`472 passed`). The command exited 0; it printed a non-failing sparkline
+  (`473 passed`). The command exited 0; it printed a non-failing sparkline
   fallback message after pytest completed.
 
 Known limitations and manual checks:
@@ -172,8 +172,7 @@ Implementation notes:
 - Bracket target/stop fills emit child `FILLED` and parent `CLOSED`.
 - Stale open trades whose broker position is no longer present emit
   `ORPHANED_ORDER`.
-- This does not implement broker-side acknowledgement or protection
-  verification; those remain Phase 3.
+- Broker-side protection verification is implemented separately in Phase 3.
 
 Test evidence:
 
@@ -184,29 +183,60 @@ Test evidence:
 - Passed: `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py::TestPortfolioPersistence --basetemp=.pytest-tmp -q`
   (`9 passed`).
 - Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
-  (`472 passed`).
+  (`473 passed`).
 
 Known limitations and manual checks:
 
-- Lifecycle recording is file-backed JSONL and does not yet reconcile IBKR
-  acknowledgement callbacks into `ACKNOWLEDGED`.
-- Protective stop child orders are marked pending, not confirmed; broker-side
-  protection verification remains required before unattended continuous live
-  operation.
+- Lifecycle recording is file-backed JSONL and does not yet reconcile entry
+  order acknowledgement callbacks into `ACKNOWLEDGED`.
 - Partial-fill state is modeled but not yet automatically ingested; automatic
   fill ingestion remains Phase 6.
 
 ### Phase 3 — Broker-side protective stop / bracket verification
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Verify broker acknowledgement of protective stop/bracket orders.
-- [ ] Confirm protective quantity matches filled quantity.
-- [ ] Mark trade protected only after verification.
-- [ ] Block new entries when protection is missing.
-- [ ] Add recovery state for unprotected live position.
+- [x] Verify broker acknowledgement of protective stop/bracket orders.
+- [x] Confirm protective quantity matches filled quantity.
+- [x] Mark trade protected only after verification.
+- [x] Block new entries when protection is missing.
+- [x] Add recovery state for unprotected live position.
+
+Implementation notes:
+
+- Added `autonomous/protection_verifier.py` with broker open-order snapshot
+  normalisation and protection verification.
+- Added `require_broker_protection_confirmation` to
+  `AutonomousLiveRunnerConfig`; it defaults to `True` and can be overridden by
+  `AUTONOMOUS_REQUIRE_BROKER_PROTECTION_CONFIRMATION`.
+- `AutonomousLiveRunner.evaluate_gates()` verifies every open non-dry-run
+  autonomous live trade before allowing another entry.
+- Missing or unverifiable protection records `RECOVERY_REQUIRED` in the
+  lifecycle store and blocks new entries while the trade remains open.
+- Confirmed broker-visible stop/bracket protection records
+  `PROTECTIVE_STOP_CONFIRMED`.
+- `TWSBridge` now maintains broker-visible open-order snapshots from
+  `openOrder` and `orderStatus`, exposed through
+  `get_open_order_snapshots()`.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_tws_bridge.py::TestBridgeOpenOrderSnapshots --basetemp=.pytest-tmp -q`
+  (`8 passed`).
+- Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
+  (`473 passed`).
+
+Known limitations and manual checks:
+
+- The verifier is read-only; it does not submit replacement stops when
+  protection is missing.
+- Partial-fill quantity is inferred from the broker position snapshot when
+  present; automatic fill ingestion and child-order resizing remain future
+  phases.
+- If broker open-order snapshots are unavailable while an open live trade
+  exists, the system fails closed and requires operator recovery.
 
 ### Phase 4 — Idempotency and duplicate-order prevention
 

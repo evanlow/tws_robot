@@ -13,6 +13,7 @@ from datetime import datetime
 from core.tws_bridge import TWSBridge, _BridgeApp, _to_float
 from core.event_bus import EventBus, Event, EventType
 from ibapi.contract import Contract
+from ibapi.order import Order
 from ibapi.order_cancel import OrderCancel
 
 
@@ -1091,6 +1092,52 @@ class TestBridgeFilledOrderTracking:
     def test_pop_when_no_app_returns_empty(self, bridge):
         bridge._app = None
         assert bridge.pop_filled_order_ids() == set()
+
+
+# ==============================================================================
+# Open-order snapshots for autonomous protection verification
+# ==============================================================================
+
+
+class TestBridgeOpenOrderSnapshots:
+    """Tests for broker-visible open-order snapshots."""
+
+    @pytest.mark.unit
+    def test_open_order_snapshot_records_and_terminal_status_removes(
+        self, bridge, mock_service_manager
+    ):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        bridge._app = app
+        contract = Contract()
+        contract.symbol = "AAA"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.currency = "USD"
+        order = Order()
+        order.action = "SELL"
+        order.orderType = "STP"
+        order.totalQuantity = 2
+        order.parentId = 700
+        order.auxPrice = 95.0
+
+        app.openOrder(702, contract, order, Mock(status="Submitted"))
+
+        snapshots = bridge.get_open_order_snapshots()
+        assert len(snapshots) == 1
+        assert snapshots[0]["order_id"] == 702
+        assert snapshots[0]["symbol"] == "AAA"
+        assert snapshots[0]["action"] == "SELL"
+        assert snapshots[0]["order_type"] == "STP"
+        assert snapshots[0]["quantity"] == 2.0
+        assert snapshots[0]["parent_id"] == 700
+        mock_service_manager.add_order.assert_called()
+
+        app.orderStatus(
+            orderId=702, status="Cancelled", filled=0.0, remaining=0.0,
+            avgFillPrice=0.0, permId=0, parentId=700, lastFillPrice=0.0,
+            clientId=1, whyHeld="", mktCapPrice=0.0,
+        )
+        assert bridge.get_open_order_snapshots() == []
 
 
 # ==============================================================================

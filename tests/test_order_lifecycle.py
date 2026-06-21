@@ -13,6 +13,7 @@ from autonomous import (
     CandidateSignal,
     OrderLifecycleState,
     OrderLifecycleStore,
+    ProtectionVerifier,
     StaticSignalProvider,
 )
 from autonomous.audit import AuditLogger
@@ -90,6 +91,7 @@ def _runner(
     rejected_order_ids_provider=None,
     filled_order_ids_provider=None,
     broker_positions_provider=None,
+    broker_open_orders_provider=None,
 ) -> AutonomousLiveRunner:
     cfg = AutonomousLiveRunnerConfig(
         live_enabled=True,
@@ -115,6 +117,7 @@ def _runner(
         broker_positions_provider=broker_positions_provider,
         rejected_order_ids_provider=rejected_order_ids_provider,
         filled_order_ids_provider=filled_order_ids_provider,
+        broker_open_orders_provider=broker_open_orders_provider,
         order_lifecycle_store=lifecycle_store,
     )
 
@@ -222,3 +225,113 @@ def test_bracket_fill_writes_child_filled_and_parent_closed_lifecycle(tmp_path):
 
     assert lifecycle_store.get_current("stop-lifecycle").state == OrderLifecycleState.FILLED
     assert lifecycle_store.get_current("entry-lifecycle").state == OrderLifecycleState.CLOSED
+
+
+def test_protection_verifier_confirms_matching_active_stop_quantity():
+    trade = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol="AAA",
+        trade_type="BUY_SHARES",
+        status=OPEN,
+        entry_order_id=700,
+        entry_time=datetime.now(timezone.utc),
+        entry_limit_price=100.0,
+        quantity=5,
+        stop_order_id=702,
+    )
+
+    result = ProtectionVerifier().verify_trade(
+        trade,
+        broker_positions={"AAA": {"quantity": 3}},
+        open_orders=[
+            {
+                "order_id": 702,
+                "symbol": "AAA",
+                "action": "SELL",
+                "order_type": "STP",
+                "quantity": 3,
+                "status": "Submitted",
+            }
+        ],
+    )
+
+    assert result.protected is True
+    assert result.recovery_required is False
+    assert result.expected_quantity == 3
+
+
+def test_live_runner_marks_recovery_required_when_protection_missing(tmp_path):
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    trade_store = TradeStore(path=str(tmp_path / "live_trades.jsonl"))
+    trade = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol="AAA",
+        trade_type="BUY_SHARES",
+        status=OPEN,
+        entry_order_id=700,
+        entry_time=datetime.now(timezone.utc),
+        entry_limit_price=100.0,
+        quantity=2,
+        stop_order_id=702,
+        entry_lifecycle_id="entry-lifecycle",
+        stop_lifecycle_id="stop-lifecycle",
+    )
+    trade_store.record_trade(trade)
+    runner = _runner(
+        tmp_path,
+        lifecycle_store=lifecycle_store,
+        trade_store=trade_store,
+        broker_positions_provider=lambda: {"AAA": {"quantity": 2}},
+        broker_open_orders_provider=lambda: [],
+    )
+
+    gates = runner.evaluate_gates()
+
+    assert gates.ready is False
+    assert gates.protection_recovery_required == 1
+    assert lifecycle_store.get_current("stop-lifecycle").state == OrderLifecycleState.RECOVERY_REQUIRED
+
+
+def test_live_runner_confirms_protective_stop_before_new_entry_capacity(tmp_path):
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    trade_store = TradeStore(path=str(tmp_path / "live_trades.jsonl"))
+    trade = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol="AAA",
+        trade_type="BUY_SHARES",
+        status=OPEN,
+        entry_order_id=700,
+        entry_time=datetime.now(timezone.utc),
+        entry_limit_price=100.0,
+        quantity=2,
+        stop_order_id=702,
+        entry_lifecycle_id="entry-lifecycle",
+        stop_lifecycle_id="stop-lifecycle",
+    )
+    trade_store.record_trade(trade)
+    runner = _runner(
+        tmp_path,
+        lifecycle_store=lifecycle_store,
+        trade_store=trade_store,
+        broker_positions_provider=lambda: {"AAA": {"quantity": 2}},
+        broker_open_orders_provider=lambda: [
+            {
+                "order_id": 702,
+                "symbol": "AAA",
+                "action": "SELL",
+                "order_type": "STP",
+                "quantity": 2,
+                "remaining": 2,
+                "status": "Submitted",
+                "parent_id": 700,
+            }
+        ],
+    )
+
+    gates = runner.evaluate_gates()
+
+    assert gates.ready is True
+    assert gates.protection_recovery_required == 0
+    assert lifecycle_store.get_current("stop-lifecycle").state == (
+        OrderLifecycleState.PROTECTIVE_STOP_CONFIRMED
+    )

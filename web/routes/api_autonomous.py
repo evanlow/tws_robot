@@ -1808,6 +1808,12 @@ def _build_live_runner(
             if getattr(svc, "tws_bridge", None) is not None
             else None
         ),
+        broker_open_orders_provider=(
+            svc.tws_bridge.get_open_order_snapshots
+            if getattr(svc, "tws_bridge", None) is not None
+            and hasattr(svc.tws_bridge, "get_open_order_snapshots")
+            else None
+        ),
         continuous_mode=continuous_mode,
     )
 
