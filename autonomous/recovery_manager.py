@@ -200,7 +200,7 @@ class RecoveryManager:
                 continue
             symbol = str(trade.symbol or "").strip().upper()
             broker_qty = _position_quantity(positions_by_symbol.get(symbol))
-            local_qty = abs(float(getattr(trade, "quantity", 0) or 0))
+            local_qty = float(getattr(trade, "quantity", 0) or 0)
             if broker_qty == 0:
                 issues.append(RecoveryIssue(
                     code="local_open_trade_missing_broker_position",
