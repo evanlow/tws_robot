@@ -216,14 +216,14 @@ class RecoveryManager:
                     },
                 ))
                 continue
-            if local_qty > 0 and abs(abs(broker_qty) - local_qty) > 1e-9:
+            if local_qty > 0 and abs(broker_qty - local_qty) > 1e-9:
                 issues.append(RecoveryIssue(
                     code="local_broker_quantity_mismatch",
                     severity=RECOVERY,
                     message=(
                         f"Local autonomous trade {trade.autonomous_trade_id} "
                         f"quantity {local_qty:g} does not match broker quantity "
-                        f"{abs(broker_qty):g} for {symbol}."
+                        f"{broker_qty:g} for {symbol}."
                     ),
                     details={
                         "autonomous_trade_id": trade.autonomous_trade_id,
@@ -247,10 +247,19 @@ class RecoveryManager:
             for order_id in (trade.entry_order_id, trade.target_order_id, trade.stop_order_id)
             if _as_int(order_id) is not None
         }
+        _terminal_states = {
+            OrderLifecycleState.FILLED,
+            OrderLifecycleState.CLOSED,
+            OrderLifecycleState.RECONCILED,
+            OrderLifecycleState.REJECTED,
+            OrderLifecycleState.CANCELLED,
+            OrderLifecycleState.EXPIRED,
+        }
         lifecycle_order_ids = {
             event.broker_order_id
             for event in lifecycle_current.values()
             if event.broker_order_id is not None
+            and event.state not in _terminal_states
         }
         known_order_ids = trade_order_ids | lifecycle_order_ids
         for order in open_orders:

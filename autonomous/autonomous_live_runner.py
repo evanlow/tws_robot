@@ -555,7 +555,7 @@ class AutonomousLiveRunner:
             protection_recovery_required=len(protection_failures),
             protection_diagnostics=[r.to_dict() for r in protection_results],
             recovery_classification=recovery_report.classification.value,
-            recovery_required=recovery_report.recovery_required,
+            recovery_required=not recovery_report.ready_to_trade,
             recovery_diagnostics=recovery_report.to_dict(),
             continuous_mode_required=self._continuous_mode,
         )

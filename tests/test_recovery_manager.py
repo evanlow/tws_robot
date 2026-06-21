@@ -306,3 +306,80 @@ def test_supervisor_pauses_on_recovery_required_gate():
     assert result.status == PAUSED
     assert result.reason == UNRECONCILED_LIFECYCLE_STATE
     assert result.fault.details["recovery_classification"] == "RECOVERY_REQUIRED"
+
+
+def test_recovery_manager_flags_opposite_sign_broker_position():
+    """Broker short position must not match a local long trade."""
+    trade = _trade(quantity=2)
+    report = _manager().evaluate(
+        trades=[trade],
+        broker_positions={"AAA": {"quantity": -2}},
+        broker_open_orders=[],
+        lifecycle_events=[],
+        idempotency_locks=[],
+    )
+
+    assert report.classification == RecoveryClassification.RECOVERY_REQUIRED
+    assert any(i.code == "local_broker_quantity_mismatch" for i in report.issues)
+    mismatch = next(i for i in report.issues if i.code == "local_broker_quantity_mismatch")
+    assert mismatch.details["broker_quantity"] == -2
+
+
+def test_recovery_manager_flags_active_buy_order_with_terminal_lifecycle():
+    """An active broker BUY order whose lifecycle is terminal must be flagged."""
+    from autonomous.order_lifecycle import OrderLifecycleEvent, OrderLifecycleState
+
+    lifecycle_event = OrderLifecycleEvent(
+        lifecycle_id="entry-life",
+        state=OrderLifecycleState.FILLED,
+        symbol="AAA",
+        broker_order_id=800,
+    )
+    report = _manager().evaluate(
+        trades=[],
+        broker_positions={},
+        broker_open_orders=[
+            {
+                "order_id": 800,
+                "symbol": "AAA",
+                "action": "BUY",
+                "order_type": "LMT",
+                "quantity": 1,
+                "status": "Submitted",
+            }
+        ],
+        lifecycle_events=[lifecycle_event],
+        idempotency_locks=[],
+    )
+
+    assert report.classification == RecoveryClassification.RECOVERY_REQUIRED
+    assert any(i.code == "unmatched_broker_entry_order" for i in report.issues)
+
+
+def test_live_runner_gates_block_safe_to_monitor_only(tmp_path):
+    """SAFE_TO_MONITOR_ONLY must set recovery_required=True on the readiness gates."""
+    from autonomous.order_lifecycle import OrderLifecycleEvent, OrderLifecycleState
+
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    lifecycle_store.record_transition(
+        lifecycle_id="entry-life",
+        state=OrderLifecycleState.DUPLICATE_ORDER_BLOCKED,
+        symbol="AAA",
+        reason="duplicate detected",
+    )
+    trade_store = TradeStore(path=str(tmp_path / "trades.jsonl"))
+    idempotency_store = IdempotencyStore(path=str(tmp_path / "idempotency.jsonl"))
+    runner = _runner(
+        tmp_path,
+        trade_store=trade_store,
+        lifecycle_store=lifecycle_store,
+        idempotency_store=idempotency_store,
+        broker_positions={},
+        broker_open_orders=[],
+    )
+
+    gates = runner.evaluate_gates()
+
+    assert gates.recovery_required is True
+    assert gates.recovery_classification == "SAFE_TO_MONITOR_ONLY"
+    assert gates.ready is False
