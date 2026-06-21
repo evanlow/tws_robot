@@ -37,7 +37,7 @@ The rule-based estimator remains useful as a prior when evidence is sparse.  As 
 
 ## 3. What counts as evidence
 
-Evidence must come from realized outcomes, not merely signals or paper assumptions.
+Edge and performance calibration must use realized outcomes, not merely signals or paper assumptions. Non-trade decision records (e.g. rejected or no-trade decisions) are still logged as evidence for opportunity and operational analysis.
 
 Valid evidence records include:
 

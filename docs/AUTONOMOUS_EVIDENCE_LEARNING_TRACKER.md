@@ -210,12 +210,8 @@ A PR that implements an EL phase should update:
 - new limitations discovered;
 - any spec deviations.
 
-If an implementation changes live trading behaviour, the PR description should explicitly state:
+If an implementation changes live trading behaviour, follow the PR-description template defined in `docs/AUTONOMOUS_TRADING_SYSTEM_SPEC.md`. Evidence-learning PRs should also include the following additional line:
 
 ```text
-Live behaviour changed: yes/no
-Order submission path changed: yes/no
-Sizing changed: yes/no
-Risk gates changed: yes/no
 Evidence-learning behaviour changed: yes/no
 ```
