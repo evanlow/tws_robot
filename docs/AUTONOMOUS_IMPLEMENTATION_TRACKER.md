@@ -69,7 +69,7 @@ Legend:
 | 4 | Idempotency and duplicate-order prevention | Done | Current PR continuing #161 |
 | 5 | Quote freshness and market-data health guard | Done | Current PR continuing #161 |
 | 6 | Automatic broker-fill ingestion | Done | Current PR continuing #161 |
-| 7 | Continuous-run supervisor | Planned | TBD |
+| 7 | Continuous-run supervisor | Done | Current PR continuing #161 |
 | 8 | Restart recovery and broker reconciliation | Planned | TBD |
 | 9 | Enhanced emergency stop operations | Planned | TBD |
 | 10 | Control tower dashboard/API | Planned | TBD |
@@ -388,17 +388,52 @@ Known limitations and manual checks:
 
 ### Phase 7 — Continuous-run supervisor
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Add supervisor module.
-- [ ] Prevent overlapping runs.
-- [ ] Maintain heartbeat.
-- [ ] Pause on serious errors.
-- [ ] Pause on broker disconnect.
-- [ ] Pause on unreconciled lifecycle state.
-- [ ] Pause on risk-lifecycle breach.
+- [x] Add supervisor module.
+- [x] Prevent overlapping runs.
+- [x] Maintain heartbeat.
+- [x] Pause on serious errors.
+- [x] Pause on broker disconnect.
+- [x] Pause on unreconciled lifecycle state.
+- [x] Pause on risk-lifecycle breach.
+
+Implementation notes:
+
+- Added `autonomous/continuous_supervisor.py` with non-overlap locking,
+  cadence enforcement, heartbeat/status snapshots, pause/resume controls, and
+  structured fault/result records.
+- Wired the live lifecycle worker and `/api/autonomous/live/status`
+  auto-advance path through the supervisor for continuous cycles.
+- Supervisor status is exposed in `/api/autonomous/live/status` under
+  `continuous_supervisor`.
+- Continuous cycles pause fail-closed on broker disconnect, emergency stop,
+  unreconciled protection/lifecycle state, failed live trades, risk lifecycle
+  breach results, or tick exceptions.
+- Fixed a continuous-cycle market-not-suitable halt path to format the runner
+  result decision payload instead of referencing an undefined local variable.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_continuous_supervisor.py tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveLifecycleTick --basetemp=.pytest-tmp -q`
+  (`13 passed`).
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`476 passed`).
+
+Known limitations and manual checks:
+
+- The supervisor is a coordinator only; it does not perform restart recovery,
+  broker/local reconciliation, automatic replacement protection, order
+  cancellation, or panic flattening.
+- The existing lifecycle worker still owns background threading; the supervisor
+  controls whether a continuous tick is allowed to run and why it pauses.
+- Dedicated dashboard controls for supervisor pause/resume remain part of the
+  future control tower phase.
 
 ### Phase 8 — Restart recovery and broker reconciliation
 

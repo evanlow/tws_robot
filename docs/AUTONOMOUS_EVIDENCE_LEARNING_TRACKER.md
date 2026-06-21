@@ -38,6 +38,7 @@ Legend:
 | Duplicate-order diagnostics | Done | Current PR continuing #161; active idempotency locks and same-symbol open trades now emit duplicate-order-blocked lifecycle diagnostics for future operational incident metrics |
 | Market-data health diagnostics | Done | Current PR continuing #161; trade plans now emit quote freshness, spread, last-vs-mid, feed-health, and market-open diagnostics for future stale-quote and degraded-feed metrics |
 | Broker fill ingestion diagnostics | Done | Current PR continuing #161; broker execution and commission callbacks now update trade fills, lifecycle states, and realized outcome evidence for future fill-quality and partial-fill metrics |
+| Continuous supervisor diagnostics | Done | Current PR continuing #161; continuous cycles now expose heartbeat, pause reason, cadence/overlap counters, and operational fault diagnostics for future incident metrics |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -228,6 +229,10 @@ evidence-aware sizing and by future operational metrics:
 - Broker fill ingestion records execution IDs, order IDs, side, quantity,
   price, commission, timestamp, exchange/liquidity when available, partial-fill
   aggregation, and closed-trade outcome evidence.
+- Continuous supervisor diagnostics record heartbeat, pause reason, last cycle
+  result, cadence skips, overlap blocks, and operational fault codes for
+  broker disconnect, emergency stop, lifecycle recovery, risk lifecycle breach,
+  and tick exceptions.
 
 Test evidence:
 
@@ -244,6 +249,8 @@ Test evidence:
   (`57 passed`).
 - Passed: `.venv\Scripts\python.exe -m pytest tests\test_broker_fill_ingestor.py tests\test_tws_bridge.py::TestBridgeBrokerFillEvents tests\test_autonomous_trade_store.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
   (`22 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_continuous_supervisor.py tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveLifecycleTick --basetemp=.pytest-tmp -q`
+  (`13 passed`).
 - Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
   completed with `2799 passed`, `18 skipped`, and `6 failed`; the failures
   were existing autonomous/live-runner expectation issues outside this PR's
@@ -268,6 +275,8 @@ Known limitations:
   they are not yet consumed by an adaptive evidence calibrator or dashboard.
 - Broker fill ingestion updates outcome evidence, but it does not yet resize
   child orders after partial fills or expose a dedicated fill-quality dashboard.
+- Continuous supervisor diagnostics are operational controls only; they are not
+  yet consumed by an adaptive evidence calibrator or incident dashboard.
 
 ## 5. Maintenance rules
 

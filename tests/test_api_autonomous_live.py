@@ -190,7 +190,10 @@ class TestLiveStatus:
         assert "live_runner_config" in body
         assert "gates" in body
         assert "autonomous_live_mode" in body
+        assert "continuous_supervisor" in body
         assert body["live_runner_config"]["live_enabled"] is True
+        assert body["continuous_supervisor"]["state"] == "IDLE"
+        assert body["continuous_supervisor"]["paused"] is False
 
     def test_gates_show_live_mode_false_when_not_connected(self, app, client, tmp_path):
         _install_live_runner(app, tmp_path)

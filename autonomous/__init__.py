@@ -10,6 +10,7 @@ from autonomous.autonomous_config import AutonomousTradingConfig, AutonomousMode
 from autonomous.basket_risk_allocator import BasketRiskAllocation, BasketRiskAllocator, BasketRiskLegDecision
 from autonomous.broker_fill_ingestor import BrokerFillIngestionResult, BrokerFillIngestor
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
+from autonomous.continuous_supervisor import ContinuousSupervisor, SupervisorCycleResult, SupervisorFault
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.drawdown_governor import DrawdownDecision, DrawdownGovernor
 from autonomous.edge_estimator import EdgeEstimate, RuleBasedEdgeEstimator
@@ -55,6 +56,9 @@ __all__ = [
     "BasketRiskLegDecision",
     "BrokerFillIngestionResult",
     "BrokerFillIngestor",
+    "ContinuousSupervisor",
+    "SupervisorCycleResult",
+    "SupervisorFault",
     "AutonomousTradingEngine",
     "AutonomousDecision",
     "DecisionStatus",

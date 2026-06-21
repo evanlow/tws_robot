@@ -680,6 +680,26 @@ autonomous/continuous_supervisor.py
 - Serious operational faults stop new entries.
 - Heartbeat is visible to API/dashboard.
 
+#### Current implementation status
+
+Implemented in the Issue #161 continuation PR:
+
+- `autonomous/continuous_supervisor.py` adds a dependency-injected
+  `ContinuousSupervisor` with non-overlap locking, cadence enforcement,
+  heartbeat/status snapshots, pause/resume controls, and structured
+  `SupervisorFault` / `SupervisorCycleResult` records.
+- The live lifecycle worker and `/api/autonomous/live/status` auto-advance path
+  route continuous cycles through the supervisor so status polling cannot
+  bypass overlap or cadence controls.
+- The supervisor pauses fail-closed on broker disconnect, emergency stop,
+  unreconciled protection/lifecycle recovery state, failed live trades, risk
+  lifecycle breach results, and tick exceptions.
+- `/api/autonomous/live/status` exposes `continuous_supervisor` state including
+  heartbeat, pause reason, last result, counters, and next eligible run time.
+
+This phase is a coordination layer only. It does not add order submission,
+automatic recovery, cancel/replace, live-mode enablement, or capital scaling.
+
 ### Phase 8 — Restart recovery and broker reconciliation
 
 #### Problem
@@ -898,7 +918,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add continuous-run supervisor
+Add restart recovery and broker reconciliation
 ```
 
-This should implement Phase 7 of the continuous autonomous live readiness roadmap.
+This should implement Phase 8 of the continuous autonomous live readiness roadmap.
