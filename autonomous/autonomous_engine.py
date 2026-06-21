@@ -507,6 +507,7 @@ class AutonomousTradingEngine:
             required_cash=float(plan_dict.get("required_cash") or 0.0),
             target_mode=str(plan_dict.get("target_mode") or ""),
             sizing=dict(plan_dict.get("sizing") or {}),
+            market_data_health=dict(plan_dict.get("market_data_health") or {}),
             execution_quality=dict(plan_dict.get("execution_quality") or {}),
         )
 

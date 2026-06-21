@@ -566,6 +566,35 @@ autonomous/market_data_health.py
 - Missing bid/ask can be configured to block in live mode.
 - Stale-data reason is visible in rejection output.
 
+#### Current implementation status
+
+Implemented in the Issue #161 continuation PR:
+
+- `autonomous/market_data_health.py` evaluates quote freshness, bid/ask
+  presence, crossed/wide spreads, last-vs-mid deviation, market-open state,
+  and feed health.
+- `AutonomousTradingConfig` exposes market-data guard settings:
+  `market_data_health_guard_enabled`,
+  `market_data_max_quote_age_seconds`, `market_data_max_spread_pct`,
+  `market_data_max_last_mid_deviation_pct`,
+  `market_data_block_stale_quotes_live`,
+  `market_data_block_missing_bid_ask_live`,
+  `market_data_block_missing_timestamp_live`,
+  `market_data_block_feed_unhealthy_live`, and
+  `market_data_block_market_closed_live`.
+- `TradePlanner` evaluates market-data health before execution-quality
+  checks, blocks assisted-live stale/degraded/closed-market plans, records
+  rejection reasons, and attaches `market_data_health` diagnostics to
+  successful trade plans.
+- `TechnicalAnalysisSignalProvider` maps available quote metadata into
+  candidate `extras` so planner diagnostics can be evidence-ready.
+- Missing bid/ask blocking remains configurable; the default preserves
+  current recommend-only and assisted-live fixtures while allowing operators
+  to fail closed by setting `market_data_block_missing_bid_ask_live=True`.
+
+This phase does not add any new live-order submission path and does not
+enable live trading.
+
 ### Phase 6 — Automatic broker-fill ingestion
 
 #### Problem
@@ -846,7 +875,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add quote freshness and market-data health guard
+Add automatic broker-fill ingestion
 ```
 
-This should implement Phase 5 of the continuous autonomous live readiness roadmap.
+This should implement Phase 6 of the continuous autonomous live readiness roadmap.

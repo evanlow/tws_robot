@@ -36,6 +36,7 @@ Legend:
 | Order lifecycle diagnostics | Done | Current PR continuing #161; live-runner order lifecycle events now record planned, submitted, rejected, filled, closed, pending-protection, confirmed-protection, recovery-required, and orphaned states for future operational metrics |
 | Broker protection diagnostics | Done | Current PR continuing #161; open live trades now emit confirmed-protection or recovery-required diagnostics for future unconfirmed-protection metrics |
 | Duplicate-order diagnostics | Done | Current PR continuing #161; active idempotency locks and same-symbol open trades now emit duplicate-order-blocked lifecycle diagnostics for future operational incident metrics |
+| Market-data health diagnostics | Done | Current PR continuing #161; trade plans now emit quote freshness, spread, last-vs-mid, feed-health, and market-open diagnostics for future stale-quote and degraded-feed metrics |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -204,9 +205,9 @@ Checklist:
 
 ## 4. Current PR note
 
-The basket-level risk allocation PR does not complete an evidence-learning EL
-phase. It improves the evidence substrate used by future EL6 evidence-aware
-sizing and by future operational metrics:
+The current Issue #161 continuation PR does not complete an evidence-learning
+EL phase. It improves the evidence substrate used by future EL6
+evidence-aware sizing and by future operational metrics:
 
 - `basket_plan.risk_allocation` records basket risk budget, total planned
   stop-risk, budget usage, and per-leg risk decisions.
@@ -220,6 +221,9 @@ sizing and by future operational metrics:
   `RECOVERY_REQUIRED` lifecycle events for open live trades.
 - Idempotency locks record live submission attempts and duplicate-block
   diagnostics without adding any new order submission path.
+- `trade_plan.market_data_health` records quote age, bid/ask/last age,
+  spread, last-vs-mid deviation, feed-health, market-open status, warnings,
+  and rejection reasons for stale/degraded quote analysis.
 
 Test evidence:
 
@@ -232,6 +236,8 @@ Test evidence:
   (`8 passed`).
 - Passed: `.venv\Scripts\python.exe -m pytest tests/test_idempotency.py tests/test_order_lifecycle.py tests/test_autonomous_live_runner_basket.py --basetemp=.pytest-tmp -q`
   (`15 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_market_data_health.py tests\test_trade_planner_execution_quality.py tests\test_trade_planner.py tests\test_technical_analysis_signal_provider.py tests\test_autonomous_engine_basket.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`57 passed`).
 - Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
   completed with `2799 passed`, `18 skipped`, and `6 failed`; the failures
   were existing autonomous/live-runner expectation issues outside this PR's
@@ -252,6 +258,8 @@ Known limitations:
   calibrator, adaptive edge estimator, or promotion report.
 - Idempotency and duplicate-block events are operational diagnostics only in
   this PR; they are not yet consumed by an adaptive evidence calibrator.
+- Market-data health events are pre-submission operational diagnostics only;
+  they are not yet consumed by an adaptive evidence calibrator or dashboard.
 
 ## 5. Maintenance rules
 

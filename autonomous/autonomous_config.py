@@ -45,6 +45,15 @@ class AutonomousTradingConfig:
     execution_max_slippage_pct: float = 0.005
     execution_max_price_move_pct: float = 0.01
     execution_block_on_missing_quote: bool = False
+    market_data_health_guard_enabled: bool = True
+    market_data_max_quote_age_seconds: float = 60.0
+    market_data_max_spread_pct: float = 0.003
+    market_data_max_last_mid_deviation_pct: float = 0.01
+    market_data_block_stale_quotes_live: bool = True
+    market_data_block_missing_bid_ask_live: bool = False
+    market_data_block_missing_timestamp_live: bool = False
+    market_data_block_feed_unhealthy_live: bool = True
+    market_data_block_market_closed_live: bool = True
 
     risk_lifecycle_guard_enabled: bool = True
     risk_lifecycle_recent_record_limit: int = 1000
@@ -141,9 +150,13 @@ class AutonomousTradingConfig:
             ("execution_max_spread_pct", self.execution_max_spread_pct),
             ("execution_max_slippage_pct", self.execution_max_slippage_pct),
             ("execution_max_price_move_pct", self.execution_max_price_move_pct),
+            ("market_data_max_spread_pct", self.market_data_max_spread_pct),
+            ("market_data_max_last_mid_deviation_pct", self.market_data_max_last_mid_deviation_pct),
         ):
             if value < 0 or value > 1:
                 raise ValueError(f"{label} must be in [0, 1]")
+        if self.market_data_max_quote_age_seconds < 0:
+            raise ValueError("market_data_max_quote_age_seconds must be >= 0")
         if self.risk_lifecycle_recent_record_limit < 1:
             raise ValueError("risk_lifecycle_recent_record_limit must be >= 1")
         for label, value in (
@@ -223,6 +236,15 @@ class AutonomousTradingConfig:
             "execution_max_slippage_pct": self.execution_max_slippage_pct,
             "execution_max_price_move_pct": self.execution_max_price_move_pct,
             "execution_block_on_missing_quote": self.execution_block_on_missing_quote,
+            "market_data_health_guard_enabled": self.market_data_health_guard_enabled,
+            "market_data_max_quote_age_seconds": self.market_data_max_quote_age_seconds,
+            "market_data_max_spread_pct": self.market_data_max_spread_pct,
+            "market_data_max_last_mid_deviation_pct": self.market_data_max_last_mid_deviation_pct,
+            "market_data_block_stale_quotes_live": self.market_data_block_stale_quotes_live,
+            "market_data_block_missing_bid_ask_live": self.market_data_block_missing_bid_ask_live,
+            "market_data_block_missing_timestamp_live": self.market_data_block_missing_timestamp_live,
+            "market_data_block_feed_unhealthy_live": self.market_data_block_feed_unhealthy_live,
+            "market_data_block_market_closed_live": self.market_data_block_market_closed_live,
             "risk_lifecycle_guard_enabled": self.risk_lifecycle_guard_enabled,
             "risk_lifecycle_recent_record_limit": self.risk_lifecycle_recent_record_limit,
             "max_daily_loss_r": self.max_daily_loss_r,

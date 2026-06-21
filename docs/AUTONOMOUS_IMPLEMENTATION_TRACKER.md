@@ -66,8 +66,8 @@ Legend:
 | 1 | Basket-level risk allocation | Done | Current PR continuing #161 |
 | 2 | Broker order lifecycle state machine | Done | Current PR continuing #161 |
 | 3 | Broker-side protective stop / bracket verification | Done | Current PR continuing #161 |
-| 4 | Idempotency and duplicate-order prevention | Planned | Next implementation PR |
-| 5 | Quote freshness and market-data health guard | Planned | TBD |
+| 4 | Idempotency and duplicate-order prevention | Done | Current PR continuing #161 |
+| 5 | Quote freshness and market-data health guard | Done | Current PR continuing #161 |
 | 6 | Automatic broker-fill ingestion | Planned | TBD |
 | 7 | Continuous-run supervisor | Planned | TBD |
 | 8 | Restart recovery and broker reconciliation | Planned | TBD |
@@ -290,20 +290,54 @@ Known limitations and manual checks:
 - The idempotency key intentionally blocks by symbol/action for live entries,
   not just by exact signal timestamp, to avoid duplicate exposure after a
   restart window.
-- Quote freshness, automatic fill ingestion, and continuous supervisor
-  recovery are still future phases.
+- Automatic fill ingestion and continuous supervisor recovery are still
+  future phases.
 
 ### Phase 5 — Quote freshness and market-data health guard
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Track bid/ask/last timestamps.
-- [ ] Block stale quote in live mode.
-- [ ] Add feed-health diagnostics.
-- [ ] Add live-mode missing bid/ask block option.
-- [ ] Add tests for stale and missing quotes.
+- [x] Track bid/ask/last timestamps.
+- [x] Block stale quote in live mode.
+- [x] Add feed-health diagnostics.
+- [x] Add live-mode missing bid/ask block option.
+- [x] Add tests for stale and missing quotes.
+
+Implementation notes:
+
+- Added `autonomous/market_data_health.py` with a source-agnostic
+  `MarketDataHealthGuard` and serializable diagnostics.
+- Added configurable guard settings to `AutonomousTradingConfig`.
+- `TradePlanner` now runs market-data health before execution-quality
+  checks, rejects assisted-live stale/degraded/closed-market plans, records
+  rejection reasons, and attaches `market_data_health` to trade-plan output.
+- `TechnicalAnalysisSignalProvider` maps bid/ask/last timestamps, feed
+  status, feed-health, and market-open metadata into candidate extras when
+  those fields are available.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_market_data_health.py tests\test_trade_planner_execution_quality.py tests\test_trade_planner.py tests\test_technical_analysis_signal_provider.py tests\test_autonomous_engine_basket.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`57 passed`).
+
+Smoke-test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
+  (`473 passed`).
+
+Known limitations and manual checks:
+
+- Missing bid/ask blocking is configurable and defaults to non-blocking to
+  preserve current assisted-live fixtures; operators can fail closed with
+  `market_data_block_missing_bid_ask_live=True`.
+- Missing quote timestamp blocking is configurable and defaults to
+  non-blocking for compatibility with providers that do not yet publish
+  quote timestamps.
+- The guard is pre-submission only; it does not subscribe to market data or
+  repair a degraded feed.
+- Automatic fill ingestion remains Phase 6.
 
 ### Phase 6 — Automatic broker-fill ingestion
 

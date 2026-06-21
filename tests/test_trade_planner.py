@@ -306,3 +306,22 @@ def test_split_caps_invalid_value_rejected():
         AutonomousTradingConfig(max_position_deployable_cash_pct=0.0)
     with pytest.raises(ValueError):
         AutonomousTradingConfig(max_position_equity_pct=1.5)
+
+
+def test_market_data_health_config_serialises_and_validates():
+    import pytest
+
+    cfg = AutonomousTradingConfig(
+        market_data_max_quote_age_seconds=45,
+        market_data_block_missing_bid_ask_live=True,
+    )
+
+    payload = cfg.to_dict()
+    assert payload["market_data_health_guard_enabled"] is True
+    assert payload["market_data_max_quote_age_seconds"] == 45
+    assert payload["market_data_block_missing_bid_ask_live"] is True
+
+    with pytest.raises(ValueError):
+        AutonomousTradingConfig(market_data_max_quote_age_seconds=-1)
+    with pytest.raises(ValueError):
+        AutonomousTradingConfig(market_data_max_spread_pct=1.5)

@@ -16,6 +16,7 @@ from autonomous.execution_quality import ExecutionQualityDecision, ExecutionQual
 from autonomous.feature_builder import FeatureBuilder
 from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDecision
 from autonomous.idempotency import IdempotencyLock, IdempotencyStore, LockAcquisition
+from autonomous.market_data_health import MarketDataHealthDecision, MarketDataHealthGuard
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.outcome_reconciliation import FillSummary, OutcomeReconciliation, OutcomeReconciler
 from autonomous.order_lifecycle import OrderLifecycleEvent, OrderLifecycleState, OrderLifecycleStore
@@ -73,6 +74,8 @@ __all__ = [
     "IdempotencyLock",
     "IdempotencyStore",
     "LockAcquisition",
+    "MarketDataHealthDecision",
+    "MarketDataHealthGuard",
     "LossLimitDecision",
     "LossLimitGuard",
     "OutcomeEvidenceWriter",
