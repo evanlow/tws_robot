@@ -738,6 +738,44 @@ MANUAL_INTERVENTION_REQUIRED
 - Recovery decisions are logged.
 - Operator can see what needs manual action.
 
+#### Current implementation status
+
+Implemented in the current PR continuing issue #161.
+
+The implementation adds `autonomous/recovery_manager.py` and a read-only
+startup/recovery classifier used by `AutonomousLiveRunner.evaluate_gates()`.
+The recovery report reconciles:
+
+- local autonomous trade-store state;
+- append-only order lifecycle current states;
+- active/stale idempotency locks;
+- broker positions;
+- broker-visible open orders;
+- broker-side protection diagnostics;
+- deployable-cash snapshot.
+
+Startup/readiness is classified as:
+
+```text
+SAFE_TO_TRADE
+SAFE_TO_MONITOR_ONLY
+RECOVERY_REQUIRED
+MANUAL_INTERVENTION_REQUIRED
+```
+
+`/api/autonomous/live/status` exposes the recovery classification through the
+existing live-runner readiness payload.  Continuous supervision pauses
+fail-closed when recovery is required.
+
+The recovery manager is deliberately conservative.  Local/broker position
+mismatches, unmatched active broker BUY orders, stale or trade-less
+idempotency locks, broker protection failures, and recovery lifecycle states
+block new entries until an operator reviews or clears the condition.
+
+This phase does not submit replacement stop orders, cancel open orders, flatten
+positions, auto-clear stale locks, or enable live trading.  It only classifies
+and blocks unsafe restart/resume states.
+
 ### Phase 9 — Enhanced emergency stop operations
 
 #### Current state
@@ -918,7 +956,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add restart recovery and broker reconciliation
+Add enhanced emergency stop operations
 ```
 
-This should implement Phase 8 of the continuous autonomous live readiness roadmap.
+This should implement Phase 9 of the continuous autonomous live readiness roadmap.

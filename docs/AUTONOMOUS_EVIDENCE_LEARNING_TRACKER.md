@@ -32,13 +32,14 @@ Legend:
 | Sector / time-of-day regime context | Done | Implemented in PR #172 |
 | Risk lifecycle using outcome records | Done | Implemented in PR #171 |
 | Chronological validation report | Done | Implemented in PR #172 |
-| Basket risk diagnostics | Done | Current PR continuing #161; basket plans now emit shared risk budget, per-leg allocation, planned risk, and rejection/resize reasons for future evidence-aware sizing |
-| Order lifecycle diagnostics | Done | Current PR continuing #161; live-runner order lifecycle events now record planned, submitted, rejected, filled, closed, pending-protection, confirmed-protection, recovery-required, and orphaned states for future operational metrics |
-| Broker protection diagnostics | Done | Current PR continuing #161; open live trades now emit confirmed-protection or recovery-required diagnostics for future unconfirmed-protection metrics |
-| Duplicate-order diagnostics | Done | Current PR continuing #161; active idempotency locks and same-symbol open trades now emit duplicate-order-blocked lifecycle diagnostics for future operational incident metrics |
-| Market-data health diagnostics | Done | Current PR continuing #161; trade plans now emit quote freshness, spread, last-vs-mid, feed-health, and market-open diagnostics for future stale-quote and degraded-feed metrics |
-| Broker fill ingestion diagnostics | Done | Current PR continuing #161; broker execution and commission callbacks now update trade fills, lifecycle states, and realized outcome evidence for future fill-quality and partial-fill metrics |
-| Continuous supervisor diagnostics | Done | Current PR continuing #161; continuous cycles now expose heartbeat, pause reason, cadence/overlap counters, and operational fault diagnostics for future incident metrics |
+| Basket risk diagnostics | Done | PR #175; basket plans now emit shared risk budget, per-leg allocation, planned risk, and rejection/resize reasons for future evidence-aware sizing |
+| Order lifecycle diagnostics | Done | PR #175; live-runner order lifecycle events now record planned, submitted, rejected, filled, closed, pending-protection, confirmed-protection, recovery-required, and orphaned states for future operational metrics |
+| Broker protection diagnostics | Done | PR #175; open live trades now emit confirmed-protection or recovery-required diagnostics for future unconfirmed-protection metrics |
+| Duplicate-order diagnostics | Done | PR #175; active idempotency locks and same-symbol open trades now emit duplicate-order-blocked lifecycle diagnostics for future operational incident metrics |
+| Market-data health diagnostics | Done | PR #175; trade plans now emit quote freshness, spread, last-vs-mid, feed-health, and market-open diagnostics for future stale-quote and degraded-feed metrics |
+| Broker fill ingestion diagnostics | Done | PR #175; broker execution and commission callbacks now update trade fills, lifecycle states, and realized outcome evidence for future fill-quality and partial-fill metrics |
+| Continuous supervisor diagnostics | Done | PR #175; continuous cycles now expose heartbeat, pause reason, cadence/overlap counters, and operational fault diagnostics for future incident metrics |
+| Restart recovery diagnostics | Done | Current PR continuing #161; live readiness now exposes broker/local recovery classifications, mismatch reasons, stale idempotency locks, unmatched broker orders, and recovery-required states for future operational metrics |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -207,7 +208,7 @@ Checklist:
 
 ## 4. Current PR note
 
-The current Issue #161 continuation PR does not complete an evidence-learning
+The current Issue #161 continuation work does not complete an evidence-learning
 EL phase. It improves the evidence substrate used by future EL6
 evidence-aware sizing and by future operational metrics:
 
@@ -233,6 +234,12 @@ evidence-aware sizing and by future operational metrics:
   result, cadence skips, overlap blocks, and operational fault codes for
   broker disconnect, emergency stop, lifecycle recovery, risk lifecycle breach,
   and tick exceptions.
+- Restart recovery diagnostics classify readiness as `SAFE_TO_TRADE`,
+  `SAFE_TO_MONITOR_ONLY`, `RECOVERY_REQUIRED`, or
+  `MANUAL_INTERVENTION_REQUIRED`, with structured issue codes for
+  broker/local mismatches, unmatched active broker orders, stale idempotency
+  locks, missing broker protection, lifecycle recovery states, and risk
+  lifecycle blocks.
 
 Test evidence:
 
@@ -277,6 +284,9 @@ Known limitations:
   child orders after partial fills or expose a dedicated fill-quality dashboard.
 - Continuous supervisor diagnostics are operational controls only; they are not
   yet consumed by an adaptive evidence calibrator or incident dashboard.
+- Restart recovery diagnostics are exposed through live readiness only; they
+  are not yet aggregated into EL operational metrics, promotion reports, or a
+  dedicated control-tower view.
 
 ## 5. Maintenance rules
 
