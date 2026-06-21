@@ -39,7 +39,8 @@ Legend:
 | Market-data health diagnostics | Done | PR #175; trade plans now emit quote freshness, spread, last-vs-mid, feed-health, and market-open diagnostics for future stale-quote and degraded-feed metrics |
 | Broker fill ingestion diagnostics | Done | PR #175; broker execution and commission callbacks now update trade fills, lifecycle states, and realized outcome evidence for future fill-quality and partial-fill metrics |
 | Continuous supervisor diagnostics | Done | PR #175; continuous cycles now expose heartbeat, pause reason, cadence/overlap counters, and operational fault diagnostics for future incident metrics |
-| Restart recovery diagnostics | Done | Current PR continuing #161; live readiness now exposes broker/local recovery classifications, mismatch reasons, stale idempotency locks, unmatched broker orders, and recovery-required states for future operational metrics |
+| Restart recovery diagnostics | Done | PR #176; live readiness now exposes broker/local recovery classifications, mismatch reasons, stale idempotency locks, unmatched broker orders, and recovery-required states for future operational metrics |
+| Emergency stop operations diagnostics | Done | Current PR continuing #161; autonomous emergency stop/reset now exposes marker state, supervisor pause state, pending-entry cleanup reports, preserved protective exits, and reset audit events for future operational metrics |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -209,84 +210,47 @@ Checklist:
 ## 4. Current PR note
 
 The current Issue #161 continuation work does not complete an evidence-learning
-EL phase. It improves the evidence substrate used by future EL6
-evidence-aware sizing and by future operational metrics:
+EL phase. It improves the operational evidence substrate used by future EL7
+capital-promotion reports and operational incident metrics:
 
-- `basket_plan.risk_allocation` records basket risk budget, total planned
-  stop-risk, budget usage, and per-leg risk decisions.
-- Adjusted leg `sizing` diagnostics include a `basket_risk` block.
-- The allocator can only reduce or reject basket legs; it cannot bypass hard
-  sizing, risk, drawdown, or operator caps.
-- `order_lifecycle` records live order state transitions for future rejected
-  order rate, protection-event, fill-state, duplicate-order-blocked, and
-  recovery-required metrics.
-- Broker protection verification records `PROTECTIVE_STOP_CONFIRMED` or
-  `RECOVERY_REQUIRED` lifecycle events for open live trades.
-- Idempotency locks record live submission attempts and duplicate-block
-  diagnostics without adding any new order submission path.
-- `trade_plan.market_data_health` records quote age, bid/ask/last age,
-  spread, last-vs-mid deviation, feed-health, market-open status, warnings,
-  and rejection reasons for stale/degraded quote analysis.
-- Broker fill ingestion records execution IDs, order IDs, side, quantity,
-  price, commission, timestamp, exchange/liquidity when available, partial-fill
-  aggregation, and closed-trade outcome evidence.
-- Continuous supervisor diagnostics record heartbeat, pause reason, last cycle
-  result, cadence skips, overlap blocks, and operational fault codes for
-  broker disconnect, emergency stop, lifecycle recovery, risk lifecycle breach,
-  and tick exceptions.
-- Restart recovery diagnostics classify readiness as `SAFE_TO_TRADE`,
-  `SAFE_TO_MONITOR_ONLY`, `RECOVERY_REQUIRED`, or
-  `MANUAL_INTERVENTION_REQUIRED`, with structured issue codes for
-  broker/local mismatches, unmatched active broker orders, stale idempotency
-  locks, missing broker protection, lifecycle recovery states, and risk
-  lifecycle blocks.
+- Autonomous emergency-stop responses now expose marker state, manual reset
+  requirement, shared risk-manager emergency-stop state, and the explicit
+  separation between Emergency Stop and Panic Flatten.
+- Emergency stop now pauses the live continuous supervisor and returns
+  supervisor pause diagnostics for future incident-rate metrics.
+- Optional pending-entry cleanup returns per-entry cancel-forwarding reports
+  without cancelling target or stop protective exit order IDs.
+- Autonomous emergency reset requires explicit confirmation and writes an
+  audit event while keeping autonomous modes off.
 
 Test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp`
-- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop --basetemp=.pytest-tmp -q`
   (`4 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp -q`
-  (`49 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_tws_bridge.py::TestBridgeOpenOrderSnapshots --basetemp=.pytest-tmp -q`
-  (`8 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests/test_idempotency.py tests/test_order_lifecycle.py tests/test_autonomous_live_runner_basket.py --basetemp=.pytest-tmp -q`
-  (`15 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_market_data_health.py tests\test_trade_planner_execution_quality.py tests\test_trade_planner.py tests\test_technical_analysis_signal_provider.py tests\test_autonomous_engine_basket.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
-  (`57 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_broker_fill_ingestor.py tests\test_tws_bridge.py::TestBridgeBrokerFillEvents tests\test_autonomous_trade_store.py tests\test_order_lifecycle.py --basetemp=.pytest-tmp -q`
-  (`22 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_continuous_supervisor.py tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveLifecycleTick --basetemp=.pytest-tmp -q`
-  (`13 passed`).
-- Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
-  completed with `2799 passed`, `18 skipped`, and `6 failed`; the failures
-  were existing autonomous/live-runner expectation issues outside this PR's
-  evidence-learning or basket-risk diagnostics path.
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveHalt tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop tests\test_web_api.py::TestEmergencyAPI --basetemp=.pytest-tmp -q`
+  (`16 passed`).
 
 Smoke-test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -vv --tb=short -o faulthandler_timeout=60`
-  (`476 passed`).
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+- The first smoke group printed a non-failing sparkline fallback message after
+  pytest completed; the command exited 0.
 
 Known limitations:
 
-- No adaptive edge estimator, setup eligibility gate, or evidence-aware sizing
-  overlay is implemented in this PR.
-- Basket risk diagnostics should be consumed by future evidence-learning
-  modules, but no automatic capital promotion or live-mode expansion is added.
-- Order lifecycle events are not yet surfaced through a dedicated setup
-  calibrator, adaptive edge estimator, or promotion report.
-- Idempotency and duplicate-block events are operational diagnostics only in
-  this PR; they are not yet consumed by an adaptive evidence calibrator.
-- Market-data health events are pre-submission operational diagnostics only;
-  they are not yet consumed by an adaptive evidence calibrator or dashboard.
-- Broker fill ingestion updates outcome evidence, but it does not yet resize
-  child orders after partial fills or expose a dedicated fill-quality dashboard.
-- Continuous supervisor diagnostics are operational controls only; they are not
-  yet consumed by an adaptive evidence calibrator or incident dashboard.
-- Restart recovery diagnostics are exposed through live readiness only; they
-  are not yet aggregated into EL operational metrics, promotion reports, or a
-  dedicated control-tower view.
+- No adaptive edge estimator, setup eligibility gate, evidence-aware sizing
+  overlay, or capital promotion report is implemented in this PR.
+- Emergency-stop diagnostics are operational controls only; they are not yet
+  aggregated into EL operational metrics, promotion reports, or a dedicated
+  control-tower view.
+- Panic Flatten remains a separate future explicit control and is not part of
+  this emergency-stop implementation.
 
 ## 5. Maintenance rules
 

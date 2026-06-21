@@ -70,8 +70,8 @@ Legend:
 | 5 | Quote freshness and market-data health guard | Done | PR #175 |
 | 6 | Automatic broker-fill ingestion | Done | PR #175 |
 | 7 | Continuous-run supervisor | Done | PR #175 |
-| 8 | Restart recovery and broker reconciliation | Done | Current PR continuing #161 |
-| 9 | Enhanced emergency stop operations | Planned | TBD |
+| 8 | Restart recovery and broker reconciliation | Done | PR #176 |
+| 9 | Enhanced emergency stop operations | Done | Current PR continuing #161 |
 | 10 | Control tower dashboard/API | Planned | TBD |
 | 11 | Replay / chaos testing harness | Planned | TBD |
 | 12 | Capital ramp and promotion gates | Planned | TBD |
@@ -502,16 +502,64 @@ Known limitations and manual checks:
 
 ### Phase 9 — Enhanced emergency stop operations
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Keep current emergency stop as new-entry blocker.
-- [ ] Add supervisor pause integration.
-- [ ] Add optional pending-entry cancellation.
-- [ ] Preserve protective exits unless panic flatten is explicitly requested.
-- [ ] Add audited reset.
-- [ ] Add dashboard/API visibility.
+- [x] Keep current emergency stop as new-entry blocker.
+- [x] Add supervisor pause integration.
+- [x] Add optional pending-entry cancellation.
+- [x] Preserve protective exits unless panic flatten is explicitly requested.
+- [x] Add audited reset.
+- [x] Add dashboard/API visibility.
+
+Implementation notes:
+
+- Enhanced `POST /api/autonomous/emergency-stop` so it writes the autonomous
+  emergency-stop marker, turns paper/live autonomous modes off, stops lifecycle
+  workers, pauses the live continuous supervisor, and writes an autonomous
+  audit event.
+- Added optional `cancel_pending_entries=true` cleanup that forwards broker
+  cancel requests for pending autonomous entry order IDs only.  Target and stop
+  child order IDs are not cancelled and are reported as preserved protective
+  exits.
+- Added `POST /api/autonomous/emergency-reset`, requiring `confirm=true`, to
+  clear the marker, keep autonomous modes off, resume the supervisor for future
+  explicitly reactivated sessions, and write an audit event.
+- Added structured `emergency_stop` status to `/api/autonomous/status` and
+  `/api/autonomous/live/status`, including marker state, manual reset
+  requirement, shared risk-manager stop state, and the separation between
+  Emergency Stop and Panic Flatten.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop --basetemp=.pytest-tmp -q`
+  (`4 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveHalt tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop tests\test_web_api.py::TestEmergencyAPI --basetemp=.pytest-tmp -q`
+  (`16 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+- The first smoke group printed a non-failing sparkline fallback message after
+  pytest completed; the command exited 0.
+
+Known limitations and manual checks:
+
+- Bulk pending-entry cleanup forwards cancel requests but does not mark trades
+  terminal immediately; broker fill/reject/cancel reconciliation remains the
+  source of truth.
+- Panic Flatten remains a separate future explicit control and is not invoked
+  by emergency stop or reset.
+- Reset clears the autonomous emergency-stop marker and resumes the supervisor
+  object for future sessions, but it does not reactivate paper/live autonomous
+  mode or enable live trading.
 
 ### Phase 10 — Control tower dashboard/API
 
