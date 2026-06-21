@@ -64,8 +64,8 @@ Legend:
 | Phase | Work item | Status | Target PR |
 |---:|---|---|---|
 | 1 | Basket-level risk allocation | Done | Current PR continuing #161 |
-| 2 | Broker order lifecycle state machine | Planned | Next implementation PR |
-| 3 | Broker-side protective stop / bracket verification | Planned | TBD |
+| 2 | Broker order lifecycle state machine | Done | Current PR continuing #161 |
+| 3 | Broker-side protective stop / bracket verification | Planned | Next implementation PR |
 | 4 | Idempotency and duplicate-order prevention | Planned | TBD |
 | 5 | Quote freshness and market-data health guard | Planned | TBD |
 | 6 | Automatic broker-fill ingestion | Planned | TBD |
@@ -131,7 +131,7 @@ Test evidence:
 Smoke-test evidence:
 
 - Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
-  (`471 passed`). The command exited 0; it printed a non-failing sparkline
+  (`472 passed`). The command exited 0; it printed a non-failing sparkline
   fallback message after pytest completed.
 
 Known limitations and manual checks:
@@ -147,16 +147,54 @@ Known limitations and manual checks:
 
 ### Phase 2 — Broker order lifecycle state machine
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Add lifecycle state model.
-- [ ] Persist lifecycle events.
-- [ ] Track submitted, acknowledged, partial, filled, cancelled, rejected, closed, reconciled states.
-- [ ] Add recovery states.
-- [ ] Add lifecycle diagnostics to live runner output.
-- [ ] Add tests for state transitions.
+- [x] Add lifecycle state model.
+- [x] Persist lifecycle events.
+- [x] Track submitted, filled, rejected, closed, and recovery states.
+- [x] Add recovery states.
+- [x] Add lifecycle diagnostics to live runner output.
+- [x] Add tests for state transitions.
+
+Implementation notes:
+
+- Added `autonomous/order_lifecycle.py` with `OrderLifecycleState`,
+  `OrderLifecycleEvent`, and append-only `OrderLifecycleStore`.
+- Added `order_lifecycle_store_path` to `AutonomousLiveRunnerConfig`.
+- `AutonomousLiveRunner` and the basket live-runner patch now write lifecycle
+  events around the existing `OrderExecutor` path.
+- Submitted entry orders emit `PLANNED` then `SUBMITTED`.
+- Bracket child orders emit `TARGET_PENDING` or
+  `PROTECTIVE_STOP_PENDING`.
+- Rejected orders emit `REJECTED`.
+- Bracket target/stop fills emit child `FILLED` and parent `CLOSED`.
+- Stale open trades whose broker position is no longer present emit
+  `ORPHANED_ORDER`.
+- This does not implement broker-side acknowledgement or protection
+  verification; those remain Phase 3.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`4 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp -q`
+  (`49 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py::TestPortfolioPersistence --basetemp=.pytest-tmp -q`
+  (`9 passed`).
+- Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
+  (`472 passed`).
+
+Known limitations and manual checks:
+
+- Lifecycle recording is file-backed JSONL and does not yet reconcile IBKR
+  acknowledgement callbacks into `ACKNOWLEDGED`.
+- Protective stop child orders are marked pending, not confirmed; broker-side
+  protection verification remains required before unattended continuous live
+  operation.
+- Partial-fill state is modeled but not yet automatically ingested; automatic
+  fill ingestion remains Phase 6.
 
 ### Phase 3 — Broker-side protective stop / bracket verification
 

@@ -76,6 +76,11 @@ class AutonomousTrade:
     # to reconcile a target/stop fill into a CLOSED status.
     target_order_id: Optional[int] = None
     stop_order_id: Optional[int] = None
+    # Order-lifecycle event IDs (live trades only).  These link the coarse
+    # trade record to append-only broker order transition records.
+    entry_lifecycle_id: Optional[str] = None
+    target_lifecycle_id: Optional[str] = None
+    stop_lifecycle_id: Optional[str] = None
 
     @staticmethod
     def new_id() -> str:

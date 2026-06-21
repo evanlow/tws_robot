@@ -77,7 +77,7 @@ def get_latest_snapshot() -> Optional[Dict[str, Any]]:
     with db.session_scope() as session:
         row = (
             session.query(PortfolioSnapshot)
-            .order_by(PortfolioSnapshot.timestamp.desc())
+            .order_by(PortfolioSnapshot.timestamp.desc(), PortfolioSnapshot.id.desc())
             .first()
         )
         if row is None:
@@ -92,7 +92,7 @@ def get_snapshot_history(limit: int = 30) -> List[Dict[str, Any]]:
     with db.session_scope() as session:
         rows = (
             session.query(PortfolioSnapshot)
-            .order_by(PortfolioSnapshot.timestamp.desc())
+            .order_by(PortfolioSnapshot.timestamp.desc(), PortfolioSnapshot.id.desc())
             .limit(limit)
             .all()
         )
@@ -165,7 +165,7 @@ def get_latest_stock_analysis(
         row = (
             session.query(StockAnalysis)
             .filter(StockAnalysis.symbol == symbol, StockAnalysis.analysis_date > cutoff)
-            .order_by(StockAnalysis.analysis_date.desc())
+            .order_by(StockAnalysis.analysis_date.desc(), StockAnalysis.id.desc())
             .first()
         )
         if row is None:
@@ -184,7 +184,7 @@ def get_stock_analysis_history(
         rows = (
             session.query(StockAnalysis)
             .filter(StockAnalysis.symbol == symbol)
-            .order_by(StockAnalysis.analysis_date.desc())
+            .order_by(StockAnalysis.analysis_date.desc(), StockAnalysis.id.desc())
             .limit(limit)
             .all()
         )

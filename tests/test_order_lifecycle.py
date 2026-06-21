@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from autonomous import (
+    AutonomousLiveRunner,
+    AutonomousLiveRunnerConfig,
+    AutonomousMode,
+    AutonomousTradingConfig,
+    AutonomousTradingEngine,
+    CandidateScanner,
+    CandidateSignal,
+    OrderLifecycleState,
+    OrderLifecycleStore,
+    StaticSignalProvider,
+)
+from autonomous.audit import AuditLogger
+from autonomous.trade_store import AutonomousTrade, OPEN, TradeStore
+from data.cash_availability import CashAvailabilityAnalyzer
+from execution.order_executor import OrderResult, OrderStatus
+
+
+class _RealProvider:
+    pass
+
+
+class _BracketSubmittingExecutor:
+    def __init__(self, parent_id: int = 700, target_id: int = 701, stop_id: int = 702):
+        self.parent_id = parent_id
+        self.target_id = target_id
+        self.stop_id = stop_id
+
+    def execute_signal(self, strategy_name, signal, current_equity, positions):
+        result = OrderResult(
+            status=OrderStatus.SUBMITTED,
+            order_id=self.parent_id,
+            signal=signal,
+            quantity=signal.quantity,
+            price=signal.target_price or 0.0,
+            reason="bracket submitted",
+        )
+        result.bracket_target_order_id = self.target_id
+        result.bracket_stop_order_id = self.stop_id
+        return result
+
+
+def _signal(symbol: str = "AAA") -> CandidateSignal:
+    return CandidateSignal(
+        symbol=symbol,
+        strength_score=120,
+        signal_label="Confirmed Rebound",
+        last_price=100.0,
+        support_price=95.0,
+        resistance_price=110.0,
+    )
+
+
+def _build_engine(tmp_path: Path, *, signal: CandidateSignal) -> AutonomousTradingEngine:
+    provider = StaticSignalProvider([signal])
+    scanner = CandidateScanner(
+        signal_provider=provider,
+        symbols=[{"symbol": signal.symbol, "security": signal.symbol, "sector": "X", "sub_industry": ""}],
+    )
+    cfg = AutonomousTradingConfig(
+        mode=AutonomousMode.ASSISTED_LIVE,
+        allow_live_execution=True,
+        require_user_confirmation=True,
+        max_trades_per_day=5,
+        audit_log_dir=str(tmp_path),
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    return AutonomousTradingEngine(
+        scanner=scanner,
+        cash_analyzer=CashAvailabilityAnalyzer(),
+        account_provider=lambda: {"cash_balance": 100_000, "equity": 100_000},
+        positions_provider=lambda: {},
+        config=cfg,
+        paper_adapter=None,
+        audit_logger=AuditLogger(log_dir=str(tmp_path)),
+    )
+
+
+def _runner(
+    tmp_path: Path,
+    *,
+    lifecycle_store: OrderLifecycleStore,
+    trade_store: TradeStore | None = None,
+    executor=None,
+    rejected_order_ids_provider=None,
+    filled_order_ids_provider=None,
+    broker_positions_provider=None,
+) -> AutonomousLiveRunner:
+    cfg = AutonomousLiveRunnerConfig(
+        live_enabled=True,
+        live_continuous_enabled=True,
+        expected_account_id="U1234567",
+        max_open_live_trades=5,
+        max_live_trades_per_day=5,
+        trade_store_path=str(tmp_path / "live_trades.jsonl"),
+        order_lifecycle_store_path=str(tmp_path / "lifecycle.jsonl"),
+    )
+    store = trade_store or TradeStore(path=str(tmp_path / "live_trades.jsonl"))
+    return AutonomousLiveRunner(
+        engine=_build_engine(tmp_path, signal=_signal()),
+        trade_store=store,
+        live_config=cfg,
+        order_executor=executor or _BracketSubmittingExecutor(),
+        connected_provider=lambda: True,
+        connection_env_provider=lambda: "live",
+        account_id_provider=lambda: "U1234567",
+        signal_provider_provider=lambda: _RealProvider(),
+        emergency_stop_provider=lambda: False,
+        deployable_cash_provider=lambda: 50_000.0,
+        broker_positions_provider=broker_positions_provider,
+        rejected_order_ids_provider=rejected_order_ids_provider,
+        filled_order_ids_provider=filled_order_ids_provider,
+        order_lifecycle_store=lifecycle_store,
+    )
+
+
+def test_order_lifecycle_store_replays_latest_state(tmp_path):
+    store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+
+    store.record_transition(
+        lifecycle_id="order-1",
+        state=OrderLifecycleState.PLANNED,
+        symbol="AAA",
+        reason="planned",
+    )
+    store.record_transition(
+        lifecycle_id="order-1",
+        state=OrderLifecycleState.SUBMITTED,
+        symbol="AAA",
+        broker_order_id=700,
+        reason="submitted",
+    )
+
+    events = store.list_events("order-1")
+    assert [event.state for event in events] == [
+        OrderLifecycleState.PLANNED,
+        OrderLifecycleState.SUBMITTED,
+    ]
+    assert store.get_current("order-1").state == OrderLifecycleState.SUBMITTED
+
+
+def test_live_runner_records_submitted_entry_and_bracket_child_lifecycle(tmp_path):
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    runner = _runner(tmp_path, lifecycle_store=lifecycle_store)
+
+    result = runner.run_once()
+
+    assert result.status == "executed"
+    trade = result.trade["submitted_trades"][0]
+    current = lifecycle_store.current_states()
+    assert current[trade["entry_lifecycle_id"]].state == OrderLifecycleState.SUBMITTED
+    assert current[trade["target_lifecycle_id"]].state == OrderLifecycleState.TARGET_PENDING
+    assert current[trade["stop_lifecycle_id"]].state == OrderLifecycleState.PROTECTIVE_STOP_PENDING
+    assert current[trade["entry_lifecycle_id"]].broker_order_id == 700
+    assert {event["state"] for event in result.order_lifecycle} >= {
+        "PLANNED",
+        "SUBMITTED",
+        "TARGET_PENDING",
+        "PROTECTIVE_STOP_PENDING",
+    }
+
+
+def test_rejected_order_reconciliation_writes_rejected_lifecycle(tmp_path):
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    trade_store = TradeStore(path=str(tmp_path / "live_trades.jsonl"))
+    trade = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol="AAA",
+        trade_type="BUY_SHARES",
+        status=OPEN,
+        entry_order_id=7,
+        entry_time=datetime.now(timezone.utc),
+        entry_limit_price=100.0,
+        quantity=1,
+        entry_lifecycle_id="entry-lifecycle",
+    )
+    trade_store.record_trade(trade)
+    runner = _runner(
+        tmp_path,
+        lifecycle_store=lifecycle_store,
+        trade_store=trade_store,
+        rejected_order_ids_provider=lambda: {7},
+    )
+
+    runner.evaluate_gates()
+
+    assert lifecycle_store.get_current("entry-lifecycle").state == OrderLifecycleState.REJECTED
+
+
+def test_bracket_fill_writes_child_filled_and_parent_closed_lifecycle(tmp_path):
+    lifecycle_store = OrderLifecycleStore(path=str(tmp_path / "lifecycle.jsonl"))
+    trade_store = TradeStore(path=str(tmp_path / "live_trades.jsonl"))
+    trade = AutonomousTrade(
+        autonomous_trade_id=AutonomousTrade.new_id(),
+        symbol="AAA",
+        trade_type="BUY_SHARES",
+        status=OPEN,
+        entry_order_id=700,
+        entry_time=datetime.now(timezone.utc),
+        entry_limit_price=100.0,
+        quantity=1,
+        target_order_id=701,
+        stop_order_id=702,
+        entry_lifecycle_id="entry-lifecycle",
+        target_lifecycle_id="target-lifecycle",
+        stop_lifecycle_id="stop-lifecycle",
+    )
+    trade_store.record_trade(trade)
+    runner = _runner(
+        tmp_path,
+        lifecycle_store=lifecycle_store,
+        trade_store=trade_store,
+        filled_order_ids_provider=lambda: {702},
+    )
+
+    runner.evaluate_gates()
+
+    assert lifecycle_store.get_current("stop-lifecycle").state == OrderLifecycleState.FILLED
+    assert lifecycle_store.get_current("entry-lifecycle").state == OrderLifecycleState.CLOSED

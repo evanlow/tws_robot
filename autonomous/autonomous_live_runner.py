@@ -41,6 +41,14 @@ from autonomous.autonomous_config import AutonomousMode
 from autonomous.autonomous_engine import AutonomousDecision, AutonomousTradingEngine, DecisionStatus
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.signal_provider import StaticSignalProvider
+from autonomous.order_lifecycle import (
+    ENTRY,
+    STOP,
+    TARGET,
+    OrderLifecycleEvent,
+    OrderLifecycleState,
+    OrderLifecycleStore,
+)
 from autonomous.trade_planner import TradeType
 from autonomous.trade_store import (
     CLOSED,
@@ -197,6 +205,7 @@ class AutonomousLiveRunResult:
     rejection_reason: Optional[str] = None
     decision: Optional[Dict[str, Any]] = None
     trade: Optional[Dict[str, Any]] = None
+    order_lifecycle: List[Dict[str, Any]] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     dry_run: bool = False
 
@@ -207,6 +216,7 @@ class AutonomousLiveRunResult:
             "gates": self.gates.to_dict(),
             "decision": self.decision,
             "trade": self.trade,
+            "order_lifecycle": list(self.order_lifecycle),
             "notes": list(self.notes),
             "dry_run": self.dry_run,
         }
@@ -332,6 +342,7 @@ class AutonomousLiveRunner:
         broker_positions_provider: Optional[BrokerPositionsProvider] = None,
         rejected_order_ids_provider: Optional[RejectedOrderIdsProvider] = None,
         filled_order_ids_provider: Optional[FilledOrderIdsProvider] = None,
+        order_lifecycle_store: Optional[OrderLifecycleStore] = None,
         continuous_mode: bool = False,
     ) -> None:
         self._engine = engine
@@ -347,6 +358,9 @@ class AutonomousLiveRunner:
         self._broker_positions_provider = broker_positions_provider
         self._rejected_order_ids_provider = rejected_order_ids_provider
         self._filled_order_ids_provider = filled_order_ids_provider
+        self._lifecycle_store = order_lifecycle_store or OrderLifecycleStore(
+            path=self._config.order_lifecycle_store_path
+        )
         self._continuous_mode = continuous_mode
 
     # ------------------------------------------------------------------
@@ -369,6 +383,11 @@ class AutonomousLiveRunner:
     def order_executor(self) -> Any:
         """The :class:`execution.order_executor.OrderExecutor` wired to this runner."""
         return self._executor
+
+    @property
+    def order_lifecycle_store(self) -> OrderLifecycleStore:
+        """Append-only lifecycle event store for live autonomous broker orders."""
+        return self._lifecycle_store
 
     # ------------------------------------------------------------------
     # Readiness
@@ -634,6 +653,35 @@ class AutonomousLiveRunner:
         if self._config.live_limit_orders_only:
             signal.strategy_name = "AutonomousLiveRunner:LIMIT"
 
+        lifecycle_events: List[Dict[str, Any]] = []
+        entry_lifecycle_id = OrderLifecycleEvent.new_id()
+        try:
+            lifecycle_events.append(
+                self._record_order_lifecycle_transition(
+                    lifecycle_id=entry_lifecycle_id,
+                    state=OrderLifecycleState.PLANNED,
+                    symbol=symbol,
+                    order_role=ENTRY,
+                    reason="live runner prepared order for OrderExecutor",
+                    metadata={
+                        "quantity": quantity,
+                        "limit_price": limit_price,
+                        "target_price": plan_target_price,
+                        "stop_price": plan_stop_price,
+                        "dry_run": self._config.live_dry_run,
+                    },
+                )
+            )
+        except OSError as exc:
+            logger.exception("failed to record autonomous order lifecycle PLANNED event")
+            return AutonomousLiveRunResult(
+                status=EXECUTION_FAILED,
+                gates=gates,
+                rejection_reason=f"order lifecycle write failed before submission: {exc}",
+                decision=decision_payload,
+                dry_run=self._config.live_dry_run,
+            )
+
         try:
             broker_positions: Dict[str, Any] = (
                 self._broker_positions_provider()
@@ -656,18 +704,36 @@ class AutonomousLiveRunner:
             )
         except Exception:
             logger.exception("OrderExecutor.execute_signal raised")
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=entry_lifecycle_id,
+                state=OrderLifecycleState.BROKER_DISCONNECTED,
+                symbol=symbol,
+                order_role=ENTRY,
+                reason="OrderExecutor raised an exception before returning a result",
+            )
             return AutonomousLiveRunResult(
                 status=EXECUTION_FAILED,
                 gates=gates,
                 rejection_reason="OrderExecutor raised an exception",
                 decision=decision_payload,
+                order_lifecycle=lifecycle_events,
                 dry_run=self._config.live_dry_run,
             )
 
         if result.status == OrderStatus.DRY_RUN:
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=entry_lifecycle_id,
+                state=OrderLifecycleState.EXPIRED,
+                symbol=symbol,
+                order_role=ENTRY,
+                reason="dry-run preview; order was not submitted to broker",
+            )
             # Dry-run: record the would-be trade and return.
             trade = self._record_trade(
                 decision, plan, quantity, result.order_id,
+                entry_lifecycle_id=entry_lifecycle_id,
                 target_order_id=getattr(result, "bracket_target_order_id", None),
                 stop_order_id=getattr(result, "bracket_stop_order_id", None),
                 extra_notes=bracket_notes,
@@ -677,6 +743,7 @@ class AutonomousLiveRunner:
                 gates=gates,
                 decision=decision_payload,
                 trade=trade.to_dict() if trade else None,
+                order_lifecycle=lifecycle_events,
                 notes=[
                     "dry-run preview — order NOT submitted to TWS",
                     f"would-be quantity={quantity}",
@@ -690,8 +757,49 @@ class AutonomousLiveRunner:
         if result.status == OrderStatus.SUBMITTED:
             target_id = getattr(result, "bracket_target_order_id", None)
             stop_id = getattr(result, "bracket_stop_order_id", None)
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=entry_lifecycle_id,
+                state=OrderLifecycleState.SUBMITTED,
+                symbol=symbol,
+                order_role=ENTRY,
+                broker_order_id=result.order_id,
+                reason="OrderExecutor returned SUBMITTED",
+                metadata={"quantity": quantity, "limit_price": limit_price},
+            )
+            target_lifecycle_id = None
+            stop_lifecycle_id = None
+            if target_id is not None:
+                target_lifecycle_id = OrderLifecycleEvent.new_id()
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_events,
+                    lifecycle_id=target_lifecycle_id,
+                    state=OrderLifecycleState.TARGET_PENDING,
+                    symbol=symbol,
+                    order_role=TARGET,
+                    broker_order_id=target_id,
+                    parent_lifecycle_id=entry_lifecycle_id,
+                    reason="bracket target child order submitted with parent",
+                    metadata={"target_price": plan_target_price},
+                )
+            if stop_id is not None:
+                stop_lifecycle_id = OrderLifecycleEvent.new_id()
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_events,
+                    lifecycle_id=stop_lifecycle_id,
+                    state=OrderLifecycleState.PROTECTIVE_STOP_PENDING,
+                    symbol=symbol,
+                    order_role=STOP,
+                    broker_order_id=stop_id,
+                    parent_lifecycle_id=entry_lifecycle_id,
+                    reason="bracket protective stop child order submitted with parent",
+                    metadata={"stop_price": plan_stop_price},
+                )
             trade = self._record_trade(
                 decision, plan, quantity, result.order_id,
+                entry_lifecycle_id=entry_lifecycle_id,
+                target_lifecycle_id=target_lifecycle_id,
+                stop_lifecycle_id=stop_lifecycle_id,
                 target_order_id=target_id,
                 stop_order_id=stop_id,
                 extra_notes=bracket_notes,
@@ -716,22 +824,77 @@ class AutonomousLiveRunner:
                 gates=gates,
                 decision=decision_payload,
                 trade=trade.to_dict() if trade else None,
+                order_lifecycle=lifecycle_events,
                 notes=submit_notes,
                 dry_run=False,
             )
 
         # Rejected / blocked by OrderExecutor.
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.REJECTED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason=f"OrderExecutor rejected: {result.reason}",
+        )
         return AutonomousLiveRunResult(
             status=EXECUTION_FAILED,
             gates=gates,
             rejection_reason=f"OrderExecutor rejected: {result.reason}",
             decision=decision_payload,
+            order_lifecycle=lifecycle_events,
             dry_run=self._config.live_dry_run,
         )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _record_order_lifecycle_transition(
+        self,
+        *,
+        lifecycle_id: str,
+        state: OrderLifecycleState,
+        symbol: str,
+        order_role: str = ENTRY,
+        broker_order_id: Optional[int] = None,
+        autonomous_trade_id: Optional[str] = None,
+        parent_lifecycle_id: Optional[str] = None,
+        reason: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        event = self._lifecycle_store.record_transition(
+            lifecycle_id=lifecycle_id,
+            state=state,
+            symbol=symbol,
+            order_role=order_role,
+            broker_order_id=broker_order_id,
+            autonomous_trade_id=autonomous_trade_id,
+            parent_lifecycle_id=parent_lifecycle_id,
+            reason=reason,
+            metadata=metadata,
+        )
+        return event.to_dict()
+
+    def _safe_record_order_lifecycle_transition(
+        self,
+        event_sink: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> None:
+        try:
+            event = self._record_order_lifecycle_transition(**kwargs)
+        except OSError:
+            logger.exception("failed to record autonomous order lifecycle event")
+            return
+        if event_sink is not None:
+            event_sink.append(event)
+
+    @staticmethod
+    def _fallback_lifecycle_id(trade: AutonomousTrade, role: str, order_id: Optional[int]) -> str:
+        trade_id = trade.autonomous_trade_id or "unknown-trade"
+        oid = order_id if order_id is not None else "unknown-order"
+        return f"legacy-{trade_id}-{role}-{oid}"
 
     def _count_live_trades_today(self, today: Optional[date] = None) -> int:
         """Count live trades with entry_time on ``today`` (UTC date).
@@ -821,6 +984,18 @@ class AutonomousLiveRunner:
                         trade.autonomous_trade_id,
                         trade.symbol,
                     )
+                    self._safe_record_order_lifecycle_transition(
+                        lifecycle_id=(
+                            trade.entry_lifecycle_id
+                            or self._fallback_lifecycle_id(trade, ENTRY, trade.entry_order_id)
+                        ),
+                        state=OrderLifecycleState.REJECTED,
+                        symbol=trade.symbol,
+                        order_role=ENTRY,
+                        broker_order_id=trade.entry_order_id,
+                        autonomous_trade_id=trade.autonomous_trade_id,
+                        reason="broker rejection reconciled from rejected_order_ids_provider",
+                    )
                 except Exception:  # pragma: no cover - defensive
                     logger.exception(
                         "failed to mark rejected trade %s as FAILED",
@@ -895,6 +1070,38 @@ class AutonomousLiveRunner:
                     trade.autonomous_trade_id,
                     trade.symbol,
                     matched_id,
+                )
+                child_lifecycle_id = (
+                    trade.target_lifecycle_id
+                    if exit_reason == "TAKE_PROFIT"
+                    else trade.stop_lifecycle_id
+                )
+                child_role = TARGET if exit_reason == "TAKE_PROFIT" else STOP
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=(
+                        child_lifecycle_id
+                        or self._fallback_lifecycle_id(trade, child_role, matched_id)
+                    ),
+                    state=OrderLifecycleState.FILLED,
+                    symbol=trade.symbol,
+                    order_role=child_role,
+                    broker_order_id=matched_id,
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    parent_lifecycle_id=trade.entry_lifecycle_id,
+                    reason=f"bracket {exit_reason} fill reconciled",
+                )
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=(
+                        trade.entry_lifecycle_id
+                        or self._fallback_lifecycle_id(trade, ENTRY, trade.entry_order_id)
+                    ),
+                    state=OrderLifecycleState.CLOSED,
+                    symbol=trade.symbol,
+                    order_role=ENTRY,
+                    broker_order_id=trade.entry_order_id,
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    reason=f"trade closed by bracket {exit_reason} order #{matched_id}",
+                    metadata={"exit_order_id": matched_id, "exit_reason": exit_reason},
                 )
             except Exception:  # pragma: no cover - defensive
                 logger.exception(
@@ -981,6 +1188,19 @@ class AutonomousLiveRunner:
                     trade.autonomous_trade_id,
                     trade.symbol,
                 )
+                self._safe_record_order_lifecycle_transition(
+                    lifecycle_id=(
+                        trade.entry_lifecycle_id
+                        or self._fallback_lifecycle_id(trade, ENTRY, trade.entry_order_id)
+                    ),
+                    state=OrderLifecycleState.ORPHANED_ORDER,
+                    symbol=trade.symbol,
+                    order_role=ENTRY,
+                    broker_order_id=trade.entry_order_id,
+                    autonomous_trade_id=trade.autonomous_trade_id,
+                    reason="broker no longer holds the symbol for an OPEN local trade",
+                    metadata={"exit_reason": "reconciled_no_broker_position"},
+                )
             except Exception:  # pragma: no cover - defensive
                 logger.exception(
                     "failed to mark stale trade %s as CLOSED",
@@ -1018,6 +1238,9 @@ class AutonomousLiveRunner:
         quantity: int,
         order_id: Optional[int],
         *,
+        entry_lifecycle_id: Optional[str] = None,
+        target_lifecycle_id: Optional[str] = None,
+        stop_lifecycle_id: Optional[str] = None,
         target_order_id: Optional[int] = None,
         stop_order_id: Optional[int] = None,
         extra_notes: Optional[List[str]] = None,
@@ -1055,6 +1278,9 @@ class AutonomousLiveRunner:
                 max_holding_days=int(self._config.max_holding_days),
                 target_order_id=int(target_order_id) if target_order_id is not None else None,
                 stop_order_id=int(stop_order_id) if stop_order_id is not None else None,
+                entry_lifecycle_id=entry_lifecycle_id,
+                target_lifecycle_id=target_lifecycle_id,
+                stop_lifecycle_id=stop_lifecycle_id,
                 notes=notes,
             )
         except Exception:  # pragma: no cover - defensive

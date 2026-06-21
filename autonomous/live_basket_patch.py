@@ -27,6 +27,7 @@ from autonomous.autonomous_live_runner import (
     NO_TRADE,
     _as_float,
 )
+from autonomous.order_lifecycle import ENTRY, STOP, TARGET, OrderLifecycleEvent, OrderLifecycleState
 from autonomous.trade_planner import TradeType
 from execution.order_executor import OrderStatus
 from strategies.signal import Signal, SignalStrength, SignalType
@@ -66,6 +67,30 @@ def _execute_one_live_plan(self: AutonomousLiveRunner, decision, plan: Dict[str,
     if self._config.live_limit_orders_only:
         signal.strategy_name = "AutonomousLiveRunner:LIMIT"
 
+    lifecycle_events: List[Dict[str, Any]] = []
+    entry_lifecycle_id = OrderLifecycleEvent.new_id()
+    try:
+        lifecycle_events.append(
+            self._record_order_lifecycle_transition(
+                lifecycle_id=entry_lifecycle_id,
+                state=OrderLifecycleState.PLANNED,
+                symbol=symbol,
+                order_role=ENTRY,
+                reason="basket live runner prepared leg for OrderExecutor",
+                metadata={
+                    "quantity": quantity,
+                    "limit_price": limit_price,
+                    "target_price": plan_target_price,
+                    "stop_price": plan_stop_price,
+                    "dry_run": self._config.live_dry_run,
+                    "basket_leg": True,
+                },
+            )
+        )
+    except OSError as exc:
+        logger.exception("failed to record autonomous order lifecycle PLANNED event")
+        return None, None, f"order lifecycle write failed before submission: {exc}", lifecycle_events
+
     try:
         broker_positions: Dict[str, Any] = (
             self._broker_positions_provider()
@@ -80,21 +105,91 @@ def _execute_one_live_plan(self: AutonomousLiveRunner, decision, plan: Dict[str,
         )
     except Exception:
         logger.exception("OrderExecutor.execute_signal raised")
-        return None, None, "OrderExecutor raised an exception"
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.BROKER_DISCONNECTED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason="OrderExecutor raised an exception before returning a result",
+        )
+        return None, None, "OrderExecutor raised an exception", lifecycle_events
 
     if result.status not in {OrderStatus.SUBMITTED, OrderStatus.DRY_RUN}:
-        return result, None, f"OrderExecutor rejected {symbol}: {result.reason}"
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.REJECTED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason=f"OrderExecutor rejected {symbol}: {result.reason}",
+        )
+        return result, None, f"OrderExecutor rejected {symbol}: {result.reason}", lifecycle_events
+
+    target_id = getattr(result, "bracket_target_order_id", None)
+    stop_id = getattr(result, "bracket_stop_order_id", None)
+    target_lifecycle_id = None
+    stop_lifecycle_id = None
+    if result.status == OrderStatus.DRY_RUN:
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.EXPIRED,
+            symbol=symbol,
+            order_role=ENTRY,
+            reason="dry-run preview; basket leg was not submitted to broker",
+        )
+    else:
+        self._safe_record_order_lifecycle_transition(
+            lifecycle_events,
+            lifecycle_id=entry_lifecycle_id,
+            state=OrderLifecycleState.SUBMITTED,
+            symbol=symbol,
+            order_role=ENTRY,
+            broker_order_id=result.order_id,
+            reason="OrderExecutor returned SUBMITTED for basket leg",
+            metadata={"quantity": quantity, "limit_price": limit_price},
+        )
+        if target_id is not None:
+            target_lifecycle_id = OrderLifecycleEvent.new_id()
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=target_lifecycle_id,
+                state=OrderLifecycleState.TARGET_PENDING,
+                symbol=symbol,
+                order_role=TARGET,
+                broker_order_id=target_id,
+                parent_lifecycle_id=entry_lifecycle_id,
+                reason="basket bracket target child order submitted with parent",
+                metadata={"target_price": plan_target_price},
+            )
+        if stop_id is not None:
+            stop_lifecycle_id = OrderLifecycleEvent.new_id()
+            self._safe_record_order_lifecycle_transition(
+                lifecycle_events,
+                lifecycle_id=stop_lifecycle_id,
+                state=OrderLifecycleState.PROTECTIVE_STOP_PENDING,
+                symbol=symbol,
+                order_role=STOP,
+                broker_order_id=stop_id,
+                parent_lifecycle_id=entry_lifecycle_id,
+                reason="basket bracket protective stop child order submitted with parent",
+                metadata={"stop_price": plan_stop_price},
+            )
 
     trade = self._record_trade(
         decision,
         plan,
         quantity,
         result.order_id,
-        target_order_id=getattr(result, "bracket_target_order_id", None),
-        stop_order_id=getattr(result, "bracket_stop_order_id", None),
+        entry_lifecycle_id=entry_lifecycle_id,
+        target_lifecycle_id=target_lifecycle_id,
+        stop_lifecycle_id=stop_lifecycle_id,
+        target_order_id=target_id,
+        stop_order_id=stop_id,
         extra_notes=bracket_notes,
     )
-    return result, trade, None
+    return result, trade, None, lifecycle_events
 
 
 def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResult:
@@ -187,6 +282,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
         f"max_trade_value={max_trade_value:.2f}",
     ]
     dry_run_seen = False
+    lifecycle_events: List[Dict[str, Any]] = []
 
     for plan in trade_plans:
         limit_price = float(plan.get("limit_price") or 0.0)
@@ -207,9 +303,10 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
                 notes=notes,
             )
 
-        result, trade, error = _execute_one_live_plan(
+        result, trade, error, leg_lifecycle_events = _execute_one_live_plan(
             self, decision, plan, quantity, gates, deployable_cash, max_trade_value
         )
+        lifecycle_events.extend(leg_lifecycle_events)
         if error:
             return AutonomousLiveRunResult(
                 status=EXECUTION_FAILED,
@@ -217,6 +314,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
                 rejection_reason=error,
                 decision=decision_payload,
                 trade={"submitted_trades": submitted_trades} if submitted_trades else None,
+                order_lifecycle=lifecycle_events,
                 dry_run=self._config.live_dry_run,
                 notes=notes,
             )
@@ -238,6 +336,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
             "submitted_trades": submitted_trades,
             "order_ids": order_ids,
         },
+        order_lifecycle=lifecycle_events,
         notes=notes,
         dry_run=dry_run_seen,
     )

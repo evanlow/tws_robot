@@ -756,6 +756,18 @@ class TestPortfolioPersistence:
         assert len(history) == 2
         assert history[0]["verdict"] == "HOLD"  # newest first
 
+    def test_stock_analysis_history_orders_same_timestamp_by_insert_order(self, db_for_persistence):
+        from data.portfolio_persistence import save_stock_analysis, get_stock_analysis_history
+
+        fixed_now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        with patch("data.portfolio_persistence.datetime") as mock_datetime:
+            mock_datetime.now.return_value = fixed_now
+            save_stock_analysis("GOOG", verdict="BUY")
+            save_stock_analysis("GOOG", verdict="HOLD")
+
+        history = get_stock_analysis_history("GOOG", limit=10)
+        assert [row["verdict"] for row in history] == ["HOLD", "BUY"]
+
 
 # ===========================================================================
 # data.fundamentals tests

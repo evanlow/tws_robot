@@ -335,6 +335,12 @@ Continuous trading requires explicit state tracking for every autonomous broker 
 autonomous/order_lifecycle.py
 ```
 
+#### Config
+
+```python
+order_lifecycle_store_path: str = "logs/autonomous_order_lifecycle.jsonl"
+```
+
 #### Proposed states
 
 ```text
@@ -371,6 +377,25 @@ RECOVERY_REQUIRED
 - Rejected orders do not silently consume live-trade slots forever.
 - Partial fills are visible and tied to order IDs.
 - Orphaned orders can be detected and flagged.
+
+#### Current implementation status
+
+Implemented in the current PR continuing issue #161.
+
+The implementation adds an append-only `OrderLifecycleStore` and records live
+runner lifecycle events for:
+
+- planned entry orders before the `OrderExecutor` call;
+- submitted parent entry orders;
+- bracket target and protective-stop child orders as pending;
+- `OrderExecutor` rejections;
+- broker-rejected entry reconciliation;
+- bracket target/stop fills;
+- stale local open trades whose broker position is no longer present.
+
+This is an audit/state-tracking layer. It does not add a new order submission
+path, does not enable live trading, and does not verify broker-side protective
+stop acknowledgement yet.
 
 ### Phase 3 — Broker-side protective stop / bracket verification
 
@@ -742,7 +767,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add broker order lifecycle state machine
+Add broker-side protective stop / bracket verification
 ```
 
-This should implement Phase 2 of the continuous autonomous live readiness roadmap.
+This should implement Phase 3 of the continuous autonomous live readiness roadmap.

@@ -171,6 +171,9 @@ class AutonomousLiveRunnerConfig:
         Fallback stop-loss distance below the entry limit price used
         when a live plan reaches the runner without ``stop_price``.  Default
         ``0.05`` (5 %).  Must be in ``(0, 1)``.
+    ``AUTONOMOUS_ORDER_LIFECYCLE_STORE_PATH``
+        Append-only lifecycle event log for live autonomous broker orders.
+        Default ``logs/autonomous_order_lifecycle.jsonl``.
     """
 
     # ---- Master live-mode switches ------------------------------------
@@ -202,6 +205,7 @@ class AutonomousLiveRunnerConfig:
     buy_shares_only: bool = True
     max_holding_days: int = 5
     trade_store_path: str = "logs/autonomous_live_trades.jsonl"
+    order_lifecycle_store_path: str = "logs/autonomous_order_lifecycle.jsonl"
 
     # ---- Expected account ID (set at activation time) ----------------
     expected_account_id: Optional[str] = None
@@ -252,6 +256,7 @@ class AutonomousLiveRunnerConfig:
             "buy_shares_only": self.buy_shares_only,
             "max_holding_days": self.max_holding_days,
             "trade_store_path": self.trade_store_path,
+            "order_lifecycle_store_path": self.order_lifecycle_store_path,
             "expected_account_id": self.expected_account_id,
         }
 
@@ -290,4 +295,8 @@ class AutonomousLiveRunnerConfig:
             ),
             live_dry_run=_env_bool("AUTONOMOUS_LIVE_DRY_RUN", False),
             default_stop_pct=_env_float("AUTONOMOUS_DEFAULT_STOP_PCT", 0.05),
+            order_lifecycle_store_path=os.environ.get(
+                "AUTONOMOUS_ORDER_LIFECYCLE_STORE_PATH",
+                "logs/autonomous_order_lifecycle.jsonl",
+            ),
         )

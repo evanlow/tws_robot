@@ -33,6 +33,7 @@ Legend:
 | Risk lifecycle using outcome records | Done | Implemented in PR #171 |
 | Chronological validation report | Done | Implemented in PR #172 |
 | Basket risk diagnostics | Done | Current PR continuing #161; basket plans now emit shared risk budget, per-leg allocation, planned risk, and rejection/resize reasons for future evidence-aware sizing |
+| Order lifecycle diagnostics | Done | Current PR continuing #161; live-runner order lifecycle events now record planned, submitted, rejected, filled, closed, pending-protection, and orphaned states for future operational metrics |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -202,18 +203,24 @@ Checklist:
 ## 4. Current PR note
 
 The basket-level risk allocation PR does not complete an evidence-learning EL
-phase, but it improves the evidence substrate used by future EL6
-evidence-aware sizing:
+phase. It improves the evidence substrate used by future EL6 evidence-aware
+sizing and by future operational metrics:
 
 - `basket_plan.risk_allocation` records basket risk budget, total planned
   stop-risk, budget usage, and per-leg risk decisions.
 - Adjusted leg `sizing` diagnostics include a `basket_risk` block.
 - The allocator can only reduce or reject basket legs; it cannot bypass hard
   sizing, risk, drawdown, or operator caps.
+- `order_lifecycle` records live order state transitions for future rejected
+  order rate, protection-event, fill-state, and recovery-required metrics.
 
 Test evidence:
 
 - Passed: `.venv\Scripts\python.exe -m pytest tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp`
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`4 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests/test_order_lifecycle.py tests/test_basket_planner.py tests/test_autonomous_engine_basket.py tests/test_config.py --basetemp=.pytest-tmp -q`
+  (`49 passed`).
 - Full suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp`
   completed with `2799 passed`, `18 skipped`, and `6 failed`; the failures
   were existing autonomous/live-runner expectation issues outside this PR's
@@ -222,7 +229,7 @@ Test evidence:
 Smoke-test evidence:
 
 - Passed: `.venv\Scripts\python.exe tests/run_all_smoke.py --basetemp=.pytest-tmp`
-  (`471 passed`). The command exited 0; it printed a non-failing sparkline
+  (`472 passed`). The command exited 0; it printed a non-failing sparkline
   fallback message after pytest completed.
 
 Known limitations:
@@ -231,6 +238,8 @@ Known limitations:
   overlay is implemented in this PR.
 - Basket risk diagnostics should be consumed by future evidence-learning
   modules, but no automatic capital promotion or live-mode expansion is added.
+- Order lifecycle events are not yet surfaced through a dedicated setup
+  calibrator, adaptive edge estimator, or promotion report.
 
 ## 5. Maintenance rules
 
