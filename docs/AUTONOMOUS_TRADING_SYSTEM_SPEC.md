@@ -33,14 +33,14 @@ Key principles:
 The autonomous pipeline is intentionally layered:
 
 ```text
-SignalProvider / Scanner
+SignalProvider / CandidateScanner
 -> CandidateRanker
 -> TradePlanner / BasketPlanner
 -> AutonomousTradingEngine gates
--> PaperRunner or AutonomousLiveRunner
+-> AutonomousPaperRunner or AutonomousLiveRunner
 -> OrderExecutor
--> TradeStore / EvidenceStore
--> Outcome reconciliation / risk lifecycle
+-> TradeStore / TradeEvidenceStore
+-> OutcomeReconciler / LossLimitGuard / AutonomousExitManager
 ```
 
 Responsibilities:
@@ -48,18 +48,18 @@ Responsibilities:
 | Layer | Responsibility |
 |---|---|
 | Signal provider | Convert market data/screener rows into candidate signals |
-| Scanner | Scan configured universe and produce candidates |
+| CandidateScanner | Scan configured universe and produce candidates |
 | Ranker | Apply hard filters and edge-aware ranking |
 | Feature builder | Build candidate/regime features for edge estimation |
 | Trade planner | Build individual trade plans with targets, stops, and sizing |
 | Basket planner | Convert ranked candidates into capped multi-leg plans |
 | Engine | Apply gates and produce a structured autonomous decision |
-| Paper runner | Execute eligible plans in paper mode |
-| Live runner | Submit live-ready plans through OrderExecutor when live gates pass |
+| AutonomousPaperRunner | Execute eligible plans in paper mode |
+| AutonomousLiveRunner | Submit live-ready plans through OrderExecutor when live gates pass |
 | OrderExecutor | Submit broker orders with existing risk/reconciliation checks |
-| Evidence store | Persist decision and outcome evidence |
-| Outcome reconciler | Convert closed trades/fills into realized outcome records |
-| Risk lifecycle | Stop new entries after loss/drawdown events |
+| TradeEvidenceStore | Persist decision and outcome evidence |
+| OutcomeReconciler | Convert closed trades/fills into realized outcome records |
+| LossLimitGuard / AutonomousExitManager | Stop new entries after loss/drawdown events and manage open-risk exits |
 
 ## 4. Operating modes
 
