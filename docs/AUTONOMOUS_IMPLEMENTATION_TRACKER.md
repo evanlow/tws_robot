@@ -41,7 +41,8 @@ Legend:
 | Evidence-learning performance metrics | Done | PR #183 |
 | Evidence-learning setup registry | Done | PR #184 |
 | Evidence-learning evidence calibrator | Done | PR #186 |
-| Evidence-learning adaptive edge estimator | Done | Current PR |
+| Evidence-learning adaptive edge estimator | Done | PR #187 |
+| Evidence-learning setup eligibility gate | Done | Current PR |
 | Validation framework | Done | PR #169 |
 | Realized outcome reconciliation | Done | PR #170 |
 | Slippage / commission / partial-fill outcome fields | Done | PR #170 |

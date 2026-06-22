@@ -18,6 +18,8 @@ from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.basket_planner import BasketPlanner
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
+from autonomous.edge_estimator import EdgeEstimate
+from autonomous.evidence_calibrator import SetupEvidenceSummary
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.market_regime import evaluate_market_regime
 from autonomous.risk_lifecycle import LossLimitGuard
@@ -91,6 +93,10 @@ class AutonomousDecision:
 
 OptionHintProvider = Callable[[CandidateSignal], Optional[OptionChainHint]]
 SpyPriceProvider = Callable[[], Optional[Dict[str, Any]]]
+SetupEvidenceProvider = Callable[
+    [CandidateSignal, Dict[str, Any], EdgeEstimate],
+    Optional[SetupEvidenceSummary],
+]
 
 
 class AutonomousTradingEngine:
@@ -106,6 +112,7 @@ class AutonomousTradingEngine:
         paper_adapter: Any = None,
         option_hint_provider: Optional[OptionHintProvider] = None,
         spy_price_provider: Optional[SpyPriceProvider] = None,
+        setup_evidence_provider: Optional[SetupEvidenceProvider] = None,
         audit_logger: Optional[AuditLogger] = None,
         evidence_store: Optional[TradeEvidenceStore] = None,
     ) -> None:
@@ -119,7 +126,10 @@ class AutonomousTradingEngine:
         self.paper_adapter = paper_adapter
         self.option_hint_provider = option_hint_provider
         self.spy_price_provider = spy_price_provider
-        self.ranker = CandidateRanker(self.config)
+        self.ranker = CandidateRanker(
+            self.config,
+            setup_evidence_provider=setup_evidence_provider,
+        )
         self.planner = TradePlanner(self.config)
         self.basket_planner = BasketPlanner(self.config)
         self.audit = audit_logger or AuditLogger(self.config.audit_log_dir)

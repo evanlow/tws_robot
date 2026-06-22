@@ -76,6 +76,14 @@ from autonomous.setup_registry import (
     SetupRegistry,
     setup_id_for_record,
 )
+from autonomous.setup_eligibility import (
+    SETUP_ELIGIBILITY_ALLOW,
+    SETUP_ELIGIBILITY_PAPER_ONLY,
+    SETUP_ELIGIBILITY_REJECT,
+    SetupEligibilityConfig,
+    SetupEligibilityDecision,
+    SetupEligibilityGate,
+)
 from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
 from autonomous.validation_framework import ValidationFramework, ValidationReport, ValidationThresholds
@@ -192,6 +200,12 @@ __all__ = [
     "SetupMetadata",
     "SetupRegistry",
     "setup_id_for_record",
+    "SETUP_ELIGIBILITY_ALLOW",
+    "SETUP_ELIGIBILITY_PAPER_ONLY",
+    "SETUP_ELIGIBILITY_REJECT",
+    "SetupEligibilityConfig",
+    "SetupEligibilityDecision",
+    "SetupEligibilityGate",
     "StrategyArmLearner",
     "StrategyArmStats",
     "TradePlan",

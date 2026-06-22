@@ -313,6 +313,31 @@ Proposed module:
 autonomous/setup_eligibility.py
 ```
 
+### Current implementation
+
+Reusable EL5 setup eligibility gating is implemented in:
+
+```text
+autonomous/setup_eligibility.py
+```
+
+The gate evaluates an EL3 `SetupEvidenceSummary` or EL4 `EdgeEstimate`
+metadata and returns a serializable decision with eligibility, action, allowed
+modes, setup ID/state, sample size, expected R, confidence, and diagnostics.
+It rejects retired setups, rejects sufficiently sampled non-positive expected
+R, rejects weak setup states, blocks `PAPER_ONLY` and insufficient-evidence
+setups from assisted-live mode, and downgrades those setups to
+recommend/paper-only when not in live mode.
+
+`CandidateRanker` accepts an optional setup-evidence provider. When supplied,
+the ranker blends the rule-based prior with setup evidence, evaluates setup
+eligibility before planning/execution, records diagnostics on candidate extras,
+and fails closed if the evidence provider raises. When no provider is supplied,
+default ranking behavior is unchanged.
+
+This gate only restricts or annotates candidates. It does not enable live
+trading, change sizing, bypass risk controls, or place orders.
+
 ## 9. Smarter sizing from evidence
 
 Sizing should remain constrained by existing hard caps:

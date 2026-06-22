@@ -14,12 +14,15 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from autonomous.adaptive_edge_estimator import AdaptiveEdgeEstimator
 from autonomous.autonomous_config import AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
 from autonomous.edge_estimator import EdgeEstimate, RuleBasedEdgeEstimator
+from autonomous.evidence_calibrator import SetupEvidenceSummary
 from autonomous.feature_builder import FeatureBuilder
+from autonomous.setup_eligibility import SETUP_ELIGIBILITY_ALLOW, SetupEligibilityGate
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +55,18 @@ class CandidateRanker:
         config: AutonomousTradingConfig,
         feature_builder: Optional[FeatureBuilder] = None,
         edge_estimator: Optional[RuleBasedEdgeEstimator] = None,
+        setup_evidence_provider: Optional[
+            Callable[[CandidateSignal, Dict[str, Any], EdgeEstimate], Optional[SetupEvidenceSummary]]
+        ] = None,
+        adaptive_edge_estimator: Optional[AdaptiveEdgeEstimator] = None,
+        setup_eligibility_gate: Optional[SetupEligibilityGate] = None,
     ) -> None:
         self.config = config
         self.feature_builder = feature_builder or FeatureBuilder()
         self.edge_estimator = edge_estimator or RuleBasedEdgeEstimator()
+        self.setup_evidence_provider = setup_evidence_provider
+        self.adaptive_edge_estimator = adaptive_edge_estimator or AdaptiveEdgeEstimator()
+        self.setup_eligibility_gate = setup_eligibility_gate or SetupEligibilityGate()
 
     def _earnings_too_close(self, candidate: CandidateSignal, today: Optional[date] = None) -> bool:
         if candidate.earnings_date is None:
@@ -139,12 +150,50 @@ class CandidateRanker:
                 features = {}
 
             if edge_estimate is not None:
+                setup_evidence: Optional[SetupEvidenceSummary] = None
+                if self.setup_evidence_provider is not None:
+                    try:
+                        setup_evidence = self.setup_evidence_provider(
+                            candidate,
+                            features,
+                            edge_estimate,
+                        )
+                    except Exception:
+                        logger.exception("setup evidence provider failed for %s", candidate.symbol)
+                        return None, "setup eligibility evidence provider failed"
+                    if setup_evidence is not None:
+                        edge_estimate = self.adaptive_edge_estimator.estimate(
+                            edge_estimate,
+                            setup_evidence,
+                        )
+
                 candidate.extras["features"] = dict(features)
                 candidate.extras["edge_estimate"] = edge_estimate.to_dict()
-                # Later evidence calibration can set this value.  Keep an
-                # explicit zero so the fractional sizing overlay knows that
-                # bootstrap estimates are not yet evidence-backed.
-                candidate.extras.setdefault("edge_observed_trades", 0)
+                if setup_evidence is not None:
+                    candidate.extras["edge_observed_trades"] = edge_estimate.sample_size
+                else:
+                    # Later evidence calibration can set this value. Keep an
+                    # explicit zero so the fractional sizing overlay knows
+                    # bootstrap estimates are not yet evidence-backed.
+                    candidate.extras.setdefault("edge_observed_trades", 0)
+                if setup_evidence is not None or edge_estimate.setup_state is not None:
+                    setup_eligibility = self.setup_eligibility_gate.evaluate(
+                        mode=self.config.mode,
+                        edge_estimate=edge_estimate,
+                        setup_evidence=setup_evidence,
+                    )
+                    candidate.extras["setup_eligibility"] = setup_eligibility.to_dict()
+                    if not setup_eligibility.eligible:
+                        return (
+                            None,
+                            "setup_eligibility "
+                            f"{setup_eligibility.action}: {setup_eligibility.reason}",
+                        )
+                    if setup_eligibility.action != SETUP_ELIGIBILITY_ALLOW:
+                        reasons.append(
+                            "setup_eligibility="
+                            f"{setup_eligibility.action}: {setup_eligibility.reason}"
+                        )
                 if edge_estimate.expected_r < self.config.min_expected_r:
                     return None, f"expected_r {edge_estimate.expected_r:.4f} < min {self.config.min_expected_r:.4f}"
                 if edge_estimate.confidence < self.config.min_edge_confidence:
