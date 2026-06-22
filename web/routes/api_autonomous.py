@@ -54,6 +54,7 @@ from autonomous.autonomous_mode import (
 )
 from autonomous.continuous_supervisor import (
     ContinuousSupervisor,
+    EMERGENCY_STOP_ACTIVE as SUPERVISOR_EMERGENCY_STOP_ACTIVE,
     PAUSED as SUPERVISOR_PAUSED,
     RISK_LIFECYCLE_BREACH,
     SupervisorCycleResult,
@@ -946,6 +947,7 @@ def status():
         "config": config,
         "emergency_stop_file_exists": EMERGENCY_STOP_FILE.exists(),
         "emergency_stop_file": str(EMERGENCY_STOP_FILE),
+        "emergency_stop": _emergency_stop_payload(),
         "paper_adapter_configured": paper_adapter is not None,
         "connection_env": getattr(svc, "connection_env", None),
         "connected": bool(getattr(svc, "connected", False)),
@@ -1117,17 +1119,17 @@ def emergency_stop():
     """Create the EMERGENCY_STOP file so subsequent runs are blocked."""
     body = request.get_json(silent=True) or {}
     reason = body.get("reason", "Autonomous emergency stop")
+    cancel_pending_entries = body.get("cancel_pending_entries") is True
+    marker_written = False
     try:
         EMERGENCY_STOP_FILE.write_text(
             f"EMERGENCY STOP - {reason}\n"
+            "Source: autonomous_emergency_stop\n"
             f"Triggered: {datetime.now(timezone.utc).isoformat()}\n"
         )
+        marker_written = True
     except OSError:
         logger.exception("Failed to write EMERGENCY_STOP file")
-        return jsonify({
-            "status": "error",
-            "error": "Failed to write emergency stop file",
-        }), 500
 
     force_autonomous_mode_off(
         message="Emergency stop active. Autonomous Mode has been turned OFF.",
@@ -1139,12 +1141,119 @@ def emergency_stop():
     )
     _stop_paper_lifecycle_worker()
     _stop_live_lifecycle_worker()
-    _audit_mode_event("halt", {"reason": reason, "source": "emergency_stop"})
+    _live_continuous_supervisor().pause(
+        reason="emergency_stop_active",
+        message="Emergency stop active; continuous supervisor paused.",
+    )
+    pending_entry_cleanup = _pending_entry_cancel_report(
+        cancel_pending_entries=cancel_pending_entries,
+    )
+    _audit_mode_event("halt", {
+        "reason": reason,
+        "source": "emergency_stop",
+        "marker_written": marker_written,
+        "cancel_pending_entries": cancel_pending_entries,
+        "pending_entry_cleanup": pending_entry_cleanup,
+    })
+
+    if not marker_written:
+        return jsonify({
+            "status": "halted_marker_write_failed",
+            "error": (
+                "Failed to write emergency stop file; "
+                "all autonomous processes have been halted"
+            ),
+            "emergency_stop_file": str(EMERGENCY_STOP_FILE),
+            "emergency_stop": _emergency_stop_payload(),
+            "pending_entry_cleanup": pending_entry_cleanup,
+            "continuous_supervisor": _live_continuous_supervisor().status(),
+            "autonomous_mode": _autonomous_status_payload(),
+            "autonomous_live_mode": _live_mode_state().to_dict(),
+            "reason": reason,
+        }), 500
 
     return jsonify({
         "status": "halted",
         "emergency_stop_file": str(EMERGENCY_STOP_FILE),
+        "emergency_stop": _emergency_stop_payload(),
+        "pending_entry_cleanup": pending_entry_cleanup,
+        "continuous_supervisor": _live_continuous_supervisor().status(),
+        "autonomous_mode": _autonomous_status_payload(),
+        "autonomous_live_mode": _live_mode_state().to_dict(),
         "reason": reason,
+    })
+
+
+@bp.route("/emergency-reset", methods=["POST"])
+def emergency_reset():
+    """Clear the autonomous emergency stop marker after explicit confirmation."""
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") is not True:
+        return jsonify({
+            "status": "confirmation_required",
+            "error": "confirm must be true to reset autonomous emergency stop",
+        }), 400
+
+    reason = body.get("reason", "Autonomous emergency stop reset")
+    try:
+        marker_exists = EMERGENCY_STOP_FILE.exists()
+    except OSError:
+        logger.exception("Failed to inspect EMERGENCY_STOP file")
+        return jsonify({
+            "status": "error",
+            "error": "Failed to inspect emergency stop file; emergency stop remains active",
+            "emergency_stop": _emergency_stop_payload(),
+        }), 500
+
+    if marker_exists and not _autonomous_owns_emergency_stop_marker():
+        return jsonify({
+            "status": "global_emergency_stop_active",
+            "error": (
+                "Emergency stop marker was not created by the autonomous "
+                "emergency-stop endpoint; use /api/emergency/resume after "
+                "operator review to clear the global kill switch."
+            ),
+            "emergency_stop": _emergency_stop_payload(),
+        }), 409
+
+    if marker_exists:
+        try:
+            EMERGENCY_STOP_FILE.unlink()
+        except OSError:
+            logger.exception("Failed to remove EMERGENCY_STOP file")
+            return jsonify({
+                "status": "error",
+                "error": "Failed to remove emergency stop file",
+                "emergency_stop": _emergency_stop_payload(),
+            }), 500
+
+    force_autonomous_mode_off(
+        message="Emergency stop reset. Autonomous Mode remains OFF until reactivated.",
+        status="Ready",
+    )
+    _live_mode_state().turn_off(
+        "Emergency stop reset. Live Autonomous Mode remains OFF until reactivated.",
+        status="Ready",
+    )
+    supervisor = _live_continuous_supervisor()
+    # Only resume when the supervisor was paused by an emergency stop.
+    # Other pause reasons (e.g. broker disconnect, manual pause) are intentionally
+    # left untouched so their underlying faults are not silently cleared.
+    if supervisor.status().get("pause_reason") == SUPERVISOR_EMERGENCY_STOP_ACTIVE:
+        supervisor.resume()
+    _audit_mode_event("emergency_reset", {
+        "reason": reason,
+        "source": "operator",
+        "mode_remains_off": True,
+    })
+
+    return jsonify({
+        "status": "reset",
+        "reason": reason,
+        "emergency_stop": _emergency_stop_payload(),
+        "autonomous_mode": _autonomous_status_payload(),
+        "autonomous_live_mode": _live_mode_state().to_dict(),
+        "continuous_supervisor": _live_continuous_supervisor().status(),
     })
 
 
@@ -1343,6 +1452,147 @@ def _cancel_entry_order(order_id: int) -> bool:
             return False
     svc = get_services()
     return bool(svc.cancel_broker_order(int(order_id)))
+
+
+def _is_pending_entry_trade(trade: Any) -> bool:
+    """Return True for an open autonomous entry without recorded fills."""
+
+    try:
+        order_id = int(getattr(trade, "entry_order_id", 0) or 0)
+    except (TypeError, ValueError):
+        order_id = 0
+    return (
+        str(getattr(trade, "status", "")) == OPEN
+        and order_id > 0
+        and getattr(trade, "entry_filled_price", None) is None
+        and not list(getattr(trade, "entry_fills", []) or [])
+    )
+
+
+def _pending_entry_cancel_report(
+    *,
+    cancel_pending_entries: bool,
+    include_paper: bool = True,
+    include_live: bool = True,
+) -> Dict[str, Any]:
+    """Optionally forward cancels for pending entry orders.
+
+    This intentionally targets entry order IDs only.  Bracket target/stop IDs
+    are reported as preserved so emergency stop cannot accidentally remove
+    protective exits.
+    """
+
+    stores = []
+    if include_paper:
+        stores.append(("paper", _trade_store()))
+    if include_live:
+        stores.append(("live", _live_trade_store()))
+
+    entries: list[Dict[str, Any]] = []
+    preserved_exit_orders: list[Dict[str, Any]] = []
+    for account_mode, store in stores:
+        for trade in store.list_open():
+            for role, order_id in (
+                ("target", getattr(trade, "target_order_id", None)),
+                ("stop", getattr(trade, "stop_order_id", None)),
+            ):
+                if order_id:
+                    preserved_exit_orders.append({
+                        "account_mode": account_mode,
+                        "autonomous_trade_id": trade.autonomous_trade_id,
+                        "symbol": trade.symbol,
+                        "role": role,
+                        "order_id": int(order_id),
+                    })
+
+            if not _is_pending_entry_trade(trade):
+                continue
+
+            entry: Dict[str, Any] = {
+                "account_mode": account_mode,
+                "autonomous_trade_id": trade.autonomous_trade_id,
+                "symbol": trade.symbol,
+                "entry_order_id": int(trade.entry_order_id),
+                "cancel_requested": bool(cancel_pending_entries),
+                "forwarded_to_broker": False,
+                "trade_status": trade.status,
+                "lifecycle_note": (
+                    "Trade remains open until broker cancellation/fill "
+                    "reconciliation confirms terminal state."
+                ),
+            }
+            # Only forward cancels for live trades: paper order IDs must not
+            # be sent to the live broker as they can collide with live order IDs.
+            if cancel_pending_entries and account_mode == "live":
+                entry["forwarded_to_broker"] = _cancel_entry_order(
+                    int(trade.entry_order_id)
+                )
+            elif cancel_pending_entries and account_mode != "live":
+                entry["cancel_skipped_reason"] = (
+                    "paper entry order IDs are not forwarded to the broker "
+                    "from the autonomous emergency-stop endpoint"
+                )
+            entries.append(entry)
+
+    return {
+        "requested": bool(cancel_pending_entries),
+        "pending_entry_orders": entries,
+        "pending_entry_order_count": len(entries),
+        "cancel_forwarded_count": sum(
+            1 for entry in entries if entry.get("forwarded_to_broker")
+        ),
+        "protective_exit_orders_preserved": preserved_exit_orders,
+        "protective_exit_order_count": len(preserved_exit_orders),
+    }
+
+
+def _autonomous_owns_emergency_stop_marker() -> bool:
+    """Return True only for markers created by this autonomous endpoint."""
+
+    try:
+        marker = EMERGENCY_STOP_FILE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        logger.warning(
+            "Unable to read EMERGENCY_STOP_FILE ownership marker; refusing reset",
+            exc_info=True,
+        )
+        return False
+    return "Source: autonomous_emergency_stop" in marker
+
+
+def _emergency_stop_payload() -> Dict[str, Any]:
+    marker_owned_by_autonomous = False
+    marker_read_error = False
+    try:
+        file_exists = EMERGENCY_STOP_FILE.exists()
+    except OSError:
+        logger.warning(
+            "OSError checking EMERGENCY_STOP_FILE; treating as active (fail-closed)",
+            exc_info=True,
+        )
+        file_exists = True  # fail-closed: treat unreadable state as active
+        marker_read_error = True
+    if file_exists and not marker_read_error:
+        marker_owned_by_autonomous = _autonomous_owns_emergency_stop_marker()
+    risk_active = False
+    try:
+        risk_active = bool(get_services().risk_manager.emergency_stop_active)
+    except Exception:  # pragma: no cover - defensive status helper
+        risk_active = False
+    return {
+        "active": bool(file_exists or risk_active),
+        "emergency_stop_file_exists": file_exists,
+        "emergency_stop_file": str(EMERGENCY_STOP_FILE),
+        "emergency_stop_marker_owned_by_autonomous": marker_owned_by_autonomous,
+        "emergency_stop_marker_read_error": marker_read_error,
+        "risk_manager_emergency_stop_active": risk_active,
+        "manual_reset_required": file_exists,
+        "panic_flatten_available": False,
+        "panic_flatten_note": (
+            "Emergency Stop pauses and blocks new entries only. "
+            "Panic Flatten is a separate explicit control and is not invoked here."
+        ),
+    }
 
 
 @bp.route("/runner/status", methods=["GET"])
@@ -2147,6 +2397,7 @@ def live_runner_status():
         "gates": gates.to_dict(),
         "autonomous_live_mode": state.to_dict(),
         "continuous_supervisor": _live_continuous_supervisor().status(),
+        "emergency_stop": _emergency_stop_payload(),
     })
 
 

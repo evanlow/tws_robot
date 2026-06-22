@@ -809,6 +809,29 @@ Panic Flatten = close autonomous positions explicitly
 - Protective exits are not accidentally cancelled.
 - Reset is auditable.
 
+#### Implementation notes
+
+Phase 9 adds enhanced autonomous emergency-stop operations:
+
+- `POST /api/autonomous/emergency-stop` writes the emergency-stop marker,
+  turns paper and live autonomous modes off, stops lifecycle workers, pauses
+  the live continuous supervisor, and writes an autonomous audit event.
+- The same endpoint accepts `cancel_pending_entries=true` to forward broker
+  cancel requests for pending live autonomous entry order IDs only.  Paper
+  entry order IDs are reported but not sent to the broker, and target/stop
+  child order IDs are reported as preserved protective exits.
+- `POST /api/autonomous/emergency-reset` requires `confirm=true`, removes only
+  an emergency-stop marker created by `/api/autonomous/emergency-stop`, keeps
+  autonomous modes off, resumes the supervisor only when it was paused by
+  emergency stop, and writes an audit event.  Global/manual emergency markers
+  must be cleared through `/api/emergency/resume`.
+- `GET /api/autonomous/status` and `GET /api/autonomous/live/status` expose a
+  structured `emergency_stop` payload including file state, reset requirement,
+  and the fact that Panic Flatten is a separate explicit control.
+
+This phase does not flatten positions, cancel protective exits, submit
+replacement stops, auto-reactivate autonomous mode, or enable live trading.
+
 ### Phase 10 — Control tower dashboard/API
 
 #### Problem

@@ -19,7 +19,7 @@ from autonomous import (
 from autonomous.audit import AuditLogger
 from autonomous.autonomous_live_runner import AutonomousLiveRunner, EXECUTED, DRY_RUN_EXECUTED, NO_TRADE
 from autonomous.runner_config import AutonomousLiveRunnerConfig
-from autonomous.trade_store import TradeStore
+from autonomous.trade_store import AutonomousTrade, TradeStore
 from data.cash_availability import CashAvailabilityAnalyzer
 from execution.order_executor import OrderResult, OrderStatus
 from web import create_app
@@ -643,6 +643,259 @@ class TestLiveHalt:
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["autonomous_live_mode"]["display_mode"] == "OFF"
+
+
+class TestAutonomousEmergencyStop:
+    def test_stop_pauses_supervisor_and_reports_visibility(self, app, client, tmp_path):
+        _install_live_runner(app, tmp_path)
+
+        from autonomous.autonomous_mode import (
+            AccountMode,
+            AutonomousModeState,
+            TradingCycle,
+        )
+
+        state = AutonomousModeState()
+        state.turn_on(TradingCycle.CONTINUOUS, AccountMode.LIVE, dry_run=True)
+        app.config["autonomous_live_mode_state"] = state
+
+        resp = client.post(
+            "/api/autonomous/emergency-stop",
+            json={"reason": "operator stop"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["status"] == "halted"
+        assert body["emergency_stop"]["active"] is True
+        assert body["emergency_stop"]["manual_reset_required"] is True
+        assert body["emergency_stop"]["emergency_stop_marker_owned_by_autonomous"] is True
+        assert body["emergency_stop"]["panic_flatten_available"] is False
+        assert body["continuous_supervisor"]["paused"] is True
+        assert body["continuous_supervisor"]["pause_reason"] == "emergency_stop_active"
+        assert body["autonomous_live_mode"]["operating_state"] == "OFF"
+
+        live_status = client.get("/api/autonomous/live/status")
+        assert live_status.status_code == 200
+        assert live_status.get_json()["emergency_stop"]["active"] is True
+
+    def test_stop_optionally_cancels_only_pending_entry_orders(
+        self, app, client, tmp_path
+    ):
+        _install_live_runner(app, tmp_path)
+        cancelled = []
+
+        def cancel_order(order_id):
+            cancelled.append(order_id)
+            return True
+
+        app.config["autonomous_cancel_order"] = cancel_order
+
+        with app.app_context():
+            store = app.config["autonomous_live_trade_store"]
+            store.record_trade(
+                AutonomousTrade(
+                    autonomous_trade_id="pending-entry",
+                    symbol="AAPL",
+                    trade_type="BUY_SHARES",
+                    status="OPEN",
+                    entry_order_id=777,
+                    entry_time=datetime.now(timezone.utc),
+                    entry_limit_price=150.0,
+                    quantity=10,
+                    target_order_id=778,
+                    stop_order_id=779,
+                    notes=["recorded by AutonomousLiveRunner", "dry_run=False"],
+                )
+            )
+
+        resp = client.post(
+            "/api/autonomous/emergency-stop",
+            json={
+                "reason": "cancel pending entries",
+                "cancel_pending_entries": True,
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        cleanup = body["pending_entry_cleanup"]
+        assert cleanup["requested"] is True
+        assert cleanup["pending_entry_order_count"] == 1
+        assert cleanup["cancel_forwarded_count"] == 1
+        assert cancelled == [777]
+        assert cleanup["protective_exit_order_count"] == 2
+        preserved_ids = {
+            item["order_id"]
+            for item in cleanup["protective_exit_orders_preserved"]
+        }
+        assert preserved_ids == {778, 779}
+        assert 778 not in cancelled
+        assert 779 not in cancelled
+
+        with app.app_context():
+            trade = app.config["autonomous_live_trade_store"].get("pending-entry")
+            assert trade.status == "OPEN"
+
+    def test_stop_does_not_forward_paper_entry_ids_to_broker(
+        self, app, client, tmp_path
+    ):
+        _install_live_runner(app, tmp_path)
+        cancelled = []
+
+        def cancel_order(order_id):
+            cancelled.append(order_id)
+            return True
+
+        app.config["autonomous_cancel_order"] = cancel_order
+
+        with app.app_context():
+            paper_store = TradeStore(path=str(tmp_path / "paper_trades.jsonl"))
+            app.config["autonomous_trade_store"] = paper_store
+            paper_store.record_trade(
+                AutonomousTrade(
+                    autonomous_trade_id="paper-entry",
+                    symbol="PAPER",
+                    trade_type="BUY_SHARES",
+                    status="OPEN",
+                    entry_order_id=777,
+                    entry_time=datetime.now(timezone.utc),
+                    entry_limit_price=42.0,
+                    quantity=1,
+                )
+            )
+            live_store = app.config["autonomous_live_trade_store"]
+            live_store.record_trade(
+                AutonomousTrade(
+                    autonomous_trade_id="live-entry",
+                    symbol="LIVE",
+                    trade_type="BUY_SHARES",
+                    status="OPEN",
+                    entry_order_id=888,
+                    entry_time=datetime.now(timezone.utc),
+                    entry_limit_price=43.0,
+                    quantity=1,
+                )
+            )
+
+        resp = client.post(
+            "/api/autonomous/emergency-stop",
+            json={
+                "reason": "cancel pending entries",
+                "cancel_pending_entries": True,
+            },
+        )
+
+        assert resp.status_code == 200
+        cleanup = resp.get_json()["pending_entry_cleanup"]
+        assert cleanup["pending_entry_order_count"] == 2
+        assert cleanup["cancel_forwarded_count"] == 1
+        assert cancelled == [888]
+        paper_entry = next(
+            item for item in cleanup["pending_entry_orders"]
+            if item["account_mode"] == "paper"
+        )
+        assert paper_entry["forwarded_to_broker"] is False
+        assert "paper entry order IDs" in paper_entry["cancel_skipped_reason"]
+
+    def test_stop_does_not_cancel_entries_unless_requested(
+        self, app, client, tmp_path
+    ):
+        _install_live_runner(app, tmp_path)
+        cancelled = []
+
+        def cancel_order(order_id):
+            cancelled.append(order_id)
+            return True
+
+        app.config["autonomous_cancel_order"] = cancel_order
+
+        with app.app_context():
+            store = app.config["autonomous_live_trade_store"]
+            store.record_trade(
+                AutonomousTrade(
+                    autonomous_trade_id="pending-entry",
+                    symbol="MSFT",
+                    trade_type="BUY_SHARES",
+                    status="OPEN",
+                    entry_order_id=880,
+                    entry_time=datetime.now(timezone.utc),
+                    entry_limit_price=300.0,
+                    quantity=5,
+                )
+            )
+
+        resp = client.post(
+            "/api/autonomous/emergency-stop",
+            json={"reason": "plain stop"},
+        )
+
+        assert resp.status_code == 200
+        cleanup = resp.get_json()["pending_entry_cleanup"]
+        assert cleanup["requested"] is False
+        assert cleanup["pending_entry_order_count"] == 1
+        assert cleanup["cancel_forwarded_count"] == 0
+        assert cancelled == []
+
+    def test_reset_requires_confirmation_and_is_audited(
+        self, app, client, tmp_path
+    ):
+        _install_live_runner(app, tmp_path)
+        app.config["autonomous_audit_log_dir"] = str(tmp_path / "audit")
+
+        stop = client.post(
+            "/api/autonomous/emergency-stop",
+            json={"reason": "reset test"},
+        )
+        assert stop.status_code == 200
+
+        rejected = client.post(
+            "/api/autonomous/emergency-reset",
+            json={"reason": "missing confirm"},
+        )
+        assert rejected.status_code == 400
+        assert rejected.get_json()["status"] == "confirmation_required"
+
+        reset = client.post(
+            "/api/autonomous/emergency-reset",
+            json={"reason": "operator reviewed", "confirm": True},
+        )
+        assert reset.status_code == 200
+        body = reset.get_json()
+        assert body["status"] == "reset"
+        assert body["emergency_stop"]["active"] is False
+        assert body["autonomous_live_mode"]["operating_state"] == "OFF"
+        assert body["continuous_supervisor"]["paused"] is False
+
+        audit_files = list((tmp_path / "audit").glob("autonomous_trading_*.jsonl"))
+        assert audit_files
+        audit_text = audit_files[0].read_text(encoding="utf-8")
+        assert '"event": "emergency_reset"' in audit_text
+        assert '"mode_remains_off": true' in audit_text
+
+    def test_reset_refuses_to_clear_global_marker_not_owned_by_autonomous(
+        self, app, client, tmp_path
+    ):
+        _install_live_runner(app, tmp_path)
+
+        from web.routes import api_autonomous
+
+        api_autonomous.EMERGENCY_STOP_FILE.write_text(
+            "EMERGENCY STOP - global operator halt\n",
+            encoding="utf-8",
+        )
+
+        reset = client.post(
+            "/api/autonomous/emergency-reset",
+            json={"reason": "operator reviewed", "confirm": True},
+        )
+
+        assert reset.status_code == 409
+        body = reset.get_json()
+        assert body["status"] == "global_emergency_stop_active"
+        assert body["emergency_stop"]["active"] is True
+        assert body["emergency_stop"]["emergency_stop_marker_owned_by_autonomous"] is False
+        assert api_autonomous.EMERGENCY_STOP_FILE.exists()
 
 
 # ---------------------------------------------------------------------------
