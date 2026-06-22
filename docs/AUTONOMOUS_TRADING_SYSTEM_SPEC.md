@@ -974,6 +974,31 @@ autonomous/capital_promotion.py
 - Operator approval is required.
 - Drawdown, faults, or stale evidence can demote the system.
 
+#### Current implementation
+
+Phase 12 is implemented as an advisory report generator in
+`autonomous/capital_promotion.py`.
+
+It provides:
+
+- fixed capital levels 0-6 matching the roadmap;
+- `CapitalPromotionEvaluator`;
+- promotion, hold, and demotion reports;
+- completed/recent trade counts;
+- avg R and expected R;
+- win rate and profit factor;
+- rolling Sharpe and Sortino;
+- max drawdown in R;
+- slippage and partial-fill diagnostics;
+- operational incident counting;
+- paper-vs-live consistency diagnostics;
+- stale-evidence demotion checks.
+
+The evaluator never promotes itself, changes capital caps, mutates autonomous
+configuration, connects to TWS, submits orders, cancels orders, or enables live
+trading. Every report sets `operator_approval_required` to true and
+`automatic_capital_scaling_allowed` to false.
+
 ## 12. Continuous-live readiness definition
 
 TWS Robot should not be considered continuous-live-ready until it can answer and evidence all of the following:
