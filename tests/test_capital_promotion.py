@@ -6,6 +6,7 @@ from autonomous.capital_promotion import (
     PROMOTION_HOLD,
     CapitalPromotionEvaluator,
     CapitalPromotionThresholds,
+    _parse_ts,
 )
 
 
@@ -143,3 +144,18 @@ def test_capital_promotion_report_serializes_required_safety_flags():
     assert data["metrics"]["profit_factor"] is None
     assert data["metrics"]["profit_factor_unbounded"] is True
     assert "paper_live_consistency" in data["metrics"]
+
+
+def test_parse_ts_fails_closed_on_missing_or_bad_timestamp():
+    # None and missing/unparseable values should yield the epoch (very old), not now
+    epoch = datetime.min.replace(tzinfo=timezone.utc)
+
+    assert _parse_ts(None) == epoch
+    assert _parse_ts("not-a-date") == epoch
+    assert _parse_ts(12345) == epoch
+    assert _parse_ts("") == epoch
+
+    # Valid ISO strings still parse correctly
+    ts = datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc)
+    assert _parse_ts(ts.isoformat()) == ts
+    assert _parse_ts(ts) == ts

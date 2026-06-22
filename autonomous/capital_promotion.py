@@ -217,11 +217,13 @@ class CapitalPromotionEvaluator:
 
         demotion_reasons = self._demotion_reasons(metrics, current)
         if demotion_reasons:
+            min_level = self.levels[0].level
+            demoted = max(min_level, current - 1)
             return CapitalPromotionReport(
                 current_level=current,
-                recommended_level=max(0, current - 1),
+                recommended_level=demoted,
                 action=PROMOTION_DEMOTE,
-                target_level=self._level_by_number.get(max(0, current - 1)),
+                target_level=self._level_by_number.get(demoted),
                 metrics=metrics,
                 demotion_reasons=demotion_reasons,
             )
@@ -261,12 +263,12 @@ class CapitalPromotionEvaluator:
         )
 
     def _normalize_level(self, current_level: int) -> int:
+        min_level = self.levels[0].level
+        max_level = self.levels[-1].level
         try:
             value = int(current_level)
         except (TypeError, ValueError):
-            return 0
-        min_level = self.levels[0].level
-        max_level = self.levels[-1].level
+            return min_level
         return max(min_level, min(max_level, value))
 
     def _metrics(
@@ -537,7 +539,7 @@ def _parse_ts(value: Any) -> datetime:
             return _ensure_aware(datetime.fromisoformat(value.replace("Z", "+00:00")))
         except ValueError:
             pass
-    return datetime.now(timezone.utc)
+    return datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _ensure_aware(value: datetime) -> datetime:
