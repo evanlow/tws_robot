@@ -267,9 +267,9 @@ class OrderExecutor:
         self.tws_adapter = tws_adapter
         self.risk_manager = risk_manager
         self.is_live_mode = is_live_mode
-        self.require_confirmation = require_confirmation and is_live_mode
-        self.emergency_stop_file = Path(emergency_stop_file)
         self.dry_run = bool(dry_run)
+        self.require_confirmation = require_confirmation and is_live_mode and not self.dry_run
+        self.emergency_stop_file = Path(emergency_stop_file)
         self.live_trading_enabled = bool(live_trading_enabled)
         self.live_confirmation = live_confirmation
         self.expected_account_id = expected_account_id

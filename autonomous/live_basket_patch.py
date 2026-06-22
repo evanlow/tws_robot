@@ -457,6 +457,20 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
         notes.append(f"{plan.get('symbol')}: quantity={quantity} status={getattr(result, 'status', None)}")
 
     status = DRY_RUN_EXECUTED if dry_run_seen else EXECUTED
+    if len(trade_plans) == 1:
+        single_trade = submitted_trades[0] if submitted_trades else None
+        trade_payload = None
+        if single_trade is not None:
+            trade_payload = {"submitted_trades": [single_trade], **single_trade}
+        return AutonomousLiveRunResult(
+            status=status,
+            gates=gates,
+            decision=decision_payload,
+            trade=trade_payload,
+            order_lifecycle=lifecycle_events,
+            notes=notes,
+            dry_run=dry_run_seen,
+        )
     return AutonomousLiveRunResult(
         status=status,
         gates=gates,

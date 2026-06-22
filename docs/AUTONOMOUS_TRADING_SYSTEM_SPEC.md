@@ -863,6 +863,31 @@ The operator needs fast visibility into system status.
 - Serious warnings are visible.
 - Emergency stop status is prominent.
 
+#### Implementation notes
+
+Phase 10 adds a consolidated passive operator snapshot endpoint:
+
+- `GET /api/autonomous/control-tower` exposes current paper/live mode state,
+  autonomous enabled state, live supervisor heartbeat, IBKR connection/account
+  context, cash/deployable-cash diagnostics, paper/live autonomous trade
+  counts, broker-visible open-order snapshots, append-only order lifecycle
+  current states, latest basket risk diagnostics from evidence, passive
+  broker-protection verification, risk/recovery readiness, recent decisions,
+  recent rejections, recent fills/outcomes, and emergency-stop status.
+- The control-tower endpoint computes live readiness passively from service
+  state, config, trade store, broker open-order snapshots, and the protection
+  verifier. It deliberately does not call the live runner's
+  `evaluate_gates()` because that method ingests broker fills/rejections,
+  reconciles stale positions, releases idempotency locks, and can append
+  lifecycle diagnostics.
+- The payload includes `safety_notes` and live-readiness `side_effects`
+  markers so operators and tests can verify that this endpoint does not submit
+  orders, cancel orders, flatten positions, or advance autonomous lifecycle.
+
+This phase improves visibility only. It does not add order submission,
+cancel/replace, panic flattening, automatic recovery, capital promotion, or
+live-mode activation.
+
 ### Phase 11 — Replay / chaos testing harness
 
 #### Problem
@@ -979,7 +1004,7 @@ docs/AUTONOMOUS_IMPLEMENTATION_TRACKER.md
 The next implementation PR should be:
 
 ```text
-Add enhanced emergency stop operations
+Add replay / chaos testing harness
 ```
 
-This should implement Phase 9 of the continuous autonomous live readiness roadmap.
+This should implement Phase 11 of the continuous autonomous live readiness roadmap.
