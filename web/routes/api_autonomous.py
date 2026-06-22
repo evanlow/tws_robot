@@ -1609,7 +1609,9 @@ def _safe_call(label: str, func, default):
 def _cash_snapshot_payload(svc) -> Dict[str, Any]:
     account = _safe_call("account summary", svc.get_account_summary, {}) or {}
     positions = _safe_call("positions", svc.get_positions, {}) or {}
-    orders = _safe_call("orders", svc.get_orders, {}) or {}
+    orders = _safe_call("orders", svc.get_orders, [])
+    if not isinstance(orders, list):
+        orders = []
     try:
         cash = CashAvailabilityAnalyzer().analyze(
             account_summary=account,
@@ -1627,7 +1629,7 @@ def _cash_snapshot_payload(svc) -> Dict[str, Any]:
         "account_summary": account,
         "cash": cash,
         "positions_count": len(positions) if isinstance(positions, dict) else None,
-        "orders_count": len(orders) if isinstance(orders, dict) else None,
+        "orders_count": len(orders),
     }
 
 

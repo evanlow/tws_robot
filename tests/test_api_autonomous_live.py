@@ -229,6 +229,73 @@ class TestLiveStatus:
 
 
 class TestControlTower:
+    def test_cash_snapshot_preserves_order_lists_for_analysis_and_counts(
+        self, monkeypatch
+    ):
+        import web.routes.api_autonomous as api_autonomous
+
+        captured = {}
+        orders = [{"id": "OID-1"}]
+
+        class _Svc:
+            def get_account_summary(self):
+                return {"cash_balance": 1234.0}
+
+            def get_positions(self):
+                return {}
+
+            def get_orders(self):
+                return list(orders)
+
+        class _Analysis:
+            def to_dict(self):
+                return {"deployable_cash": 1000.0}
+
+        class _Analyzer:
+            def analyze(self, *, account_summary, positions, orders):
+                captured["orders"] = orders
+                return _Analysis()
+
+        monkeypatch.setattr(api_autonomous, "CashAvailabilityAnalyzer", lambda: _Analyzer())
+
+        payload = api_autonomous._cash_snapshot_payload(_Svc())
+
+        assert captured["orders"] == orders
+        assert payload["orders_count"] == 1
+
+    def test_cash_snapshot_defaults_orders_to_empty_list_on_read_failure(
+        self, monkeypatch
+    ):
+        import web.routes.api_autonomous as api_autonomous
+
+        captured = {}
+
+        class _Svc:
+            def get_account_summary(self):
+                return {"cash_balance": 1234.0}
+
+            def get_positions(self):
+                return {}
+
+            def get_orders(self):
+                raise RuntimeError("boom")
+
+        class _Analysis:
+            def to_dict(self):
+                return {"deployable_cash": 1000.0}
+
+        class _Analyzer:
+            def analyze(self, *, account_summary, positions, orders):
+                captured["orders"] = orders
+                return _Analysis()
+
+        monkeypatch.setattr(api_autonomous, "CashAvailabilityAnalyzer", lambda: _Analyzer())
+
+        payload = api_autonomous._cash_snapshot_payload(_Svc())
+
+        assert captured["orders"] == []
+        assert payload["orders_count"] == 0
+
     def test_control_tower_returns_operator_snapshot(self, app, client, tmp_path, monkeypatch):
         store, _ = _install_live_runner(app, tmp_path)
         live_cfg = app.config["autonomous_live_runner_config"]
