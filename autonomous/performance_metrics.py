@@ -167,6 +167,8 @@ def _outcome_from_record(record: Dict[str, Any]) -> Optional[PerformanceOutcome]
         return None
     outcome = record.get("outcome") or {}
     raw_commission = outcome.get("commission")
+    # Fall back to total_commission only when commission is absent entirely;
+    # an explicit commission=0.0 must be preserved to avoid inflating totals.
     commission_value = raw_commission if raw_commission is not None else outcome.get("total_commission")
     return PerformanceOutcome(
         timestamp=_parse_ts(record.get("timestamp")),
