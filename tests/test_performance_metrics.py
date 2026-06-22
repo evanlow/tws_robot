@@ -74,7 +74,7 @@ def test_performance_metrics_calculates_risk_adjusted_metrics():
     metrics = PerformanceMetricsCalculator(rolling_window=3).calculate(records)
 
     assert metrics.max_drawdown_r == pytest.approx(2.0)
-    assert metrics.consecutive_losses == 1
+    assert metrics.consecutive_losses == 2
     assert metrics.volatility_r is not None
     assert metrics.downside_deviation is not None
     assert metrics.sharpe is not None

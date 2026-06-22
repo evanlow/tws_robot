@@ -166,13 +166,15 @@ def _outcome_from_record(record: Dict[str, Any]) -> Optional[PerformanceOutcome]
     if r_multiple is None:
         return None
     outcome = record.get("outcome") or {}
+    raw_commission = outcome.get("commission")
+    commission_value = raw_commission if raw_commission is not None else outcome.get("total_commission")
     return PerformanceOutcome(
         timestamp=_parse_ts(record.get("timestamp")),
         symbol=str(record.get("symbol") or ""),
         r_multiple=r_multiple,
         realized_pnl=_float(outcome.get("realized_pnl")) or 0.0,
         slippage_pct=_slippage_pct(outcome),
-        commission=_float(outcome.get("commission") or outcome.get("total_commission")) or 0.0,
+        commission=_float(commission_value) or 0.0,
         partial_fill=bool(outcome.get("partial_fill")),
     )
 
@@ -187,7 +189,7 @@ def _slippage_pct(outcome: Dict[str, Any]) -> Optional[float]:
     values = [value for value in values if value is not None]
     if not values:
         return None
-    return sum(values) / len(values)
+    return sum(abs(v) for v in values) / len(values)
 
 
 def _profit_factor(wins: List[float], losses: List[float]) -> float:
@@ -210,13 +212,15 @@ def _max_drawdown(values: List[float]) -> float:
 
 
 def _consecutive_losses(outcomes: List[PerformanceOutcome]) -> int:
+    max_count = 0
     count = 0
-    for row in sorted(outcomes, key=lambda item: item.timestamp, reverse=True):
+    for row in sorted(outcomes, key=lambda item: item.timestamp):
         if row.r_multiple < 0:
             count += 1
-            continue
-        break
-    return count
+            max_count = max(max_count, count)
+        else:
+            count = 0
+    return max_count
 
 
 def _sharpe(values: List[float]) -> Optional[float]:
