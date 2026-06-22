@@ -18,6 +18,7 @@ from autonomous import (
 )
 from autonomous.audit import AuditLogger
 from autonomous.autonomous_live_runner import AutonomousLiveRunner, EXECUTED, DRY_RUN_EXECUTED, NO_TRADE
+from autonomous.order_lifecycle import ENTRY, OrderLifecycleState, OrderLifecycleStore
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.trade_store import AutonomousTrade, TradeStore
 from data.cash_availability import CashAvailabilityAnalyzer
@@ -225,6 +226,133 @@ class TestLiveStatus:
         body = resp.get_json()
         assert body["gates"]["connected"] is False
         assert body["gates"]["ready"] is False
+
+
+class TestControlTower:
+    def test_control_tower_returns_operator_snapshot(self, app, client, tmp_path, monkeypatch):
+        store, _ = _install_live_runner(app, tmp_path)
+        live_cfg = app.config["autonomous_live_runner_config"]
+        live_cfg.order_lifecycle_store_path = str(tmp_path / "order_lifecycle.jsonl")
+        store.record_trade(AutonomousTrade(
+            autonomous_trade_id="live-open-1",
+            symbol="AAA",
+            trade_type="BUY_SHARES",
+            status="OPEN",
+            entry_order_id=7777,
+            entry_time=datetime.now(timezone.utc),
+            entry_limit_price=100.0,
+            quantity=3,
+            stop_price=95.0,
+            target_order_id=7778,
+            stop_order_id=7779,
+            notes=["dry_run=False"],
+        ))
+        OrderLifecycleStore(live_cfg.order_lifecycle_store_path).record_transition(
+            lifecycle_id="life-entry-1",
+            state=OrderLifecycleState.SUBMITTED,
+            symbol="AAA",
+            order_role=ENTRY,
+            broker_order_id=7777,
+            autonomous_trade_id="live-open-1",
+            reason="submitted for test",
+        )
+
+        class _Bridge:
+            def get_open_order_snapshots(self):
+                return [{
+                    "order_id": 7779,
+                    "symbol": "AAA",
+                    "action": "SELL",
+                    "order_type": "STP",
+                    "status": "Submitted",
+                    "total_quantity": 3,
+                }]
+
+        class _Evidence:
+            def recent(self, limit=25):
+                return [
+                    {
+                        "evidence_type": "autonomous_decision",
+                        "timestamp": "2026-06-22T00:00:00+00:00",
+                        "status": "selected",
+                        "symbol": "AAA",
+                        "basket_plan": {
+                            "risk_allocation": {
+                                "budget": 100.0,
+                                "planned_risk": 42.0,
+                            }
+                        },
+                        "basket_planned_risk": [{"symbol": "AAA", "planned_dollar_risk": 42.0}],
+                        "trade_plan": {
+                            "symbol": "AAA",
+                            "market_data_health": {"healthy": True, "quote_age_seconds": 1.0},
+                        },
+                    },
+                    {
+                        "evidence_type": "autonomous_outcome",
+                        "timestamp": "2026-06-22T00:01:00+00:00",
+                        "symbol": "BBB",
+                        "realized_r_multiple": 0.7,
+                    },
+                    {
+                        "evidence_type": "autonomous_decision",
+                        "timestamp": "2026-06-22T00:02:00+00:00",
+                        "status": "no_candidate",
+                        "rejection_reason": "no_candidate",
+                    },
+                ]
+
+        monkeypatch.setattr("web.services.ServiceManager.connected", True)
+        monkeypatch.setattr("web.services.ServiceManager.connection_env", "live")
+        monkeypatch.setattr(
+            "web.services.ServiceManager.connection_info",
+            {"account": "U1234567", "port": 7496},
+        )
+        monkeypatch.setattr("web.services.ServiceManager.tws_bridge", _Bridge())
+        monkeypatch.setattr(
+            "web.routes.api_autonomous._supervised_live_lifecycle_tick",
+            lambda: (_ for _ in ()).throw(AssertionError("must not auto-advance")),
+        )
+        monkeypatch.setattr(
+            "web.routes.api_autonomous._evidence_store",
+            lambda: _Evidence(),
+        )
+
+        resp = client.get("/api/autonomous/control-tower")
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["safety_notes"]["read_only"] is True
+        assert body["safety_notes"]["does_not_advance_lifecycle"] is True
+        assert body["mode"]["autonomous_enabled"] is False
+        assert body["connection"]["connected"] is True
+        assert body["heartbeat"]["supervisor"]["state"] == "IDLE"
+        assert body["cash"]["cash"]["deployable_cash"] is not None
+        assert body["trades"]["live"]["counts"]["open"] == 1
+        assert body["broker_orders"]["count"] == 1
+        assert body["order_lifecycle"]["counts"]["active"] == 1
+        assert body["basket_risk"]["available"] is True
+        assert body["market_data_health"]["available"] is True
+        assert body["protection"]["diagnostics"] == body["readiness"]["live"]["protection_diagnostics"]
+        assert body["evidence"]["counts"]["decisions"] == 2
+        assert body["evidence"]["counts"]["fills"] == 1
+        assert body["evidence"]["counts"]["rejections"] == 1
+        assert "emergency_stop" in body
+
+    def test_control_tower_prominently_reports_emergency_stop(self, app, client, tmp_path, monkeypatch):
+        _install_live_runner(app, tmp_path)
+        stop_file = tmp_path / "ESTOP"
+        stop_file.write_text("Source: autonomous_emergency_stop\n", encoding="utf-8")
+        import web.routes.api_autonomous as api_autonomous
+        monkeypatch.setattr(api_autonomous, "EMERGENCY_STOP_FILE", stop_file)
+
+        resp = client.get("/api/autonomous/control-tower")
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["emergency_stop"]["active"] is True
+        assert body["emergency_stop"]["manual_reset_required"] is True
+        assert body["readiness"]["warnings"][0] == "Emergency stop active"
 
 
 # ---------------------------------------------------------------------------

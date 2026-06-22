@@ -39,6 +39,7 @@ from autonomous.audit import AuditLogger
 from autonomous.autonomous_live_runner import (
     AutonomousLiveRunner,
     EXECUTED as LIVE_EXECUTED,
+    LiveReadinessGates,
 )
 from autonomous.autonomous_runner import (
     AutonomousPaperRunner,
@@ -63,7 +64,9 @@ from autonomous.continuous_supervisor import (
 from autonomous.exit_manager import AutonomousExitManager
 from autonomous.lifecycle_worker import AutonomousLifecycleWorker
 from autonomous.evidence_store import TradeEvidenceStore
+from autonomous.order_lifecycle import OrderLifecycleStore
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
+from autonomous.protection_verifier import ProtectionVerifier
 from autonomous.runner_config import AutonomousRunnerConfig, AutonomousLiveRunnerConfig
 from autonomous.trade_store import CLOSED, EXIT_PENDING, FAILED, OPEN, TradeStore
 from autonomous.trade_reconciler import TradeReconciler
@@ -1593,6 +1596,371 @@ def _emergency_stop_payload() -> Dict[str, Any]:
             "Panic Flatten is a separate explicit control and is not invoked here."
         ),
     }
+
+
+def _safe_call(label: str, func, default):
+    try:
+        return func()
+    except Exception:
+        logger.exception("Control tower snapshot failed reading %s", label)
+        return default
+
+
+def _cash_snapshot_payload(svc) -> Dict[str, Any]:
+    account = _safe_call("account summary", svc.get_account_summary, {}) or {}
+    positions = _safe_call("positions", svc.get_positions, {}) or {}
+    orders = _safe_call("orders", svc.get_orders, {}) or {}
+    try:
+        cash = CashAvailabilityAnalyzer().analyze(
+            account_summary=account,
+            positions=positions,
+            orders=orders,
+        ).to_dict()
+    except Exception:
+        logger.exception("Control tower failed calculating deployable cash")
+        cash = {
+            "cash_balance": account.get("cash_balance") or account.get("cash"),
+            "deployable_cash": None,
+            "warnings": ["deployable_cash_unavailable"],
+        }
+    return {
+        "account_summary": account,
+        "cash": cash,
+        "positions_count": len(positions) if isinstance(positions, dict) else None,
+        "orders_count": len(orders) if isinstance(orders, dict) else None,
+    }
+
+
+def _broker_open_orders_payload(svc) -> Dict[str, Any]:
+    bridge = getattr(svc, "tws_bridge", None)
+    getter = getattr(bridge, "get_open_order_snapshots", None)
+    if not callable(getter):
+        return {
+            "available": False,
+            "orders": [],
+            "count": 0,
+            "warning": "broker_open_order_snapshot_unavailable",
+        }
+    orders = _safe_call("broker open orders", getter, []) or []
+    return {
+        "available": True,
+        "orders": orders,
+        "count": len(orders) if isinstance(orders, list) else 0,
+    }
+
+
+def _live_trades_today_count(store: TradeStore) -> int:
+    today = datetime.now(timezone.utc).date()
+    count = 0
+    for trade in store.list_all():
+        entry_time = getattr(trade, "entry_time", None)
+        if isinstance(entry_time, datetime) and entry_time.date() == today:
+            count += 1
+    return count
+
+
+def _trade_summary_payload(store: TradeStore) -> Dict[str, Any]:
+    trades = store.list_all()
+    open_trades = [t.to_dict() for t in trades if t.status == OPEN]
+    exit_pending = [t.to_dict() for t in trades if t.status == EXIT_PENDING]
+    closed = [t.to_dict() for t in trades if t.status in (CLOSED, FAILED)]
+    return {
+        "open": open_trades,
+        "exit_pending": exit_pending,
+        "recent_closed": closed[-10:],
+        "counts": {
+            "open": len(open_trades),
+            "exit_pending": len(exit_pending),
+            "closed_or_failed": len(closed),
+            "total": len(trades),
+        },
+    }
+
+
+def _passive_live_readiness_payload(
+    live_config: AutonomousLiveRunnerConfig,
+    svc,
+    broker_orders: Dict[str, Any],
+    cash_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    info = getattr(svc, "connection_info", None) or {}
+    account_id = info.get("account") or None
+    if not live_config.live_require_account_confirmation:
+        account_verified = True
+    elif not account_id:
+        account_verified = False
+    elif live_config.expected_account_id:
+        account_verified = (
+            str(account_id).strip().upper()
+            == str(live_config.expected_account_id).strip().upper()
+        )
+    else:
+        account_verified = True
+
+    provider = _resolve_signal_provider()
+    provider_ready = provider is not None and not isinstance(provider, StaticSignalProvider)
+    live_store = _live_trade_store()
+    open_trades = live_store.list_open()
+    if live_config.require_broker_protection_confirmation:
+        protection_results = ProtectionVerifier().verify_open_trades(
+            open_trades,
+            broker_positions=_build_broker_positions(svc),
+            open_orders=broker_orders.get("orders") or [],
+        )
+    else:
+        protection_results = []
+    protection_failures = [r for r in protection_results if r.recovery_required]
+    deployable_cash = (
+        (cash_payload.get("cash") or {}).get("deployable_cash")
+        if isinstance(cash_payload, dict)
+        else None
+    )
+    try:
+        deployable_cash_f = float(deployable_cash)
+    except (TypeError, ValueError):
+        deployable_cash_f = 0.0
+
+    recovery_issues = [
+        {
+            "code": "protection_recovery_required",
+            "message": result.reason,
+            "symbol": result.symbol,
+            "autonomous_trade_id": result.autonomous_trade_id,
+        }
+        for result in protection_failures
+    ]
+    recovery_required = bool(recovery_issues)
+    gates = LiveReadinessGates(
+        connected=bool(getattr(svc, "connected", False)),
+        live_mode=(getattr(svc, "connection_env", None) == "live"),
+        live_enabled=live_config.live_enabled,
+        live_continuous_enabled=live_config.live_continuous_enabled,
+        account_id_verified=account_verified,
+        signal_provider_ready=provider_ready,
+        emergency_stop_active=bool(_emergency_stop_payload().get("active")),
+        open_live_trades=len(open_trades),
+        max_open_live_trades=live_config.max_open_live_trades,
+        live_trades_today=_live_trades_today_count(live_store),
+        max_live_trades_per_day=live_config.max_live_trades_per_day,
+        deployable_cash=deployable_cash_f,
+        min_deployable_cash=live_config.min_deployable_cash,
+        protection_confirmed=not protection_failures,
+        protection_recovery_required=len(protection_failures),
+        protection_diagnostics=[r.to_dict() for r in protection_results],
+        recovery_classification=(
+            "RECOVERY_REQUIRED" if recovery_required else "SAFE_TO_TRADE"
+        ),
+        recovery_required=recovery_required,
+        recovery_diagnostics={
+            "classification": (
+                "RECOVERY_REQUIRED" if recovery_required else "SAFE_TO_TRADE"
+            ),
+            "ready_to_trade": not recovery_required,
+            "issues": recovery_issues,
+            "passive_snapshot": True,
+        },
+    )
+    payload = gates.to_dict()
+    payload["passive_snapshot"] = True
+    payload["side_effects"] = {
+        "does_not_ingest_fills": True,
+        "does_not_reconcile_rejected_orders": True,
+        "does_not_write_lifecycle_events": True,
+    }
+    return payload
+
+
+def _recent_evidence_payload(limit: int = 25) -> Dict[str, Any]:
+    records = _safe_call("recent evidence", lambda: _evidence_store().recent(limit), []) or []
+    decisions = [r for r in records if r.get("evidence_type") == "autonomous_decision"]
+    outcomes = [r for r in records if r.get("evidence_type") == "autonomous_outcome"]
+    rejections = [
+        r for r in decisions
+        if r.get("rejection_reason") or r.get("status") in {"rejected", "market_not_suitable", "no_candidate"}
+    ]
+    return {
+        "recent_decisions": decisions[:10],
+        "recent_rejections": rejections[:10],
+        "recent_fills": outcomes[:10],
+        "counts": {
+            "records": len(records),
+            "decisions": len(decisions),
+            "rejections": len(rejections),
+            "fills": len(outcomes),
+        },
+    }
+
+
+def _latest_basket_risk_payload(evidence: Dict[str, Any]) -> Dict[str, Any]:
+    for record in evidence.get("recent_decisions") or []:
+        basket_plan = record.get("basket_plan") or {}
+        risk_allocation = basket_plan.get("risk_allocation")
+        basket_risk = record.get("basket_planned_risk") or []
+        if risk_allocation or basket_risk:
+            return {
+                "available": True,
+                "timestamp": record.get("timestamp"),
+                "symbol": record.get("symbol"),
+                "risk_allocation": risk_allocation or {},
+                "planned_risk": basket_risk,
+            }
+    return {
+        "available": False,
+        "risk_allocation": {},
+        "planned_risk": [],
+    }
+
+
+def _market_data_health_payload(evidence: Dict[str, Any], live_gates: Dict[str, Any]) -> Dict[str, Any]:
+    for record in evidence.get("recent_decisions") or []:
+        plans = []
+        if isinstance(record.get("trade_plan"), dict):
+            plans.append(record.get("trade_plan") or {})
+        plans.extend(record.get("trade_plans") or [])
+        diagnostics = [
+            plan.get("market_data_health")
+            for plan in plans
+            if isinstance(plan, dict) and plan.get("market_data_health")
+        ]
+        if diagnostics:
+            return {
+                "available": True,
+                "source": "recent_evidence",
+                "timestamp": record.get("timestamp"),
+                "diagnostics": diagnostics,
+            }
+    return {
+        "available": False,
+        "source": "live_readiness",
+        "diagnostics": [],
+        "warning": "no_recent_market_data_health_record",
+        "ready": live_gates.get("ready"),
+    }
+
+
+def _risk_lifecycle_payload(live_gates: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    recovery = live_gates.get("recovery_diagnostics") or {}
+    for record in evidence.get("recent_decisions") or []:
+        risk = record.get("risk_lifecycle")
+        if isinstance(risk, dict):
+            return {
+                "available": True,
+                "source": "recent_evidence",
+                "status": risk,
+                "recovery_classification": live_gates.get("recovery_classification"),
+                "recovery_required": live_gates.get("recovery_required"),
+                "recovery_diagnostics": recovery,
+            }
+    return {
+        "available": bool(live_gates),
+        "source": "live_readiness",
+        "status": {},
+        "recovery_classification": live_gates.get("recovery_classification"),
+        "recovery_required": live_gates.get("recovery_required"),
+        "recovery_diagnostics": recovery,
+    }
+
+
+def _order_lifecycle_payload(live_config: AutonomousLiveRunnerConfig) -> Dict[str, Any]:
+    store = OrderLifecycleStore(live_config.order_lifecycle_store_path)
+    states = _safe_call("order lifecycle states", store.current_states, {}) or {}
+    events = [event.to_dict() for event in states.values()]
+    active = [
+        event for event in events
+        if event.get("state") not in {"CLOSED", "RECONCILED", "REJECTED", "CANCELLED", "EXPIRED"}
+    ]
+    return {
+        "current": events,
+        "active": active,
+        "counts": {
+            "current": len(events),
+            "active": len(active),
+        },
+    }
+
+
+def _control_tower_payload() -> Dict[str, Any]:
+    svc = get_services()
+    live_config = _live_runner_config()
+    paper_status = _autonomous_status_payload()
+    evidence = _recent_evidence_payload(limit=25)
+    cash_payload = _cash_snapshot_payload(svc)
+    live_mode = _live_mode_state().to_dict()
+    supervisor = _live_continuous_supervisor().status()
+    broker_orders = _broker_open_orders_payload(svc)
+    live_gates = _passive_live_readiness_payload(
+        live_config,
+        svc,
+        broker_orders,
+        cash_payload,
+    )
+    emergency_stop = _emergency_stop_payload()
+    serious_warnings: list[str] = []
+    serious_warnings.extend(live_gates.get("reasons") or [])
+    if emergency_stop.get("active"):
+        serious_warnings.insert(0, "Emergency stop active")
+    if broker_orders.get("warning"):
+        serious_warnings.append(broker_orders["warning"])
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "control_tower_version": 1,
+        "mode": {
+            "paper": paper_status.get("mode", {}),
+            "live": live_mode,
+            "autonomous_enabled": bool(
+                (paper_status.get("mode") or {}).get("operating_state") == "ON"
+                or live_mode.get("operating_state") == "ON"
+            ),
+        },
+        "connection": {
+            "connected": bool(getattr(svc, "connected", False)),
+            "connection_env": getattr(svc, "connection_env", None),
+            "connection_info": getattr(svc, "connection_info", None) or {},
+            "verification": _connection_verification_payload(svc),
+        },
+        "heartbeat": {
+            "supervisor": supervisor,
+            "last_heartbeat_at": supervisor.get("last_heartbeat_at"),
+            "state": supervisor.get("state"),
+            "paused": supervisor.get("paused"),
+        },
+        "readiness": {
+            "paper": paper_status.get("readiness", {}),
+            "live": live_gates,
+            "warnings": serious_warnings,
+        },
+        "market_data_health": _market_data_health_payload(evidence, live_gates),
+        "cash": cash_payload,
+        "trades": {
+            "paper": _trade_summary_payload(_trade_store()),
+            "live": _trade_summary_payload(_live_trade_store()),
+        },
+        "broker_orders": broker_orders,
+        "order_lifecycle": _order_lifecycle_payload(live_config),
+        "basket_risk": _latest_basket_risk_payload(evidence),
+        "protection": {
+            "confirmed": live_gates.get("protection_confirmed"),
+            "recovery_required": live_gates.get("protection_recovery_required"),
+            "diagnostics": live_gates.get("protection_diagnostics") or [],
+        },
+        "risk_lifecycle": _risk_lifecycle_payload(live_gates, evidence),
+        "evidence": evidence,
+        "emergency_stop": emergency_stop,
+        "safety_notes": {
+            "read_only": True,
+            "does_not_submit_orders": True,
+            "does_not_cancel_orders": True,
+            "does_not_flatten_positions": True,
+            "does_not_advance_lifecycle": True,
+        },
+    }
+
+
+@bp.route("/control-tower", methods=["GET"])
+def control_tower():
+    """Return a consolidated operator snapshot for autonomous readiness."""
+    return jsonify(_control_tower_payload())
 
 
 @bp.route("/runner/status", methods=["GET"])

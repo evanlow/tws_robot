@@ -40,7 +40,8 @@ Legend:
 | Broker fill ingestion diagnostics | Done | PR #175; broker execution and commission callbacks now update trade fills, lifecycle states, and realized outcome evidence for future fill-quality and partial-fill metrics |
 | Continuous supervisor diagnostics | Done | PR #175; continuous cycles now expose heartbeat, pause reason, cadence/overlap counters, and operational fault diagnostics for future incident metrics |
 | Restart recovery diagnostics | Done | PR #176; live readiness now exposes broker/local recovery classifications, mismatch reasons, stale idempotency locks, unmatched broker orders, and recovery-required states for future operational metrics |
-| Emergency stop operations diagnostics | Done | Current PR continuing #161; autonomous emergency stop/reset now exposes marker state, supervisor pause state, pending-entry cleanup reports, preserved protective exits, and reset audit events for future operational metrics |
+| Emergency stop operations diagnostics | Done | PR #178; autonomous emergency stop/reset now exposes marker state, supervisor pause state, pending-entry cleanup reports, preserved protective exits, and reset audit events for future operational metrics |
+| Control tower operational snapshot | Done | Current PR continuing #161; consolidated API exposure for mode, heartbeat, broker/account, cash, open trades/orders, basket risk, protection, recovery/risk state, recent decisions/rejections/fills, and emergency-stop status |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
@@ -210,28 +211,29 @@ Checklist:
 ## 4. Current PR note
 
 The current Issue #161 continuation work does not complete an evidence-learning
-EL phase. It improves the operational evidence substrate used by future EL7
-capital-promotion reports and operational incident metrics:
+EL phase. It improves operator visibility and the operational evidence
+substrate used by future EL7 capital-promotion reports and operational
+incident metrics:
 
-- Autonomous emergency-stop responses now expose marker state, autonomous
-  marker ownership, manual reset requirement, shared risk-manager
-  emergency-stop state, and the explicit separation between Emergency Stop and
-  Panic Flatten.
-- Emergency stop now pauses the live continuous supervisor and returns
-  supervisor pause diagnostics for future incident-rate metrics.
-- Optional pending-entry cleanup returns per-entry cancel-forwarding reports,
-  forwards only live entry order IDs, and does not cancel target or stop
-  protective exit order IDs.
-- Autonomous emergency reset requires explicit confirmation and writes an
-  audit event while keeping autonomous modes off; it refuses to clear
-  global/manual emergency markers.
+- `GET /api/autonomous/control-tower` now exposes recent decisions,
+  rejections, fills/outcomes, latest basket-risk diagnostics, market-data
+  health diagnostics from evidence when present, broker protection state,
+  recovery/risk readiness, open autonomous trades/orders, cash/deployable cash,
+  continuous-supervisor heartbeat, and emergency-stop status in one operator
+  snapshot.
+- The endpoint is passive: it does not call the live runner readiness evaluator
+  that ingests fills/rejections and writes lifecycle diagnostics, and it does
+  not submit, cancel, flatten, or advance lifecycle state.
+- This improves the future EL8 dashboard/API foundation but does not implement
+  setup performance tables, promotion reports, weak-setup reports, or evidence
+  drift analysis.
 
 Test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop --basetemp=.pytest-tmp -q`
-  (`6 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveHalt tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop tests\test_web_api.py::TestEmergencyAPI --basetemp=.pytest-tmp -q`
-  (`18 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestControlTower --basetemp=.pytest-tmp -q`
+  (`2 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous.py tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestControlTower tests\test_api_autonomous_evidence.py tests\test_autonomous_dashboard.py --basetemp=.pytest-tmp -q`
+  (`94 passed`).
 
 Smoke-test evidence:
 
@@ -242,18 +244,21 @@ Smoke-test evidence:
   (`112 passed`);
   `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`161 passed`). Total split smoke coverage: `476 passed`.
-- The first smoke group printed a non-failing sparkline fallback message after
-  pytest completed; the command exited 0.
+- The first smoke group initially timed out after 240 seconds with no reported
+  failures; rerunning with a longer timeout passed.
+- The second smoke group printed non-failing post-pytest database/cache fetch
+  messages after pytest completed; the command exited 0.
 
 Known limitations:
 
 - No adaptive edge estimator, setup eligibility gate, evidence-aware sizing
   overlay, or capital promotion report is implemented in this PR.
-- Emergency-stop diagnostics are operational controls only; they are not yet
-  aggregated into EL operational metrics, promotion reports, or a dedicated
-  control-tower view.
-- Panic Flatten remains a separate future explicit control and is not part of
-  this emergency-stop implementation.
+- Control tower exposure is operational/API visibility. It is not yet the
+  dedicated EL8 learning dashboard with setup performance, promotion, weak
+  setup, or evidence drift reports.
+- Daily/weekly/monthly R is not separately aggregated by this endpoint yet;
+  it remains available to future work through realized outcome evidence and
+  risk lifecycle records.
 
 ## 5. Maintenance rules
 

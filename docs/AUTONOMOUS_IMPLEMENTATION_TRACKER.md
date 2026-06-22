@@ -71,8 +71,8 @@ Legend:
 | 6 | Automatic broker-fill ingestion | Done | PR #175 |
 | 7 | Continuous-run supervisor | Done | PR #175 |
 | 8 | Restart recovery and broker reconciliation | Done | PR #176 |
-| 9 | Enhanced emergency stop operations | Done | Current PR continuing #161 |
-| 10 | Control tower dashboard/API | Planned | TBD |
+| 9 | Enhanced emergency stop operations | Done | PR #178 |
+| 10 | Control tower dashboard/API | Done | Current PR continuing #161 |
 | 11 | Replay / chaos testing harness | Planned | TBD |
 | 12 | Capital ramp and promotion gates | Planned | TBD |
 
@@ -437,7 +437,7 @@ Known limitations and manual checks:
 
 ### Phase 8 — Restart recovery and broker reconciliation
 
-Status: Done in current PR; pending merge
+Status: Done in PR #176
 
 Checklist:
 
@@ -502,7 +502,7 @@ Known limitations and manual checks:
 
 ### Phase 9 — Enhanced emergency stop operations
 
-Status: Done in current PR; pending merge
+Status: Done in PR #178
 
 Checklist:
 
@@ -566,20 +566,74 @@ Known limitations and manual checks:
 
 ### Phase 10 — Control tower dashboard/API
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Expose autonomous mode and enabled state.
-- [ ] Expose heartbeat.
-- [ ] Expose IBKR connection and account state.
-- [ ] Expose market-data health.
-- [ ] Expose cash/deployable cash.
-- [ ] Expose open autonomous trades and orders.
-- [ ] Expose basket risk usage.
-- [ ] Expose confirmed protection state.
-- [ ] Expose risk lifecycle state.
-- [ ] Expose emergency stop status.
+- [x] Expose autonomous mode and enabled state.
+- [x] Expose heartbeat.
+- [x] Expose IBKR connection and account state.
+- [x] Expose market-data health.
+- [x] Expose cash/deployable cash.
+- [x] Expose open autonomous trades and orders.
+- [x] Expose basket risk usage.
+- [x] Expose confirmed protection state.
+- [x] Expose risk lifecycle state.
+- [x] Expose emergency stop status.
+
+Implementation notes:
+
+- Added `GET /api/autonomous/control-tower` as a consolidated operator
+  snapshot for Phase 10 visibility.
+- The payload includes paper/live autonomous mode state, enabled status,
+  continuous-supervisor heartbeat, IBKR connection/account verification,
+  passive live-readiness gates, market-data health diagnostics from recent
+  evidence when present, cash/deployable-cash diagnostics, paper/live
+  autonomous trade summaries, broker-visible open orders, append-only order
+  lifecycle current states, latest basket risk usage from evidence, passive
+  broker-protection diagnostics, recovery/risk lifecycle state, recent
+  decisions, recent rejections, recent fills/outcomes, and structured
+  emergency-stop status.
+- The control-tower route is intentionally passive and does not call
+  `AutonomousLiveRunner.evaluate_gates()`, because the live runner readiness
+  evaluator ingests broker fills/rejections, reconciles stale positions,
+  releases idempotency locks, and may write lifecycle diagnostics.
+- The response includes explicit `safety_notes` and live-readiness
+  `side_effects` markers confirming that the endpoint does not submit orders,
+  cancel orders, flatten positions, write lifecycle events, or advance the
+  autonomous lifecycle.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestControlTower --basetemp=.pytest-tmp -q`
+  (`2 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous.py tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestControlTower tests\test_api_autonomous_evidence.py tests\test_autonomous_dashboard.py --basetemp=.pytest-tmp -q`
+  (`94 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+- The first smoke group initially timed out after 240 seconds with no reported
+  failures; rerunning the same group with a longer timeout passed.
+- The second smoke group printed non-failing post-pytest database/cache fetch
+  messages after pytest completed; the command exited 0.
+
+Known limitations and manual checks:
+
+- The first Phase 10 slice is API-first; it consolidates state for the
+  existing dashboard/control-tower surface but does not redesign the browser UI.
+- Passive readiness does not ingest fresh broker fills/rejections or release
+  terminal idempotency locks; use `/api/autonomous/live/status` when explicit
+  live-runner reconciliation is desired.
+- Daily/weekly/monthly R remains available through existing outcome evidence
+  and risk lifecycle records; this endpoint currently surfaces recent fills and
+  risk/recovery state but does not compute a separate R-period summary table.
 
 ### Phase 11 — Replay / chaos testing harness
 
