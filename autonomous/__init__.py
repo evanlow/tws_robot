@@ -55,6 +55,13 @@ from autonomous.replay_engine import (
 )
 from autonomous.regime_context import build_regime_context, classify_time_of_day, sector_etf_for
 from autonomous.risk_lifecycle import LossLimitDecision, LossLimitGuard, StrategyEquityCurveBuilder, StrategyEquityPoint
+from autonomous.setup_registry import (
+    SETUP_REGISTRY_VERSION,
+    SetupDimensions,
+    SetupMetadata,
+    SetupRegistry,
+    setup_id_for_record,
+)
 from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
 from autonomous.trade_planner import TradePlan, TradePlanner, TradeType
 from autonomous.validation_framework import ValidationFramework, ValidationReport, ValidationThresholds
@@ -153,6 +160,11 @@ __all__ = [
     "SizingDecision",
     "StrategyEquityCurveBuilder",
     "StrategyEquityPoint",
+    "SETUP_REGISTRY_VERSION",
+    "SetupDimensions",
+    "SetupMetadata",
+    "SetupRegistry",
+    "setup_id_for_record",
     "StrategyArmLearner",
     "StrategyArmStats",
     "TradePlan",
