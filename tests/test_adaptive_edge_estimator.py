@@ -10,6 +10,7 @@ from autonomous.evidence_calibrator import (
     SETUP_STATE_RETIRED,
     calibrate_setup_evidence,
 )
+from autonomous.evidence_store import SCHEMA_VERSION
 
 
 BASE = datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc)
@@ -29,7 +30,7 @@ def _prior():
 
 def _record(r_value, *, index=0, symbol="AAA", realized=True):
     return {
-        "schema_version": 3,
+        "schema_version": SCHEMA_VERSION,
         "evidence_type": "autonomous_outcome",
         "timestamp": (BASE + timedelta(minutes=index)).isoformat(),
         "symbol": symbol,
