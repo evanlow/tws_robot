@@ -34,6 +34,12 @@ from autonomous.market_data_health import MarketDataHealthDecision, MarketDataHe
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.outcome_reconciliation import FillSummary, OutcomeReconciliation, OutcomeReconciler
 from autonomous.order_lifecycle import OrderLifecycleEvent, OrderLifecycleState, OrderLifecycleStore
+from autonomous.performance_metrics import (
+    PerformanceMetrics,
+    PerformanceMetricsCalculator,
+    PerformanceOutcome,
+    calculate_performance_metrics,
+)
 from autonomous.position_sizing import PositionSizer, SizingDecision
 from autonomous.protection_verifier import BrokerOrderSnapshot, ProtectionVerifier, ProtectionVerificationResult
 from autonomous.recovery_manager import RecoveryClassification, RecoveryIssue, RecoveryManager, RecoveryReport
@@ -124,6 +130,10 @@ __all__ = [
     "OrderLifecycleEvent",
     "OrderLifecycleState",
     "OrderLifecycleStore",
+    "PerformanceMetrics",
+    "PerformanceMetricsCalculator",
+    "PerformanceOutcome",
+    "calculate_performance_metrics",
     "PositionSizer",
     "BrokerOrderSnapshot",
     "ProtectionVerifier",

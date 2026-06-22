@@ -135,6 +135,24 @@ TWS Robot should calculate performance metrics from realized outcome evidence.
 - recovery-required events;
 - live vs paper slippage difference.
 
+### Current implementation
+
+Reusable EL1 trade and risk-adjusted metrics are implemented in:
+
+```text
+autonomous/performance_metrics.py
+```
+
+It calculates realized outcome metrics from `autonomous_outcome` evidence,
+including trade count, win/loss/breakeven count, win rate, average R, median R,
+total R, average win/loss R, expected R, profit factor, per-trade Sharpe,
+rolling Sharpe, Sortino, max drawdown in R, consecutive losses, downside
+deviation, R volatility, average slippage, average commission, total
+commission, and partial-fill rate.
+
+The module is analytics-only. It does not alter sizing, eligibility, capital
+promotion, risk gates, or order execution.
+
 ## 6. Evidence calibration
 
 The robot should include an evidence calibrator that computes setup-level statistics.
