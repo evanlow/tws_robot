@@ -4,7 +4,7 @@ from autonomous.setup_registry import SetupRegistry, setup_id_for_record
 def _record(**overrides):
     record = {
         "schema_version": 3,
-        "evidence_type": "autonomous_outcome",
+        "evidence_type": "autonomous_decision",
         "timestamp": "2026-06-22T12:00:00+00:00",
         "symbol": "AAA",
         "strategy_bucket": {
@@ -16,12 +16,17 @@ def _record(**overrides):
             "vix_direction_regime": "falling",
             "sector": "Technology",
         },
-        "features": {
-            "sector_regime": "sector_supportive",
-            "time_of_day_regime": "regular_session",
-            "support_distance_pct": 0.025,
-            "resistance_room_pct": 0.12,
-            "adr_pct": 0.035,
+        "selected": {
+            "candidate": {
+                "symbol": "AAA",
+            },
+            "features": {
+                "sector_regime": "sector_supportive",
+                "time_of_day_regime": "regular_session",
+                "support_distance_pct": 0.025,
+                "resistance_room_pct": 0.12,
+                "adr_pct": 0.035,
+            },
         },
         "trade_plan": {
             "symbol": "AAA",
@@ -111,12 +116,15 @@ def test_setup_registry_builds_metadata_registry_without_performance_aggregation
         _record(symbol="BBB"),
         _record(
             symbol="CCC",
-            features={
-                "sector_regime": "sector_supportive",
-                "time_of_day_regime": "regular_session",
-                "support_distance_pct": 0.12,
-                "resistance_room_pct": 0.12,
-                "adr_pct": 0.035,
+            selected={
+                "candidate": {"symbol": "CCC"},
+                "features": {
+                    "sector_regime": "sector_supportive",
+                    "time_of_day_regime": "regular_session",
+                    "support_distance_pct": 0.12,
+                    "resistance_room_pct": 0.12,
+                    "adr_pct": 0.035,
+                },
             },
         ),
     ]

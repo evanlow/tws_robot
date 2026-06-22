@@ -85,10 +85,15 @@ class SetupRegistry:
 
     def dimensions_from_record(self, record: Dict[str, Any]) -> SetupDimensions:
         bucket = record.get("strategy_bucket") or {}
-        features = record.get("features") or record.get("candidate_features") or {}
         market_gate = record.get("market_gate") or {}
         vix = market_gate.get("vix") or {}
         selected = record.get("selected") or {}
+        features = (
+            record.get("features")
+            or selected.get("features")
+            or record.get("candidate_features")
+            or {}
+        )
         candidate = selected.get("candidate") or record.get("candidate") or {}
         extras = candidate.get("extras") or {}
         trade_plan = record.get("trade_plan") or {}
@@ -237,9 +242,9 @@ def _sector_regime(
     if explicit:
         return explicit
     if features.get("sector_bullish") is True:
-        return "sector_bullish"
+        return "sector_supportive"
     if features.get("sector_bullish") is False:
-        return "sector_not_bullish"
+        return "sector_hostile"
     sector = bucket.get("sector") or features.get("sector")
     return f"sector_{sector}" if sector else "unknown_sector_regime"
 
