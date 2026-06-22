@@ -922,6 +922,27 @@ tests/simulated_broker/
 - Supervisor pauses or recovers as designed.
 - Evidence remains reconstructable.
 
+#### Current implementation
+
+The Phase 11 harness is implemented as a deterministic, simulation-only
+component in `autonomous/replay_engine.py`.
+
+It provides:
+
+- `ReplayChaosHarness`;
+- `SimulatedBroker`;
+- replay scenario/step/result dataclasses;
+- `default_phase_11_scenarios()` covering the required scenarios.
+
+The harness drives existing safety components (`BrokerFillIngestor`,
+`OrderLifecycleStore`, `IdempotencyStore`, `ProtectionVerifier`,
+`RecoveryManager`, `MarketDataHealthGuard`, and `ContinuousSupervisor`) so
+scenario results reflect production recovery semantics instead of parallel mock
+logic.
+
+It does not submit, cancel, replace, or flatten broker orders. It does not
+change live activation, sizing, risk gates, or autonomous execution behavior.
+
 ### Phase 12 — Capital ramp and promotion gates
 
 #### Problem

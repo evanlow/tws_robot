@@ -25,6 +25,16 @@ from autonomous.order_lifecycle import OrderLifecycleEvent, OrderLifecycleState,
 from autonomous.position_sizing import PositionSizer, SizingDecision
 from autonomous.protection_verifier import BrokerOrderSnapshot, ProtectionVerifier, ProtectionVerificationResult
 from autonomous.recovery_manager import RecoveryClassification, RecoveryIssue, RecoveryManager, RecoveryReport
+from autonomous.replay_engine import (
+    ReplayChaosHarness,
+    ReplayResult,
+    ReplayScenario,
+    ReplayStep,
+    ReplayStepKind,
+    ReplayStepResult,
+    SimulatedBroker,
+    default_phase_11_scenarios,
+)
 from autonomous.regime_context import build_regime_context, classify_time_of_day, sector_etf_for
 from autonomous.risk_lifecycle import LossLimitDecision, LossLimitGuard, StrategyEquityCurveBuilder, StrategyEquityPoint
 from autonomous.strategy_arm import StrategyArmLearner, StrategyArmStats
@@ -100,6 +110,14 @@ __all__ = [
     "RecoveryIssue",
     "RecoveryManager",
     "RecoveryReport",
+    "ReplayChaosHarness",
+    "ReplayResult",
+    "ReplayScenario",
+    "ReplayStep",
+    "ReplayStepKind",
+    "ReplayStepResult",
+    "SimulatedBroker",
+    "default_phase_11_scenarios",
     "SizingDecision",
     "StrategyEquityCurveBuilder",
     "StrategyEquityPoint",
