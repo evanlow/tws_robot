@@ -43,9 +43,9 @@ Legend:
 | Emergency stop operations diagnostics | Done | PR #178; autonomous emergency stop/reset now exposes marker state, supervisor pause state, pending-entry cleanup reports, preserved protective exits, and reset audit events for future operational metrics |
 | Control tower operational snapshot | Done | PR #180; consolidated API exposure for mode, heartbeat, broker/account, cash, open trades/orders, basket risk, protection, recovery/risk state, recent decisions/rejections/fills, and emergency-stop status |
 | Replay evidence reconstructability checks | Done | PR #181; Phase 11 replay harness verifies fill/outcome reconstructability under normal fill, partial fill, restart, stop/target, failed-leg, stale-quote, disconnect, and missing-protection scenarios |
-| Evidence-based adaptive edge estimator | Pending | Not yet implemented; tracked by Issue #185 |
+| Evidence-based adaptive edge estimator | Done | Current PR; passive rule-prior plus setup-evidence blending implemented in `autonomous/adaptive_edge_estimator.py` |
 | Setup registry | Done | PR #184; deterministic setup IDs and metadata registry implemented in `autonomous/setup_registry.py` |
-| Evidence calibrator | Done | Current PR; setup-level evidence summaries and conservative Bayesian/shrinkage classification implemented in `autonomous/evidence_calibrator.py` |
+| Evidence calibrator | Done | PR #186; setup-level evidence summaries and conservative Bayesian/shrinkage classification implemented in `autonomous/evidence_calibrator.py` |
 | Setup eligibility gate | Pending | Not yet implemented |
 | Evidence-aware sizing overlay | Pending | Not yet implemented |
 | Capital promotion report | Done | PR #182; advisory EL7 report recommends approve/hold/demote from realized outcome evidence and operational incidents without applying capital changes |
@@ -57,8 +57,8 @@ Legend:
 |---:|---|---|---|
 | EL1 | Performance metrics | Done | PR #183 |
 | EL2 | Setup identity and registry | Done | PR #184 |
-| EL3 | Evidence calibrator | Done | Current PR |
-| EL4 | Adaptive edge estimator | Pending | Issue #185 |
+| EL3 | Evidence calibrator | Done | PR #186 |
+| EL4 | Adaptive edge estimator | Done | Current PR |
 | EL5 | Setup eligibility gate | Pending | Issue #185 |
 | EL6 | Evidence-aware sizing overlay | Pending | Issue #185 |
 | EL7 | Capital promotion report | Done | PR #182 |
@@ -177,7 +177,7 @@ Smoke-test evidence:
 
 ### EL3 — Evidence calibrator
 
-Status: Done in current PR
+Status: Done in PR #186
 
 Goal:
 
@@ -233,7 +233,7 @@ Smoke-test evidence:
 
 ### EL4 — Adaptive edge estimator
 
-Status: Pending
+Status: Done in current PR
 
 Goal:
 
@@ -241,18 +241,49 @@ Goal:
 
 Checklist:
 
-- [ ] Add `autonomous/adaptive_edge_estimator.py`.
-- [ ] Accept current `EdgeEstimate` prior.
-- [ ] Accept setup evidence summary.
-- [ ] Compute prior weight and evidence weight.
-- [ ] Output calibrated `p_win`, `avg_win_r`, `avg_loss_r`, `expected_r`, and confidence.
-- [ ] Include setup ID and sample size.
-- [ ] Preserve transparent reasons.
-- [ ] Add tests.
+- [x] Add `autonomous/adaptive_edge_estimator.py`.
+- [x] Accept current `EdgeEstimate` prior.
+- [x] Accept setup evidence summary.
+- [x] Compute prior weight and evidence weight.
+- [x] Output calibrated `p_win`, `avg_win_r`, `avg_loss_r`, `expected_r`, and confidence.
+- [x] Include setup ID and sample size.
+- [x] Preserve transparent reasons.
+- [x] Add tests.
 
-Tracking note:
+Implementation notes:
 
-- Remaining EL4 work is tracked by follow-up Issue #185.
+- Added `AdaptiveEdgeEstimator` and `AdaptiveEdgeBlendConfig`.
+- Extended `EdgeEstimate` with optional `setup_id`, `sample_size`,
+  `prior_weight`, `evidence_weight`, and `setup_state` fields so adaptive
+  outputs can flow through existing serialization without replacing the
+  estimator contract.
+- The estimator returns a prior-only estimate when setup evidence is
+  unavailable.
+- Sparse or insufficient setup evidence receives low weight, mature/high
+  confidence evidence can dominate up to a conservative cap, and weak/retired
+  evidence is allowed to pull calibrated expected R down.
+- Loss magnitude convention is preserved for `EdgeEstimate.avg_loss_r` even
+  though EL3 stores posterior average loss R as a negative R value.
+- This module is passive in this PR; it is not wired into active ranking,
+  trade planning, sizing, eligibility, live execution, or capital promotion.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_adaptive_edge_estimator.py --basetemp=.pytest-tmp -q`
+  (`5 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_adaptive_edge_estimator.py tests\test_feature_builder_edge_estimator.py tests\test_candidate_ranker_edge.py tests\test_evidence_calibrator.py tests\test_setup_registry.py tests\test_performance_metrics.py tests\test_validation_framework.py --basetemp=.pytest-tmp -q`
+  (`34 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-el4-smoke1b --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-el4-smoke2b --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el4-smoke3b --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+- Final split smoke rerun completed without smoke-test product failures.
 
 ### EL5 — Setup eligibility gate
 
@@ -356,46 +387,50 @@ Tracking note:
 
 ## 4. Current PR note
 
-The current Issue #185 continuation work completes EL3 evidence calibration:
+The current Issue #185 continuation work completes EL4 adaptive edge
+estimation:
 
-- `autonomous/evidence_calibrator.py` groups realized outcome evidence by
-  deterministic setup ID and calculates setup-level performance metrics.
-- The calibrator applies minimum sample-size thresholds and conservative
-  Bayesian/shrinkage estimates so small samples do not overstate edge.
-- Setup summaries classify setup families as `INSUFFICIENT_EVIDENCE`, `WEAK`,
-  `ACCEPTABLE`, `STRONG`, `RETIRED`, `PAPER_ONLY`, or `LIVE_ELIGIBLE`.
+- `autonomous/adaptive_edge_estimator.py` blends a rule-based `EdgeEstimate`
+  prior with an optional EL3 `SetupEvidenceSummary`.
+- Adaptive output includes calibrated `p_win`, `avg_win_r`, `avg_loss_r`,
+  `expected_r`, confidence, source, setup ID, sample size, prior/evidence
+  weights, setup state, and transparent reasons.
+- Sparse evidence keeps the rule-based prior dominant; mature high-confidence
+  evidence can dominate up to a conservative cap; weak or retired setup
+  evidence can reduce calibrated edge.
 - The implementation is passive: it does not change live trading, order
-  placement, sizing, risk gates, eligibility gates, dry-run/paper/live mode, or
-  capital promotion.
+  placement, active ranking, sizing, risk gates, eligibility gates,
+  dry-run/paper/live mode, or capital promotion.
 
 Test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_evidence_calibrator.py --basetemp=.pytest-tmp -q`
-  (`7 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_evidence_calibrator.py tests\test_setup_registry.py tests\test_performance_metrics.py tests\test_strategy_arm.py tests\test_validation_framework.py tests\test_trade_evidence_store.py --basetemp=.pytest-tmp -q`
-  (`32 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_adaptive_edge_estimator.py --basetemp=.pytest-tmp -q`
+  (`5 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_adaptive_edge_estimator.py tests\test_feature_builder_edge_estimator.py tests\test_candidate_ranker_edge.py tests\test_evidence_calibrator.py tests\test_setup_registry.py tests\test_performance_metrics.py tests\test_validation_framework.py --basetemp=.pytest-tmp -q`
+  (`34 passed`).
 
 Smoke-test evidence:
 
 - Passed split smoke verification:
-  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-smoke1 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-el4-smoke1b --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`203 passed`);
-  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-smoke2 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-el4-smoke2b --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`112 passed`);
-  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-smoke3 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el4-smoke3b --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`161 passed`). Total split smoke coverage: `476 passed`.
-- Smoke groups 1 and 2 printed non-failing post-pytest database/cache messages
-  after pytest completed; both commands exited 0.
+- Final split smoke rerun completed without smoke-test product failures.
 
 Known limitations:
 
-- This PR does not blend calibrated setup evidence into the active edge
-  estimator; that remains EL4 in Issue #185.
 - This PR does not reject, downgrade, or route setups based on evidence state;
   that remains EL5 in Issue #185.
 - This PR does not change sizing from evidence; that remains EL6 in Issue #185.
 - This PR does not expose setup performance through an API or dashboard; that
   remains EL8 in Issue #185.
+- This PR does not automatically wire adaptive edge into active candidate
+  ranking or execution. That integration should be coordinated with EL5 setup
+  eligibility and EL6 evidence-aware sizing so weak evidence cannot silently
+  affect live behavior without explicit gates.
 - Operational incident rates such as rejected-order rate, stale-quote rejection
   rate, broker disconnect frequency, unconfirmed-protection events, and
   recovery-required events remain for later operational metrics work once event
