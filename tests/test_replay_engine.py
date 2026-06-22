@@ -58,6 +58,7 @@ def test_restart_and_missing_protection_scenarios_fail_closed(tmp_path):
 
     assert restart.recovery["recovery_required"] is True
     assert restart.steps[-1].supervisor_status == "PAUSED"
+    assert restart.supervisor["state"] == "PAUSED"
     restart_codes = {
         issue["code"] for issue in restart.recovery["issues"]
     }
@@ -74,10 +75,12 @@ def test_disconnect_and_stale_quote_pause_supervisor(tmp_path):
     stale = _run(tmp_path, "stale_quote")
 
     assert disconnect.steps[-1].supervisor_status == "PAUSED"
+    assert disconnect.supervisor["state"] == "PAUSED"
     assert disconnect.steps[-1].supervisor_reason == "broker_disconnected"
     assert disconnect.broker_connected is False
 
     assert stale.steps[-1].supervisor_status == "PAUSED"
+    assert stale.supervisor["state"] == "PAUSED"
     assert stale.steps[-1].supervisor_reason == STALE_QUOTE_FAULT
     assert stale.steps[-1].market_data_health["allowed"] is False
     assert "quote age" in stale.steps[-1].market_data_health["reason"]

@@ -307,9 +307,9 @@ class ReplayChaosHarness:
                 market_data_health=health.to_dict() if health is not None else None,
                 notes=notes,
             ))
+            latest_supervisor = self.supervisor.status()
             if self.supervisor.paused:
                 self.supervisor.resume()
-        latest_supervisor = self.supervisor.status()
 
         return ReplayResult(
             scenario=scenario.name,
