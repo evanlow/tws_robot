@@ -64,9 +64,11 @@ from autonomous.continuous_supervisor import (
 from autonomous.exit_manager import AutonomousExitManager
 from autonomous.lifecycle_worker import AutonomousLifecycleWorker
 from autonomous.evidence_store import TradeEvidenceStore
+from autonomous.idempotency import IdempotencyStore
 from autonomous.order_lifecycle import OrderLifecycleStore
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.protection_verifier import ProtectionVerifier
+from autonomous.recovery_manager import RecoveryManager
 from autonomous.runner_config import AutonomousRunnerConfig, AutonomousLiveRunnerConfig
 from autonomous.trade_store import CLOSED, EXIT_PENDING, FAILED, OPEN, TradeStore
 from autonomous.trade_reconciler import TradeReconciler
@@ -1606,6 +1608,19 @@ def _safe_call(label: str, func, default):
         return default
 
 
+def _resolve_live_state_path(
+    configured_path: str,
+    live_store: TradeStore,
+) -> Path:
+    """Resolve live sidecar stores the same way AutonomousLiveRunner does."""
+    path = Path(configured_path)
+    if not path.is_absolute():
+        store_path = Path(getattr(live_store, "path", ""))
+        if store_path.is_absolute():
+            path = store_path.parent / path
+    return path
+
+
 def _cash_snapshot_payload(svc) -> Dict[str, Any]:
     account = _safe_call("account summary", svc.get_account_summary, {}) or {}
     positions = _safe_call("positions", svc.get_positions, {}) or {}
@@ -1703,10 +1718,15 @@ def _passive_live_readiness_payload(
     provider_ready = provider is not None and not isinstance(provider, StaticSignalProvider)
     live_store = _live_trade_store()
     open_trades = live_store.list_open()
+    broker_positions = _safe_call(
+        "broker positions",
+        lambda: _build_broker_positions(svc),
+        {},
+    ) or {}
     if live_config.require_broker_protection_confirmation:
         protection_results = ProtectionVerifier().verify_open_trades(
             open_trades,
-            broker_positions=_build_broker_positions(svc),
+            broker_positions=broker_positions,
             open_orders=broker_orders.get("orders") or [],
         )
     else:
@@ -1722,16 +1742,15 @@ def _passive_live_readiness_payload(
     except (TypeError, ValueError):
         deployable_cash_f = 0.0
 
-    recovery_issues = [
-        {
-            "code": "protection_recovery_required",
-            "message": result.reason,
-            "symbol": result.symbol,
-            "autonomous_trade_id": result.autonomous_trade_id,
-        }
-        for result in protection_failures
-    ]
-    recovery_required = bool(recovery_issues)
+    recovery_report = _passive_recovery_report(
+        live_config=live_config,
+        live_store=live_store,
+        broker_positions=broker_positions,
+        broker_orders=broker_orders,
+        protection_results=protection_results,
+        deployable_cash=deployable_cash_f,
+    )
+    recovery_required = not recovery_report.ready_to_trade
     gates = LiveReadinessGates(
         connected=bool(getattr(svc, "connected", False)),
         live_mode=(getattr(svc, "connection_env", None) == "live"),
@@ -1749,18 +1768,9 @@ def _passive_live_readiness_payload(
         protection_confirmed=not protection_failures,
         protection_recovery_required=len(protection_failures),
         protection_diagnostics=[r.to_dict() for r in protection_results],
-        recovery_classification=(
-            "RECOVERY_REQUIRED" if recovery_required else "SAFE_TO_TRADE"
-        ),
+        recovery_classification=recovery_report.classification.value,
         recovery_required=recovery_required,
-        recovery_diagnostics={
-            "classification": (
-                "RECOVERY_REQUIRED" if recovery_required else "SAFE_TO_TRADE"
-            ),
-            "ready_to_trade": not recovery_required,
-            "issues": recovery_issues,
-            "passive_snapshot": True,
-        },
+        recovery_diagnostics=recovery_report.to_dict() | {"passive_snapshot": True},
     )
     payload = gates.to_dict()
     payload["passive_snapshot"] = True
@@ -1770,6 +1780,50 @@ def _passive_live_readiness_payload(
         "does_not_write_lifecycle_events": True,
     }
     return payload
+
+
+def _passive_recovery_report(
+    *,
+    live_config: AutonomousLiveRunnerConfig,
+    live_store: TradeStore,
+    broker_positions: Dict[str, Any],
+    broker_orders: Dict[str, Any],
+    protection_results,
+    deployable_cash: float,
+):
+    """Evaluate restart recovery without running live-runner reconciliation."""
+    recovery_manager = RecoveryManager(
+        idempotency_stale_minutes=live_config.idempotency_stale_minutes
+    )
+    try:
+        lifecycle_path = _resolve_live_state_path(
+            live_config.order_lifecycle_store_path,
+            live_store,
+        )
+        idempotency_path = _resolve_live_state_path(
+            live_config.idempotency_store_path,
+            live_store,
+        )
+        lifecycle_events = OrderLifecycleStore(str(lifecycle_path)).list_events()
+        idempotency_locks = list(
+            IdempotencyStore(str(idempotency_path)).current_locks().values()
+        )
+        trades = live_store.list_all()
+    except Exception as exc:  # pragma: no cover - defensive fail-closed snapshot
+        logger.exception("Control tower failed reading autonomous recovery state")
+        return recovery_manager.manual_intervention_report(
+            f"Local autonomous recovery state is unavailable: {exc}"
+        )
+
+    return recovery_manager.evaluate(
+        trades=trades,
+        broker_positions=broker_positions,
+        broker_open_orders=broker_orders.get("orders") or [],
+        lifecycle_events=lifecycle_events,
+        idempotency_locks=idempotency_locks,
+        protection_results=protection_results,
+        deployable_cash=deployable_cash,
+    )
 
 
 def _recent_evidence_payload(limit: int = 25) -> Dict[str, Any]:
@@ -1863,8 +1917,13 @@ def _risk_lifecycle_payload(live_gates: Dict[str, Any], evidence: Dict[str, Any]
     }
 
 
-def _order_lifecycle_payload(live_config: AutonomousLiveRunnerConfig) -> Dict[str, Any]:
-    store = OrderLifecycleStore(live_config.order_lifecycle_store_path)
+def _order_lifecycle_payload(
+    live_config: AutonomousLiveRunnerConfig,
+    live_store: TradeStore,
+) -> Dict[str, Any]:
+    store = OrderLifecycleStore(
+        str(_resolve_live_state_path(live_config.order_lifecycle_store_path, live_store))
+    )
     states = _safe_call("order lifecycle states", store.current_states, {}) or {}
     events = [event.to_dict() for event in states.values()]
     active = [
@@ -1884,6 +1943,7 @@ def _order_lifecycle_payload(live_config: AutonomousLiveRunnerConfig) -> Dict[st
 def _control_tower_payload() -> Dict[str, Any]:
     svc = get_services()
     live_config = _live_runner_config()
+    live_store = _live_trade_store()
     paper_status = _autonomous_status_payload()
     evidence = _recent_evidence_payload(limit=25)
     cash_payload = _cash_snapshot_payload(svc)
@@ -1936,10 +1996,10 @@ def _control_tower_payload() -> Dict[str, Any]:
         "cash": cash_payload,
         "trades": {
             "paper": _trade_summary_payload(_trade_store()),
-            "live": _trade_summary_payload(_live_trade_store()),
+            "live": _trade_summary_payload(live_store),
         },
         "broker_orders": broker_orders,
-        "order_lifecycle": _order_lifecycle_payload(live_config),
+        "order_lifecycle": _order_lifecycle_payload(live_config, live_store),
         "basket_risk": _latest_basket_risk_payload(evidence),
         "protection": {
             "confirmed": live_gates.get("protection_confirmed"),

@@ -18,6 +18,7 @@ from autonomous import (
 )
 from autonomous.audit import AuditLogger
 from autonomous.autonomous_live_runner import AutonomousLiveRunner, EXECUTED, DRY_RUN_EXECUTED, NO_TRADE
+from autonomous.idempotency import IdempotencyStore
 from autonomous.order_lifecycle import ENTRY, OrderLifecycleState, OrderLifecycleStore
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.trade_store import AutonomousTrade, TradeStore
@@ -405,6 +406,38 @@ class TestControlTower:
         assert body["evidence"]["counts"]["fills"] == 1
         assert body["evidence"]["counts"]["rejections"] == 1
         assert "emergency_stop" in body
+
+    def test_control_tower_reports_non_protection_recovery_required(
+        self, app, client, tmp_path, monkeypatch
+    ):
+        _install_live_runner(app, tmp_path)
+        live_cfg = app.config["autonomous_live_runner_config"]
+        live_cfg.idempotency_store_path = str(tmp_path / "idempotency.jsonl")
+        IdempotencyStore(live_cfg.idempotency_store_path).acquire(symbol="AAA")
+        app.config["autonomous_signal_provider"] = _RealProvider()
+
+        monkeypatch.setattr("web.services.ServiceManager.connected", True)
+        monkeypatch.setattr("web.services.ServiceManager.connection_env", "live")
+        monkeypatch.setattr(
+            "web.services.ServiceManager.connection_info",
+            {"account": "U1234567", "port": 7496},
+        )
+
+        resp = client.get("/api/autonomous/control-tower")
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        live = body["readiness"]["live"]
+        issues = live["recovery_diagnostics"]["issues"]
+        assert live["protection_recovery_required"] == 0
+        assert live["recovery_required"] is True
+        assert live["recovery_classification"] == "RECOVERY_REQUIRED"
+        assert live["ready"] is False
+        assert issues[0]["code"] == "idempotency_lock_without_trade"
+        assert any(
+            "Restart recovery/broker reconciliation requires operator action" in reason
+            for reason in live["reasons"]
+        )
 
     def test_control_tower_prominently_reports_emergency_stop(self, app, client, tmp_path, monkeypatch):
         _install_live_runner(app, tmp_path)
