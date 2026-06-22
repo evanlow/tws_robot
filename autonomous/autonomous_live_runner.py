@@ -35,6 +35,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from autonomous.autonomous_config import AutonomousMode
@@ -417,13 +418,21 @@ class AutonomousLiveRunner:
         self._rejected_order_ids_provider = rejected_order_ids_provider
         self._filled_order_ids_provider = filled_order_ids_provider
         self._broker_fill_events_provider = broker_fill_events_provider
-        self._lifecycle_store = order_lifecycle_store or OrderLifecycleStore(
-            path=self._config.order_lifecycle_store_path
-        )
+        if order_lifecycle_store is not None:
+            self._lifecycle_store = order_lifecycle_store
+        else:
+            lifecycle_path = Path(self._config.order_lifecycle_store_path)
+            if not lifecycle_path.is_absolute() and self._store.path.is_absolute():
+                lifecycle_path = self._store.path.parent / lifecycle_path
+            self._lifecycle_store = OrderLifecycleStore(path=str(lifecycle_path))
         self._protection_verifier = protection_verifier or ProtectionVerifier()
-        self._idempotency_store = idempotency_store or IdempotencyStore(
-            path=self._config.idempotency_store_path
-        )
+        if idempotency_store is not None:
+            self._idempotency_store = idempotency_store
+        else:
+            idempotency_path = Path(self._config.idempotency_store_path)
+            if not idempotency_path.is_absolute() and self._store.path.is_absolute():
+                idempotency_path = self._store.path.parent / idempotency_path
+            self._idempotency_store = IdempotencyStore(path=str(idempotency_path))
         self._recovery_manager = recovery_manager or RecoveryManager(
             idempotency_stale_minutes=self._config.idempotency_stale_minutes
         )

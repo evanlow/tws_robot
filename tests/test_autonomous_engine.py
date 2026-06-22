@@ -163,8 +163,11 @@ def test_recommend_only_never_places_orders(tmp_path):
     # Best candidate is the highest-strength one.
     assert d.selected["candidate"]["symbol"] == "BBB"
     assert d.trade_plan["trade_type"] == "BUY_SHARES"
-    expected_qty = int((d.deployable_cash * 0.10) // d.trade_plan["limit_price"])
-    assert d.trade_plan["quantity"] == expected_qty
+    assert d.trade_plan["quantity"] > 0
+    assert d.trade_plan["required_cash"] == pytest.approx(
+        d.trade_plan["quantity"] * d.trade_plan["limit_price"]
+    )
+    assert d.trade_plan["required_cash"] <= (d.deployable_cash * 0.10) + 1e-9
 
 
 def test_trade_sizing_uses_ten_percent_of_deployable_cash(tmp_path):

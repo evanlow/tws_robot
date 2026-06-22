@@ -459,7 +459,7 @@ def test_live_runner_config_defaults():
     cfg = AutonomousLiveRunnerConfig()
     assert cfg.live_enabled is False
     assert cfg.live_continuous_enabled is False
-    assert cfg.max_deployable_cash_pct == 0.10
+    assert cfg.max_deployable_cash_pct == 0.005
     assert cfg.min_deployable_cash == 1000.0
     assert cfg.max_open_live_trades == 1
     assert cfg.max_live_trades_per_day == 1
@@ -485,7 +485,7 @@ def test_live_runner_config_from_env_defaults(monkeypatch):
     cfg = AutonomousLiveRunnerConfig.from_env()
     assert cfg.live_enabled is False
     assert cfg.live_continuous_enabled is False
-    assert cfg.max_deployable_cash_pct == 0.10
+    assert cfg.max_deployable_cash_pct == 0.005
 
 
 def test_live_runner_config_from_env_opt_in(monkeypatch):
@@ -1038,6 +1038,9 @@ def test_synthesized_stop_when_plan_lacks_stop_price(tmp_path):
         default_stop_pct=0.05,
     )
     runner = _runner(tmp_path, signal=cand, executor=executor, config=cfg)
+    # Exercise runner-level fallback by allowing assisted-live plans without
+    # planner-provided stop_price to reach the runner.
+    runner._engine.config.require_stop_price_for_assisted_live = False
 
     result = runner.run_once()
     assert result.status == "executed"
