@@ -89,8 +89,8 @@ class SetupRegistry:
         vix = market_gate.get("vix") or {}
         selected = record.get("selected") or {}
         features = (
-            record.get("features")
-            or selected.get("features")
+            selected.get("features")
+            or record.get("features")
             or record.get("candidate_features")
             or {}
         )
