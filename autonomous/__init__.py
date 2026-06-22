@@ -26,6 +26,19 @@ from autonomous.continuous_supervisor import ContinuousSupervisor, SupervisorCyc
 from autonomous.candidate_ranker import CandidateRanker
 from autonomous.drawdown_governor import DrawdownDecision, DrawdownGovernor
 from autonomous.edge_estimator import EdgeEstimate, RuleBasedEdgeEstimator
+from autonomous.evidence_calibrator import (
+    EvidenceCalibrationThresholds,
+    EvidenceCalibrator,
+    SETUP_STATE_ACCEPTABLE,
+    SETUP_STATE_INSUFFICIENT_EVIDENCE,
+    SETUP_STATE_LIVE_ELIGIBLE,
+    SETUP_STATE_PAPER_ONLY,
+    SETUP_STATE_RETIRED,
+    SETUP_STATE_STRONG,
+    SETUP_STATE_WEAK,
+    SetupEvidenceSummary,
+    calibrate_setup_evidence,
+)
 from autonomous.execution_quality import ExecutionQualityDecision, ExecutionQualityGuard
 from autonomous.feature_builder import FeatureBuilder
 from autonomous.fractional_sizer import FractionalEdgeSizer, FractionalSizingDecision
@@ -118,6 +131,17 @@ __all__ = [
     "DrawdownGovernor",
     "EdgeEstimate",
     "RuleBasedEdgeEstimator",
+    "EvidenceCalibrationThresholds",
+    "EvidenceCalibrator",
+    "SETUP_STATE_ACCEPTABLE",
+    "SETUP_STATE_INSUFFICIENT_EVIDENCE",
+    "SETUP_STATE_LIVE_ELIGIBLE",
+    "SETUP_STATE_PAPER_ONLY",
+    "SETUP_STATE_RETIRED",
+    "SETUP_STATE_STRONG",
+    "SETUP_STATE_WEAK",
+    "SetupEvidenceSummary",
+    "calibrate_setup_evidence",
     "ExecutionQualityDecision",
     "ExecutionQualityGuard",
     "FeatureBuilder",

@@ -176,7 +176,7 @@ promotion, risk gates, or order execution.
 
 The robot should include an evidence calibrator that computes setup-level statistics.
 
-Proposed module:
+Current module:
 
 ```text
 autonomous/evidence_calibrator.py
@@ -202,6 +202,30 @@ RETIRED
 PAPER_ONLY
 LIVE_ELIGIBLE
 ```
+
+### Current implementation
+
+Reusable EL3 evidence calibration is implemented in:
+
+```text
+autonomous/evidence_calibrator.py
+```
+
+The calibrator groups realized outcome records by deterministic setup ID from
+`autonomous/setup_registry.py`, calculates setup-level performance metrics with
+`autonomous/performance_metrics.py`, and emits serializable setup summaries.
+Each summary includes sample size, setup metadata, raw performance metrics,
+Bayesian/shrinkage-adjusted win rate, average win R, average loss R, expected R,
+prior/evidence weights, confidence, setup state, and classification reasons.
+
+Calibration is intentionally conservative: sparse samples remain
+`INSUFFICIENT_EVIDENCE`, observed setup metrics are shrunk toward neutral
+priors, drawdown can keep a setup `PAPER_ONLY`, and sufficiently negative
+evidence can mark a setup `RETIRED`.
+
+This module is analytics-only. It does not alter sizing, eligibility, capital
+promotion, risk gates, dry-run/paper/live mode, broker connectivity, or order
+execution.
 
 ## 7. Adaptive edge estimation
 
