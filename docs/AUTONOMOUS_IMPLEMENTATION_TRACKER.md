@@ -72,8 +72,8 @@ Legend:
 | 7 | Continuous-run supervisor | Done | PR #175 |
 | 8 | Restart recovery and broker reconciliation | Done | PR #176 |
 | 9 | Enhanced emergency stop operations | Done | PR #178 |
-| 10 | Control tower dashboard/API | Done | Current PR continuing #161 |
-| 11 | Replay / chaos testing harness | Planned | TBD |
+| 10 | Control tower dashboard/API | Done | PR #180 |
+| 11 | Replay / chaos testing harness | Done | Current PR continuing #161 |
 | 12 | Capital ramp and promotion gates | Planned | TBD |
 
 ## 4. Phase detail tracker
@@ -566,7 +566,7 @@ Known limitations and manual checks:
 
 ### Phase 10 — Control tower dashboard/API
 
-Status: Done in current PR; pending merge
+Status: Done in PR #180
 
 Checklist:
 
@@ -637,20 +637,71 @@ Known limitations and manual checks:
 
 ### Phase 11 — Replay / chaos testing harness
 
-Status: Planned
+Status: Done in current PR; pending merge
 
 Checklist:
 
-- [ ] Add simulated broker fixtures.
-- [ ] Simulate normal fill.
-- [ ] Simulate partial fill.
-- [ ] Simulate order rejection.
-- [ ] Simulate broker disconnect.
-- [ ] Simulate stale quote.
-- [ ] Simulate restart after submission.
-- [ ] Simulate restart after fill before evidence write.
-- [ ] Simulate unconfirmed protective stop.
-- [ ] Verify no duplicate exposure.
+- [x] Add simulated broker fixtures.
+- [x] Simulate normal fill.
+- [x] Simulate partial fill.
+- [x] Simulate order rejection.
+- [x] Simulate broker disconnect.
+- [x] Simulate stale quote.
+- [x] Simulate restart after submission.
+- [x] Simulate restart after fill before evidence write.
+- [x] Simulate basket with one failed leg.
+- [x] Simulate stop hit.
+- [x] Simulate target hit.
+- [x] Simulate unconfirmed protective stop.
+- [x] Verify no duplicate exposure.
+
+Implementation notes:
+
+- Added `autonomous/replay_engine.py` with `ReplayChaosHarness`,
+  `SimulatedBroker`, replay scenario/step/result dataclasses, and
+  `default_phase_11_scenarios()`.
+- The harness is simulation-only. It never calls `OrderExecutor`, never
+  submits or cancels broker orders, never flattens positions, and never changes
+  live-mode activation or sizing behavior.
+- Replay scenarios drive the existing safety components instead of parallel
+  mock logic: `BrokerFillIngestor`, `OrderLifecycleStore`,
+  `IdempotencyStore`, `ProtectionVerifier`, `RecoveryManager`,
+  `MarketDataHealthGuard`, and `ContinuousSupervisor`.
+- Each replay result records recovery classification, supervisor status,
+  duplicate-exposure diagnostics, evidence-reconstructability diagnostics,
+  broker snapshots, lifecycle states, and trade-store state.
+- The default scenario set covers the current Phase 11 spec cases:
+  normal fill, partial fill, order rejection, broker disconnect, stale quote,
+  restart after submission, restart after fill before evidence write, basket
+  with one failed leg, stop hit, target hit, and unconfirmed protective stop.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_replay_engine.py --basetemp=.pytest-tmp -q`
+  (`5 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_replay_engine.py tests\test_recovery_manager.py tests\test_order_lifecycle.py tests\test_broker_fill_ingestor.py tests\test_continuous_supervisor.py tests\test_market_data_health.py --basetemp=.pytest-tmp -q`
+  (`42 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+
+Known limitations and manual checks:
+
+- This is a deterministic component/test harness, not a broker simulator UI or
+  long-running market replay service.
+- The harness does not submit replacement protection, cancel orders,
+  panic-flatten, or auto-clear stale idempotency locks; those remain explicit
+  operator/recovery actions.
+- Scenario data is intentionally small and deterministic. Future phases can
+  layer historical market-bar playback or randomized fault schedules on top of
+  the same result model if needed.
 
 ### Phase 12 — Capital ramp and promotion gates
 
