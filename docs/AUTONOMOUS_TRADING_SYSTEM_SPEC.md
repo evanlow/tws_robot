@@ -817,12 +817,14 @@ Phase 9 adds enhanced autonomous emergency-stop operations:
   turns paper and live autonomous modes off, stops lifecycle workers, pauses
   the live continuous supervisor, and writes an autonomous audit event.
 - The same endpoint accepts `cancel_pending_entries=true` to forward broker
-  cancel requests for pending autonomous entry order IDs only.  It does not
-  cancel target or stop child order IDs and reports preserved protective exit
-  orders in the response.
-- `POST /api/autonomous/emergency-reset` requires `confirm=true`, removes the
-  emergency-stop marker, keeps autonomous modes off, resumes the supervisor for
-  future explicitly reactivated sessions, and writes an audit event.
+  cancel requests for pending live autonomous entry order IDs only.  Paper
+  entry order IDs are reported but not sent to the broker, and target/stop
+  child order IDs are reported as preserved protective exits.
+- `POST /api/autonomous/emergency-reset` requires `confirm=true`, removes only
+  an emergency-stop marker created by `/api/autonomous/emergency-stop`, keeps
+  autonomous modes off, resumes the supervisor only when it was paused by
+  emergency stop, and writes an audit event.  Global/manual emergency markers
+  must be cleared through `/api/emergency/resume`.
 - `GET /api/autonomous/status` and `GET /api/autonomous/live/status` expose a
   structured `emergency_stop` payload including file state, reset requirement,
   and the fact that Panic Flatten is a separate explicit control.

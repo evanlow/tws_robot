@@ -213,22 +213,25 @@ The current Issue #161 continuation work does not complete an evidence-learning
 EL phase. It improves the operational evidence substrate used by future EL7
 capital-promotion reports and operational incident metrics:
 
-- Autonomous emergency-stop responses now expose marker state, manual reset
-  requirement, shared risk-manager emergency-stop state, and the explicit
-  separation between Emergency Stop and Panic Flatten.
+- Autonomous emergency-stop responses now expose marker state, autonomous
+  marker ownership, manual reset requirement, shared risk-manager
+  emergency-stop state, and the explicit separation between Emergency Stop and
+  Panic Flatten.
 - Emergency stop now pauses the live continuous supervisor and returns
   supervisor pause diagnostics for future incident-rate metrics.
-- Optional pending-entry cleanup returns per-entry cancel-forwarding reports
-  without cancelling target or stop protective exit order IDs.
+- Optional pending-entry cleanup returns per-entry cancel-forwarding reports,
+  forwards only live entry order IDs, and does not cancel target or stop
+  protective exit order IDs.
 - Autonomous emergency reset requires explicit confirmation and writes an
-  audit event while keeping autonomous modes off.
+  audit event while keeping autonomous modes off; it refuses to clear
+  global/manual emergency markers.
 
 Test evidence:
 
 - Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop --basetemp=.pytest-tmp -q`
-  (`4 passed`).
+  (`6 passed`).
 - Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveHalt tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop tests\test_web_api.py::TestEmergencyAPI --basetemp=.pytest-tmp -q`
-  (`16 passed`).
+  (`18 passed`).
 
 Smoke-test evidence:
 

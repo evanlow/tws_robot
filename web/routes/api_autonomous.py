@@ -1124,6 +1124,7 @@ def emergency_stop():
     try:
         EMERGENCY_STOP_FILE.write_text(
             f"EMERGENCY STOP - {reason}\n"
+            "Source: autonomous_emergency_stop\n"
             f"Triggered: {datetime.now(timezone.utc).isoformat()}\n"
         )
         marker_written = True
@@ -1194,7 +1195,28 @@ def emergency_reset():
         }), 400
 
     reason = body.get("reason", "Autonomous emergency stop reset")
-    if EMERGENCY_STOP_FILE.exists():
+    try:
+        marker_exists = EMERGENCY_STOP_FILE.exists()
+    except OSError:
+        logger.exception("Failed to inspect EMERGENCY_STOP file")
+        return jsonify({
+            "status": "error",
+            "error": "Failed to inspect emergency stop file; emergency stop remains active",
+            "emergency_stop": _emergency_stop_payload(),
+        }), 500
+
+    if marker_exists and not _autonomous_owns_emergency_stop_marker():
+        return jsonify({
+            "status": "global_emergency_stop_active",
+            "error": (
+                "Emergency stop marker was not created by the autonomous "
+                "emergency-stop endpoint; use /api/emergency/resume after "
+                "operator review to clear the global kill switch."
+            ),
+            "emergency_stop": _emergency_stop_payload(),
+        }), 409
+
+    if marker_exists:
         try:
             EMERGENCY_STOP_FILE.unlink()
         except OSError:
@@ -1505,6 +1527,11 @@ def _pending_entry_cancel_report(
                 entry["forwarded_to_broker"] = _cancel_entry_order(
                     int(trade.entry_order_id)
                 )
+            elif cancel_pending_entries and account_mode != "live":
+                entry["cancel_skipped_reason"] = (
+                    "paper entry order IDs are not forwarded to the broker "
+                    "from the autonomous emergency-stop endpoint"
+                )
             entries.append(entry)
 
     return {
@@ -1519,7 +1546,23 @@ def _pending_entry_cancel_report(
     }
 
 
+def _autonomous_owns_emergency_stop_marker() -> bool:
+    """Return True only for markers created by this autonomous endpoint."""
+
+    try:
+        marker = EMERGENCY_STOP_FILE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        logger.warning(
+            "Unable to read EMERGENCY_STOP_FILE ownership marker; refusing reset",
+            exc_info=True,
+        )
+        return False
+    return "Source: autonomous_emergency_stop" in marker
+
+
 def _emergency_stop_payload() -> Dict[str, Any]:
+    marker_owned_by_autonomous = False
+    marker_read_error = False
     try:
         file_exists = EMERGENCY_STOP_FILE.exists()
     except OSError:
@@ -1528,6 +1571,9 @@ def _emergency_stop_payload() -> Dict[str, Any]:
             exc_info=True,
         )
         file_exists = True  # fail-closed: treat unreadable state as active
+        marker_read_error = True
+    if file_exists and not marker_read_error:
+        marker_owned_by_autonomous = _autonomous_owns_emergency_stop_marker()
     risk_active = False
     try:
         risk_active = bool(get_services().risk_manager.emergency_stop_active)
@@ -1537,6 +1583,8 @@ def _emergency_stop_payload() -> Dict[str, Any]:
         "active": bool(file_exists or risk_active),
         "emergency_stop_file_exists": file_exists,
         "emergency_stop_file": str(EMERGENCY_STOP_FILE),
+        "emergency_stop_marker_owned_by_autonomous": marker_owned_by_autonomous,
+        "emergency_stop_marker_read_error": marker_read_error,
         "risk_manager_emergency_stop_active": risk_active,
         "manual_reset_required": file_exists,
         "panic_flatten_available": False,

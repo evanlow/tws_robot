@@ -520,12 +520,14 @@ Implementation notes:
   workers, pauses the live continuous supervisor, and writes an autonomous
   audit event.
 - Added optional `cancel_pending_entries=true` cleanup that forwards broker
-  cancel requests for pending autonomous entry order IDs only.  Target and stop
-  child order IDs are not cancelled and are reported as preserved protective
-  exits.
+  cancel requests for pending live autonomous entry order IDs only.  Paper
+  entry order IDs are reported but not sent to the broker, and target/stop
+  child order IDs are reported as preserved protective exits.
 - Added `POST /api/autonomous/emergency-reset`, requiring `confirm=true`, to
-  clear the marker, keep autonomous modes off, resume the supervisor for future
-  explicitly reactivated sessions, and write an audit event.
+  clear only an autonomous-owned marker, keep autonomous modes off, resume the
+  supervisor only when it was paused by emergency stop, and write an audit
+  event.  Global/manual emergency markers must be cleared through
+  `/api/emergency/resume`.
 - Added structured `emergency_stop` status to `/api/autonomous/status` and
   `/api/autonomous/live/status`, including marker state, manual reset
   requirement, shared risk-manager stop state, and the separation between
@@ -534,9 +536,9 @@ Implementation notes:
 Test evidence:
 
 - Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop --basetemp=.pytest-tmp -q`
-  (`4 passed`).
+  (`6 passed`).
 - Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestLiveHalt tests\test_api_autonomous_live.py::TestAutonomousEmergencyStop tests\test_web_api.py::TestEmergencyAPI --basetemp=.pytest-tmp -q`
-  (`16 passed`).
+  (`18 passed`).
 
 Smoke-test evidence:
 
@@ -552,14 +554,15 @@ Smoke-test evidence:
 
 Known limitations and manual checks:
 
-- Bulk pending-entry cleanup forwards cancel requests but does not mark trades
-  terminal immediately; broker fill/reject/cancel reconciliation remains the
-  source of truth.
+- Bulk pending-entry cleanup forwards cancel requests for live entry order IDs
+  only and does not mark trades terminal immediately; broker
+  fill/reject/cancel reconciliation remains the source of truth.
 - Panic Flatten remains a separate future explicit control and is not invoked
   by emergency stop or reset.
-- Reset clears the autonomous emergency-stop marker and resumes the supervisor
-  object for future sessions, but it does not reactivate paper/live autonomous
-  mode or enable live trading.
+- Reset clears only autonomous-owned emergency-stop markers and resumes the
+  supervisor only if the pause reason was emergency stop.  It does not clear
+  global/manual emergency markers, reactivate paper/live autonomous mode, or
+  enable live trading.
 
 ### Phase 10 — Control tower dashboard/API
 
