@@ -123,17 +123,15 @@ class EvidenceCalibrator:
             if _realized_r(record) is None:
                 continue
             metadata = self.setup_registry.metadata_for_record(record)
-            bucket = grouped.setdefault(
-                metadata.setup_id,
-                {
-                    "metadata": metadata,
-                    "records": [],
-                },
-            )
-            if bucket["metadata"] is not metadata:
-                symbol = metadata.symbols[0] if metadata.symbols else None
-                bucket["metadata"].add_observation(symbol=symbol)
-            bucket["records"].append(record)
+            setup_id = metadata.setup_id
+            if setup_id not in grouped:
+                grouped[setup_id] = {"metadata": metadata, "records": []}
+            else:
+                trade_plan = record.get("trade_plan") or {}
+                symbol_raw = record.get("symbol") or trade_plan.get("symbol")
+                symbol = str(symbol_raw) if symbol_raw else None
+                grouped[setup_id]["metadata"].add_observation(symbol=symbol)
+            grouped[setup_id]["records"].append(record)
         return grouped
 
     def _summarize_setup(
