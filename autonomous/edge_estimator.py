@@ -8,7 +8,7 @@ estimators can replace it without changing ranker/engine plumbing.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -22,6 +22,11 @@ class EdgeEstimate:
     confidence: float
     source: str
     reasons: List[str]
+    setup_id: Optional[str] = None
+    sample_size: int = 0
+    prior_weight: Optional[float] = None
+    evidence_weight: Optional[float] = None
+    setup_state: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -32,6 +37,11 @@ class EdgeEstimate:
             "confidence": round(self.confidence, 6),
             "source": self.source,
             "reasons": list(self.reasons),
+            "setup_id": self.setup_id,
+            "sample_size": self.sample_size,
+            "prior_weight": _round_optional(self.prior_weight),
+            "evidence_weight": _round_optional(self.evidence_weight),
+            "setup_state": self.setup_state,
         }
 
 
@@ -135,3 +145,9 @@ def _num(value: Any):
     except (TypeError, ValueError):
         return None
     return out
+
+
+def _round_optional(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    return round(value, 6)

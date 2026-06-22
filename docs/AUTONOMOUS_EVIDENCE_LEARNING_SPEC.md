@@ -231,7 +231,7 @@ execution.
 
 The current rule-based estimator should become one input into an adaptive estimator.
 
-Proposed module:
+Current module:
 
 ```text
 autonomous/adaptive_edge_estimator.py
@@ -265,6 +265,29 @@ reasons
 ```
 
 The existing `EdgeEstimate` structure can be extended rather than replaced.
+
+### Current implementation
+
+Reusable EL4 adaptive edge estimation is implemented in:
+
+```text
+autonomous/adaptive_edge_estimator.py
+```
+
+The adaptive estimator accepts a rule-based `EdgeEstimate` prior and an
+optional EL3 `SetupEvidenceSummary`. When setup evidence is unavailable or
+sparse, the prior dominates. As sample size, evidence confidence, and setup
+quality improve, realized setup evidence receives more weight. Weak or retired
+setup evidence is deliberately allowed to pull the calibrated estimate down.
+
+The returned `EdgeEstimate` includes calibrated `p_win`, `avg_win_r`,
+`avg_loss_r`, `expected_r`, `confidence`, `source`, transparent reasons,
+`setup_id`, `sample_size`, `prior_weight`, `evidence_weight`, and
+`setup_state`.
+
+This module is passive in its first implementation. It does not wire calibrated
+edge into active candidate ranking, sizing, eligibility, capital promotion,
+risk gates, dry-run/paper/live mode, broker connectivity, or order execution.
 
 ## 8. Intelligent rejection of weak conditions
 
