@@ -44,18 +44,18 @@ Legend:
 | Control tower operational snapshot | Done | PR #180; consolidated API exposure for mode, heartbeat, broker/account, cash, open trades/orders, basket risk, protection, recovery/risk state, recent decisions/rejections/fills, and emergency-stop status |
 | Replay evidence reconstructability checks | Done | PR #181; Phase 11 replay harness verifies fill/outcome reconstructability under normal fill, partial fill, restart, stop/target, failed-leg, stale-quote, disconnect, and missing-protection scenarios |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
-| Setup registry | Pending | Not yet implemented |
+| Setup registry | Done | Current PR; deterministic setup IDs and metadata registry implemented in `autonomous/setup_registry.py` |
 | Setup eligibility gate | Pending | Not yet implemented |
 | Evidence-aware sizing overlay | Pending | Not yet implemented |
 | Capital promotion report | Done | PR #182; advisory EL7 report recommends approve/hold/demote from realized outcome evidence and operational incidents without applying capital changes |
-| Sharpe / Sortino / profit-factor metrics | Done | Current PR; implemented in reusable `autonomous/performance_metrics.py` for realized outcome evidence |
+| Sharpe / Sortino / profit-factor metrics | Done | PR #183; implemented in reusable `autonomous/performance_metrics.py` for realized outcome evidence |
 
 ## 2. Evidence-learning phases
 
 | Phase | Work item | Status | Target PR |
 |---:|---|---|---|
-| EL1 | Performance metrics | Done | Current PR |
-| EL2 | Setup identity and registry | Pending | TBD |
+| EL1 | Performance metrics | Done | PR #183 |
+| EL2 | Setup identity and registry | Done | Current PR |
 | EL3 | Evidence calibrator | Pending | TBD |
 | EL4 | Adaptive edge estimator | Pending | TBD |
 | EL5 | Setup eligibility gate | Pending | TBD |
@@ -67,7 +67,7 @@ Legend:
 
 ### EL1 — Performance metrics
 
-Status: Done in current PR
+Status: Done in PR #183
 
 Goal:
 
@@ -122,7 +122,7 @@ Smoke-test evidence:
 
 ### EL2 — Setup identity and registry
 
-Status: Pending
+Status: Done in current PR
 
 Goal:
 
@@ -130,12 +130,49 @@ Goal:
 
 Checklist:
 
-- [ ] Add `autonomous/setup_registry.py`.
-- [ ] Define setup dimensions.
-- [ ] Generate deterministic setup IDs.
-- [ ] Include market, VIX, sector, time-of-day, support/resistance, volatility, and basket context.
-- [ ] Add setup metadata model.
-- [ ] Add tests.
+- [x] Add `autonomous/setup_registry.py`.
+- [x] Define setup dimensions.
+- [x] Generate deterministic setup IDs.
+- [x] Include market, VIX, sector, time-of-day, support/resistance, volatility, and basket context.
+- [x] Add setup metadata model.
+- [x] Add tests.
+
+Implementation notes:
+
+- Added `SetupRegistry`, `SetupDimensions`, `SetupMetadata`, and
+  `setup_id_for_record`.
+- Setup IDs are stable, readable `setup_v1__...` identifiers built from
+  signal, quality, momentum, market, VIX, sector, time-of-day, support,
+  resistance, volatility, basket context, and trade type dimensions.
+- Sparse evidence records are assigned explicit `unknown_*` dimensions instead
+  of being dropped, preserving deterministic grouping for future calibration.
+- The registry tracks setup metadata and observation symbols only; it does not
+  calculate performance, classify setup quality, or alter trading behaviour.
+- This module is analytics-only and does not change live execution, sizing,
+  eligibility gates, risk gates, or capital promotion.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_setup_registry.py --basetemp=.pytest-tmp -q`
+  (`4 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_setup_registry.py tests\test_feature_builder_edge_estimator.py tests\test_strategy_arm.py tests\test_trade_evidence_store.py tests\test_performance_metrics.py tests\test_validation_framework.py --basetemp=.pytest-tmp -q`
+  (`28 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed` after rerunning with a longer command timeout);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+- The first smoke group initially timed out at 300 seconds with no reported
+  failures and then passed when rerun with a longer command timeout. Smoke
+  groups 1 and 2 printed non-failing post-pytest database/cache messages after
+  pytest completed; both rerun/passing commands exited 0. After a self-review
+  support-distance denominator fix, targeted tests and all three split smoke
+  groups were rerun and passed with the same counts.
 
 ### EL3 — Evidence calibrator
 
@@ -264,44 +301,52 @@ Checklist:
 
 ## 4. Current PR note
 
-The current Issue #161 continuation work completes EL1 performance metrics:
+The current Issue #161 continuation work completes EL2 setup identity and
+registry:
 
-- `autonomous/performance_metrics.py` calculates reusable risk-adjusted and
-  trade-quality metrics from realized `autonomous_outcome` evidence.
-- Metrics include trade count, win/loss/breakeven count, win rate, avg R,
-  median R, total R, avg win/loss R, expected R, profit factor, per-trade
-  Sharpe, rolling Sharpe, Sortino, max drawdown in R, consecutive losses,
-  downside deviation, R volatility, average slippage, average commission, total
-  commission, and partial-fill rate.
-- The calculator ignores non-realized and non-finite R records and sorts
-  outcomes chronologically before calculating drawdown and recent loss streaks.
+- `autonomous/setup_registry.py` calculates deterministic setup IDs and setup
+  metadata from realized evidence records and candidate feature payloads.
+- Setup dimensions include signal, quality, momentum, market classification,
+  VIX level/direction, sector regime, time-of-day regime, support-distance
+  bucket, resistance-room bucket, ADR volatility bucket, basket context, and
+  trade type.
+- Sparse records receive explicit `unknown_*` dimensions, keeping future
+  evidence grouping deterministic.
+- The registry tracks setup metadata and observation symbols only. It does not
+  calculate setup performance, classify setup quality, reject setups, change
+  size, or alter capital promotion.
 - The implementation is passive: it does not change live trading, order
   placement, sizing, risk gates, eligibility gates, or capital promotion.
 
 Test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_performance_metrics.py --basetemp=.pytest-tmp -q`
-  (`7 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_performance_metrics.py tests\test_capital_promotion.py tests\test_validation_framework.py tests\test_trade_evidence_store.py tests\test_risk_lifecycle.py tests\test_strategy_arm.py --basetemp=.pytest-tmp -q`
-  (`35 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_setup_registry.py --basetemp=.pytest-tmp -q`
+  (`4 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_setup_registry.py tests\test_feature_builder_edge_estimator.py tests\test_strategy_arm.py tests\test_trade_evidence_store.py tests\test_performance_metrics.py tests\test_validation_framework.py --basetemp=.pytest-tmp -q`
+  (`28 passed`).
 
 Smoke-test evidence:
 
 - Passed split smoke verification:
   `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
-  (`203 passed`);
+  (`203 passed` after rerunning with a longer command timeout);
   `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`112 passed`);
   `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`161 passed`). Total split smoke coverage: `476 passed`.
-- Smoke groups 1 and 2 printed non-failing post-pytest database/cache fetch
-  messages after pytest completed; both commands exited 0.
+- The first smoke group initially timed out at 300 seconds with no reported
+  failures and then passed when rerun with a longer command timeout. Smoke
+  groups 1 and 2 printed non-failing post-pytest database/cache messages after
+  pytest completed; both rerun/passing commands exited 0. After a self-review
+  support-distance denominator fix, targeted tests and all three split smoke
+  groups were rerun and passed with the same counts.
 
 Known limitations:
 
-- This PR does not yet group metrics by setup ID; that remains EL2/EL3.
-- This PR does not expose the metrics through an API or dashboard; that remains
-  EL8.
+- This PR does not yet calculate setup-level performance metrics; that remains
+  EL3.
+- This PR does not expose setup registry metadata through an API or dashboard;
+  that remains EL8.
 - Operational incident rates such as rejected-order rate, stale-quote rejection
   rate, broker disconnect frequency, unconfirmed-protection events, and
   recovery-required events remain for later operational metrics work once event

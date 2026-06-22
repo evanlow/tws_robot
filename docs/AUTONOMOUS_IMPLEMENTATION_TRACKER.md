@@ -38,6 +38,8 @@ Legend:
 | Drawdown governor | Done | PR #167 |
 | Execution quality guard | Done | PR #168; pre-submission only |
 | Strategy-arm learning | Done | PR #169 |
+| Evidence-learning performance metrics | Done | PR #183 |
+| Evidence-learning setup registry | Done | Current PR |
 | Validation framework | Done | PR #169 |
 | Realized outcome reconciliation | Done | PR #170 |
 | Slippage / commission / partial-fill outcome fields | Done | PR #170 |

@@ -94,6 +94,25 @@ StrongConfirmedRebound
 
 The setup ID should be deterministic so that future outcomes aggregate cleanly.
 
+### Current implementation
+
+Reusable EL2 setup identity and registry metadata are implemented in:
+
+```text
+autonomous/setup_registry.py
+```
+
+The registry maps evidence records and candidate feature payloads into stable,
+readable setup IDs using canonical dimensions for signal, quality, momentum,
+market classification, VIX level/direction, sector regime, time-of-day regime,
+support-distance bucket, resistance-room bucket, ADR volatility bucket, basket
+context, and trade type.
+
+Sparse records are handled defensively with explicit `unknown_*` dimensions so
+future aggregation remains deterministic instead of silently dropping records.
+The module is analytics-only. It does not alter sizing, eligibility, capital
+promotion, risk gates, or order execution.
+
 ## 5. Performance metrics
 
 TWS Robot should calculate performance metrics from realized outcome evidence.
