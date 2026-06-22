@@ -42,13 +42,13 @@ Legend:
 | Restart recovery diagnostics | Done | PR #176; live readiness now exposes broker/local recovery classifications, mismatch reasons, stale idempotency locks, unmatched broker orders, and recovery-required states for future operational metrics |
 | Emergency stop operations diagnostics | Done | PR #178; autonomous emergency stop/reset now exposes marker state, supervisor pause state, pending-entry cleanup reports, preserved protective exits, and reset audit events for future operational metrics |
 | Control tower operational snapshot | Done | PR #180; consolidated API exposure for mode, heartbeat, broker/account, cash, open trades/orders, basket risk, protection, recovery/risk state, recent decisions/rejections/fills, and emergency-stop status |
-| Replay evidence reconstructability checks | Done | Current PR; Phase 11 replay harness verifies fill/outcome reconstructability under normal fill, partial fill, restart, stop/target, failed-leg, stale-quote, disconnect, and missing-protection scenarios |
+| Replay evidence reconstructability checks | Done | PR #181; Phase 11 replay harness verifies fill/outcome reconstructability under normal fill, partial fill, restart, stop/target, failed-leg, stale-quote, disconnect, and missing-protection scenarios |
 | Evidence-based adaptive edge estimator | Pending | Not yet implemented |
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
 | Evidence-aware sizing overlay | Pending | Not yet implemented |
-| Capital promotion report | Pending | Not yet implemented |
-| Sharpe / Sortino / profit-factor metrics | Pending | Not yet implemented as dedicated metrics module |
+| Capital promotion report | Done | Current PR; advisory EL7 report recommends approve/hold/demote from realized outcome evidence and operational incidents without applying capital changes |
+| Sharpe / Sortino / profit-factor metrics | Partial | Implemented inside `autonomous/capital_promotion.py` for EL7 reports; not yet extracted as a dedicated EL1 metrics module |
 
 ## 2. Evidence-learning phases
 
@@ -60,7 +60,7 @@ Legend:
 | EL4 | Adaptive edge estimator | Pending | TBD |
 | EL5 | Setup eligibility gate | Pending | TBD |
 | EL6 | Evidence-aware sizing overlay | Pending | TBD |
-| EL7 | Capital promotion report | Pending | TBD |
+| EL7 | Capital promotion report | Done | Current PR |
 | EL8 | Dashboard/API exposure | Pending | TBD |
 
 ## 3. Phase detail tracker
@@ -177,7 +177,7 @@ Checklist:
 
 ### EL7 — Capital promotion report
 
-Status: Pending
+Status: Done in current PR
 
 Goal:
 
@@ -185,13 +185,33 @@ Goal:
 
 Checklist:
 
-- [ ] Add `autonomous/capital_promotion.py`.
-- [ ] Define promotion levels.
-- [ ] Calculate report from realized evidence and operational metrics.
-- [ ] Include trade count, avg R, expected R, win rate, profit factor, rolling Sharpe, Sortino, max drawdown, slippage, partial-fill rate, and operational incidents.
-- [ ] Recommend approve/hold/demote.
-- [ ] Require operator approval; no auto-promotion.
-- [ ] Add tests.
+- [x] Add `autonomous/capital_promotion.py`.
+- [x] Define promotion levels.
+- [x] Calculate report from realized evidence and operational metrics.
+- [x] Include trade count, avg R, expected R, win rate, profit factor, rolling Sharpe, Sortino, max drawdown, slippage, partial-fill rate, and operational incidents.
+- [x] Recommend approve/hold/demote.
+- [x] Require operator approval; no auto-promotion.
+- [x] Add tests.
+
+Implementation notes:
+
+- `CapitalPromotionEvaluator` consumes realized `autonomous_outcome` evidence
+  and optional operational event records, then returns an advisory
+  `CapitalPromotionReport`.
+- Reports include fixed levels 0-6, the current and recommended level, the
+  target level, approval/rejection/demotion reasons, stale-evidence age,
+  paper/live counts, and paper-vs-live consistency diagnostics.
+- Demotion can be recommended after excessive drawdown, unresolved operational
+  incidents, stale evidence, or live/paper inconsistency at higher levels.
+- The module does not implement EL8 API/dashboard exposure and does not apply
+  approvals or capital changes.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_capital_promotion.py --basetemp=.pytest-tmp -q`
+  (`6 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_capital_promotion.py tests\test_validation_framework.py tests\test_trade_evidence_store.py tests\test_risk_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`23 passed`).
 
 ### EL8 — Dashboard/API exposure
 
@@ -211,30 +231,28 @@ Checklist:
 
 ## 4. Current PR note
 
-The current Issue #161 continuation work does not complete an evidence-learning
-EL phase. It improves operator visibility and the operational evidence
-substrate used by future EL7 capital-promotion reports and operational
-incident metrics:
+The current Issue #161 continuation work completes EL7 capital-promotion
+reporting:
 
-- `GET /api/autonomous/control-tower` now exposes recent decisions,
-  rejections, fills/outcomes, latest basket-risk diagnostics, market-data
-  health diagnostics from evidence when present, broker protection state,
-  recovery/risk readiness, open autonomous trades/orders, cash/deployable cash,
-  continuous-supervisor heartbeat, and emergency-stop status in one operator
-  snapshot.
-- The endpoint is passive: it does not call the live runner readiness evaluator
-  that ingests fills/rejections and writes lifecycle diagnostics, and it does
-  not submit, cancel, flatten, or advance lifecycle state.
-- This improves the future EL8 dashboard/API foundation but does not implement
-  setup performance tables, promotion reports, weak-setup reports, or evidence
-  drift analysis.
+- `autonomous/capital_promotion.py` defines fixed levels 0-6 and produces
+  advisory approve/hold/demote reports.
+- Reports are calculated from realized `autonomous_outcome` evidence plus
+  optional unresolved operational incident records.
+- Reports include trade count, recent trade count, avg R, expected R, win rate,
+  profit factor, rolling Sharpe, Sortino, max drawdown in R, slippage,
+  partial-fill rate, operational incidents, stale-evidence age, and paper/live
+  consistency.
+- The evaluator is passive: it does not apply approvals, mutate capital caps,
+  enable live trading, submit orders, cancel orders, or change risk controls.
+- Every report requires operator approval and explicitly disallows automatic
+  capital scaling.
 
 Test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py::TestControlTower --basetemp=.pytest-tmp -q`
-  (`2 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous.py tests\test_api_autonomous_live.py::TestLiveStatus tests\test_api_autonomous_live.py::TestControlTower tests\test_api_autonomous_evidence.py tests\test_autonomous_dashboard.py --basetemp=.pytest-tmp -q`
-  (`94 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_capital_promotion.py --basetemp=.pytest-tmp -q`
+  (`6 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_capital_promotion.py tests\test_validation_framework.py tests\test_trade_evidence_store.py tests\test_risk_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`23 passed`).
 
 Smoke-test evidence:
 
@@ -245,21 +263,17 @@ Smoke-test evidence:
   (`112 passed`);
   `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`161 passed`). Total split smoke coverage: `476 passed`.
-- The first smoke group initially timed out after 240 seconds with no reported
-  failures; rerunning with a longer timeout passed.
 - The second smoke group printed non-failing post-pytest database/cache fetch
   messages after pytest completed; the command exited 0.
 
 Known limitations:
 
-- No adaptive edge estimator, setup eligibility gate, evidence-aware sizing
-  overlay, or capital promotion report is implemented in this PR.
-- Control tower exposure is operational/API visibility. It is not yet the
-  dedicated EL8 learning dashboard with setup performance, promotion, weak
-  setup, or evidence drift reports.
-- Daily/weekly/monthly R is not separately aggregated by this endpoint yet;
-  it remains available to future work through realized outcome evidence and
-  risk lifecycle records.
+- This PR does not add EL8 dashboard/API exposure for promotion reports.
+- This PR does not add approval history persistence or operator approval
+  workflows.
+- Sharpe, Sortino, profit factor, and drawdown calculations are implemented for
+  the promotion report; a reusable EL1 performance metrics module remains
+  pending.
 
 ## 5. Maintenance rules
 

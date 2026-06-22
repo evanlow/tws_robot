@@ -73,8 +73,8 @@ Legend:
 | 8 | Restart recovery and broker reconciliation | Done | PR #176 |
 | 9 | Enhanced emergency stop operations | Done | PR #178 |
 | 10 | Control tower dashboard/API | Done | PR #180 |
-| 11 | Replay / chaos testing harness | Done | Current PR continuing #161 |
-| 12 | Capital ramp and promotion gates | Planned | TBD |
+| 11 | Replay / chaos testing harness | Done | PR #181 |
+| 12 | Capital ramp and promotion gates | Done | Current PR continuing #161 |
 
 ## 4. Phase detail tracker
 
@@ -705,16 +705,59 @@ Known limitations and manual checks:
 
 ### Phase 12 — Capital ramp and promotion gates
 
-Status: Planned
+Status: Done in current PR
 
 Checklist:
 
-- [ ] Define capital levels.
-- [ ] Generate promotion report.
-- [ ] Require operator approval.
-- [ ] Allow demotion after drawdown/fault.
-- [ ] Track live/paper consistency.
-- [ ] Prevent automatic capital scaling.
+- [x] Define capital levels.
+- [x] Generate promotion report.
+- [x] Require operator approval.
+- [x] Allow demotion after drawdown/fault.
+- [x] Track live/paper consistency.
+- [x] Prevent automatic capital scaling.
+
+Implementation notes:
+
+- Added `autonomous/capital_promotion.py` with fixed capital levels 0-6,
+  `CapitalPromotionEvaluator`, threshold configuration, metrics dataclasses,
+  paper/live consistency diagnostics, and promotion/hold/demotion report
+  serialization.
+- Reports include completed and recent trade counts, avg R, expected R, win
+  rate, profit factor, rolling Sharpe, Sortino, max drawdown in R, slippage,
+  partial-fill rate, operational incident count, stale-evidence age, paper/live
+  counts, and approval/rejection/demotion reasons.
+- The evaluator is advisory only. It never submits, cancels, replaces, or
+  flattens orders; never mutates autonomous configuration; never enables live
+  trading; and never changes capital caps automatically.
+- Every report sets `operator_approval_required` to true and
+  `automatic_capital_scaling_allowed` to false.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_capital_promotion.py --basetemp=.pytest-tmp -q`
+  (`6 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_capital_promotion.py tests\test_validation_framework.py tests\test_trade_evidence_store.py tests\test_risk_lifecycle.py --basetemp=.pytest-tmp -q`
+  (`23 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+- The second smoke group printed non-failing post-pytest database/cache fetch
+  messages after pytest completed; the command exited 0.
+
+Known limitations and manual checks:
+
+- This phase does not add dashboard/API exposure for promotion reports; that
+  remains part of EL8.
+- The report consumes available realized outcome evidence and optional
+  operational event records. It does not write approval history or apply
+  operator approvals.
 
 ## 5. Maintenance rules
 
