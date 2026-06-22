@@ -47,27 +47,27 @@ Legend:
 | Setup registry | Pending | Not yet implemented |
 | Setup eligibility gate | Pending | Not yet implemented |
 | Evidence-aware sizing overlay | Pending | Not yet implemented |
-| Capital promotion report | Done | Current PR; advisory EL7 report recommends approve/hold/demote from realized outcome evidence and operational incidents without applying capital changes |
-| Sharpe / Sortino / profit-factor metrics | Partial | Implemented inside `autonomous/capital_promotion.py` for EL7 reports; not yet extracted as a dedicated EL1 metrics module |
+| Capital promotion report | Done | PR #182; advisory EL7 report recommends approve/hold/demote from realized outcome evidence and operational incidents without applying capital changes |
+| Sharpe / Sortino / profit-factor metrics | Done | Current PR; implemented in reusable `autonomous/performance_metrics.py` for realized outcome evidence |
 
 ## 2. Evidence-learning phases
 
 | Phase | Work item | Status | Target PR |
 |---:|---|---|---|
-| EL1 | Performance metrics | Pending | TBD |
+| EL1 | Performance metrics | Done | Current PR |
 | EL2 | Setup identity and registry | Pending | TBD |
 | EL3 | Evidence calibrator | Pending | TBD |
 | EL4 | Adaptive edge estimator | Pending | TBD |
 | EL5 | Setup eligibility gate | Pending | TBD |
 | EL6 | Evidence-aware sizing overlay | Pending | TBD |
-| EL7 | Capital promotion report | Done | Current PR |
+| EL7 | Capital promotion report | Done | PR #182 |
 | EL8 | Dashboard/API exposure | Pending | TBD |
 
 ## 3. Phase detail tracker
 
 ### EL1 — Performance metrics
 
-Status: Pending
+Status: Done in current PR
 
 Goal:
 
@@ -75,17 +75,50 @@ Goal:
 
 Checklist:
 
-- [ ] Add `autonomous/performance_metrics.py`.
-- [ ] Calculate trade count, win rate, avg R, median R, total R.
-- [ ] Calculate avg win R and avg loss R.
-- [ ] Calculate expected R.
-- [ ] Calculate profit factor.
-- [ ] Calculate per-trade Sharpe using R-multiples.
-- [ ] Calculate rolling Sharpe.
-- [ ] Calculate Sortino ratio.
-- [ ] Calculate max drawdown in R.
-- [ ] Add tests using realized outcome records.
-- [ ] Add docs.
+- [x] Add `autonomous/performance_metrics.py`.
+- [x] Calculate trade count, win rate, avg R, median R, total R.
+- [x] Calculate avg win R and avg loss R.
+- [x] Calculate expected R.
+- [x] Calculate profit factor.
+- [x] Calculate per-trade Sharpe using R-multiples.
+- [x] Calculate rolling Sharpe.
+- [x] Calculate Sortino ratio.
+- [x] Calculate max drawdown in R.
+- [x] Add tests using realized outcome records.
+- [x] Add docs.
+
+Implementation notes:
+
+- Added `PerformanceMetricsCalculator`, `PerformanceMetrics`,
+  `PerformanceOutcome`, and `calculate_performance_metrics`.
+- Metrics include trade count, win/loss/breakeven count, win rate, avg R,
+  median R, total R, avg win/loss R, expected R, profit factor, Sharpe,
+  rolling Sharpe, Sortino, max drawdown in R, consecutive losses, downside
+  deviation, R volatility, slippage, commission, and partial-fill rate.
+- Non-realized and non-finite R records are ignored.
+- Unbounded profit factor is serialized as `profit_factor=None` plus
+  `profit_factor_unbounded=true` so future API use remains JSON-friendly.
+- This module is analytics-only and does not change live execution, sizing,
+  eligibility, risk gates, or capital promotion behavior.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_performance_metrics.py --basetemp=.pytest-tmp -q`
+  (`7 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_performance_metrics.py tests\test_capital_promotion.py tests\test_validation_framework.py tests\test_trade_evidence_store.py tests\test_risk_lifecycle.py tests\test_strategy_arm.py --basetemp=.pytest-tmp -q`
+  (`35 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+- Smoke groups 1 and 2 printed non-failing post-pytest database/cache fetch
+  messages after pytest completed; both commands exited 0.
 
 ### EL2 — Setup identity and registry
 
@@ -177,7 +210,7 @@ Checklist:
 
 ### EL7 — Capital promotion report
 
-Status: Done in current PR
+Status: Done in PR #182
 
 Goal:
 
@@ -231,28 +264,26 @@ Checklist:
 
 ## 4. Current PR note
 
-The current Issue #161 continuation work completes EL7 capital-promotion
-reporting:
+The current Issue #161 continuation work completes EL1 performance metrics:
 
-- `autonomous/capital_promotion.py` defines fixed levels 0-6 and produces
-  advisory approve/hold/demote reports.
-- Reports are calculated from realized `autonomous_outcome` evidence plus
-  optional unresolved operational incident records.
-- Reports include trade count, recent trade count, avg R, expected R, win rate,
-  profit factor, rolling Sharpe, Sortino, max drawdown in R, slippage,
-  partial-fill rate, operational incidents, stale-evidence age, and paper/live
-  consistency.
-- The evaluator is passive: it does not apply approvals, mutate capital caps,
-  enable live trading, submit orders, cancel orders, or change risk controls.
-- Every report requires operator approval and explicitly disallows automatic
-  capital scaling.
+- `autonomous/performance_metrics.py` calculates reusable risk-adjusted and
+  trade-quality metrics from realized `autonomous_outcome` evidence.
+- Metrics include trade count, win/loss/breakeven count, win rate, avg R,
+  median R, total R, avg win/loss R, expected R, profit factor, per-trade
+  Sharpe, rolling Sharpe, Sortino, max drawdown in R, consecutive losses,
+  downside deviation, R volatility, average slippage, average commission, total
+  commission, and partial-fill rate.
+- The calculator ignores non-realized and non-finite R records and sorts
+  outcomes chronologically before calculating drawdown and recent loss streaks.
+- The implementation is passive: it does not change live trading, order
+  placement, sizing, risk gates, eligibility gates, or capital promotion.
 
 Test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_capital_promotion.py --basetemp=.pytest-tmp -q`
-  (`6 passed`).
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_capital_promotion.py tests\test_validation_framework.py tests\test_trade_evidence_store.py tests\test_risk_lifecycle.py --basetemp=.pytest-tmp -q`
-  (`23 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_performance_metrics.py --basetemp=.pytest-tmp -q`
+  (`7 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_performance_metrics.py tests\test_capital_promotion.py tests\test_validation_framework.py tests\test_trade_evidence_store.py tests\test_risk_lifecycle.py tests\test_strategy_arm.py --basetemp=.pytest-tmp -q`
+  (`35 passed`).
 
 Smoke-test evidence:
 
@@ -263,17 +294,18 @@ Smoke-test evidence:
   (`112 passed`);
   `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`161 passed`). Total split smoke coverage: `476 passed`.
-- The second smoke group printed non-failing post-pytest database/cache fetch
-  messages after pytest completed; the command exited 0.
+- Smoke groups 1 and 2 printed non-failing post-pytest database/cache fetch
+  messages after pytest completed; both commands exited 0.
 
 Known limitations:
 
-- This PR does not add EL8 dashboard/API exposure for promotion reports.
-- This PR does not add approval history persistence or operator approval
-  workflows.
-- Sharpe, Sortino, profit factor, and drawdown calculations are implemented for
-  the promotion report; a reusable EL1 performance metrics module remains
-  pending.
+- This PR does not yet group metrics by setup ID; that remains EL2/EL3.
+- This PR does not expose the metrics through an API or dashboard; that remains
+  EL8.
+- Operational incident rates such as rejected-order rate, stale-quote rejection
+  rate, broker disconnect frequency, unconfirmed-protection events, and
+  recovery-required events remain for later operational metrics work once event
+  streams are normalized.
 
 ## 5. Maintenance rules
 

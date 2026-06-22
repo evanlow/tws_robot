@@ -74,7 +74,7 @@ Legend:
 | 9 | Enhanced emergency stop operations | Done | PR #178 |
 | 10 | Control tower dashboard/API | Done | PR #180 |
 | 11 | Replay / chaos testing harness | Done | PR #181 |
-| 12 | Capital ramp and promotion gates | Done | Current PR continuing #161 |
+| 12 | Capital ramp and promotion gates | Done | PR #182 |
 
 ## 4. Phase detail tracker
 
