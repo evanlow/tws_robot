@@ -54,6 +54,7 @@ from autonomous.autonomous_mode import (
 )
 from autonomous.continuous_supervisor import (
     ContinuousSupervisor,
+    EMERGENCY_STOP_ACTIVE as SUPERVISOR_EMERGENCY_STOP_ACTIVE,
     PAUSED as SUPERVISOR_PAUSED,
     RISK_LIFECYCLE_BREACH,
     SupervisorCycleResult,
@@ -1119,6 +1120,7 @@ def emergency_stop():
     body = request.get_json(silent=True) or {}
     reason = body.get("reason", "Autonomous emergency stop")
     cancel_pending_entries = body.get("cancel_pending_entries") is True
+    marker_written = True
     try:
         EMERGENCY_STOP_FILE.write_text(
             f"EMERGENCY STOP - {reason}\n"
@@ -1126,10 +1128,7 @@ def emergency_stop():
         )
     except OSError:
         logger.exception("Failed to write EMERGENCY_STOP file")
-        return jsonify({
-            "status": "error",
-            "error": "Failed to write emergency stop file",
-        }), 500
+        marker_written = False
 
     force_autonomous_mode_off(
         message="Emergency stop active. Autonomous Mode has been turned OFF.",
@@ -1151,9 +1150,26 @@ def emergency_stop():
     _audit_mode_event("halt", {
         "reason": reason,
         "source": "emergency_stop",
+        "marker_written": marker_written,
         "cancel_pending_entries": cancel_pending_entries,
         "pending_entry_cleanup": pending_entry_cleanup,
     })
+
+    if not marker_written:
+        return jsonify({
+            "status": "halted_marker_write_failed",
+            "error": (
+                "Failed to write emergency stop file; "
+                "all autonomous processes have been halted"
+            ),
+            "emergency_stop_file": str(EMERGENCY_STOP_FILE),
+            "emergency_stop": _emergency_stop_payload(),
+            "pending_entry_cleanup": pending_entry_cleanup,
+            "continuous_supervisor": _live_continuous_supervisor().status(),
+            "autonomous_mode": _autonomous_status_payload(),
+            "autonomous_live_mode": _live_mode_state().to_dict(),
+            "reason": reason,
+        }), 500
 
     return jsonify({
         "status": "halted",
@@ -1197,7 +1213,9 @@ def emergency_reset():
         "Emergency stop reset. Live Autonomous Mode remains OFF until reactivated.",
         status="Ready",
     )
-    _live_continuous_supervisor().resume()
+    supervisor = _live_continuous_supervisor()
+    if supervisor.status().get("pause_reason") == SUPERVISOR_EMERGENCY_STOP_ACTIVE:
+        supervisor.resume()
     _audit_mode_event("emergency_reset", {
         "reason": reason,
         "source": "operator",
@@ -1478,7 +1496,7 @@ def _pending_entry_cancel_report(
                     "reconciliation confirms terminal state."
                 ),
             }
-            if cancel_pending_entries:
+            if cancel_pending_entries and account_mode == "live":
                 entry["forwarded_to_broker"] = _cancel_entry_order(
                     int(trade.entry_order_id)
                 )
@@ -1500,7 +1518,7 @@ def _emergency_stop_payload() -> Dict[str, Any]:
     try:
         file_exists = EMERGENCY_STOP_FILE.exists()
     except OSError:
-        file_exists = False
+        file_exists = True  # fail-closed: treat unreadable state as active
     risk_active = False
     try:
         risk_active = bool(get_services().risk_manager.emergency_stop_active)
