@@ -20,6 +20,7 @@ Legend:
 | Evidence foundation | Done | PR #162 |
 | Decision evidence records | Done | PR #162 |
 | Evidence API / recent evidence view | Done | PR #162 |
+| Evidence-learning dashboard/API exposure | Current PR | EL8 read-only setup performance, promotion, weak setup, and drift diagnostics exposed through evidence APIs and control tower |
 | Support/resistance enrichment | Done | PR #163 |
 | Assisted-live valid stop requirement | Done | PR #163 |
 | VIX / market-regime guard | Done | PR #160 |
@@ -42,7 +43,8 @@ Legend:
 | Evidence-learning setup registry | Done | PR #184 |
 | Evidence-learning evidence calibrator | Done | PR #186 |
 | Evidence-learning adaptive edge estimator | Done | PR #187 |
-| Evidence-learning setup eligibility gate | Done | Current PR |
+| Evidence-learning setup eligibility gate | Done | PR #188 |
+| Evidence-learning evidence-aware sizing overlay | Done | PR #189 |
 | Validation framework | Done | PR #169 |
 | Realized outcome reconciliation | Done | PR #170 |
 | Slippage / commission / partial-fill outcome fields | Done | PR #170 |
@@ -710,7 +712,7 @@ Known limitations and manual checks:
 
 ### Phase 12 — Capital ramp and promotion gates
 
-Status: Done in current PR
+Status: Done in PR #182
 
 Checklist:
 
@@ -758,11 +760,56 @@ Smoke-test evidence:
 
 Known limitations and manual checks:
 
-- This phase does not add dashboard/API exposure for promotion reports; that
-  remains part of EL8.
 - The report consumes available realized outcome evidence and optional
   operational event records. It does not write approval history or apply
   operator approvals.
+
+### Evidence-learning dashboard/API exposure
+
+Status: Current PR
+
+Checklist:
+
+- [x] Add setup performance API.
+- [x] Add promotion report API.
+- [x] Add weak setup report API.
+- [x] Add evidence drift report API.
+- [x] Surface evidence-learning status through the control tower snapshot.
+- [x] Preserve read-only/advisory behavior.
+
+Implementation notes:
+
+- Added `autonomous/evidence_learning_summary.py` to summarize realized
+  autonomous outcome evidence into setup performance, promotion, weak setup,
+  and drift diagnostics.
+- Added read-only endpoints under `/api/autonomous/evidence`:
+  `/learning-status`, `/setup-performance`, `/promotion-report`,
+  `/weak-setups`, and `/drift-report`.
+- Added `evidence_learning` to `/api/autonomous/control-tower` for dashboard
+  consumers.
+- The exposure is advisory and read-only. It does not submit, cancel, replace,
+  or flatten orders; does not advance lifecycle state; does not enable live
+  trading; and does not apply capital changes.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_evidence_learning_summary.py tests\test_api_autonomous_evidence.py tests\test_api_autonomous_live.py::TestControlTower tests\test_evidence_calibrator.py tests\test_capital_promotion.py --basetemp=.pytest-tmp-el8-target2 -q`
+  (`25 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-el8-smoke1 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-el8-smoke2 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el8-smoke3 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+
+Known limitations and manual checks:
+
+- EL8 reads from the local evidence store only; it does not configure a
+  default live setup-evidence provider or write approval history.
 
 ## 5. Maintenance rules
 
