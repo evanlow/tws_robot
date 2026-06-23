@@ -117,6 +117,16 @@ class TradePlanner:
             fractional_edge_retirement_mode_max_pct=config.fractional_edge_retirement_mode_max_pct,
             fractional_edge_allow_size_increase=config.fractional_edge_allow_size_increase,
             fractional_edge_can_reduce_size=config.fractional_edge_can_reduce_size,
+            evidence_aware_sizing_enabled=config.evidence_aware_sizing_enabled,
+            evidence_aware_min_trades_for_tiny_live=config.evidence_aware_min_trades_for_tiny_live,
+            evidence_aware_min_trades_for_normal=config.evidence_aware_min_trades_for_normal,
+            evidence_aware_tiny_live_max_position_pct=config.evidence_aware_tiny_live_max_position_pct,
+            evidence_aware_reduced_size_multiplier=config.evidence_aware_reduced_size_multiplier,
+            evidence_aware_min_confidence_for_normal=config.evidence_aware_min_confidence_for_normal,
+            evidence_aware_strong_expected_r=config.evidence_aware_strong_expected_r,
+            evidence_aware_max_drawdown_r_for_normal=config.evidence_aware_max_drawdown_r_for_normal,
+            evidence_aware_max_slippage_bps_for_normal=config.evidence_aware_max_slippage_bps_for_normal,
+            evidence_aware_allow_size_increase=config.evidence_aware_allow_size_increase,
             drawdown_governor_enabled=config.drawdown_governor_enabled,
             strategy_drawdown_pct=config.strategy_drawdown_pct,
         )
@@ -221,7 +231,11 @@ class TradePlanner:
             adr_pct=_positive_float(candidate.extras.get("adr_pct")),
             edge_estimate=_dict_or_none(candidate.extras.get("edge_estimate")),
             observed_edge_trades=_int(candidate.extras.get("edge_observed_trades"), default=0),
+            setup_eligibility=_dict_or_none(candidate.extras.get("setup_eligibility")),
             strategy_drawdown_pct=_positive_float(candidate.extras.get("strategy_drawdown_pct")),
+            avg_slippage_bps=_positive_float(
+                _first(candidate.extras, "edge_avg_slippage_bps", "avg_slippage_bps")
+            ),
         )
         quantity = sizing.quantity
         if quantity <= 0:

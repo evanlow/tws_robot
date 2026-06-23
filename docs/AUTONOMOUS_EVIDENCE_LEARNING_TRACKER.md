@@ -46,8 +46,8 @@ Legend:
 | Evidence-based adaptive edge estimator | Done | PR #187; passive rule-prior plus setup-evidence blending implemented in `autonomous/adaptive_edge_estimator.py` |
 | Setup registry | Done | PR #184; deterministic setup IDs and metadata registry implemented in `autonomous/setup_registry.py` |
 | Evidence calibrator | Done | PR #186; setup-level evidence summaries and conservative Bayesian/shrinkage classification implemented in `autonomous/evidence_calibrator.py` |
-| Setup eligibility gate | Done | Current PR; conservative setup-state and expected-R gate implemented in `autonomous/setup_eligibility.py` with optional ranker integration |
-| Evidence-aware sizing overlay | Pending | Not yet implemented |
+| Setup eligibility gate | Done | PR #188; conservative setup-state and expected-R gate implemented in `autonomous/setup_eligibility.py` with optional ranker integration |
+| Evidence-aware sizing overlay | Current PR | Conservative EL6 overlay in progress; setup evidence can hold, reduce, tiny-cap, or block share sizing without bypassing hard caps |
 | Capital promotion report | Done | PR #182; advisory EL7 report recommends approve/hold/demote from realized outcome evidence and operational incidents without applying capital changes |
 | Sharpe / Sortino / profit-factor metrics | Done | PR #183; implemented in reusable `autonomous/performance_metrics.py` for realized outcome evidence |
 
@@ -59,8 +59,8 @@ Legend:
 | EL2 | Setup identity and registry | Done | PR #184 |
 | EL3 | Evidence calibrator | Done | PR #186 |
 | EL4 | Adaptive edge estimator | Done | PR #187 |
-| EL5 | Setup eligibility gate | Done | Current PR |
-| EL6 | Evidence-aware sizing overlay | Pending | Issue #185 |
+| EL5 | Setup eligibility gate | Done | PR #188 |
+| EL6 | Evidence-aware sizing overlay | Current PR | Issue #185 |
 | EL7 | Capital promotion report | Done | PR #182 |
 | EL8 | Dashboard/API exposure | Pending | Issue #185 |
 
@@ -287,7 +287,7 @@ Smoke-test evidence:
 
 ### EL5 — Setup eligibility gate
 
-Status: Done in current PR
+Status: Done in PR #188
 
 Goal:
 
@@ -342,11 +342,11 @@ Smoke-test evidence:
 
 Tracking note:
 
-- EL5 is complete in the current PR. Remaining Issue #185 work is EL6 and EL8.
+- EL5 is complete in PR #188. Remaining Issue #185 work is EL6 and EL8.
 
 ### EL6 — Evidence-aware sizing overlay
 
-Status: Pending
+Status: Current PR
 
 Goal:
 
@@ -354,15 +354,36 @@ Goal:
 
 Checklist:
 
-- [ ] Extend sizing diagnostics with evidence score.
-- [ ] Use setup confidence, expected R, rolling Sharpe, drawdown, and slippage history.
-- [ ] Never bypass deployable cash, basket risk, risk-per-trade, drawdown, or operator caps.
-- [ ] Add size-state output: `NO_TRADE`, `PAPER_ONLY`, `TINY_LIVE`, `NORMAL_CAPPED`, `REDUCED_SIZE`, `RETIRED`.
-- [ ] Add tests.
+- [x] Extend sizing diagnostics with evidence score.
+- [x] Use setup confidence, expected R, rolling Sharpe, drawdown, and slippage history.
+- [x] Never bypass deployable cash, basket risk, risk-per-trade, drawdown, or operator caps.
+- [x] Add size-state output: `NO_TRADE`, `PAPER_ONLY`, `TINY_LIVE`, `NORMAL_CAPPED`, `REDUCED_SIZE`, `RETIRED`.
+- [x] Add tests.
+
+Implementation notes:
+
+- Added `autonomous/evidence_aware_sizer.py` with `EvidenceAwareSizer`,
+  `EvidenceAwareSizingConfig`, serializable decision diagnostics, evidence
+  score output, and explicit EL6 sizing states.
+- `PositionSizer` now evaluates the evidence-aware overlay after fractional
+  edge sizing and before the drawdown governor. The overlay adds an
+  `evidence_aware_cap` only when it reduces or blocks sizing; otherwise
+  existing cash/equity, risk-per-trade, volatility, fractional, drawdown, and
+  operator caps remain binding.
+- `TradePlanner` passes candidate evidence diagnostics into sizing through
+  `edge_estimate`, `edge_observed_trades`, `setup_eligibility`,
+  `strategy_drawdown_pct`, and `edge_avg_slippage_bps`/`avg_slippage_bps`.
+- The feature is disabled by default. It does not enable live trading, place
+  orders, weaken dry-run/paper/live mode gates, bypass risk controls, or apply
+  capital changes.
 
 Tracking note:
 
-- Remaining EL6 work is tracked by follow-up Issue #185.
+- Targeted verification passed:
+  `.venv\Scripts\python.exe -m pytest tests\test_evidence_aware_sizer.py tests\test_trade_planner_evidence_sizing.py tests\test_trade_planner_sizing.py tests\test_trade_planner_fractional_drawdown.py tests\test_setup_eligibility.py tests\test_candidate_ranker_edge.py tests\test_autonomous_engine.py --basetemp=.pytest-tmp-el6-target2 -q`
+  (`46 passed`).
+- Smoke-test evidence will be recorded after final split verification for this
+  PR.
 
 ### EL7 — Capital promotion report
 
@@ -424,40 +445,37 @@ Tracking note:
 
 ## 4. Current PR note
 
-The current Issue #185 continuation work completes EL5 setup eligibility
-gating:
+The current Issue #185 continuation work implements EL6 evidence-aware sizing:
 
-- `autonomous/setup_eligibility.py` rejects or downgrades setup evidence before
-  planning/execution when evidence is explicitly supplied.
-- `CandidateRanker` can consume optional setup evidence, apply adaptive edge,
-  record setup-eligibility diagnostics, and fail closed on provider errors.
-- `AutonomousTradingEngine` accepts an optional setup-evidence provider hook and
-  passes it into the ranker.
-- Default runtime behavior is unchanged when no setup-evidence provider is
-  configured.
+- `autonomous/evidence_aware_sizer.py` converts setup evidence into explicit
+  sizing states and an optional cap.
+- `PositionSizer` records `evidence_aware` diagnostics and can bind on
+  `evidence_aware_cap` only when evidence blocks or reduces sizing.
+- `TradePlanner` passes setup eligibility, adaptive edge, drawdown, and
+  slippage diagnostics into the sizing overlay.
+- Default runtime behavior is unchanged because the overlay is disabled unless
+  explicitly configured.
 
 Test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_setup_eligibility.py tests\test_candidate_ranker.py tests\test_candidate_ranker_edge.py tests\test_autonomous_engine.py tests\test_autonomous_engine_evidence.py tests\test_adaptive_edge_estimator.py tests\test_evidence_calibrator.py tests\test_setup_registry.py --basetemp=.pytest-tmp-el5-target2 -q`
-  (`52 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_evidence_aware_sizer.py tests\test_trade_planner_evidence_sizing.py tests\test_trade_planner_sizing.py tests\test_trade_planner_fractional_drawdown.py tests\test_setup_eligibility.py tests\test_candidate_ranker_edge.py tests\test_autonomous_engine.py --basetemp=.pytest-tmp-el6-target2 -q`
+  (`46 passed`).
 
 Smoke-test evidence:
 
 - Passed split smoke verification:
-  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-el5-smoke1 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-el6-smoke1 --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`203 passed`);
-  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-el5-smoke2 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-el6-smoke2 --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`112 passed`);
-  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el5-smoke3 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el6-smoke3 --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`161 passed`). Total split smoke coverage: `476 passed`.
-- Smoke groups 1 and 2 printed non-failing post-pytest database/cache fetch
-  messages after pytest completed; both commands exited 0. The messages come
-  from market overview/event fallback logging and did not indicate smoke-test
-  assertion failures.
 
 Known limitations:
 
-- This PR does not change sizing from evidence; that remains EL6 in Issue #185.
+- EL6 currently affects `BUY_SHARES` sizing. Short-put plans continue to use
+  the existing cash-secured and drawdown-governor sizing path.
+- EL8 dashboard/API exposure remains open in Issue #185 after EL6.
 - This PR does not expose setup performance through an API or dashboard; that
   remains EL8 in Issue #185.
 - The setup-evidence provider hook is explicit; no default live evidence source
