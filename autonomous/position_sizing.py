@@ -1,4 +1,4 @@
-"""Risk-per-trade, volatility, fractional-edge, and drawdown-aware sizing.
+"""Risk-per-trade, volatility, evidence, fractional-edge, and drawdown-aware sizing.
 
 The sizer is deliberately conservative: each overlay can reduce the base cap,
 but by default no overlay can increase exposure beyond existing hard caps.
@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from autonomous.drawdown_governor import DrawdownGovernor
+from autonomous.evidence_aware_sizer import EvidenceAwareSizer, EvidenceAwareSizingConfig
 from autonomous.fractional_sizer import FractionalEdgeSizer
 
 
@@ -52,6 +53,16 @@ class PositionSizer:
         fractional_edge_retirement_mode_max_pct: float = 0.005,
         fractional_edge_allow_size_increase: bool = False,
         fractional_edge_can_reduce_size: bool = True,
+        evidence_aware_sizing_enabled: bool = False,
+        evidence_aware_min_trades_for_tiny_live: int = 20,
+        evidence_aware_min_trades_for_normal: int = 100,
+        evidence_aware_tiny_live_max_position_pct: float = 0.001,
+        evidence_aware_reduced_size_multiplier: float = 0.50,
+        evidence_aware_min_confidence_for_normal: float = 0.60,
+        evidence_aware_strong_expected_r: float = 0.25,
+        evidence_aware_max_drawdown_r_for_normal: float = 8.00,
+        evidence_aware_max_slippage_bps_for_normal: float = 50.0,
+        evidence_aware_allow_size_increase: bool = False,
         drawdown_governor_enabled: bool = True,
         strategy_drawdown_pct: float = 0.0,
     ) -> None:
@@ -69,6 +80,20 @@ class PositionSizer:
             allow_size_increase=fractional_edge_allow_size_increase,
             can_reduce_size=fractional_edge_can_reduce_size,
         )
+        self.evidence_sizer = EvidenceAwareSizer(
+            EvidenceAwareSizingConfig(
+                enabled=evidence_aware_sizing_enabled,
+                min_trades_for_tiny_live=evidence_aware_min_trades_for_tiny_live,
+                min_trades_for_normal=evidence_aware_min_trades_for_normal,
+                tiny_live_max_position_pct=evidence_aware_tiny_live_max_position_pct,
+                reduced_size_multiplier=evidence_aware_reduced_size_multiplier,
+                min_confidence_for_normal=evidence_aware_min_confidence_for_normal,
+                strong_expected_r=evidence_aware_strong_expected_r,
+                max_drawdown_r_for_normal=evidence_aware_max_drawdown_r_for_normal,
+                max_slippage_bps_for_normal=evidence_aware_max_slippage_bps_for_normal,
+                allow_size_increase=evidence_aware_allow_size_increase,
+            )
+        )
         self.drawdown_governor = DrawdownGovernor(
             enabled=drawdown_governor_enabled,
             current_drawdown_pct=strategy_drawdown_pct,
@@ -85,7 +110,9 @@ class PositionSizer:
         adr_pct: Optional[float] = None,
         edge_estimate: Optional[Dict[str, Any]] = None,
         observed_edge_trades: int = 0,
+        setup_eligibility: Optional[Dict[str, Any]] = None,
         strategy_drawdown_pct: Optional[float] = None,
+        avg_slippage_bps: Optional[float] = None,
     ) -> SizingDecision:
         """Return final quantity and cap diagnostics for one long-share leg."""
 
@@ -135,6 +162,20 @@ class PositionSizer:
         notes.extend([f"fractional_edge: {r}" for r in fractional_decision.reasons])
         if fractional_decision.applied and fractional_decision.cap_value is not None:
             cap_values["fractional_edge_cap"] = max(0.0, fractional_decision.cap_value)
+
+        evidence_decision = self.evidence_sizer.evaluate(
+            equity=equity,
+            current_cap_value=min(cap_values.values()) if cap_values else base_cap_value,
+            edge_estimate=edge_estimate,
+            observed_trades=observed_edge_trades,
+            setup_eligibility=setup_eligibility,
+            strategy_drawdown_pct=strategy_drawdown_pct,
+            avg_slippage_bps=avg_slippage_bps,
+        )
+        caps["evidence_aware"] = evidence_decision.to_dict()
+        notes.extend([f"evidence_aware: {r}" for r in evidence_decision.reasons])
+        if evidence_decision.applied and evidence_decision.cap_value is not None:
+            cap_values["evidence_aware_cap"] = max(0.0, evidence_decision.cap_value)
 
         dd_decision = self.drawdown_governor.evaluate(strategy_drawdown_pct)
         caps["drawdown_governor"] = dd_decision.to_dict()

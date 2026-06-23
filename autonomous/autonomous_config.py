@@ -37,6 +37,17 @@ class AutonomousTradingConfig:
     fractional_edge_allow_size_increase: bool = False
     fractional_edge_can_reduce_size: bool = True
 
+    evidence_aware_sizing_enabled: bool = False
+    evidence_aware_min_trades_for_tiny_live: int = 20
+    evidence_aware_min_trades_for_normal: int = 100
+    evidence_aware_tiny_live_max_position_pct: float = 0.001
+    evidence_aware_reduced_size_multiplier: float = 0.50
+    evidence_aware_min_confidence_for_normal: float = 0.60
+    evidence_aware_strong_expected_r: float = 0.25
+    evidence_aware_max_drawdown_r_for_normal: float = 8.00
+    evidence_aware_max_slippage_bps_for_normal: float = 50.0
+    evidence_aware_allow_size_increase: bool = False
+
     drawdown_governor_enabled: bool = True
     strategy_drawdown_pct: float = 0.0
 
@@ -137,6 +148,9 @@ class AutonomousTradingConfig:
             ("fractional_edge_fraction", self.fractional_edge_fraction),
             ("fractional_edge_max_position_pct", self.fractional_edge_max_position_pct),
             ("fractional_edge_retirement_mode_max_pct", self.fractional_edge_retirement_mode_max_pct),
+            ("evidence_aware_tiny_live_max_position_pct", self.evidence_aware_tiny_live_max_position_pct),
+            ("evidence_aware_reduced_size_multiplier", self.evidence_aware_reduced_size_multiplier),
+            ("evidence_aware_min_confidence_for_normal", self.evidence_aware_min_confidence_for_normal),
             ("vix_caution_size_multiplier", self.vix_caution_size_multiplier),
             ("vix_high_size_multiplier", self.vix_high_size_multiplier),
         ):
@@ -144,6 +158,17 @@ class AutonomousTradingConfig:
                 raise ValueError(f"{label} must be in (0, 1]")
         if self.fractional_edge_min_trades < 0:
             raise ValueError("fractional_edge_min_trades must be >= 0")
+        if self.evidence_aware_min_trades_for_tiny_live < 0:
+            raise ValueError("evidence_aware_min_trades_for_tiny_live must be >= 0")
+        if self.evidence_aware_min_trades_for_normal < self.evidence_aware_min_trades_for_tiny_live:
+            raise ValueError("evidence_aware_min_trades_for_normal must be >= tiny-live threshold")
+        for label, value in (
+            ("evidence_aware_strong_expected_r", self.evidence_aware_strong_expected_r),
+            ("evidence_aware_max_drawdown_r_for_normal", self.evidence_aware_max_drawdown_r_for_normal),
+            ("evidence_aware_max_slippage_bps_for_normal", self.evidence_aware_max_slippage_bps_for_normal),
+        ):
+            if value < 0:
+                raise ValueError(f"{label} must be >= 0")
         if self.strategy_drawdown_pct < 0 or self.strategy_drawdown_pct > 1:
             raise ValueError("strategy_drawdown_pct must be in [0, 1]")
         for label, value in (
@@ -229,6 +254,16 @@ class AutonomousTradingConfig:
             "fractional_edge_retirement_mode_max_pct": self.fractional_edge_retirement_mode_max_pct,
             "fractional_edge_allow_size_increase": self.fractional_edge_allow_size_increase,
             "fractional_edge_can_reduce_size": self.fractional_edge_can_reduce_size,
+            "evidence_aware_sizing_enabled": self.evidence_aware_sizing_enabled,
+            "evidence_aware_min_trades_for_tiny_live": self.evidence_aware_min_trades_for_tiny_live,
+            "evidence_aware_min_trades_for_normal": self.evidence_aware_min_trades_for_normal,
+            "evidence_aware_tiny_live_max_position_pct": self.evidence_aware_tiny_live_max_position_pct,
+            "evidence_aware_reduced_size_multiplier": self.evidence_aware_reduced_size_multiplier,
+            "evidence_aware_min_confidence_for_normal": self.evidence_aware_min_confidence_for_normal,
+            "evidence_aware_strong_expected_r": self.evidence_aware_strong_expected_r,
+            "evidence_aware_max_drawdown_r_for_normal": self.evidence_aware_max_drawdown_r_for_normal,
+            "evidence_aware_max_slippage_bps_for_normal": self.evidence_aware_max_slippage_bps_for_normal,
+            "evidence_aware_allow_size_increase": self.evidence_aware_allow_size_increase,
             "drawdown_governor_enabled": self.drawdown_governor_enabled,
             "strategy_drawdown_pct": self.strategy_drawdown_pct,
             "execution_quality_guard_enabled": self.execution_quality_guard_enabled,
