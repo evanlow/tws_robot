@@ -1302,6 +1302,9 @@ Get upcoming market-moving events from the cached event store.
 
 **Query Parameters:**
 - `days` (optional, default `14`) - Calendar days ahead to return events for
+- `event_type` (optional) - Comma-separated event types, such as `EARNINGS,FOMC`
+- `symbol` (optional) - Comma-separated symbols, such as `AAPL,MSFT`
+- `status` (optional) - Comma-separated lifecycle statuses, such as `active,updated,stale`
 
 Validation rules:
 - Minimum = `1`
@@ -1315,28 +1318,44 @@ Validation rules:
     {
       "id": 12,
       "event_type": "EARNINGS",
+      "event_id": "evt_abc123",
       "symbol": "AAPL",
       "title": "Apple Earnings",
-      "event_date": "2026-05-20T00:00:00",
+      "event_date": "2026-05-20T20:00:00",
       "event_time": "AMC",
+      "start_at_utc": "2026-05-20T20:00:00",
+      "end_at_utc": null,
+      "market_timezone": "America/New_York",
       "source": "yfinance",
+      "source_event_id": "EARNINGS:AAPL:2026-05-20",
+      "confidence": "estimated",
+      "importance_score": 75.0,
+      "status": "active",
       "detail": {
         "eps_estimate": 1.23
       },
       "is_portfolio_relevant": true,
       "fetched_at": "2026-05-09T09:41:22",
-      "days_away": 11
+      "days_away": 11,
+      "severity": "medium"
     }
   ],
   "count": 1,
   "days_ahead": 14,
-  "portfolio_symbols": ["AAPL", "MSFT"]
+  "portfolio_symbols": ["AAPL", "MSFT"],
+  "filters": {
+    "event_type": ["EARNINGS"],
+    "symbol": ["AAPL"],
+    "status": []
+  }
 }
 ```
 
 **Notes:**
 - `portfolio_symbols` is collected from open positions and registered strategies.
 - Event records are returned in chronological order.
+- Default status filtering returns `active` and `updated` events. Request `status=stale` to inspect provider-missing future events.
+- Datetimes are normalized to UTC in `start_at_utc`; legacy `event_date` remains for existing clients.
 
 ### `POST /api/market-events/refresh`
 
@@ -1346,14 +1365,72 @@ Trigger a non-blocking refresh of market events from external sources.
 - Starts background refresh (returns immediately)
 - Forces a refresh even if TTL has not expired
 - Uses current `portfolio_symbols` from positions + strategies
+- Sync window defaults to the next 28 calendar days
+- Provider errors are recorded in the sync log and do not delete existing events
 
 **Response:**
 ```json
 {
   "status": "refresh_started",
+  "days_ahead": 28,
   "portfolio_symbols": ["AAPL", "MSFT"]
 }
 ```
+
+### `GET /api/market-events/sync-log`
+
+Return recent market-event provider sync attempts.
+
+**Query Parameters:**
+- `limit` (optional, default `20`, max `100`) - Number of sync log rows
+
+**Response:**
+```json
+{
+  "logs": [
+    {
+      "provider": "yfinance",
+      "event_type": "EARNINGS",
+      "status": "success",
+      "fetched_count": 2,
+      "upserted_count": 2,
+      "stale_count": 0,
+      "error_count": 0,
+      "sync_started_at": "2026-06-23T05:00:00",
+      "sync_finished_at": "2026-06-23T05:00:02"
+    }
+  ],
+  "count": 1,
+  "last_sync_summary": {
+    "status": "success",
+    "total_fetched": 4,
+    "total_upserted": 4,
+    "total_stale": 0,
+    "total_errors": 0
+  }
+}
+```
+
+### `GET /api/market-events/ticker`
+
+Return compact upcoming-event items for the dashboard rolling event strip.
+
+**Query Parameters:**
+- `days` (optional, default `28`, max `90`)
+- `limit` (optional, default `8`, max `20`)
+
+### `GET /api/market-events/reminders`
+
+Return popup reminder candidates for upcoming medium/high/critical events.
+
+**Query Parameters:**
+- `days` (optional, default `7`, max `30`)
+- `mode` (optional) - `off`, `high_only`, `medium_high`, or `all`
+
+**Safety behaviour:**
+- Reminder output is advisory and does not place orders.
+- Critical market calendar events are also surfaced in `/api/trading-readiness/status` as fail-closed blockers for automated paper/live entries.
+- Medium/high event warnings appear in readiness context but do not loosen any existing gate.
 
 ---
 

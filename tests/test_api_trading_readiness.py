@@ -63,6 +63,16 @@ def test_status_blocks_meaningful_capital_by_default(monkeypatch):
 
 def test_status_allows_small_single_trade_live_experiment_when_gates_pass(monkeypatch):
     app = _make_app(monkeypatch)
+    monkeypatch.setattr(
+        "web.routes.api_trading_readiness._event_risk_report",
+        lambda svc: {
+            "enabled": True,
+            "blockers": [],
+            "warnings": [],
+            "events_considered": 0,
+            "max_severity": "info",
+        },
+    )
     app.config["autonomous_signal_provider"] = _RealProvider()
     app.config["autonomous_live_runner_config"] = AutonomousLiveRunnerConfig(
         live_enabled=True,
@@ -83,6 +93,45 @@ def test_status_allows_small_single_trade_live_experiment_when_gates_pass(monkey
     assert body["criteria"]["live_dry_run"]["status"] == "YES"
     assert body["criteria"]["actual_live_single_trade"]["status"] == "YES"
     assert body["criteria"]["capital_growth_50k"]["status"] == "BLOCKED"
+
+
+def test_status_blocks_live_when_critical_market_event_present(monkeypatch):
+    app = _make_app(monkeypatch)
+    app.config["autonomous_signal_provider"] = _RealProvider()
+    app.config["autonomous_live_runner_config"] = AutonomousLiveRunnerConfig(
+        live_enabled=True,
+        expected_account_id="U1234567",
+        max_deployable_cash_pct=0.005,
+        max_open_live_trades=1,
+        max_live_trades_per_day=1,
+    )
+    _arm_live_services(app, deployable_cash=50_000.0)
+    monkeypatch.setattr(
+        "web.routes.api_trading_readiness._event_risk_report",
+        lambda svc: {
+            "enabled": True,
+            "blockers": [{
+                "event_type": "MARKET_HOLIDAY",
+                "title": "NYSE/Nasdaq Closed",
+                "message": "Market holiday: NYSE/Nasdaq Closed is today.",
+                "severity": "critical",
+            }],
+            "warnings": [],
+            "events_considered": 1,
+            "max_severity": "critical",
+        },
+    )
+    client = app.test_client()
+
+    resp = client.get("/api/trading-readiness/status")
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["overall_fit"] is False
+    assert body["event_risk"]["max_severity"] == "critical"
+    single = body["criteria"]["actual_live_single_trade"]
+    assert single["status"] == "NO"
+    assert any("Critical market event risk" in reason for reason in single["reasons"])
 
 
 def test_status_blocks_single_trade_when_trade_value_cap_is_too_high(monkeypatch):

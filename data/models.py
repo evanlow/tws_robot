@@ -450,11 +450,11 @@ class FundamentalsCache(Base):
 
 
 class MarketEvent(Base):
-    """Scheduled market-moving event (earnings, FOMC, dividends, economic releases).
+    """Scheduled market-moving event (earnings, FOMC, dividends, holidays).
 
-    One row per event occurrence.  The unique constraint on
-    ``(event_type, symbol, event_date)`` prevents duplicate rows when the
-    fetcher re-runs during the same calendar day.
+    One row per event occurrence. The legacy ``event_date`` / ``event_time``
+    fields remain for existing callers; newer code should prefer
+    ``start_at_utc`` / ``end_at_utc`` and the source identifiers.
 
     ``symbol`` is NULL for macro events (FOMC, economic data releases) that
     are not tied to a specific ticker.
@@ -462,30 +462,48 @@ class MarketEvent(Base):
     __tablename__ = 'market_events'
 
     id = Column(Integer, primary_key=True)
+    event_id = Column(String(128), nullable=True, unique=True, index=True)
 
     # Categorisation
     event_type = Column(String(50), nullable=False, index=True)
-    # "EARNINGS" | "FOMC" | "DIVIDEND" | "ECONOMIC"
+    # "EARNINGS" | "FOMC" | "DIVIDEND" | "MARKET_HOLIDAY" | ...
 
     symbol = Column(String(20), nullable=True, index=True)
     title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
 
-    # Timing
+    # Legacy timing
     event_date = Column(DateTime, nullable=False, index=True)
     event_time = Column(String(20), nullable=True)   # "BMO" / "AMC" / "09:00 ET" etc.
 
+    # Normalised timing
+    start_at_utc = Column(DateTime, nullable=True, index=True)
+    end_at_utc = Column(DateTime, nullable=True)
+    market_timezone = Column(String(64), nullable=True)
+
     # Provenance
     source = Column(String(100), nullable=True)       # "yfinance" / "federalreserve.gov" etc.
+    source_event_id = Column(String(200), nullable=True, index=True)
+    source_url = Column(Text, nullable=True)
 
     # Rich payload (EPS estimates, rate-decision context, etc.)
     detail_json = Column(Text, nullable=True)
+    raw_payload_json = Column(Text, nullable=True)
+    raw_payload_hash = Column(String(64), nullable=True, index=True)
 
     # Portfolio relevance flag (set at fetch time based on active strategy symbols)
     is_portfolio_relevant = Column(Boolean, default=False, nullable=False)
 
+    # Classification and lifecycle
+    confidence = Column(String(20), nullable=True, default='confirmed')
+    importance_score = Column(Float, nullable=True, default=0.0)
+    status = Column(String(20), nullable=True, default='active', index=True)
+
     # Freshness tracking
+    last_seen_at = Column(DateTime, nullable=True)
     fetched_at = Column(DateTime, nullable=False, default=datetime.now)
     created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     __table_args__ = (
         UniqueConstraint(
@@ -504,15 +522,29 @@ class MarketEvent(Base):
                 detail = self.detail_json
         return {
             "id": self.id,
+            "event_id": self.event_id,
             "event_type": self.event_type,
             "symbol": self.symbol,
             "title": self.title,
+            "description": self.description,
             "event_date": self.event_date.isoformat() if self.event_date else None,
             "event_time": self.event_time,
+            "start_at_utc": self.start_at_utc.isoformat() if self.start_at_utc else None,
+            "end_at_utc": self.end_at_utc.isoformat() if self.end_at_utc else None,
+            "market_timezone": self.market_timezone,
             "source": self.source,
+            "source_event_id": self.source_event_id,
+            "source_url": self.source_url,
             "detail": detail,
+            "raw_payload_hash": self.raw_payload_hash,
             "is_portfolio_relevant": self.is_portfolio_relevant,
+            "confidence": self.confidence,
+            "importance_score": self.importance_score,
+            "status": self.status,
+            "last_seen_at": self.last_seen_at.isoformat() if self.last_seen_at else None,
             "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
     def __repr__(self):
@@ -520,3 +552,50 @@ class MarketEvent(Base):
             f"<MarketEvent(id={self.id}, type={self.event_type}, "
             f"symbol={self.symbol}, date={self.event_date})>"
         )
+
+
+class MarketEventSyncLog(Base):
+    """Provider-level sync attempt log for market event refreshes."""
+    __tablename__ = 'market_event_sync_logs'
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String(100), nullable=False, index=True)
+    event_type = Column(String(50), nullable=False, index=True)
+    sync_started_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    sync_finished_at = Column(DateTime, nullable=True)
+    window_start_utc = Column(DateTime, nullable=True)
+    window_end_utc = Column(DateTime, nullable=True)
+    status = Column(String(20), nullable=False, default='success', index=True)
+    fetched_count = Column(Integer, default=0)
+    upserted_count = Column(Integer, default=0)
+    stale_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    detail_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def to_dict(self):
+        import json as _json
+        detail = None
+        if self.detail_json:
+            try:
+                detail = _json.loads(self.detail_json)
+            except Exception:
+                detail = self.detail_json
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "event_type": self.event_type,
+            "sync_started_at": self.sync_started_at.isoformat() if self.sync_started_at else None,
+            "sync_finished_at": self.sync_finished_at.isoformat() if self.sync_finished_at else None,
+            "window_start_utc": self.window_start_utc.isoformat() if self.window_start_utc else None,
+            "window_end_utc": self.window_end_utc.isoformat() if self.window_end_utc else None,
+            "status": self.status,
+            "fetched_count": self.fetched_count or 0,
+            "upserted_count": self.upserted_count or 0,
+            "stale_count": self.stale_count or 0,
+            "error_count": self.error_count or 0,
+            "error_message": self.error_message,
+            "detail": detail,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

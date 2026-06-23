@@ -892,6 +892,62 @@ Known limitations and manual checks:
 - This change does not add a new live-order submission path and does not enable
   live trading by default.
 
+## Issue #179 — Market event readiness context
+
+Status: In progress.
+
+Work completed:
+
+- Extended the market-events store toward the durable Issue #179 model with
+  source identifiers, UTC timestamps, confidence, importance, raw payload hash,
+  lifecycle status, last-seen timestamps, and provider sync logs.
+- Added a 28-day market-event sync path for tracked symbols and macro/calendar
+  events. The first provider set covers yfinance earnings/dividends, Federal
+  Reserve FOMC dates, and deterministic NYSE/Nasdaq holidays/early closes.
+- Added stale marking for previously seen future events that disappear from a
+  provider result instead of deleting them.
+- Added dashboard/API support for event filters, sync-log status, rolling
+  ticker items, and popup reminder payloads.
+- Added fit-for-trading readiness event-risk context. Critical market-calendar
+  blockers are fail-closed for automated paper/live readiness; medium/high
+  events are surfaced as warnings/review tasks.
+
+Safety posture:
+
+- Live behaviour changed: no.
+- Order submission path changed: no.
+- Sizing changed: no.
+- Risk gates changed: additive only. Event-risk checks can add warnings or
+  blockers but cannot make any trading mode more permissive.
+- The sync service logs provider failures and preserves existing events rather
+  than deleting data after an outage.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_market_events.py tests\test_web_api.py::TestMarketEventsAPI tests\test_api_trading_readiness.py --basetemp=.pytest-tmp-179 -q`
+  (`31 passed`).
+
+Smoke-test evidence:
+
+- Initial combined web/safety smoke command timed out after 180s while still
+  progressing and without a reported failure.
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests\test_web_api.py --basetemp=.pytest-tmp-179-smoke-web -q --no-cov --tb=short -o faulthandler_timeout=60`
+  (`187 passed`);
+  `.venv\Scripts\python.exe -m pytest tests\test_safety_regression.py --basetemp=.pytest-tmp-179-smoke-safety -q --no-cov --tb=short -o faulthandler_timeout=60`
+  (`19 passed`).
+
+Known limitations and manual checks:
+
+- Earnings/dividend data remains best-effort because yfinance calendars vary by
+  symbol and availability.
+- The built-in US market calendar covers common NYSE/Nasdaq holidays and early
+  closes but is not a substitute for an exchange-certified calendar feed.
+- Dashboard preferences are currently lightweight client defaults; persistent
+  user-configurable reminder settings remain follow-up work.
+- Human review should confirm event-risk wording and blocker severity before
+  relying on it operationally.
+
 ## 5. Maintenance rules
 
 Future PRs should update this tracker when they complete a phase or checklist item.
