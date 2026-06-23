@@ -943,8 +943,9 @@ Known limitations and manual checks:
   symbol and availability.
 - The built-in US market calendar covers common NYSE/Nasdaq holidays and early
   closes but is not a substitute for an exchange-certified calendar feed.
-- Dashboard preferences are currently lightweight client defaults; persistent
-  user-configurable reminder settings remain follow-up work.
+- Dashboard reminder preferences are browser-local controls for ticker
+  visibility, popup sensitivity, and reminder window. They do not change
+  backend readiness or risk behaviour.
 - Human review should confirm event-risk wording and blocker severity before
   relying on it operationally.
 

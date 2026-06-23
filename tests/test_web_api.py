@@ -1668,6 +1668,10 @@ class TestPageRoutes:
         resp = client.get("/")
         assert resp.status_code == 200
         assert b"Dashboard" in resp.data
+        assert b"id=\"eventTickerToggle\"" in resp.data
+        assert b"id=\"eventPopupModeSelect\"" in resp.data
+        assert b"id=\"eventReminderWindowSelect\"" in resp.data
+        assert b"twsRobot.marketEventPreferences" in resp.data
 
     def test_dashboard_shows_emergency_stop_button_when_not_halted(self, client, services):
         """Dashboard renders the emergency stop action when trading is not halted."""
