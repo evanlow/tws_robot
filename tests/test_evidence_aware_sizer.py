@@ -135,3 +135,15 @@ def test_evidence_aware_sizer_holds_normal_capped_strong_evidence():
     assert decision.state == EVIDENCE_SIZE_NORMAL_CAPPED
     assert decision.cap_value is None
     assert decision.evidence_score > 0
+
+
+def test_evidence_aware_sizer_does_not_reduce_for_drawdown_below_governor_floor():
+    decision = _sizer().evaluate(
+        equity=100_000.0,
+        current_cap_value=10_000.0,
+        setup_eligibility=_eligibility(),
+        strategy_drawdown_pct=0.01,
+    )
+
+    assert decision.applied is False
+    assert decision.state == EVIDENCE_SIZE_NORMAL_CAPPED

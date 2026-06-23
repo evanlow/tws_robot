@@ -181,8 +181,8 @@ class EvidenceAwareSizer:
             reduction_reasons.append(
                 f"avg_slippage_bps {slippage_bps:.4f} > {self.config.max_slippage_bps_for_normal:.4f}"
             )
-        if strategy_drawdown_pct is not None and strategy_drawdown_pct > 0:
-            reduction_reasons.append(f"strategy_drawdown_pct {strategy_drawdown_pct:.4f} > 0")
+        if strategy_drawdown_pct is not None and strategy_drawdown_pct >= 0.02:
+            reduction_reasons.append(f"strategy_drawdown_pct {strategy_drawdown_pct:.4f} >= 0.0200")
 
         if reduction_reasons:
             cap_value = current_cap_value * self.config.reduced_size_multiplier
