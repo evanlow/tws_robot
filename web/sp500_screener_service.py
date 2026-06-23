@@ -152,6 +152,7 @@ class SP500ScreenerService:
                 if symbol:
                     rows.append({
                         "symbol": symbol,
+                        "company": row.get("security", symbol).strip(),
                         "security": row.get("security", symbol).strip(),
                         "sector": row.get("sector", "").strip(),
                         "sub_industry": row.get("sub_industry", "").strip(),

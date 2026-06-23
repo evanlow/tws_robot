@@ -144,6 +144,7 @@ class STIScreenerService:
                     rows.append({
                         "symbol": symbol,
                         "display_symbol": row.get("display_symbol", symbol.replace(".SI", "")).strip(),
+                        "company": row.get("security", symbol).strip(),
                         "security": row.get("security", symbol).strip(),
                         "sector": row.get("sector", "").strip(),
                         "sub_industry": row.get("sub_industry", "").strip(),

@@ -95,7 +95,8 @@ class TestHSIConstituentLoading:
         """The bundled HSI CSV should be loadable and have expected columns."""
         svc = self._make_service()
         rows = svc._load_constituents()
-        assert len(rows) >= 10, "Expected at least 10 HSI constituents"
+        # HSI is a large universe; a much smaller count likely means the file is stale/truncated.
+        assert len(rows) >= 70, "Expected at least 70 HSI constituents"
         for row in rows[:5]:
             assert "symbol" in row
             assert "display_symbol" in row
@@ -921,6 +922,11 @@ class TestHSIScreenerPageRoute:
         """Template should fetch from the HSI-specific API endpoint."""
         resp = client.get("/stocks/hsi")
         assert b"/api/stocks/hsi/screener" in resp.data
+
+    def test_screener_page_has_company_name_filter(self, client):
+        resp = client.get("/stocks/hsi")
+        assert b"companyFilter" in resp.data
+        assert b"Name contains..." in resp.data
 
 
 # ==============================================================================

@@ -5,13 +5,13 @@ indicating which stocks are technically overbought or oversold based on
 Bollinger Bands analysis.
 
 This service mirrors the STI screener pattern but is tailored for the
-Hong Kong market (HKEX-listed stocks, ~50 constituents, yfinance ``.HK`` suffix
+Hong Kong market (HKEX-listed stocks, full HSI constituents, yfinance ``.HK`` suffix
 tickers with zero-padded four-digit stock codes).
 
 Performance design
 ------------------
 * Tickers are scanned **concurrently** using a bounded ``ThreadPoolExecutor``
-  (``MAX_SCAN_WORKERS`` threads, default 5).  The HSI universe (~50 stocks)
+    (``MAX_SCAN_WORKERS`` threads, default 5).  The HSI universe (~80-100 stocks)
   is smaller than the S&P 500, so fewer workers are needed.
 * Results are **cached in-memory** with a configurable TTL
   (``CACHE_TTL_SECONDS``, default 15 minutes).
@@ -58,7 +58,7 @@ _CONSTITUENTS_PATH = Path(__file__).resolve().parent.parent / "data" / "hsi_cons
 _CACHE_TTL_SECONDS = 900
 
 # Maximum number of concurrent yfinance fetch threads.
-# 5 is sufficient for the ~50-stock HSI universe.
+# 5 is conservative for the HSI universe and helps avoid rate-limit pressure.
 _MAX_SCAN_WORKERS = 5
 
 # Brief sleep between batches (seconds) to reduce pressure on yfinance.
@@ -148,6 +148,7 @@ class HSIScreenerService:
                     rows.append({
                         "symbol": symbol,
                         "display_symbol": row.get("display_symbol", symbol.replace(".HK", "")).strip(),
+                        "company": row.get("security", symbol).strip(),
                         "security": row.get("security", symbol).strip(),
                         "sector": row.get("sector", "").strip(),
                         "sub_industry": row.get("sub_industry", "").strip(),

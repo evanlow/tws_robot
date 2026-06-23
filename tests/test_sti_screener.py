@@ -782,6 +782,11 @@ class TestSTIScreenerPageRoute:
         resp = client.get("/stocks/sti")
         assert b"/api/stocks/sti/screener" in resp.data
 
+    def test_screener_page_has_company_name_filter(self, client):
+        resp = client.get("/stocks/sti")
+        assert b"companyFilter" in resp.data
+        assert b"Name contains..." in resp.data
+
 
 # ==============================================================================
 # Integration tests: .SI ticker in single-stock analysis route

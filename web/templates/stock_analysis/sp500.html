@@ -50,6 +50,10 @@
       <option value="all">All Sectors</option>
     </select>
   </div>
+  <div>
+    <label for="companyFilter" style="color:#a0aec0;font-size:0.85rem;margin-right:0.4rem;">Company:</label>
+    <input id="companyFilter" type="text" placeholder="Name contains..." style="background:#1a202c;color:#e2e8f0;border:1px solid #4a5568;border-radius:6px;padding:0.4rem 0.75rem;min-width:220px;" />
+  </div>
   <button id="refreshBtn" class="btn-primary" style="padding:0.45rem 1.1rem;">↺ Refresh</button>
   <span id="asOfLabel" style="color:#718096;font-size:0.8rem;"></span>
 </section>
@@ -105,6 +109,7 @@
 
   var statusFilter = document.getElementById('statusFilter');
   var sectorFilter = document.getElementById('sectorFilter');
+  var companyFilter = document.getElementById('companyFilter');
   var refreshBtn   = document.getElementById('refreshBtn');
   var asOfLabel    = document.getElementById('asOfLabel');
   var summaryBar   = document.getElementById('summaryBar');
@@ -275,6 +280,7 @@
   function applyFilters() {
     var sv = statusFilter.value;
     var sec = sectorFilter.value.toLowerCase();
+    var companyQuery = companyFilter.value.trim().toLowerCase();
 
     var STATUS_TO_BOLLINGER = {
       'oversold':          'below_lower_band',
@@ -288,7 +294,8 @@
     var filtered = allRows.filter(function (r) {
       var statusOk = sv === 'all' || r.bollinger_status === STATUS_TO_BOLLINGER[sv];
       var sectorOk = sec === 'all' || (r.sector || '').toLowerCase().indexOf(sec) !== -1;
-      return statusOk && sectorOk;
+      var companyOk = companyQuery === '' || (r.company || '').toLowerCase().indexOf(companyQuery) !== -1;
+      return statusOk && sectorOk && companyOk;
     });
 
     renderRows(sortRows(filtered));
@@ -375,6 +382,7 @@
 
   statusFilter.addEventListener('change', applyFilters);
   sectorFilter.addEventListener('change', applyFilters);
+  companyFilter.addEventListener('input', applyFilters);
   refreshBtn.addEventListener('click', function () { fetchData(true); });
 
   // Column sort click handlers

@@ -743,6 +743,11 @@ class TestSP500ScreenerPageRoute:
         resp = client.get("/stocks/sp500")
         assert b"screenerTable" in resp.data or b"screener" in resp.data.lower()
 
+    def test_screener_page_has_company_name_filter(self, client):
+        resp = client.get("/stocks/sp500")
+        assert b"companyFilter" in resp.data
+        assert b"Name contains..." in resp.data
+
 
 # ==============================================================================
 # Integration tests: dashboard link
