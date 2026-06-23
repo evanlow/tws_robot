@@ -881,6 +881,29 @@ def _autonomous_status_payload() -> Dict[str, Any]:
     ):
         _advance_single_trade_if_complete(state)
 
+    # Auto-activate for monitoring if open autonomous trades exist.
+    # This allows the exit manager, risk controls, and lifecycle supervision
+    # to remain active even when no new trades are being proposed.
+    if (
+        not state.is_on
+        and gates.monitoring_eligible
+        and match_status == "Verified"
+        and gates.open_autonomous_trades > 0
+    ):
+        state.turn_on(TradingCycle.CONTINUOUS, AccountMode.PAPER)
+        _audit_mode_event(
+            "auto_activate",
+            {
+                "reason": "open_autonomous_trades_exist",
+                "count": gates.open_autonomous_trades,
+                "trading_cycle": "continuous",
+            },
+        )
+        logger.info(
+            "Auto-activated Autonomous Mode (Continuous) for monitoring %d open trade(s)",
+            gates.open_autonomous_trades,
+        )
+
     readiness = state.readiness_status
     if not state.is_on and gates.emergency_stop_active:
         readiness = "Halted"

@@ -69,8 +69,12 @@ class ReadinessGates:
     max_open_autonomous_trades: int = 1
 
     @property
-    def ready(self) -> bool:
-        """All gates pass and we are below the open-trades limit."""
+    def monitoring_eligible(self) -> bool:
+        """Infrastructure gates for monitoring (activation without new trade execution).
+        
+        Does NOT check capacity. Use this to determine if mode can be activated
+        for monitoring open trades. Capacity is checked separately at execution time.
+        """
         return (
             self.connected
             and self.paper_mode
@@ -78,6 +82,17 @@ class ReadinessGates:
             and self.signal_provider_ready
             and not self.emergency_stop_active
             and self.runner_enabled
+        )
+
+    @property
+    def ready(self) -> bool:
+        """All gates pass including capacity check for new trade execution.
+        
+        Use for deciding whether to propose/execute new trades.
+        For monitoring existing trades, check monitoring_eligible instead.
+        """
+        return (
+            self.monitoring_eligible
             and self.open_autonomous_trades < self.max_open_autonomous_trades
         )
 
@@ -117,6 +132,7 @@ class ReadinessGates:
             "runner_enabled": self.runner_enabled,
             "open_autonomous_trades": self.open_autonomous_trades,
             "max_open_autonomous_trades": self.max_open_autonomous_trades,
+            "monitoring_eligible": self.monitoring_eligible,
             "ready": self.ready,
             "reasons": self.reasons(),
         }
