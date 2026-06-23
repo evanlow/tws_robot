@@ -405,6 +405,12 @@ class TestControlTower:
         assert body["evidence"]["counts"]["decisions"] == 2
         assert body["evidence"]["counts"]["fills"] == 1
         assert body["evidence"]["counts"]["rejections"] == 1
+        assert body["evidence_learning"]["safety_notes"]["read_only"] is True
+        assert body["evidence_learning"]["safety_notes"]["does_not_apply_capital_changes"] is True
+        assert "setup_performance" in body["evidence_learning"]
+        assert "promotion_report" in body["evidence_learning"]
+        assert "weak_setups" in body["evidence_learning"]
+        assert "drift_report" in body["evidence_learning"]
         assert "emergency_stop" in body
 
     def test_control_tower_reports_non_protection_recovery_required(

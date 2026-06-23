@@ -61,6 +61,7 @@ from autonomous.continuous_supervisor import (
     SupervisorCycleResult,
     SupervisorFault,
 )
+from autonomous.evidence_learning_summary import summarize_evidence_learning
 from autonomous.exit_manager import AutonomousExitManager
 from autonomous.lifecycle_worker import AutonomousLifecycleWorker
 from autonomous.evidence_store import TradeEvidenceStore
@@ -1917,6 +1918,20 @@ def _risk_lifecycle_payload(live_gates: Dict[str, Any], evidence: Dict[str, Any]
     }
 
 
+def _evidence_learning_payload(limit: int = 1000) -> Dict[str, Any]:
+    current_level = current_app.config.get("autonomous_capital_level", 0)
+    try:
+        current_level = int(current_level)
+    except (TypeError, ValueError):
+        current_level = 0
+    records = _safe_call("evidence learning", lambda: _evidence_store().recent(limit), []) or []
+    return summarize_evidence_learning(
+        records,
+        current_level=current_level,
+        setup_limit=50,
+    )
+
+
 def _order_lifecycle_payload(
     live_config: AutonomousLiveRunnerConfig,
     live_store: TradeStore,
@@ -1946,6 +1961,7 @@ def _control_tower_payload() -> Dict[str, Any]:
     live_store = _live_trade_store()
     paper_status = _autonomous_status_payload()
     evidence = _recent_evidence_payload(limit=25)
+    evidence_learning = _evidence_learning_payload(limit=1000)
     cash_payload = _cash_snapshot_payload(svc)
     live_mode = _live_mode_state().to_dict()
     supervisor = _live_continuous_supervisor().status()
@@ -2008,6 +2024,7 @@ def _control_tower_payload() -> Dict[str, Any]:
         },
         "risk_lifecycle": _risk_lifecycle_payload(live_gates, evidence),
         "evidence": evidence,
+        "evidence_learning": evidence_learning,
         "emergency_stop": emergency_stop,
         "safety_notes": {
             "read_only": True,

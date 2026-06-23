@@ -47,9 +47,10 @@ Legend:
 | Setup registry | Done | PR #184; deterministic setup IDs and metadata registry implemented in `autonomous/setup_registry.py` |
 | Evidence calibrator | Done | PR #186; setup-level evidence summaries and conservative Bayesian/shrinkage classification implemented in `autonomous/evidence_calibrator.py` |
 | Setup eligibility gate | Done | PR #188; conservative setup-state and expected-R gate implemented in `autonomous/setup_eligibility.py` with optional ranker integration |
-| Evidence-aware sizing overlay | Current PR | Conservative EL6 overlay in progress; setup evidence can hold, reduce, tiny-cap, or block share sizing without bypassing hard caps |
+| Evidence-aware sizing overlay | Done | PR #189; setup evidence can hold, reduce, tiny-cap, or block share sizing without bypassing hard caps |
 | Capital promotion report | Done | PR #182; advisory EL7 report recommends approve/hold/demote from realized outcome evidence and operational incidents without applying capital changes |
 | Sharpe / Sortino / profit-factor metrics | Done | PR #183; implemented in reusable `autonomous/performance_metrics.py` for realized outcome evidence |
+| Evidence-learning dashboard/API exposure | Current PR | Read-only EL8 setup performance, promotion, weak setup, and drift diagnostics exposed through evidence APIs and control tower |
 
 ## 2. Evidence-learning phases
 
@@ -60,9 +61,9 @@ Legend:
 | EL3 | Evidence calibrator | Done | PR #186 |
 | EL4 | Adaptive edge estimator | Done | PR #187 |
 | EL5 | Setup eligibility gate | Done | PR #188 |
-| EL6 | Evidence-aware sizing overlay | Current PR | Issue #185 |
+| EL6 | Evidence-aware sizing overlay | Done | PR #189 |
 | EL7 | Capital promotion report | Done | PR #182 |
-| EL8 | Dashboard/API exposure | Pending | Issue #185 |
+| EL8 | Dashboard/API exposure | Current PR | Issue #185 |
 
 ## 3. Phase detail tracker
 
@@ -425,7 +426,7 @@ Test evidence:
 
 ### EL8 — Dashboard/API exposure
 
-Status: Pending
+Status: Current PR
 
 Goal:
 
@@ -433,53 +434,77 @@ Goal:
 
 Checklist:
 
-- [ ] Add setup performance API.
-- [ ] Add promotion report API.
-- [ ] Add weak setup report API.
-- [ ] Add evidence drift report API.
-- [ ] Update dashboard/control tower when available.
+- [x] Add setup performance API.
+- [x] Add promotion report API.
+- [x] Add weak setup report API.
+- [x] Add evidence drift report API.
+- [x] Update dashboard/control tower when available.
 
-Tracking note:
+Implementation notes:
 
-- Remaining EL8 work is tracked by follow-up Issue #185.
-
-## 4. Current PR note
-
-The current Issue #185 continuation work implements EL6 evidence-aware sizing:
-
-- `autonomous/evidence_aware_sizer.py` converts setup evidence into explicit
-  sizing states and an optional cap.
-- `PositionSizer` records `evidence_aware` diagnostics and can bind on
-  `evidence_aware_cap` only when evidence blocks or reduces sizing.
-- `TradePlanner` passes setup eligibility, adaptive edge, drawdown, and
-  slippage diagnostics into the sizing overlay.
-- Default runtime behavior is unchanged because the overlay is disabled unless
-  explicitly configured.
+- Added `autonomous/evidence_learning_summary.py` as an analytics-only EL8
+  summarizer over realized autonomous evidence.
+- Added read-only endpoints under `/api/autonomous/evidence`:
+  `/learning-status`, `/setup-performance`, `/promotion-report`,
+  `/weak-setups`, and `/drift-report`.
+- Added `evidence_learning` to `/api/autonomous/control-tower` so dashboard
+  consumers can read setup performance, promotion, weak setup, and drift
+  diagnostics from the consolidated operator snapshot.
+- Promotion reports remain advisory. The EL8 exposure does not submit, cancel,
+  replace, or flatten orders; does not advance lifecycle state; does not enable
+  live trading; and does not apply capital changes.
 
 Test evidence:
 
-- Passed: `.venv\Scripts\python.exe -m pytest tests\test_evidence_aware_sizer.py tests\test_trade_planner_evidence_sizing.py tests\test_trade_planner_sizing.py tests\test_trade_planner_fractional_drawdown.py tests\test_setup_eligibility.py tests\test_candidate_ranker_edge.py tests\test_autonomous_engine.py --basetemp=.pytest-tmp-el6-target2 -q`
-  (`46 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_evidence_learning_summary.py tests\test_api_autonomous_evidence.py tests\test_api_autonomous_live.py::TestControlTower tests\test_evidence_calibrator.py tests\test_capital_promotion.py --basetemp=.pytest-tmp-el8-target2 -q`
+  (`25 passed`).
 
 Smoke-test evidence:
 
 - Passed split smoke verification:
-  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-el6-smoke1 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-el8-smoke1 --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`203 passed`);
-  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-el6-smoke2 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-el8-smoke2 --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`112 passed`);
-  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el6-smoke3 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el8-smoke3 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`161 passed`). Total split smoke coverage: `476 passed`.
+
+## 4. Current PR note
+
+The current Issue #185 continuation work implements EL8 dashboard/API exposure:
+
+- `autonomous/evidence_learning_summary.py` builds read-only setup
+  performance, promotion, weak setup, and drift diagnostics.
+- `/api/autonomous/evidence/learning-status` returns the full EL8 payload.
+- `/api/autonomous/evidence/setup-performance`,
+  `/api/autonomous/evidence/promotion-report`,
+  `/api/autonomous/evidence/weak-setups`, and
+  `/api/autonomous/evidence/drift-report` expose focused views.
+- `/api/autonomous/control-tower` includes an `evidence_learning` block for
+  dashboard/control-tower consumers.
+- All EL8 outputs are advisory/read-only and do not apply capital changes or
+  mutate broker/order/lifecycle state.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_evidence_learning_summary.py tests\test_api_autonomous_evidence.py tests\test_api_autonomous_live.py::TestControlTower tests\test_evidence_calibrator.py tests\test_capital_promotion.py --basetemp=.pytest-tmp-el8-target2 -q`
+  (`25 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-el8-smoke1 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-el8-smoke2 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el8-smoke3 --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`161 passed`). Total split smoke coverage: `476 passed`.
 
 Known limitations:
 
-- EL6 currently affects `BUY_SHARES` sizing. Short-put plans continue to use
-  the existing cash-secured and drawdown-governor sizing path.
-- EL8 dashboard/API exposure remains open in Issue #185 after EL6.
-- This PR does not expose setup performance through an API or dashboard; that
-  remains EL8 in Issue #185.
 - The setup-evidence provider hook is explicit; no default live evidence source
-  is configured in this PR.
+  is configured in this PR. EL8 summarizes evidence already available through
+  the evidence store.
 - Operational incident rates such as rejected-order rate, stale-quote rejection
   rate, broker disconnect frequency, unconfirmed-protection events, and
   recovery-required events remain for later operational metrics work once event
