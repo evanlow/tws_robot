@@ -112,6 +112,43 @@ def get_signal_summary() -> dict:
     }
 
 
+def get_usd_sgd_fx_rate() -> dict:
+    """Return the latest USD/SGD FX rate from the market-watch feed.
+
+    The rate is quoted as SGD per USD. When the market-watch feed is not
+    available or does not include USD/SGD, ``available`` is ``False``.
+    """
+    market_watch = get_market_watch()
+    items = market_watch.get("items") or []
+    for item in items:
+        if str(item.get("pair") or "").upper() == "USD/SGD":
+            try:
+                rate = float(item.get("last_price") or 0.0)
+            except (TypeError, ValueError):
+                rate = 0.0
+            if rate > 0:
+                return {
+                    "available": True,
+                    "rate": rate,
+                    "pair": "USD/SGD",
+                    "source": item.get("data_source") or "fx_market_watch",
+                    "as_of": item.get("as_of"),
+                }
+            return {
+                "available": False,
+                "rate": None,
+                "pair": "USD/SGD",
+                "source": item.get("data_source") or "fx_market_watch",
+                "warning": "USD/SGD quote was present but invalid.",
+            }
+    return {
+        "available": False,
+        "rate": None,
+        "pair": "USD/SGD",
+        "warning": market_watch.get("message") or "USD/SGD quote unavailable.",
+    }
+
+
 def get_fx_dashboard_data() -> dict:
     """Return FX dashboard data for all sections.
 

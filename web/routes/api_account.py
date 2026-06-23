@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 
 from web.services import get_services
 from data.fundamentals import get_fundamentals
+from web.fx_signal_service import get_usd_sgd_fx_rate
 
 logger = logging.getLogger(__name__)
 
@@ -295,9 +296,11 @@ def cash_availability():
             }), 400
 
     analyzer = CashAvailabilityAnalyzer(config=config)
+    fx_quote = get_usd_sgd_fx_rate()
     result = analyzer.analyze(
         account_summary=account_summary,
         positions=positions,
         orders=orders,
+        usd_sgd_rate=(fx_quote.get("rate") if fx_quote.get("available") else None),
     )
     return jsonify(result.to_dict())

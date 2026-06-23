@@ -78,6 +78,7 @@ from autonomous.technical_analysis_signal_provider import (
     TechnicalAnalysisSignalProvider,
 )
 from data.cash_availability import CashAvailabilityAnalyzer
+from web.fx_signal_service import get_usd_sgd_fx_rate
 from execution.autonomous_paper_adapter import AutonomousPaperAdapter
 from web.services import get_services
 
@@ -168,6 +169,17 @@ def _sanitize_config_overrides(overrides: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(value, bool):
                 cleaned[key] = value
     return cleaned
+
+
+def _usd_sgd_rate_value() -> Optional[float]:
+    quote = get_usd_sgd_fx_rate()
+    if not quote.get("available"):
+        return None
+    try:
+        rate = float(quote.get("rate") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return rate if rate > 0 else None
 
 
 def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousTradingEngine:
@@ -324,6 +336,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
         risk_manager=getattr(svc, "risk_manager", None),
         paper_adapter=paper_adapter,
         spy_price_provider=_resolve_spy_price_provider(),
+        cash_fx_rate_provider=_usd_sgd_rate_value,
     )
 
 
@@ -1707,6 +1720,7 @@ def _cash_snapshot_payload(svc) -> Dict[str, Any]:
             account_summary=account,
             positions=positions,
             orders=orders,
+            usd_sgd_rate=_usd_sgd_rate_value(),
         ).to_dict()
     except Exception:
         logger.exception("Control tower failed calculating deployable cash")

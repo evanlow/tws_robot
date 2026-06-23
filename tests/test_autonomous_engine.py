@@ -45,6 +45,7 @@ def _make_engine(
     risk_manager=None,
     symbols=None,
     spy_price_provider=None,
+    cash_fx_rate_provider=None,
 ):
     provider = StaticSignalProvider(signals or [])
     scanner = CandidateScanner(
@@ -68,6 +69,7 @@ def _make_engine(
         risk_manager=risk_manager,
         paper_adapter=paper_adapter,
         spy_price_provider=spy_price_provider,
+        cash_fx_rate_provider=cash_fx_rate_provider,
         audit_logger=audit,
     )
 
@@ -100,6 +102,28 @@ def test_no_deployable_cash_returns_no_trade(tmp_path):
     )
     d = engine.run_once()
     assert d.status is DecisionStatus.NO_DEPLOYABLE_CASH
+
+
+def test_sgd_base_cash_is_standardized_to_usd(tmp_path):
+    cfg = AutonomousTradingConfig(
+        emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
+        audit_log_dir=str(tmp_path),
+    )
+    engine = _make_engine(
+        tmp_path,
+        signals=[_make_signal(last_price=50.0)],
+        account={"cash_balance": 50_000, "equity": 100_000},
+        config=cfg,
+        cash_fx_rate_provider=lambda: 1.25,
+    )
+    engine.cash_analyzer.config.account_base_currency = "SGD"
+
+    d = engine.run_once()
+
+    assert d.deployable_cash == pytest.approx(36_000.0)
+    assert d.cash_snapshot["cash_balance_currency"] == "SGD"
+    assert d.cash_snapshot["cash_balance_usd"] == pytest.approx(40_000.0)
+    assert d.cash_snapshot["manual_cash_buffer_usd"] == pytest.approx(4_000.0)
 
 
 def test_no_matching_candidate_returns_no_candidate(tmp_path):

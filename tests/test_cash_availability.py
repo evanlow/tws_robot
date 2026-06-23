@@ -186,13 +186,18 @@ class TestNoPositions:
         result = analyzer.analyze(_account(cash=10_000), {})
         d = result.to_dict()
         expected_keys = [
-            "cash_balance", "broker_buying_power", "broker_available_funds",
+            "cash_balance", "cash_balance_usd", "cash_balance_currency",
+            "broker_buying_power", "broker_available_funds",
             "broker_excess_liquidity", "reserved_cash_total",
+            "reserved_cash_total_usd",
             "reserved_cash_short_puts", "reserved_cash_defined_risk_spreads",
+            "reserved_cash_short_puts_usd", "reserved_cash_defined_risk_spreads_usd",
             "reserved_for_pending_orders", "manual_cash_buffer",
-            "margin_safety_buffer", "deployable_cash", "reserve_coverage_ratio",
+            "manual_cash_buffer_usd", "margin_safety_buffer",
+            "margin_safety_buffer_usd", "deployable_cash", "deployable_cash_usd",
+            "deployable_cash_currency", "reserve_coverage_ratio",
             "uncovered_short_call_risk", "cash_by_currency", "position_reserves",
-            "warnings",
+            "warnings", "fx_rate_usd_sgd", "fx_rate_source",
         ]
         for k in expected_keys:
             assert k in d, f"Missing key: {k}"
@@ -806,6 +811,36 @@ class TestMultiCurrency:
 
         assert d["cash_by_currency"]["USD"] == 50_000.0
         assert d["cash_by_currency"]["HKD"] == 100_000.0
+
+
+class TestUsdStandardization:
+    def test_sgd_base_converts_deployable_cash_to_usd(self):
+        analyzer = _make_analyzer(account_base_currency="SGD")
+        account = _account(
+            cash=50_000,
+            cash_by_currency={"USD": 50_000, "SGD": 30_000},
+        )
+        result = analyzer.analyze(account, {}, usd_sgd_rate=1.25)
+
+        assert result.cash_balance_currency == "SGD"
+        assert result.cash_balance_usd == pytest.approx(40_000.0)
+        assert result.deployable_cash_currency == "USD"
+        assert result.deployable_cash == pytest.approx(40_000.0)
+        assert result.deployable_cash_usd == pytest.approx(40_000.0)
+        assert result.fx_rate_usd_sgd == pytest.approx(1.25)
+        assert any("standardization applied" in w.lower() for w in result.warnings)
+
+    def test_sgd_base_without_fx_rate_fails_closed(self):
+        analyzer = _make_analyzer(account_base_currency="SGD")
+        account = _account(
+            cash=50_000,
+            cash_by_currency={"USD": 50_000, "SGD": 30_000},
+        )
+        result = analyzer.analyze(account, {})
+
+        assert result.deployable_cash == 0.0
+        assert result.deployable_cash_usd == 0.0
+        assert any("standardization unavailable" in w.lower() for w in result.warnings)
 
 
 # ===========================================================================

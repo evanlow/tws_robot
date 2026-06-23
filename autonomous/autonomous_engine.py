@@ -94,6 +94,7 @@ class AutonomousDecision:
 
 OptionHintProvider = Callable[[CandidateSignal], Optional[OptionChainHint]]
 SpyPriceProvider = Callable[[], Optional[Dict[str, Any]]]
+CashFxRateProvider = Callable[[], Optional[float]]
 SetupEvidenceProvider = Callable[
     [CandidateSignal, Dict[str, Any], EdgeEstimate],
     Optional[SetupEvidenceSummary],
@@ -113,6 +114,7 @@ class AutonomousTradingEngine:
         paper_adapter: Any = None,
         option_hint_provider: Optional[OptionHintProvider] = None,
         spy_price_provider: Optional[SpyPriceProvider] = None,
+        cash_fx_rate_provider: Optional[CashFxRateProvider] = None,
         setup_evidence_provider: Optional[SetupEvidenceProvider] = None,
         market_data_provider: Optional[MarketDataProvider] = None,
         audit_logger: Optional[AuditLogger] = None,
@@ -128,6 +130,7 @@ class AutonomousTradingEngine:
         self.paper_adapter = paper_adapter
         self.option_hint_provider = option_hint_provider
         self.spy_price_provider = spy_price_provider
+        self.cash_fx_rate_provider = cash_fx_rate_provider
         self.market_data_provider = market_data_provider
         self.ranker = CandidateRanker(
             self.config,
@@ -278,11 +281,18 @@ class AutonomousTradingEngine:
         account_summary = self._account_provider() or {}
         positions = self._positions_provider() or {}
         orders = self._orders_provider() or []
+        usd_sgd_rate = None
+        if self.cash_fx_rate_provider is not None:
+            try:
+                usd_sgd_rate = self.cash_fx_rate_provider()
+            except Exception:
+                logger.exception("cash FX rate provider raised")
 
         cash_result = self.cash_analyzer.analyze(
             account_summary=account_summary,
             positions=positions,
             orders=orders,
+            usd_sgd_rate=usd_sgd_rate,
         )
         decision.deployable_cash = float(cash_result.deployable_cash)
         decision.cash_snapshot = cash_result.to_dict()

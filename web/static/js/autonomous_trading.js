@@ -493,13 +493,14 @@
     snapshot = snapshot || {};
     const map = {
       cashBalance:         snapshot.cash_balance,
+      cashBalanceUsd:      snapshot.cash_balance_usd ?? snapshot.cash_balance,
       cashReservedTotal:   snapshot.reserved_cash_total,
       cashReservedPuts:    snapshot.reserved_cash_short_puts,
       cashReservedSpreads: snapshot.reserved_cash_defined_risk_spreads,
       cashReservedOrders:  snapshot.reserved_for_pending_orders,
       cashManualBuffer:    snapshot.manual_cash_buffer,
       cashMarginBuffer:    snapshot.margin_safety_buffer,
-      cashDeployable:      snapshot.deployable_cash,
+      cashDeployable:      snapshot.deployable_cash_usd ?? snapshot.deployable_cash,
     };
     for (const [id, value] of Object.entries(map)) {
       const el = $(id);
@@ -690,7 +691,7 @@
         'Sizing: ' + plan.quantity + ' share' + (plan.quantity !== 1 ? 's' : '') +
         ' \u00d7 ' + fmtMoney(plan.limit_price) + ' = ' + fmtMoney(plan.required_cash) +
         ' (cap: ' + (maxPct * 100).toFixed(0) + '% equity;' +
-        ' ' + fmtMoney(decision.deployable_cash) + ' deployable)'
+        ' ' + fmtMoney(decision.deployable_cash_usd ?? decision.deployable_cash) + ' USD deployable)'
       );
     }
     if (rationaleItems.length) {

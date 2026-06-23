@@ -92,19 +92,21 @@
   <section class="panel" id="cashPanel" aria-labelledby="cashHeading">
     <h2 id="cashHeading">Deployable Cash &amp; Reserves</h2>
     <p class="panel-help">
-      The robot never trades on raw cash. Deployable cash subtracts every
-      reserved obligation (short puts, defined-risk spreads, pending orders,
-      manual buffer, margin safety buffer) from the live cash balance.
+      The robot never trades on raw cash. Deployable cash is standardized to
+      USD and subtracts every reserved obligation (short puts, defined-risk
+      spreads, pending orders, manual buffer, margin safety buffer) from the
+      live cash balance.
     </p>
     <dl class="cash-grid" id="cashGrid">
-      <dt>Cash balance</dt><dd id="cashBalance">—</dd>
-      <dt>Reserved (total)</dt><dd id="cashReservedTotal">—</dd>
+      <dt>Cash balance (base)</dt><dd id="cashBalance">—</dd>
+      <dt>USD cash balance</dt><dd id="cashBalanceUsd">—</dd>
+      <dt>Reserved (USD total)</dt><dd id="cashReservedTotal">—</dd>
       <dt>Reserved for short puts</dt><dd id="cashReservedPuts">—</dd>
       <dt>Reserved for spreads</dt><dd id="cashReservedSpreads">—</dd>
       <dt>Reserved for pending orders</dt><dd id="cashReservedOrders">—</dd>
       <dt>Manual cash buffer</dt><dd id="cashManualBuffer">—</dd>
       <dt>Margin safety buffer</dt><dd id="cashMarginBuffer">—</dd>
-      <dt class="cash-grid-highlight">Deployable cash</dt>
+      <dt class="cash-grid-highlight">Deployable cash (USD)</dt>
       <dd id="cashDeployable" class="cash-grid-highlight">—</dd>
     </dl>
     <ul class="cash-warnings" id="cashWarnings"></ul>

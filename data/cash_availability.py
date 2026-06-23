@@ -49,6 +49,7 @@ class CashAvailabilityConfig:
     direct construction.
     """
     reserve_mode: CashReserveMode = CashReserveMode.GROSS_ASSIGNMENT
+    account_base_currency: str = "USD"
     manual_cash_buffer_pct: float = 0.10        # 10% of cash balance by default
     manual_cash_buffer_amount: float = 0.0       # fixed dollar buffer
     option_contract_multiplier: int = 100        # shares per contract
@@ -70,6 +71,9 @@ class CashAvailabilityConfig:
 
         return cls(
             reserve_mode=mode,
+            account_base_currency=_normalize_currency_code(
+                os.environ.get("CASH_ACCOUNT_BASE_CURRENCY", "USD")
+            ),
             manual_cash_buffer_pct=float(
                 os.environ.get("MANUAL_CASH_BUFFER_PCT", "0.10")
             ),
@@ -181,11 +185,15 @@ class CashAvailabilityResult:
 
     # Broker-reported fields
     cash_balance: float = 0.0
+    cash_balance_usd: float = 0.0
+    cash_balance_currency: str = "USD"
     broker_buying_power: float = 0.0
     broker_available_funds: float = 0.0
     broker_excess_liquidity: float = 0.0
     broker_initial_margin_req: float = 0.0
     broker_maintenance_margin_req: float = 0.0
+    fx_rate_usd_sgd: Optional[float] = None
+    fx_rate_source: str = ""
 
     # Reserve breakdown
     reserved_cash_short_puts: float = 0.0
@@ -193,10 +201,18 @@ class CashAvailabilityResult:
     reserved_for_pending_orders: float = 0.0
     manual_cash_buffer: float = 0.0
     margin_safety_buffer: float = 0.0
+    reserved_cash_short_puts_usd: float = 0.0
+    reserved_cash_defined_risk_spreads_usd: float = 0.0
+    reserved_for_pending_orders_usd: float = 0.0
+    manual_cash_buffer_usd: float = 0.0
+    margin_safety_buffer_usd: float = 0.0
 
     # Result
     reserved_cash_total: float = 0.0
+    reserved_cash_total_usd: float = 0.0
     deployable_cash: float = 0.0
+    deployable_cash_usd: float = 0.0
+    deployable_cash_currency: str = "USD"
     reserve_coverage_ratio: Optional[float] = None
 
     # Flags
@@ -220,20 +236,38 @@ class CashAvailabilityResult:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "cash_balance": round(self.cash_balance, 2),
+            "cash_balance_usd": round(self.cash_balance_usd, 2),
+            "cash_balance_currency": self.cash_balance_currency,
             "broker_buying_power": round(self.broker_buying_power, 2),
             "broker_available_funds": round(self.broker_available_funds, 2),
             "broker_excess_liquidity": round(self.broker_excess_liquidity, 2),
             "broker_initial_margin_req": round(self.broker_initial_margin_req, 2),
             "broker_maintenance_margin_req": round(self.broker_maintenance_margin_req, 2),
+            "fx_rate_usd_sgd": (
+                round(self.fx_rate_usd_sgd, 6)
+                if self.fx_rate_usd_sgd is not None
+                else None
+            ),
+            "fx_rate_source": self.fx_rate_source,
             "reserved_cash_total": round(self.reserved_cash_total, 2),
+            "reserved_cash_total_usd": round(self.reserved_cash_total_usd, 2),
             "reserved_cash_short_puts": round(self.reserved_cash_short_puts, 2),
+            "reserved_cash_short_puts_usd": round(self.reserved_cash_short_puts_usd, 2),
             "reserved_cash_defined_risk_spreads": round(
                 self.reserved_cash_defined_risk_spreads, 2
             ),
+            "reserved_cash_defined_risk_spreads_usd": round(
+                self.reserved_cash_defined_risk_spreads_usd, 2
+            ),
             "reserved_for_pending_orders": round(self.reserved_for_pending_orders, 2),
+            "reserved_for_pending_orders_usd": round(self.reserved_for_pending_orders_usd, 2),
             "manual_cash_buffer": round(self.manual_cash_buffer, 2),
+            "manual_cash_buffer_usd": round(self.manual_cash_buffer_usd, 2),
             "margin_safety_buffer": round(self.margin_safety_buffer, 2),
+            "margin_safety_buffer_usd": round(self.margin_safety_buffer_usd, 2),
             "deployable_cash": round(self.deployable_cash, 2),
+            "deployable_cash_usd": round(self.deployable_cash_usd, 2),
+            "deployable_cash_currency": self.deployable_cash_currency,
             "reserve_coverage_ratio": (
                 round(self.reserve_coverage_ratio, 4)
                 if self.reserve_coverage_ratio is not None
@@ -282,6 +316,7 @@ class CashAvailabilityAnalyzer:
         account_summary: Dict[str, Any],
         positions: Dict[str, Dict[str, Any]],
         orders: Optional[List[Dict[str, Any]]] = None,
+        usd_sgd_rate: Optional[float] = None,
     ) -> CashAvailabilityResult:
         """Run a full cash-availability analysis.
 
@@ -301,9 +336,16 @@ class CashAvailabilityAnalyzer:
             Optional list of pending orders (as stored by
             ``ServiceManager._orders``).  Used to reserve capital for open
             buy orders.
+        usd_sgd_rate:
+            Optional live FX quote for USD/SGD (SGD per USD). When the
+            configured account base currency is SGD, this rate is required to
+            standardise deployable cash to USD.
         """
         orders = orders or []
         result = CashAvailabilityResult()
+        base_currency = _normalize_currency_code(self.config.account_base_currency)
+        result.cash_balance_currency = base_currency
+        result.deployable_cash_currency = "USD"
 
         # -- Broker fields --------------------------------------------------
         result.cash_balance = account_summary.get("cash_balance", 0.0)
@@ -324,6 +366,30 @@ class CashAvailabilityAnalyzer:
             account_summary.get("cash_by_currency", {})
         )
 
+        # -- Currency standardisation --------------------------------------
+        fx_rate = _positive_float(usd_sgd_rate)
+        if base_currency == "USD":
+            result.cash_balance_usd = float(result.cash_balance)
+            result.fx_rate_source = "base_currency_usd"
+        elif base_currency == "SGD":
+            if fx_rate is None:
+                result.multi_currency_mismatch = True
+                result.warnings.append(
+                    "USD standardization unavailable for SGD base currency. "
+                    "No USD/SGD FX quote was supplied; deployable cash is set to zero."
+                )
+                return result
+            result.fx_rate_usd_sgd = fx_rate
+            result.fx_rate_source = "USD/SGD"
+            result.cash_balance_usd = result.cash_balance / fx_rate
+        else:
+            result.multi_currency_mismatch = True
+            result.warnings.append(
+                f"Unsupported base currency {base_currency!r} for USD standardization. "
+                "Only USD and SGD are supported by the current FX conversion path."
+            )
+            return result
+
         # -- Multi-currency warning -----------------------------------------
         non_usd = {
             k: v
@@ -335,8 +401,11 @@ class CashAvailabilityAnalyzer:
             currencies = ", ".join(sorted(non_usd.keys()))
             result.warnings.append(
                 f"Non-USD cash balances detected ({currencies}). "
-                "Cross-currency deployable cash may not be immediately available "
-                "for USD trades without FX conversion."
+                "Deployable cash is standardized to USD."
+            )
+        if result.fx_rate_usd_sgd is not None:
+            result.warnings.append(
+                f"USD cash standardization applied using USD/SGD rate {result.fx_rate_usd_sgd:.6f}."
             )
 
         # -- Analyse positions ----------------------------------------------
@@ -351,11 +420,21 @@ class CashAvailabilityAnalyzer:
         buf_pct = result.cash_balance * self.config.manual_cash_buffer_pct
         buf_fixed = self.config.manual_cash_buffer_amount
         result.manual_cash_buffer = max(buf_pct, buf_fixed)
+        result.manual_cash_buffer_usd = self._to_usd(
+            result.manual_cash_buffer,
+            fx_rate,
+            base_currency,
+        )
 
         # -- Margin safety buffer -------------------------------------------
         # If broker reports excess liquidity and it is very tight (< 10% of
         # cash balance) add a conservative safety margin buffer.
         result.margin_safety_buffer = self._compute_margin_safety_buffer(result)
+        result.margin_safety_buffer_usd = self._to_usd(
+            result.margin_safety_buffer,
+            fx_rate,
+            base_currency,
+        )
 
         # -- Aggregate reserves --------------------------------------------
         result.reserved_cash_total = (
@@ -365,19 +444,33 @@ class CashAvailabilityAnalyzer:
             + result.manual_cash_buffer
             + result.margin_safety_buffer
         )
+        result.reserved_cash_short_puts_usd = result.reserved_cash_short_puts
+        result.reserved_cash_defined_risk_spreads_usd = result.reserved_cash_defined_risk_spreads
+        result.reserved_for_pending_orders_usd = result.reserved_for_pending_orders
+        result.reserved_cash_total_usd = (
+            result.reserved_cash_short_puts_usd
+            + result.reserved_cash_defined_risk_spreads_usd
+            + result.reserved_for_pending_orders_usd
+            + result.manual_cash_buffer_usd
+            + result.margin_safety_buffer_usd
+        )
+        result.manual_cash_buffer = result.manual_cash_buffer_usd
+        result.margin_safety_buffer = result.margin_safety_buffer_usd
+        result.reserved_cash_total = result.reserved_cash_total_usd
 
         # -- Deployable cash -----------------------------------------------
         result.deployable_cash = max(
             0.0,
-            result.cash_balance - result.reserved_cash_total,
+            result.cash_balance_usd - result.reserved_cash_total_usd,
         )
+        result.deployable_cash_usd = result.deployable_cash
 
         # -- Reserve coverage ratio ----------------------------------------
-        if result.reserved_cash_total > 0:
+        if result.reserved_cash_total_usd > 0:
             result.reserve_coverage_ratio = (
-                result.cash_balance / result.reserved_cash_total
+                result.cash_balance_usd / result.reserved_cash_total_usd
             )
-        elif result.cash_balance > 0:
+        elif result.cash_balance_usd > 0:
             # No reserves and positive cash: ratio is undefined (null in JSON)
             result.reserve_coverage_ratio = None
         else:
@@ -386,12 +479,12 @@ class CashAvailabilityAnalyzer:
         # -- Top-level warnings --------------------------------------------
         if result.deployable_cash <= 0:
             result.warnings.append(
-                "Estimated deployable cash is zero or negative. "
+                "Estimated USD deployable cash is zero or negative. "
                 "No new positions recommended until reserves are reduced."
             )
-        elif result.cash_balance < result.reserved_cash_total:
+        elif result.cash_balance_usd < result.reserved_cash_total_usd:
             result.warnings.append(
-                "Cash balance is less than total reserved capital. "
+                "USD cash balance is less than total reserved capital. "
                 "Short-put obligations may exceed available cash."
             )
 
@@ -409,6 +502,14 @@ class CashAvailabilityAnalyzer:
             )
 
         return result
+
+    @staticmethod
+    def _to_usd(amount: float, fx_rate_usd_sgd: Optional[float], base_currency: str) -> float:
+        if base_currency == "USD":
+            return float(amount)
+        if base_currency == "SGD" and fx_rate_usd_sgd and fx_rate_usd_sgd > 0:
+            return float(amount) / fx_rate_usd_sgd
+        return 0.0
 
     # ------------------------------------------------------------------
     # Position analysis
@@ -989,3 +1090,18 @@ class CashAvailabilityAnalyzer:
         if excess < cash * 0.10:
             return cash * 0.05  # add 5% buffer
         return 0.0
+
+
+def _normalize_currency_code(value: Any) -> str:
+    raw = str(value or "").strip().upper()
+    if raw in {"USD", "SGD"}:
+        return raw
+    return raw or "USD"
+
+
+def _positive_float(value: Any) -> Optional[float]:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0 else None

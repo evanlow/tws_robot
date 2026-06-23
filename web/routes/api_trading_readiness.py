@@ -19,6 +19,7 @@ from autonomous.runner_config import (
 )
 from autonomous.signal_provider import StaticSignalProvider
 from data.cash_availability import CashAvailabilityAnalyzer
+from web.fx_signal_service import get_usd_sgd_fx_rate
 from web.services import get_services
 
 bp = Blueprint(
@@ -118,10 +119,12 @@ def _deployable_cash(svc) -> Tuple[float, str]:
     """
 
     try:
+        fx_quote = get_usd_sgd_fx_rate()
         result = CashAvailabilityAnalyzer().analyze(
             account_summary=svc.get_account_summary(),
             positions=svc.get_positions(),
             orders=svc.get_orders(),
+            usd_sgd_rate=(fx_quote.get("rate") if fx_quote.get("available") else None),
         )
         return float(result.deployable_cash), "cash_availability_analyzer"
     except Exception:
