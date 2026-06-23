@@ -103,7 +103,10 @@ class AutonomousRunnerConfig:
         ``autonomous_runner_config`` override in the Flask app config.
         All other defaults remain the safe values defined above.
         """
-        return cls(runner_enabled=_env_bool("AUTONOMOUS_RUNNER_ENABLED", False))
+        return cls(
+            runner_enabled=_env_bool("AUTONOMOUS_RUNNER_ENABLED", False),
+            max_open_autonomous_trades=_env_int("AUTONOMOUS_MAX_OPEN_LIVE_TRADES", 1),
+        )
 
 
 def _env_float(name: str, default: float) -> float:
