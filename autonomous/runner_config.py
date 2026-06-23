@@ -194,7 +194,9 @@ class AutonomousLiveRunnerConfig:
         satisfy live autonomous execution quote requirements.
     ``MAX_LIVE_QUOTE_AGE_SECONDS``
         Diagnostic threshold surfaced in live market-data status payloads.
-        It does not independently enforce planner or readiness quote gating.
+        It does not independently enforce planner or readiness quote gating;
+        planner quote-age enforcement is controlled by
+        ``AutonomousTradingConfig.market_data_max_quote_age_seconds``.
         Default ``5`` seconds.
     """
 
