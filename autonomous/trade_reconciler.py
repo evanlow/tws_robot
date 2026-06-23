@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from autonomous.trade_store import CLOSED, EXIT_PENDING, OPEN, TradeStore
+from autonomous.trade_store import CLOSED, ENTRY_PENDING, EXIT_PENDING, OPEN, TradeStore
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +70,18 @@ class TradeReconciler:
             if trade_type != "BUY_SHARES":
                 continue
 
-            if trade.status == OPEN and trade.entry_filled_price is None:
+            if trade.status in {ENTRY_PENDING, OPEN} and trade.entry_filled_price is None:
                 fill = self._find_filled_order(trade.entry_order_id, orders)
                 if fill is not None:
                     price = fill.fill_price or trade.entry_limit_price
+                    update_fields = {
+                        "entry_filled_price": price,
+                    }
+                    if trade.status == ENTRY_PENDING:
+                        update_fields["status"] = OPEN
                     self._store.update_trade(
                         trade.autonomous_trade_id,
-                        entry_filled_price=price,
+                        **update_fields,
                     )
                     result.entry_fills += 1
                     result.notes.append(

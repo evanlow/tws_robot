@@ -401,6 +401,36 @@ class TestAutonomousMode:
 
 
 class TestEvaluateExits:
+    def test_spy_bearish_forces_risk_exit(self, app, client, tmp_path):
+        app.config["autonomous_spy_price_provider"] = lambda: {
+            "open": 500.0,
+            "current": 499.0,
+            "source": "test",
+        }
+        seed = [AutonomousTrade(
+            autonomous_trade_id="t_spy",
+            symbol="AAA",
+            trade_type="buy_shares",
+            status=OPEN,
+            entry_order_id=1,
+            entry_time=datetime.now(timezone.utc),
+            entry_limit_price=100.0,
+            quantity=10,
+            target_price=130.0,
+            stop_price=90.0,
+            max_holding_days=5,
+        )]
+        store, _adapter = _install_runner(app, tmp_path, store_seed=seed)
+
+        resp = client.post("/api/autonomous/runner/evaluate-exits", json={})
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["count"] == 1
+        d = body["decisions"][0]
+        assert d["decision"] == "RISK_EXIT"
+        assert "SPY intraday bearish" in d["reason"]
+        assert store.get("t_spy").status == EXIT_PENDING
+
     def test_take_profit_evaluation(self, app, client, tmp_path):
         seed = [AutonomousTrade(
             autonomous_trade_id="t1",

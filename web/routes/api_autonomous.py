@@ -72,7 +72,7 @@ from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.protection_verifier import ProtectionVerifier
 from autonomous.recovery_manager import RecoveryManager
 from autonomous.runner_config import AutonomousRunnerConfig, AutonomousLiveRunnerConfig
-from autonomous.trade_store import CLOSED, EXIT_PENDING, FAILED, OPEN, TradeStore
+from autonomous.trade_store import CLOSED, ENTRY_PENDING, EXIT_PENDING, FAILED, OPEN, TradeStore
 from autonomous.trade_reconciler import TradeReconciler
 from autonomous.technical_analysis_signal_provider import (
     TechnicalAnalysisSignalProvider,
@@ -669,9 +669,76 @@ def _paper_lifecycle_tick() -> None:
         return
     _reconcile_paper_trades()
     manager = _build_exit_manager()
-    manager.evaluate_open_trades()
+    _evaluate_exits_with_spy_guard(manager)
     _reconcile_paper_trades()
     _maybe_advance_lifecycle()
+
+
+def _first_positive_float(payload: Dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0.0
+
+
+def _spy_forced_exit_reason() -> Optional[str]:
+    """Return a forced risk-exit reason when SPY turns intraday red.
+
+    Safety behavior:
+    * If SPY day-open/current prices are unavailable, do not force exits.
+    * Force exits only when current is strictly below open.
+    """
+    provider = _resolve_spy_price_provider()
+    try:
+        payload = provider() or {}
+    except Exception:
+        logger.exception("Failed to fetch SPY payload for forced-exit check")
+        return None
+
+    open_price = _first_positive_float(payload, "open", "day_open", "spy_open")
+    current_price = _first_positive_float(
+        payload,
+        "current",
+        "last",
+        "last_price",
+        "spy_current",
+        "spy_last",
+    )
+    if not (open_price > 0 and current_price > 0):
+        return None
+    if current_price >= open_price:
+        return None
+
+    source = str(payload.get("source") or "unknown")
+    return (
+        "SPY intraday bearish (forced portfolio protection): "
+        f"current {current_price:.2f} < open {open_price:.2f} "
+        f"[source: {source}]"
+    )
+
+
+def _evaluate_exits_with_spy_guard(manager: AutonomousExitManager):
+    """Evaluate exits, forcing RISK_EXIT for all open trades when SPY is red."""
+    forced_reason = _spy_forced_exit_reason()
+    if forced_reason:
+        decisions = manager.evaluate_open_trades(force_risk_exit_reason=forced_reason)
+        if decisions:
+            _audit_mode_event(
+                "spy_forced_exit",
+                {
+                    "reason": forced_reason,
+                    "evaluated_trades": len(decisions),
+                },
+            )
+        return decisions
+    return manager.evaluate_open_trades()
 
 
 def _live_lifecycle_tick():
@@ -848,7 +915,7 @@ def _advance_single_trade_if_complete(state: "AutonomousModeState") -> None:
     Safe to call repeatedly; does nothing when:
     - ``activated_at`` is not set
     - no trade has been placed since activation
-    - at least one trade is still OPEN or EXIT_PENDING
+    - at least one trade is still ENTRY_PENDING, OPEN or EXIT_PENDING
 
     Callers are responsible for ensuring mode is ON, ``cycles_started > 0``,
     and ``trading_cycle == SINGLE_TRADE`` before calling this function.
@@ -857,7 +924,9 @@ def _advance_single_trade_if_complete(state: "AutonomousModeState") -> None:
         since_activation = _trades_since_activation(state)
         if not since_activation:
             return  # No trade placed yet in this activation
-        still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
+        still_active = [
+            t for t in since_activation if t.status in (ENTRY_PENDING, OPEN, EXIT_PENDING)
+        ]
         if still_active:
             return  # Trade lifecycle still in progress
         # All trades since activation are CLOSED or FAILED → lifecycle done
@@ -897,7 +966,9 @@ def _maybe_advance_lifecycle() -> None:
             if state.trading_cycle == TradingCycle.CONTINUOUS:
                 _run_next_paper_cycle(state)
             return  # No trade placed yet
-        still_active = [t for t in since_activation if t.status in (OPEN, EXIT_PENDING)]
+        still_active = [
+            t for t in since_activation if t.status in (ENTRY_PENDING, OPEN, EXIT_PENDING)
+        ]
         if still_active:
             return  # Lifecycle still in progress
 
@@ -1682,15 +1753,18 @@ def _live_trades_today_count(store: TradeStore) -> int:
 
 def _trade_summary_payload(store: TradeStore) -> Dict[str, Any]:
     trades = store.list_all()
-    open_trades = [t.to_dict() for t in trades if t.status == OPEN]
+    open_trades = [t.to_dict() for t in trades if t.status in (ENTRY_PENDING, OPEN)]
+    entry_pending = [t.to_dict() for t in trades if t.status == ENTRY_PENDING]
     exit_pending = [t.to_dict() for t in trades if t.status == EXIT_PENDING]
     closed = [t.to_dict() for t in trades if t.status in (CLOSED, FAILED)]
     return {
         "open": open_trades,
+        "entry_pending": entry_pending,
         "exit_pending": exit_pending,
         "recent_closed": closed[-10:],
         "counts": {
             "open": len(open_trades),
+            "entry_pending": len(entry_pending),
             "exit_pending": len(exit_pending),
             "closed_or_failed": len(closed),
             "total": len(trades),
@@ -2081,7 +2155,7 @@ def runner_evaluate_exits():
     """Evaluate every open autonomous trade and submit paper SELL exits."""
     before = _reconcile_paper_trades()
     manager = _build_exit_manager()
-    decisions = manager.evaluate_open_trades()
+    decisions = _evaluate_exits_with_spy_guard(manager)
     after = _reconcile_paper_trades()
     # Advance lifecycle after exits are evaluated: Single Trade turns OFF when
     # complete; Continuous Trading starts the next cycle after SPY recheck.

@@ -31,6 +31,7 @@ from autonomous.runner_config import AutonomousRunnerConfig
 from autonomous.signal_provider import StaticSignalProvider
 from autonomous.trade_planner import TradeType
 from autonomous.trade_store import (
+    ENTRY_PENDING,
     OPEN,
     AutonomousTrade,
     TradeStore,
@@ -348,7 +349,7 @@ class AutonomousPaperRunner:
                 autonomous_trade_id=AutonomousTrade.new_id(),
                 symbol=str(plan.get("symbol")),
                 trade_type=str(plan.get("trade_type") or TradeType.BUY_SHARES.value),
-                status=OPEN,
+                status=ENTRY_PENDING,
                 entry_order_id=int(decision.order_id) if decision.order_id is not None else 0,
                 entry_time=datetime.now(timezone.utc),
                 entry_limit_price=float(plan.get("limit_price") or 0.0),

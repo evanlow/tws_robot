@@ -31,11 +31,12 @@ logger = logging.getLogger(__name__)
 # Lifecycle states ----------------------------------------------------------
 
 OPEN = "OPEN"
+ENTRY_PENDING = "ENTRY_PENDING"
 EXIT_PENDING = "EXIT_PENDING"
 CLOSED = "CLOSED"
 FAILED = "FAILED"
 
-VALID_STATUSES = (OPEN, EXIT_PENDING, CLOSED, FAILED)
+VALID_STATUSES = (ENTRY_PENDING, OPEN, EXIT_PENDING, CLOSED, FAILED)
 
 
 def _now() -> datetime:
@@ -57,7 +58,7 @@ class AutonomousTrade:
     autonomous_trade_id: str
     symbol: str
     trade_type: str          # MVP: BUY_SHARES only
-    status: str              # OPEN, EXIT_PENDING, CLOSED, FAILED
+    status: str              # ENTRY_PENDING, OPEN, EXIT_PENDING, CLOSED, FAILED
     entry_order_id: int
     entry_time: datetime
     entry_limit_price: float
@@ -251,7 +252,10 @@ class TradeStore:
         return out
 
     def list_open(self) -> List[AutonomousTrade]:
-        return [t for t in self.list_all() if t.status == OPEN]
+        return [t for t in self.list_all() if t.status in (ENTRY_PENDING, OPEN)]
+
+    def list_entry_pending(self) -> List[AutonomousTrade]:
+        return [t for t in self.list_all() if t.status == ENTRY_PENDING]
 
     def list_closed(self) -> List[AutonomousTrade]:
         return [t for t in self.list_all() if t.status == CLOSED]
@@ -266,7 +270,8 @@ class TradeStore:
             return None
 
     def count_open(self) -> int:
-        return sum(1 for _ in self.list_open())
+        trades = self.list_all()
+        return sum(1 for t in trades if t.status in (ENTRY_PENDING, OPEN))
 
     # ------------------------------------------------------------------
     # Bulk helpers (used by API serialisation)

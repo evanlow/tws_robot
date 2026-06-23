@@ -38,6 +38,7 @@ from autonomous.audit import AuditLogger
 from autonomous.trade_planner import TradeType
 from autonomous.trade_store import (
     AutonomousTrade,
+    ENTRY_PENDING,
     EXIT_PENDING,
     TradeStore,
 )
@@ -158,15 +159,25 @@ class AutonomousExitManager:
     def evaluate_open_trades(
         self,
         now: Optional[datetime] = None,
+        force_risk_exit_reason: Optional[str] = None,
     ) -> List[ExitDecision]:
         """Evaluate every open trade and return one ExitDecision each."""
         moment = now or datetime.now(timezone.utc)
         risk_active = self._risk_active()
+        forced_reason = str(force_risk_exit_reason or "").strip()
+        if forced_reason:
+            risk_active = True
         positions = self._positions_provider() or {}
 
         decisions: List[ExitDecision] = []
         for trade in self._store.list_open():
-            decision = self._evaluate_one(trade, positions, moment, risk_active)
+            decision = self._evaluate_one(
+                trade,
+                positions,
+                moment,
+                risk_active,
+                forced_risk_reason=forced_reason,
+            )
             decisions.append(decision)
             self._audit_decision(decision)
         return decisions
@@ -212,7 +223,16 @@ class AutonomousExitManager:
         positions: Dict[str, Dict[str, Any]],
         now: datetime,
         risk_active: bool,
+        forced_risk_reason: str = "",
     ) -> ExitDecision:
+        if str(getattr(trade, "status", "")) == ENTRY_PENDING:
+            return ExitDecision(
+                autonomous_trade_id=trade.autonomous_trade_id,
+                symbol=trade.symbol,
+                decision=NO_EXIT,
+                reason="entry order submitted but not filled yet; waiting for fill reconciliation",
+            )
+
         # 0. MVP only acts on BUY_SHARES trades.  Anything else is left
         #    untouched so non-equity lifecycle handling can be added
         #    later without the exit manager submitting unsupported
@@ -232,6 +252,10 @@ class AutonomousExitManager:
         #    be guessing the exit, which this MVP explicitly refuses to
         #    do.
         if risk_active:
+            risk_reason = (
+                forced_risk_reason
+                or "emergency stop or risk_manager halt active"
+            )
             price = self._last_price(trade.symbol, positions)
             if price is None:
                 return ExitDecision(
@@ -239,7 +263,7 @@ class AutonomousExitManager:
                     symbol=trade.symbol,
                     decision=NO_PRICE_AVAILABLE,
                     reason=(
-                        "emergency stop or risk_manager halt active but "
+                        f"{risk_reason} but "
                         "no current_price for symbol; refusing to submit "
                         "blind exit"
                     ),
@@ -248,7 +272,7 @@ class AutonomousExitManager:
             return self._submit_exit(
                 trade,
                 RISK_EXIT,
-                "emergency stop or risk_manager halt active",
+                risk_reason,
                 price=price,
             )
 

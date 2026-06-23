@@ -163,6 +163,25 @@ def test_no_exit_when_price_within_band(store, tmp_path):
     assert store.get(trade.autonomous_trade_id).status == "OPEN"
 
 
+def test_force_risk_exit_reason_exits_even_when_price_within_band(store, tmp_path):
+    trade = _open_trade(target=130.0, stop=90.0)
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {"AAA": {"current_price": 102.0}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    d = mgr.evaluate_open_trades(
+        force_risk_exit_reason="SPY intraday bearish (forced portfolio protection)",
+    )[0]
+    assert d.decision == RISK_EXIT
+    assert "SPY intraday bearish" in d.reason
+    assert adapter.calls != []
+    assert store.get(trade.autonomous_trade_id).status == EXIT_PENDING
+
+
 def test_no_paper_adapter_records_decision_without_order(store, tmp_path):
     trade = _open_trade()
     store.record_trade(trade)
