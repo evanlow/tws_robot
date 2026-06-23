@@ -926,7 +926,7 @@ class TestHSIScreenerPageRoute:
     def test_screener_page_has_company_name_filter(self, client):
         resp = client.get("/stocks/hsi")
         assert b"companyFilter" in resp.data
-        assert b"Name contains..." in resp.data
+        assert b"e.g., Baidu, Li-Ning, JD.com" in resp.data
 
 
 # ==============================================================================

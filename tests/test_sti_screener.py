@@ -785,7 +785,7 @@ class TestSTIScreenerPageRoute:
     def test_screener_page_has_company_name_filter(self, client):
         resp = client.get("/stocks/sti")
         assert b"companyFilter" in resp.data
-        assert b"Name contains..." in resp.data
+        assert b"e.g., DBS, Singtel" in resp.data
 
 
 # ==============================================================================
