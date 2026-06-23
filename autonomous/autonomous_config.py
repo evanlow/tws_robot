@@ -57,14 +57,17 @@ class AutonomousTradingConfig:
     execution_max_price_move_pct: float = 0.01
     execution_block_on_missing_quote: bool = False
     market_data_health_guard_enabled: bool = True
-    market_data_max_quote_age_seconds: float = 60.0
+    market_data_max_quote_age_seconds: float = 5.0
     market_data_max_spread_pct: float = 0.003
     market_data_max_last_mid_deviation_pct: float = 0.01
     market_data_block_stale_quotes_live: bool = True
-    market_data_block_missing_bid_ask_live: bool = False
-    market_data_block_missing_timestamp_live: bool = False
+    market_data_block_missing_bid_ask_live: bool = True
+    market_data_block_missing_timestamp_live: bool = True
     market_data_block_feed_unhealthy_live: bool = True
     market_data_block_market_closed_live: bool = True
+    live_market_data_required_source: str = "IBKR"
+    live_market_data_require_live_type: bool = True
+    allow_yahoo_for_live_trading: bool = False
 
     risk_lifecycle_guard_enabled: bool = True
     risk_lifecycle_recent_record_limit: int = 1000
@@ -182,6 +185,8 @@ class AutonomousTradingConfig:
                 raise ValueError(f"{label} must be in [0, 1]")
         if self.market_data_max_quote_age_seconds < 0:
             raise ValueError("market_data_max_quote_age_seconds must be >= 0")
+        if not str(self.live_market_data_required_source or "").strip():
+            raise ValueError("live_market_data_required_source must be non-empty")
         if self.risk_lifecycle_recent_record_limit < 1:
             raise ValueError("risk_lifecycle_recent_record_limit must be >= 1")
         for label, value in (
@@ -280,6 +285,9 @@ class AutonomousTradingConfig:
             "market_data_block_missing_timestamp_live": self.market_data_block_missing_timestamp_live,
             "market_data_block_feed_unhealthy_live": self.market_data_block_feed_unhealthy_live,
             "market_data_block_market_closed_live": self.market_data_block_market_closed_live,
+            "live_market_data_required_source": self.live_market_data_required_source,
+            "live_market_data_require_live_type": self.live_market_data_require_live_type,
+            "allow_yahoo_for_live_trading": self.allow_yahoo_for_live_trading,
             "risk_lifecycle_guard_enabled": self.risk_lifecycle_guard_enabled,
             "risk_lifecycle_recent_record_limit": self.risk_lifecycle_recent_record_limit,
             "max_daily_loss_r": self.max_daily_loss_r,

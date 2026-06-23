@@ -187,6 +187,17 @@ class AutonomousLiveRunnerConfig:
         symbol.
     ``AUTONOMOUS_IDEMPOTENCY_STALE_MINUTES``
         Age threshold used by stale-lock inspection helpers.  Default ``120``.
+    ``LIVE_MARKET_DATA_PROVIDER``
+        Required provider for live autonomous execution.  Default ``ibkr``.
+    ``ALLOW_YAHOO_FOR_LIVE_TRADING``
+        Defaults to ``false``.  Yahoo Finance may be advisory, but cannot
+        satisfy live autonomous execution quote requirements.
+    ``MAX_LIVE_QUOTE_AGE_SECONDS``
+        Diagnostic threshold surfaced in live market-data status payloads.
+        It does not independently enforce planner or readiness quote gating;
+        planner quote-age enforcement is controlled by
+        ``AutonomousTradingConfig.market_data_max_quote_age_seconds``.
+        Default ``5`` seconds.
     """
 
     # ---- Master live-mode switches ------------------------------------
@@ -223,6 +234,9 @@ class AutonomousLiveRunnerConfig:
     order_lifecycle_store_path: str = "logs/autonomous_order_lifecycle.jsonl"
     idempotency_store_path: str = "logs/autonomous_idempotency.jsonl"
     idempotency_stale_minutes: int = 120
+    live_market_data_provider: str = "ibkr"
+    allow_yahoo_for_live_trading: bool = False
+    max_live_quote_age_seconds: float = 5.0
 
     # ---- Expected account ID (set at activation time) ----------------
     expected_account_id: Optional[str] = None
@@ -261,6 +275,10 @@ class AutonomousLiveRunnerConfig:
                 "default_stop_pct must be in (0, 1); got "
                 f"{self.default_stop_pct!r}"
             )
+        if str(self.live_market_data_provider or "").strip().lower() != "ibkr":
+            raise ValueError("live_market_data_provider must be 'ibkr'")
+        if self.max_live_quote_age_seconds < 0:
+            raise ValueError("max_live_quote_age_seconds must be >= 0")
 
     def to_dict(self) -> dict:
         return {
@@ -285,6 +303,9 @@ class AutonomousLiveRunnerConfig:
             "order_lifecycle_store_path": self.order_lifecycle_store_path,
             "idempotency_store_path": self.idempotency_store_path,
             "idempotency_stale_minutes": self.idempotency_stale_minutes,
+            "live_market_data_provider": self.live_market_data_provider,
+            "allow_yahoo_for_live_trading": self.allow_yahoo_for_live_trading,
+            "max_live_quote_age_seconds": self.max_live_quote_age_seconds,
             "expected_account_id": self.expected_account_id,
         }
 
@@ -339,5 +360,17 @@ class AutonomousLiveRunnerConfig:
             ),
             idempotency_stale_minutes=_env_int(
                 "AUTONOMOUS_IDEMPOTENCY_STALE_MINUTES", 120
+            ),
+            live_market_data_provider=os.environ.get(
+                "LIVE_MARKET_DATA_PROVIDER",
+                "ibkr",
+            ).strip().lower() or "ibkr",
+            allow_yahoo_for_live_trading=_env_bool(
+                "ALLOW_YAHOO_FOR_LIVE_TRADING",
+                False,
+            ),
+            max_live_quote_age_seconds=_env_float(
+                "MAX_LIVE_QUOTE_AGE_SECONDS",
+                5.0,
             ),
         )

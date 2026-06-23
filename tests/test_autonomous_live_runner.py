@@ -35,6 +35,13 @@ from autonomous.autonomous_live_runner import (
     EXECUTION_FAILED,
     DAILY_LIVE_TRADE_LIMIT_REACHED,
     ENGINE_REJECTED,
+    LIVE_MARKET_DATA_UNAVAILABLE,
+)
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+    MarketDataProviderStatus,
+    MarketDataQuote,
 )
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 # OPEN / CLOSED / FAILED are trade-lifecycle status strings (trade_store).
@@ -63,6 +70,7 @@ class _RealProvider:
 
 
 def _signal() -> CandidateSignal:
+    now = datetime.now(timezone.utc).isoformat()
     return CandidateSignal(
         symbol="AAA",
         strength_score=120,
@@ -70,6 +78,19 @@ def _signal() -> CandidateSignal:
         last_price=100.0,
         support_price=95.0,
         resistance_price=110.0,
+        extras={
+            "bid": 99.95,
+            "ask": 100.05,
+            "quote_last": 100.0,
+            "quote_timestamp": now,
+            "bid_timestamp": now,
+            "ask_timestamp": now,
+            "last_timestamp": now,
+            "market_data_source": IBKR_SOURCE,
+            "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+            "market_data_status": "healthy",
+            "market_data_feed_healthy": True,
+        },
     )
 
 
@@ -151,6 +172,56 @@ class _RejectingExecutor:
         )
 
 
+class _LiveMarketDataProvider:
+    def __init__(
+        self,
+        *,
+        quote: Optional[MarketDataQuote] = None,
+        connected: bool = True,
+        healthy: bool = True,
+        last_error: Optional[dict] = None,
+    ) -> None:
+        self.quote = quote or MarketDataQuote(
+            symbol="AAA",
+            bid=99.95,
+            ask=100.05,
+            last=100.0,
+            timestamp=datetime.now(timezone.utc),
+            bid_timestamp=datetime.now(timezone.utc),
+            ask_timestamp=datetime.now(timezone.utc),
+            last_timestamp=datetime.now(timezone.utc),
+            source=IBKR_SOURCE,
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            feed_healthy=True,
+        )
+        self.connected = connected
+        self.healthy = healthy
+        self.last_error = last_error
+        self.subscribed: list[str] = []
+
+    def subscribe(self, symbols):
+        self.subscribed.extend([str(s).upper() for s in symbols])
+
+    def unsubscribe(self, symbols):
+        pass
+
+    def latest_quote(self, symbol):
+        if str(symbol).upper() == self.quote.symbol:
+            return self.quote
+        return None
+
+    def status(self):
+        return MarketDataProviderStatus(
+            provider=IBKR_SOURCE,
+            connected=self.connected,
+            healthy=self.healthy,
+            subscribed_symbols=list(self.subscribed),
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            last_error=self.last_error,
+            reason="test market-data provider",
+        )
+
+
 def _runner(
     tmp_path: Path,
     *,
@@ -167,6 +238,7 @@ def _runner(
     rejected_order_ids_provider: Any = None,
     filled_order_ids_provider: Any = None,
     broker_positions_provider: Any = None,
+    market_data_provider: Any = None,
 ) -> AutonomousLiveRunner:
     engine = _build_engine(tmp_path, signal=signal)
     store = TradeStore(path=str(tmp_path / "live_trades.jsonl"))
@@ -194,6 +266,7 @@ def _runner(
         rejected_order_ids_provider=rejected_order_ids_provider,
         filled_order_ids_provider=filled_order_ids_provider,
         broker_positions_provider=broker_positions_provider,
+        market_data_provider=market_data_provider or _LiveMarketDataProvider(),
         continuous_mode=continuous_mode,
     )
 
@@ -302,6 +375,54 @@ def test_signal_provider_not_ready_blocks_run(tmp_path):
     assert result.status == SIGNAL_PROVIDER_NOT_READY
 
 
+def test_live_market_data_provider_missing_blocks_run(tmp_path):
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        market_data_provider=False,
+    )
+    runner._market_data_provider = None
+    runner._engine.market_data_provider = None
+
+    result = runner.run_once()
+
+    assert result.status == LIVE_MARKET_DATA_UNAVAILABLE
+    assert not result.gates.live_market_data_ready
+    assert "market-data provider is not configured" in result.rejection_reason
+
+
+def test_live_market_data_provider_disconnect_blocks_run(tmp_path):
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        market_data_provider=_LiveMarketDataProvider(connected=False, healthy=False),
+    )
+
+    result = runner.run_once()
+
+    assert result.status == LIVE_MARKET_DATA_UNAVAILABLE
+    assert "not connected" in result.gates.live_market_data_diagnostics["reason"]
+
+
+def test_live_market_data_permission_error_blocks_run(tmp_path):
+    runner = _runner(
+        tmp_path,
+        signal=_signal(),
+        market_data_provider=_LiveMarketDataProvider(
+            healthy=False,
+            last_error={
+                "error_code": 354,
+                "error_message": "Requested market data is not subscribed",
+            },
+        ),
+    )
+
+    result = runner.run_once()
+
+    assert result.status == LIVE_MARKET_DATA_UNAVAILABLE
+    assert "not subscribed" in result.gates.live_market_data_diagnostics["reason"]
+
+
 def test_max_open_trades_blocks_run(tmp_path):
     cfg = AutonomousLiveRunnerConfig(
         live_enabled=True,
@@ -337,6 +458,7 @@ def test_max_open_trades_blocks_run(tmp_path):
         signal_provider_provider=lambda: _RealProvider(),
         emergency_stop_provider=lambda: False,
         deployable_cash_provider=lambda: 50_000.0,
+        market_data_provider=_LiveMarketDataProvider(),
     )
     result = runner.run_once()
     assert result.status == MAX_OPEN_TRADES
@@ -621,6 +743,7 @@ def test_runner_rejects_live_blocked_engine_status(tmp_path):
         signal_provider_provider=lambda: _RealProvider(),
         emergency_stop_provider=lambda: False,
         deployable_cash_provider=lambda: 50_000.0,
+        market_data_provider=_LiveMarketDataProvider(),
     )
     result = runner.run_once()
     assert result.status == ENGINE_REJECTED
@@ -670,6 +793,7 @@ def test_daily_live_trade_limit_blocks_run(tmp_path):
         signal_provider_provider=lambda: _RealProvider(),
         emergency_stop_provider=lambda: False,
         deployable_cash_provider=lambda: 50_000.0,
+        market_data_provider=_LiveMarketDataProvider(),
     )
     result = runner.run_once()
     assert result.status == DAILY_LIVE_TRADE_LIMIT_REACHED
@@ -714,6 +838,7 @@ def test_daily_cap_not_triggered_when_trades_from_yesterday(tmp_path):
         signal_provider_provider=lambda: _RealProvider(),
         emergency_stop_provider=lambda: False,
         deployable_cash_provider=lambda: 50_000.0,
+        market_data_provider=_LiveMarketDataProvider(),
     )
     gates = runner.evaluate_gates()
     assert gates.live_trades_today == 0

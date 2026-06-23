@@ -383,6 +383,74 @@ class TestBridgeApp:
         
         # Should not raise exception
         app.tickPrice(1, 1, 150.0, None)
+
+    @pytest.mark.unit
+    def test_market_data_callbacks_update_quote_snapshot(self, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._market_data_req_id_to_symbol[700000] = "AAPL"
+        app._market_data_symbol_to_req_id["AAPL"] = 700000
+
+        app.marketDataType(700000, 1)
+        app.tickPrice(700000, 1, 150.0, None)
+        app.tickPrice(700000, 2, 150.1, None)
+        app.tickPrice(700000, 4, 150.05, None)
+        app.tickPrice(700000, 9, 149.5, None)
+        app.tickSize(700000, 0, 100)
+        app.tickSize(700000, 3, 200)
+
+        quote = app._market_data_quotes["AAPL"]
+        assert quote["source"] == "IBKR"
+        assert quote["market_data_type"] == "LIVE"
+        assert quote["bid"] == 150.0
+        assert quote["ask"] == 150.1
+        assert quote["last"] == 150.05
+        assert quote["previous_close"] == 149.5
+        assert quote["bid_size"] == 100.0
+        assert quote["ask_size"] == 200.0
+        assert quote["feed_healthy"] is True
+
+    @pytest.mark.unit
+    def test_subscribe_market_data_requests_live_market_data(
+        self,
+        bridge,
+        mock_service_manager,
+    ):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._connected = True
+        app._ready = True
+        app.isConnected = lambda: True
+        app.reqMarketDataType = Mock()
+        app.reqMktData = Mock()
+        bridge._app = app
+
+        bridge.subscribe_market_data(["aapl"])
+
+        app.reqMarketDataType.assert_called_once_with(1)
+        app.reqMktData.assert_called_once()
+        req_id, contract, generic_ticks, snapshot, regulatory_snapshot, options = (
+            app.reqMktData.call_args.args
+        )
+        assert req_id == 700000
+        assert contract.symbol == "AAPL"
+        assert contract.secType == "STK"
+        assert generic_ticks == ""
+        assert snapshot is False
+        assert regulatory_snapshot is False
+        assert options == []
+
+    @pytest.mark.unit
+    def test_market_data_permission_error_marks_quote_unhealthy(self, mock_service_manager):
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._market_data_req_id_to_symbol[700001] = "MSFT"
+        app._market_data_symbol_to_req_id["MSFT"] = 700001
+
+        app.error(700001, 0, 354, "Requested market data is not subscribed")
+
+        quote = app._market_data_quotes["MSFT"]
+        assert quote["feed_healthy"] is False
+        assert quote["error_code"] == 354
+        assert "not subscribed" in quote["error_message"]
+        assert app._market_data_last_error["symbol"] == "MSFT"
     
     @pytest.mark.unit
     def test_error_informational_codes(self, mock_service_manager):

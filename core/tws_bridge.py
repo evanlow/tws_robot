@@ -18,7 +18,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from ibapi.client import EClient
 from ibapi.contract import Contract
@@ -30,6 +30,22 @@ from core.event_bus import Event, EventType
 from execution.paper_adapter import LIVE_PORTS
 
 logger = logging.getLogger(__name__)
+
+
+_IBKR_MARKET_DATA_TYPE_BY_CODE = {
+    1: "LIVE",
+    2: "FROZEN",
+    3: "DELAYED",
+    4: "DELAYED_FROZEN",
+}
+
+_MARKET_DATA_ERROR_CODES = frozenset({
+    200,    # no security definition / contract issue
+    354,    # requested market data is not subscribed
+    10090,  # part of requested market data is not subscribed
+    10167,  # delayed market data is available
+    10168,  # requested market data is not subscribed
+})
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +99,18 @@ class _BridgeApp(EWrapper, EClient):
         # confirmed protective stop/bracket children before new entries.
         self._open_order_snapshots: Dict[int, Dict[str, Any]] = {}
         self._open_order_snapshots_lock = threading.Lock()
+
+        # Latest level-I market-data snapshots keyed by symbol.  These are
+        # populated by reqMktData callbacks and consumed by the autonomous
+        # live market-data provider.  This state is passive: it never submits
+        # or alters orders.
+        self._market_data_quotes: Dict[str, Dict[str, Any]] = {}
+        self._market_data_req_id_to_symbol: Dict[int, str] = {}
+        self._market_data_symbol_to_req_id: Dict[str, int] = {}
+        self._market_data_next_req_id = 700000
+        self._market_data_last_type = "UNKNOWN"
+        self._market_data_last_error: Optional[Dict[str, Any]] = None
+        self._market_data_lock = threading.Lock()
 
     # -- connection lifecycle -----------------------------------------------
 
@@ -248,8 +276,100 @@ class _BridgeApp(EWrapper, EClient):
     # -- market data (tick prices) ------------------------------------------
 
     def tickPrice(self, reqId, tickType, price: float, attrib) -> None:
-        # Optionally forward tick data; not critical for the dashboard bug.
-        pass
+        with self._market_data_lock:
+            symbol = self._market_data_req_id_to_symbol.get(int(reqId))
+            if not symbol:
+                return
+            quote = self._market_data_quotes.setdefault(
+                symbol,
+                self._new_market_data_quote(symbol),
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            price_f = _positive_float(price)
+            if int(tickType) in {1, 66}:  # bid / delayed bid
+                quote["bid"] = price_f
+                quote["bid_timestamp"] = now
+            elif int(tickType) in {2, 67}:  # ask / delayed ask
+                quote["ask"] = price_f
+                quote["ask_timestamp"] = now
+            elif int(tickType) in {4, 68}:  # last / delayed last
+                quote["last"] = price_f
+                quote["last_timestamp"] = now
+            elif int(tickType) in {9, 72}:  # close / delayed close
+                quote["close"] = price_f
+                quote["previous_close"] = price_f
+            else:
+                return
+            quote["timestamp"] = now
+            quote["quote_timestamp"] = now
+            quote["updated_at"] = now
+            quote["feed_healthy"] = True
+            quote["market_data_feed_healthy"] = True
+
+    def tickSize(self, reqId, tickType, size: int) -> None:
+        with self._market_data_lock:
+            symbol = self._market_data_req_id_to_symbol.get(int(reqId))
+            if not symbol:
+                return
+            quote = self._market_data_quotes.setdefault(
+                symbol,
+                self._new_market_data_quote(symbol),
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            size_f = _positive_float(size)
+            if int(tickType) in {0, 69}:  # bid size / delayed bid size
+                quote["bid_size"] = size_f
+            elif int(tickType) in {3, 70}:  # ask size / delayed ask size
+                quote["ask_size"] = size_f
+            elif int(tickType) in {5, 71}:  # last size / delayed last size
+                quote["last_size"] = size_f
+            else:
+                return
+            quote["updated_at"] = now
+
+    def marketDataType(self, reqId: int, marketDataType: int) -> None:
+        data_type = _IBKR_MARKET_DATA_TYPE_BY_CODE.get(
+            int(marketDataType),
+            "UNKNOWN",
+        )
+        with self._market_data_lock:
+            self._market_data_last_type = data_type
+            symbol = self._market_data_req_id_to_symbol.get(int(reqId))
+            if symbol:
+                quote = self._market_data_quotes.setdefault(
+                    symbol,
+                    self._new_market_data_quote(symbol),
+                )
+                quote["market_data_type"] = data_type
+                quote["market_data_type_code"] = int(marketDataType)
+                quote["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _new_market_data_quote(symbol: str) -> Dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "bid": None,
+            "ask": None,
+            "last": None,
+            "close": None,
+            "previous_close": None,
+            "bid_size": None,
+            "ask_size": None,
+            "last_size": None,
+            "timestamp": None,
+            "quote_timestamp": None,
+            "bid_timestamp": None,
+            "ask_timestamp": None,
+            "last_timestamp": None,
+            "source": "IBKR",
+            "market_data_source": "IBKR",
+            "market_data_type": "UNKNOWN",
+            "market_data_type_code": None,
+            "feed_healthy": None,
+            "market_data_feed_healthy": None,
+            "error_code": None,
+            "error_message": None,
+        }
 
     # -- error handling -----------------------------------------------------
 
@@ -287,6 +407,16 @@ class _BridgeApp(EWrapper, EClient):
         if errorCode in (502, 503, 504, 1100, 2110):
             logger.error("TWS connection error %s: %s", errorCode, errorString)
             self._connected = False
+            self._record_market_data_error(reqId, errorCode, errorString)
+            return
+        if errorCode in _MARKET_DATA_ERROR_CODES and self._is_market_data_req_id(reqId):
+            self._record_market_data_error(reqId, errorCode, errorString)
+            logger.warning(
+                "TWS market-data error %s (reqId %s): %s",
+                errorCode,
+                reqId,
+                errorString,
+            )
             return
         # Order-level rejections — the order did NOT enter the book.
         if errorCode in self._ORDER_REJECT_CODES:
@@ -306,6 +436,42 @@ class _BridgeApp(EWrapper, EClient):
             return
         logger.warning("TWS error %s (reqId %s): %s", errorCode, reqId,
                        errorString)
+
+    def _is_market_data_req_id(self, reqId: Any) -> bool:
+        if not isinstance(reqId, int) or reqId <= 0:
+            return False
+        with self._market_data_lock:
+            return reqId in self._market_data_req_id_to_symbol
+
+    def _record_market_data_error(
+        self,
+        reqId: Any,
+        errorCode: int,
+        errorString: str,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        symbol = None
+        with self._market_data_lock:
+            if isinstance(reqId, int):
+                symbol = self._market_data_req_id_to_symbol.get(reqId)
+            payload = {
+                "req_id": reqId,
+                "symbol": symbol,
+                "error_code": int(errorCode),
+                "error_message": str(errorString or ""),
+                "timestamp": now,
+            }
+            self._market_data_last_error = payload
+            if symbol:
+                quote = self._market_data_quotes.setdefault(
+                    symbol,
+                    self._new_market_data_quote(symbol),
+                )
+                quote["error_code"] = int(errorCode)
+                quote["error_message"] = str(errorString or "")
+                quote["feed_healthy"] = False
+                quote["market_data_feed_healthy"] = False
+                quote["updated_at"] = now
 
     # ------------------------------------------------------------------
     # Order status — tracks fills for bracket reconciliation
@@ -521,6 +687,15 @@ class TWSBridge:
             return
         try:
             if self._app.isConnected():
+                for req_id in self._market_data_req_ids():
+                    try:
+                        self._app.cancelMktData(req_id)
+                    except Exception:
+                        logger.debug(
+                            "TWSBridge: cancelMktData failed for req_id=%s",
+                            req_id,
+                            exc_info=True,
+                        )
                 account = self._config.get("account", "")
                 self._app.reqAccountUpdates(False, account)
                 self._app.disconnect()
@@ -629,6 +804,151 @@ class TWSBridge:
             return []
         with self._app._open_order_snapshots_lock:
             return [dict(order) for order in self._app._open_order_snapshots.values()]
+
+    def subscribe_market_data(self, symbols: Iterable[str]) -> None:
+        """Subscribe to IBKR level-I streaming market data for symbols.
+
+        This is a passive quote subscription used by autonomous readiness and
+        planning.  It does not submit orders and it does not enable live
+        trading.
+        """
+        if not self.is_connected:
+            raise RuntimeError("TWSBridge: not connected to TWS")
+        for symbol in _normalise_symbols(symbols):
+            with self._app._market_data_lock:
+                if symbol in self._app._market_data_symbol_to_req_id:
+                    continue
+                req_id = self._app._market_data_next_req_id
+                self._app._market_data_next_req_id += 1
+                self._app._market_data_symbol_to_req_id[symbol] = req_id
+                self._app._market_data_req_id_to_symbol[req_id] = symbol
+                self._app._market_data_quotes.setdefault(
+                    symbol,
+                    self._app._new_market_data_quote(symbol),
+                )
+
+            contract = Contract()
+            contract.symbol = symbol
+            contract.secType = "STK"
+            contract.exchange = "SMART"
+            contract.currency = "USD"
+            try:
+                # Autonomous live planning requires true real-time data.  If
+                # IBKR returns delayed/frozen data anyway, the quote-health
+                # guard will reject it before any live order can be submitted.
+                self._app.reqMarketDataType(1)
+            except Exception:
+                logger.debug(
+                    "TWSBridge: reqMarketDataType(LIVE) failed before %s subscription",
+                    symbol,
+                    exc_info=True,
+                )
+            self._app.reqMktData(
+                req_id,
+                contract,
+                "",
+                False,
+                False,
+                [],
+            )
+            logger.info(
+                "TWSBridge: subscribed market data for %s (req_id=%s)",
+                symbol,
+                req_id,
+            )
+
+    def unsubscribe_market_data(self, symbols: Iterable[str]) -> None:
+        """Cancel IBKR market-data subscriptions for symbols."""
+        if self._app is None:
+            return
+        for symbol in _normalise_symbols(symbols):
+            with self._app._market_data_lock:
+                req_id = self._app._market_data_symbol_to_req_id.pop(symbol, None)
+                if req_id is not None:
+                    self._app._market_data_req_id_to_symbol.pop(req_id, None)
+            if req_id is None:
+                continue
+            try:
+                self._app.cancelMktData(req_id)
+                logger.info(
+                    "TWSBridge: unsubscribed market data for %s (req_id=%s)",
+                    symbol,
+                    req_id,
+                )
+            except Exception:
+                logger.exception(
+                    "TWSBridge: failed to unsubscribe market data for %s",
+                    symbol,
+                )
+
+    def get_latest_market_data_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Return the latest IBKR quote snapshot for ``symbol``."""
+        if self._app is None:
+            return None
+        key = str(symbol or "").strip().upper()
+        if not key:
+            return None
+        with self._app._market_data_lock:
+            quote = self._app._market_data_quotes.get(key)
+            return dict(quote) if quote else None
+
+    def get_market_data_status(self) -> Dict[str, Any]:
+        """Return provider-level IBKR market-data status."""
+        if self._app is None:
+            return {
+                "provider": "IBKR",
+                "connected": False,
+                "healthy": False,
+                "subscribed_symbols": [],
+                "market_data_type": "UNKNOWN",
+                "last_error": None,
+                "quotes": {},
+                "reason": "TWS bridge is not connected",
+            }
+        with self._app._market_data_lock:
+            quotes = {
+                symbol: dict(quote)
+                for symbol, quote in self._app._market_data_quotes.items()
+            }
+            subscribed = sorted(self._app._market_data_symbol_to_req_id)
+            last_error = (
+                dict(self._app._market_data_last_error)
+                if self._app._market_data_last_error
+                else None
+            )
+            any_unhealthy_quote = any(
+                quote.get("feed_healthy") is False for quote in quotes.values()
+            )
+            healthy = (
+                self.is_connected
+                and last_error is None
+                and not any_unhealthy_quote
+            )
+            reason = (
+                "IBKR market-data stream healthy"
+                if healthy
+                else "IBKR market-data stream unavailable or degraded"
+            )
+            return {
+                "provider": "IBKR",
+                "connected": self.is_connected,
+                "healthy": healthy,
+                "subscribed_symbols": subscribed,
+                "market_data_type": self._app._market_data_last_type,
+                "last_error": last_error,
+                "quotes": quotes,
+                "reason": reason,
+            }
+
+    def _market_data_req_ids(self) -> list[int]:
+        if self._app is None:
+            return []
+        lock = getattr(self._app, "_market_data_lock", None)
+        reqs = getattr(self._app, "_market_data_req_id_to_symbol", None)
+        if lock is None or not isinstance(reqs, dict):
+            return []
+        with lock:
+            return list(reqs)
 
     def cancel_order(self, broker_order_id: int) -> None:
         """Send a cancellation request to TWS for the given order ID.
@@ -916,3 +1236,24 @@ def _to_float(val: Any) -> float:
         return float(val)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _positive_float(val: Any) -> Optional[float]:
+    """Return a positive float or ``None`` for missing/invalid prices."""
+    try:
+        out = float(val)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0 else None
+
+
+def _normalise_symbols(symbols: Iterable[str]) -> list[str]:
+    out = []
+    seen = set()
+    for raw in symbols or []:
+        symbol = str(raw or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        out.append(symbol)
+    return out

@@ -79,6 +79,9 @@ Only after all four fields validate does the frontend submit to the backend.
 | `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY` | Continuous actual-live | > 1 (e.g. `3`) |
 | `AUTONOMOUS_MAX_OPEN_LIVE_TRADES` | All actual-live | Conservative int (default: `1`) |
 | `AUTONOMOUS_LIVE_DRY_RUN` | Must be absent/false for actual-live | `false` |
+| `LIVE_MARKET_DATA_PROVIDER` | All actual-live | `ibkr` |
+| `ALLOW_YAHOO_FOR_LIVE_TRADING` | All actual-live | `false` |
+| `MAX_LIVE_QUOTE_AGE_SECONDS` | All actual-live diagnostics | Conservative seconds (default: `5`) |
 
 ## Backend Architecture
 
@@ -171,6 +174,8 @@ uses `input()` (unsuitable for Flask/web server processes).
 - Detected live account ID matches expected account ID
 - `AUTONOMOUS_LIVE_ENABLED=true`
 - `AUTONOMOUS_LIVE_DRY_RUN=false` (set automatically by actual-live path)
+- Live IBKR market-data provider is connected, healthy, and not reporting an
+  error
 - Emergency stop inactive
 - Signal provider ready
 - Deployable cash above configured minimum
@@ -181,6 +186,9 @@ uses `input()` (unsuitable for Flask/web server processes).
 - Risk manager passes
 - Portfolio reconciliation passes
 - Order sanity checks pass
+- Planner quote-health guard sees fresh per-symbol IBKR quotes with
+  `market_data_type=LIVE`; Yahoo, delayed, frozen, stale, missing bid/ask, and
+  missing timestamp quotes are rejected by default
 - *(Continuous only)* `AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true`
 - *(Continuous only)* `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY > 1`
 
@@ -216,6 +224,11 @@ The dashboard shows a clear final outcome from the `outcome` field in the API re
 | `LIVE_ORDER_SUBMITTED` | Actual live order submitted — order ID displayed |
 | `LIVE_ORDER_REJECTED` | Order rejected by a safety gate — reason displayed |
 | `NO_TRADE` | No qualifying candidates found — no action taken |
+
+`LIVE_ORDER_REJECTED` can include `live_market_data_unavailable` when the
+runner cannot verify a healthy IBKR real-time feed before evaluating a live
+entry. Candidate-level quote failures are reported in the planner's
+`market_data_health` diagnostics.
 
 ## Single-Trade Lifecycle
 

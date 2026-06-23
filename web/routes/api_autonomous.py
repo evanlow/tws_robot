@@ -66,6 +66,7 @@ from autonomous.exit_manager import AutonomousExitManager
 from autonomous.lifecycle_worker import AutonomousLifecycleWorker
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.idempotency import IdempotencyStore
+from autonomous.market_data_provider import IBKRRealtimeMarketDataProvider
 from autonomous.order_lifecycle import OrderLifecycleStore
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.protection_verifier import ProtectionVerifier
@@ -2520,6 +2521,7 @@ def _build_live_runner(
         return override(live_config, continuous_mode=continuous_mode)
 
     svc = get_services()
+    market_data_provider = _resolve_live_market_data_provider(svc)
 
     def _connected() -> bool:
         return bool(getattr(svc, "connected", False))
@@ -2619,8 +2621,19 @@ def _build_live_runner(
         ),
         outcome_writer=_outcome_writer(),
         evidence_store=_evidence_store(),
+        market_data_provider=market_data_provider,
         continuous_mode=continuous_mode,
     )
+
+
+def _resolve_live_market_data_provider(svc) -> Optional[IBKRRealtimeMarketDataProvider]:
+    override = current_app.config.get("autonomous_live_market_data_provider")
+    if override is not None:
+        return override
+    bridge = getattr(svc, "tws_bridge", None)
+    if bridge is None:
+        return None
+    return IBKRRealtimeMarketDataProvider(bridge)
 
 
 def _live_mode_state() -> AutonomousModeState:

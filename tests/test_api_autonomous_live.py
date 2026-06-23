@@ -19,6 +19,12 @@ from autonomous import (
 from autonomous.audit import AuditLogger
 from autonomous.autonomous_live_runner import AutonomousLiveRunner, EXECUTED, DRY_RUN_EXECUTED, NO_TRADE
 from autonomous.idempotency import IdempotencyStore
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+    MarketDataProviderStatus,
+    MarketDataQuote,
+)
 from autonomous.order_lifecycle import ENTRY, OrderLifecycleState, OrderLifecycleStore
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.trade_store import AutonomousTrade, TradeStore
@@ -89,7 +95,50 @@ class _DryRunExecutor:
         )
 
 
+class _LiveMarketDataProvider:
+    def __init__(self, *, connected: bool = True, healthy: bool = True, last_error=None):
+        now = datetime.now(timezone.utc)
+        self.quote = MarketDataQuote(
+            symbol="AAA",
+            bid=99.95,
+            ask=100.05,
+            last=100.0,
+            timestamp=now,
+            bid_timestamp=now,
+            ask_timestamp=now,
+            last_timestamp=now,
+            source=IBKR_SOURCE,
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            feed_healthy=True,
+        )
+        self.connected = connected
+        self.healthy = healthy
+        self.last_error = last_error
+        self.subscribed = []
+
+    def subscribe(self, symbols):
+        self.subscribed.extend([str(s).upper() for s in symbols])
+
+    def unsubscribe(self, symbols):
+        pass
+
+    def latest_quote(self, symbol):
+        return self.quote if str(symbol).upper() == "AAA" else None
+
+    def status(self):
+        return MarketDataProviderStatus(
+            provider=IBKR_SOURCE,
+            connected=self.connected,
+            healthy=self.healthy,
+            subscribed_symbols=list(self.subscribed),
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            last_error=self.last_error,
+            reason="test live market data",
+        )
+
+
 def _signal():
+    now = datetime.now(timezone.utc).isoformat()
     return CandidateSignal(
         symbol="AAA",
         strength_score=120,
@@ -97,6 +146,19 @@ def _signal():
         last_price=100.0,
         support_price=95.0,
         resistance_price=110.0,
+        extras={
+            "bid": 99.95,
+            "ask": 100.05,
+            "quote_last": 100.0,
+            "quote_timestamp": now,
+            "bid_timestamp": now,
+            "ask_timestamp": now,
+            "last_timestamp": now,
+            "market_data_source": IBKR_SOURCE,
+            "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+            "market_data_status": "healthy",
+            "market_data_feed_healthy": True,
+        },
     )
 
 
@@ -167,6 +229,7 @@ def _install_live_runner(
             signal_provider_provider=lambda: _RealProvider(),
             emergency_stop_provider=lambda: False,
             deployable_cash_provider=lambda: deployable_cash,
+            market_data_provider=_LiveMarketDataProvider(),
             continuous_mode=continuous_mode,
         )
 
@@ -805,6 +868,7 @@ class TestActualLiveActivate:
                 signal_provider_provider=lambda: _RealProvider(),
                 emergency_stop_provider=lambda: True,  # ESTOP active
                 deployable_cash_provider=lambda: 50_000.0,
+                market_data_provider=_LiveMarketDataProvider(),
                 continuous_mode=continuous_mode,
             )
 
@@ -1476,6 +1540,7 @@ class TestActualLiveExecutorOrdering:
                 signal_provider_provider=lambda: _RealProvider(),
                 emergency_stop_provider=lambda: False,
                 deployable_cash_provider=lambda: 50_000.0,
+                market_data_provider=_LiveMarketDataProvider(),
                 continuous_mode=continuous_mode,
             )
             # Verify: executor is already attached at construction
@@ -1723,6 +1788,7 @@ class TestActualLiveAllStatusesTurnOff:
                 signal_provider_provider=lambda: _RealProvider(),
                 emergency_stop_provider=lambda: False,
                 deployable_cash_provider=lambda: 50_000.0,
+                market_data_provider=_LiveMarketDataProvider(),
                 continuous_mode=continuous_mode,
             )
 
@@ -2297,6 +2363,7 @@ class TestActualLiveContinuousLifecycle:
                     signal_provider_provider=lambda: _RealProvider(),
                     emergency_stop_provider=lambda: False,
                     deployable_cash_provider=lambda: 50_000.0,
+                    market_data_provider=_LiveMarketDataProvider(),
                     continuous_mode=continuous_mode,
                 )
 

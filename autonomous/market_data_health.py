@@ -12,6 +12,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+    YAHOO_SOURCE,
+    normalise_market_data_type,
+)
+
 
 @dataclass
 class MarketDataHealthDecision:
@@ -26,6 +33,8 @@ class MarketDataHealthDecision:
     last_age_seconds: Optional[float] = None
     spread_pct: Optional[float] = None
     last_mid_deviation_pct: Optional[float] = None
+    source: Optional[str] = None
+    market_data_type: Optional[str] = None
     feed_healthy: Optional[bool] = None
     market_open: Optional[bool] = None
     warnings: list[str] = field(default_factory=list)
@@ -41,6 +50,9 @@ class MarketDataHealthDecision:
             "last_age_seconds": _round(self.last_age_seconds),
             "spread_pct": _round(self.spread_pct, places=6),
             "last_mid_deviation_pct": _round(self.last_mid_deviation_pct, places=6),
+            "source": self.source,
+            "market_data_source": self.source,
+            "market_data_type": self.market_data_type,
             "feed_healthy": self.feed_healthy,
             "market_open": self.market_open,
             "warnings": list(self.warnings),
@@ -62,6 +74,9 @@ class MarketDataHealthGuard:
         block_missing_timestamp_live: bool = False,
         block_feed_unhealthy_live: bool = True,
         block_market_closed_live: bool = True,
+        required_live_source: str = IBKR_SOURCE,
+        require_live_market_data_type: bool = True,
+        allow_yahoo_for_live_trading: bool = False,
     ) -> None:
         self.enabled = enabled
         self.max_quote_age_seconds = max_quote_age_seconds
@@ -72,6 +87,9 @@ class MarketDataHealthGuard:
         self.block_missing_timestamp_live = block_missing_timestamp_live
         self.block_feed_unhealthy_live = block_feed_unhealthy_live
         self.block_market_closed_live = block_market_closed_live
+        self.required_live_source = str(required_live_source or IBKR_SOURCE).upper()
+        self.require_live_market_data_type = require_live_market_data_type
+        self.allow_yahoo_for_live_trading = allow_yahoo_for_live_trading
 
     def evaluate(
         self,
@@ -86,6 +104,8 @@ class MarketDataHealthGuard:
         ask_timestamp: Any = None,
         last_timestamp: Any = None,
         quote_timestamp: Any = None,
+        source: Any = None,
+        market_data_type: Any = None,
         feed_healthy: Any = None,
         feed_status: Any = None,
         market_open: Any = None,
@@ -106,8 +126,29 @@ class MarketDataHealthGuard:
         warnings: list[str] = []
         blockers: list[str] = []
 
+        source_text = _normalise_source(source)
+        market_data_type_text = normalise_market_data_type(market_data_type)
         feed_ok = _feed_healthy(feed_healthy, feed_status)
         market_open_bool = _bool_or_none(market_open)
+
+        if live:
+            if source_text == YAHOO_SOURCE and not self.allow_yahoo_for_live_trading:
+                blockers.append(f"{symbol}: Yahoo Finance quote source is not allowed for live trading")
+            if self.required_live_source and source_text != self.required_live_source:
+                blockers.append(
+                    f"{symbol}: quote source {source_text or 'UNKNOWN'} != required {self.required_live_source}"
+                )
+            if (
+                self.require_live_market_data_type
+                and source_text == self.required_live_source
+                and market_data_type_text != IBKR_MARKET_DATA_TYPE_LIVE
+            ):
+                blockers.append(
+                    f"{symbol}: IBKR market data type {market_data_type_text} is not LIVE"
+                )
+        else:
+            if source_text == YAHOO_SOURCE:
+                warnings.append(f"{symbol}: Yahoo Finance quote source is advisory only")
 
         if feed_ok is False:
             msg = f"{symbol}: market-data feed unhealthy"
@@ -194,6 +235,8 @@ class MarketDataHealthGuard:
                 last_age_seconds=last_age,
                 spread_pct=spread_pct,
                 last_mid_deviation_pct=last_mid_deviation_pct,
+                source=source_text,
+                market_data_type=market_data_type_text,
                 feed_healthy=feed_ok,
                 market_open=market_open_bool,
                 warnings=warnings,
@@ -209,6 +252,8 @@ class MarketDataHealthGuard:
             last_age_seconds=last_age,
             spread_pct=spread_pct,
             last_mid_deviation_pct=last_mid_deviation_pct,
+            source=source_text,
+            market_data_type=market_data_type_text,
             feed_healthy=feed_ok,
             market_open=market_open_bool,
             warnings=warnings,
@@ -296,6 +341,17 @@ def _feed_healthy(feed_healthy: Any, feed_status: Any) -> Optional[bool]:
     if status in {"unhealthy", "degraded", "down", "stale", "disconnected", "not_configured"}:
         return False
     return None
+
+
+def _normalise_source(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().upper().replace(" ", "_").replace("-", "_")
+    if text in {"YAHOO", "YAHOO_FINANCE", "YFINANCE"}:
+        return YAHOO_SOURCE
+    if text in {"IB", "IBKR", "INTERACTIVE_BROKERS"}:
+        return IBKR_SOURCE
+    return text or None
 
 
 def _round(value: Optional[float], *, places: int = 3) -> Optional[float]:
