@@ -222,6 +222,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
         env_config_kwargs["exit_target_mode"] = _exit_mode
 
     for env_key, config_key, converter, default in [
+        ("AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY", "max_trades_per_day", int, None),
         ("AUTONOMOUS_TAKE_PROFIT_PCT", "take_profit_pct", float, None),
         ("AUTONOMOUS_ADR_LOOKBACK_DAYS", "adr_lookback_days", int, None),
         ("AUTONOMOUS_ADR_TARGET_FRACTION", "adr_target_fraction", float, None),
