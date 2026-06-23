@@ -721,14 +721,15 @@ def _resolve_spy_price_provider():
     override = current_app.config.get("autonomous_spy_price_provider")
     if callable(override):
         return override
-    # Default: always wire the yfinance provider so the SPY gate is never
-    # skipped in production.  Fails closed when market data is unavailable.
-    #
-    # NOTE: yfinance is a third-party source and may differ slightly from
-    # TWS/IBKR broker data.  It is used here as a reliable, zero-config
-    # default.  Wiring the provider to a TWS reqMktData snapshot is preferred
-    # for production and can be done by registering an override via
-    # ``current_app.config['autonomous_spy_price_provider']``.
+    # Prefer IBKR real-time data when the bridge is available; fall back to
+    # yfinance (which can be ~15 min delayed) when it is not.
+    try:
+        from web.vix_market_data import ibkr_with_yfinance_fallback_spy_provider
+        return ibkr_with_yfinance_fallback_spy_provider(
+            lambda: get_services().tws_bridge
+        )
+    except Exception:
+        logger.exception("Failed to build IBKR SPY provider; falling back to yfinance")
     return _spy_price_from_yfinance
 
 

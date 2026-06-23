@@ -990,7 +990,9 @@
       if (marketGate && (marketGate.open != null || marketGate.current != null)) {
         const openStr = Number.isFinite(marketGate.open) ? marketGate.open.toFixed(2) : '?';
         const currStr = Number.isFinite(marketGate.current) ? marketGate.current.toFixed(2) : '?';
-        const priceInfo = `SPY open=${openStr}, current=${currStr} (source: yfinance, ~15 min delayed)`;
+        const source = marketGate.source || 'unknown';
+        const sourceLabel = source === 'IBKR' ? 'IBKR real-time' : source === 'yfinance' ? 'yfinance (~15 min delayed)' : source;
+        const priceInfo = `SPY open=${openStr}, current=${currStr} (source: ${sourceLabel})`;
         if (marketGate.bullish === true) {
           logActivity('success', `SPY gate passed: current price above opening price — ${priceInfo}`);
         } else if (marketGate.bullish === false) {

@@ -634,6 +634,15 @@ class TestActivityLogPanel:
         # Must NOT reference the old spy_gate_passed field
         assert "spy_gate_passed" not in src
 
+    def test_spy_gate_shows_data_source(self):
+        """SPY gate activity log must show whether data came from IBKR or yfinance."""
+        src = self._js_source()
+        # Must extract source from marketGate.source
+        assert "marketGate.source" in src
+        # Must distinguish between IBKR (real-time) and yfinance (delayed)
+        assert "IBKR real-time" in src
+        assert "yfinance (~15 min delayed)" in src
+
     def test_no_trade_feedback_not_error(self):
         """A no_trade run status must not produce error-level feedback."""
         src = self._js_source()

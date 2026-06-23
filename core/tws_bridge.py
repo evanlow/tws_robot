@@ -295,9 +295,11 @@ class _BridgeApp(EWrapper, EClient):
             elif int(tickType) in {4, 68}:  # last / delayed last
                 quote["last"] = price_f
                 quote["last_timestamp"] = now
-            elif int(tickType) in {9, 72}:  # close / delayed close
+            elif int(tickType) in {9, 75}:  # close / delayed close
                 quote["close"] = price_f
                 quote["previous_close"] = price_f
+            elif int(tickType) in {14, 76}:  # open / delayed open
+                quote["open"] = price_f
             else:
                 return
             quote["timestamp"] = now
@@ -351,6 +353,7 @@ class _BridgeApp(EWrapper, EClient):
             "bid": None,
             "ask": None,
             "last": None,
+            "open": None,
             "close": None,
             "previous_close": None,
             "bid_size": None,

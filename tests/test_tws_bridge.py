@@ -410,6 +410,41 @@ class TestBridgeApp:
         assert quote["feed_healthy"] is True
 
     @pytest.mark.unit
+    def test_tick_price_captures_open(self, mock_service_manager):
+        """Tick type 14 (OPEN) and 76 (DELAYED_OPEN) are stored in the quote."""
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._market_data_req_id_to_symbol[700000] = "SPY"
+        app._market_data_symbol_to_req_id["SPY"] = 700000
+
+        app.tickPrice(700000, 14, 520.0, None)   # live OPEN
+        assert app._market_data_quotes["SPY"]["open"] == 520.0
+
+    @pytest.mark.unit
+    def test_tick_price_captures_delayed_open(self, mock_service_manager):
+        """Tick type 76 (DELAYED_OPEN) is stored in the quote."""
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._market_data_req_id_to_symbol[700001] = "SPY"
+        app._market_data_symbol_to_req_id["SPY"] = 700001
+
+        app.tickPrice(700001, 76, 519.5, None)   # delayed OPEN
+        assert app._market_data_quotes["SPY"]["open"] == 519.5
+
+    @pytest.mark.unit
+    def test_tick_price_delayed_close_uses_correct_tick_type(self, mock_service_manager):
+        """Tick type 75 is DELAYED_CLOSE (not 72 which is DELAYED_HIGH)."""
+        app = _BridgeApp(mock_service_manager, "DU12345")
+        app._market_data_req_id_to_symbol[700002] = "SPY"
+        app._market_data_symbol_to_req_id["SPY"] = 700002
+
+        app.tickPrice(700002, 75, 518.0, None)  # DELAYED_CLOSE
+        assert app._market_data_quotes["SPY"]["previous_close"] == 518.0
+        assert app._market_data_quotes["SPY"]["close"] == 518.0
+
+        # Tick type 72 is DELAYED_HIGH and must NOT update close/previous_close
+        app.tickPrice(700002, 72, 525.0, None)  # DELAYED_HIGH
+        assert app._market_data_quotes["SPY"]["previous_close"] == 518.0
+
+    @pytest.mark.unit
     def test_subscribe_market_data_requests_live_market_data(
         self,
         bridge,
