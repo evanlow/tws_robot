@@ -1144,7 +1144,7 @@
             if (baselineCount === null || checkData.count !== baselineCount || attempt === maxAttempts - 1) {
               _renderEvents(document.getElementById('eventsTimeline'), checkData.events || []);
               var urgent = (checkData.events || []).filter(function(e) {
-                return e.is_portfolio_relevant && (e.days_away || 0) <= 2;
+                return (e.severity === 'high' || e.severity === 'critical') || (e.is_portfolio_relevant && (e.days_away || 0) <= 2);
               }).length;
               _updateEventsTabBadge(urgent);
               _eventsLoaded = true;
@@ -1271,9 +1271,9 @@
       var data = await res.json();
       if (!data.reminders || data.reminders.length === 0) return;
       var reminder = data.reminders[0];
-      var key = 'market-event-reminder-' + reminder.event_id;
-      if (window.sessionStorage && sessionStorage.getItem(key)) return;
-      if (window.sessionStorage) sessionStorage.setItem(key, 'shown');
+      var key = reminder.event_id ? 'market-event-reminder-' + reminder.event_id : null;
+      if (key && window.sessionStorage && sessionStorage.getItem(key)) return;
+      if (key && window.sessionStorage) sessionStorage.setItem(key, 'shown');
       _showEventReminder(reminder);
     } catch(e) {}
   }

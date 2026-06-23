@@ -840,11 +840,13 @@ class MarketEventsService:
     ) -> ProviderSyncResult:
         result = ProviderSyncResult(provider=provider, event_type=event_type)
         events = []
+        fetched_symbols: Set[str] = set()
         try:
             for symbol in symbols:
                 key = f"{event_type}:{symbol}"
                 if not force and self._ttl_ok(key, ttl_hours):
                     continue
+                fetched_symbols.add(symbol)
                 event = fetcher(symbol)
                 if event is not None:
                     events.append(event)
@@ -857,14 +859,15 @@ class MarketEventsService:
                 window_start=window_start,
                 window_end=window_end,
             )
-            result.stale_count = self._mark_missing_future_events_stale(
-                source=provider,
-                event_types=[event_type],
-                seen_event_ids=seen_ids,
-                window_start=window_start,
-                window_end=window_end,
-                symbols=set(symbols),
-            )
+            if fetched_symbols:
+                result.stale_count = self._mark_missing_future_events_stale(
+                    source=provider,
+                    event_types=[event_type],
+                    seen_event_ids=seen_ids,
+                    window_start=window_start,
+                    window_end=window_end,
+                    symbols=fetched_symbols,
+                )
         except Exception as exc:
             result.status = "failed"
             result.error_count += 1
@@ -892,8 +895,10 @@ class MarketEventsService:
         try:
             if not force and self._ttl_ok(ttl_key, ttl_hours):
                 events: List[Dict[str, Any]] = []
+                fetched = False
             else:
                 events = list(events_fetcher() or [])
+                fetched = True
                 with self._lock:
                     self._last_fetched[ttl_key] = datetime.now()
             result.fetched_count = len(events)
@@ -903,14 +908,15 @@ class MarketEventsService:
                 window_start=window_start,
                 window_end=window_end,
             )
-            result.stale_count = self._mark_missing_future_events_stale(
-                source=provider,
-                event_types=stale_event_types or [event_type],
-                seen_event_ids=seen_ids,
-                window_start=window_start,
-                window_end=window_end,
-                symbols=None,
-            )
+            if fetched:
+                result.stale_count = self._mark_missing_future_events_stale(
+                    source=provider,
+                    event_types=stale_event_types or [event_type],
+                    seen_event_ids=seen_ids,
+                    window_start=window_start,
+                    window_end=window_end,
+                    symbols=None,
+                )
         except Exception as exc:
             result.status = "failed"
             result.error_count += 1

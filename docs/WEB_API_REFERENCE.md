@@ -1321,7 +1321,7 @@ Validation rules:
       "event_id": "evt_abc123",
       "symbol": "AAPL",
       "title": "Apple Earnings",
-      "event_date": "2026-05-20T00:00:00",
+      "event_date": "2026-05-20T20:00:00",
       "event_time": "AMC",
       "start_at_utc": "2026-05-20T20:00:00",
       "end_at_utc": null,

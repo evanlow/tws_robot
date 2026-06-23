@@ -168,6 +168,86 @@ class TestMarketEventNormalizationAndSync:
             assert stale_count == 1
             assert row.status == EVENT_STATUS_STALE
 
+    def test_sync_symbol_provider_only_stales_symbols_fetched_this_run(self):
+        svc, db = _memory_service()
+        now = _utc_naive()
+        window_end = now + timedelta(days=28)
+
+        svc._upsert_events([
+            {
+                "event_type": "EARNINGS",
+                "symbol": "AAPL",
+                "title": "Old AAPL Earnings",
+                "event_date": now + timedelta(days=4),
+                "event_time": "AMC",
+                "source": "test-provider",
+                "source_event_id": "old-aapl-event",
+            },
+            {
+                "event_type": "EARNINGS",
+                "symbol": "MSFT",
+                "title": "Old MSFT Earnings",
+                "event_date": now + timedelta(days=5),
+                "event_time": "AMC",
+                "source": "test-provider",
+                "source_event_id": "old-msft-event",
+            },
+        ], portfolio_symbols={"AAPL", "MSFT"}, window_start=now, window_end=window_end)
+        svc._last_fetched["EARNINGS:MSFT"] = datetime.now()
+
+        result = svc._sync_symbol_provider(
+            provider="test-provider",
+            event_type="EARNINGS",
+            symbols=["AAPL", "MSFT"],
+            fetcher=lambda _symbol: None,
+            ttl_hours=24,
+            force=False,
+            window_start=now,
+            window_end=window_end,
+        )
+
+        with db.session_scope() as session:
+            rows = {
+                row.symbol: row.status
+                for row in session.query(MarketEvent).filter_by(source="test-provider").all()
+            }
+
+        assert result.stale_count == 1
+        assert rows["AAPL"] == EVENT_STATUS_STALE
+        assert rows["MSFT"] != EVENT_STATUS_STALE
+
+    def test_sync_static_provider_ttl_skip_does_not_mark_events_stale(self):
+        svc, db = _memory_service()
+        now = _utc_naive()
+        window_end = now + timedelta(days=28)
+        svc._upsert_events([{
+            "event_type": "FOMC",
+            "title": "FOMC Meeting",
+            "event_date": now + timedelta(days=3),
+            "event_time": "14:00 ET",
+            "source": "test-provider",
+            "source_event_id": "fomc-existing",
+        }], portfolio_symbols=set(), window_start=now, window_end=window_end)
+        svc._last_fetched["FOMC"] = datetime.now()
+
+        result = svc._sync_static_provider(
+            provider="test-provider",
+            event_type="FOMC",
+            events_fetcher=lambda: [{"unexpected": "call"}],
+            ttl_key="FOMC",
+            ttl_hours=24,
+            force=False,
+            window_start=now,
+            window_end=window_end,
+        )
+
+        with db.session_scope() as session:
+            status = session.query(MarketEvent).filter_by(source="test-provider").one().status
+
+        assert result.fetched_count == 0
+        assert result.stale_count == 0
+        assert status != EVENT_STATUS_STALE
+
     def test_builtin_market_calendar_includes_july_2026_holiday(self):
         events = _fetch_market_holidays(
             datetime(2026, 7, 1),
