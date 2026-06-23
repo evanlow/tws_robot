@@ -105,6 +105,10 @@ class MarketDataQuote:
 
     @classmethod
     def from_mapping(cls, payload: Dict[str, Any]) -> "MarketDataQuote":
+        feed_healthy = payload.get("feed_healthy")
+        if feed_healthy is None:
+            feed_healthy = payload.get("market_data_feed_healthy")
+
         return cls(
             symbol=str(payload.get("symbol") or "").upper(),
             bid=_positive_float(payload.get("bid")),
@@ -127,11 +131,7 @@ class MarketDataQuote:
             market_data_type=normalise_market_data_type(
                 payload.get("market_data_type")
             ),
-            feed_healthy=_bool_or_none(
-                payload.get("feed_healthy")
-                if payload.get("feed_healthy") is not None
-                else payload.get("market_data_feed_healthy")
-            ),
+            feed_healthy=_bool_or_none(feed_healthy),
             error_code=_optional_int(payload.get("error_code")),
             error_message=(
                 str(payload.get("error_message"))
