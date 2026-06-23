@@ -20,7 +20,7 @@ Legend:
 | Evidence foundation | Done | PR #162 |
 | Decision evidence records | Done | PR #162 |
 | Evidence API / recent evidence view | Done | PR #162 |
-| Evidence-learning dashboard/API exposure | Current PR | EL8 read-only setup performance, promotion, weak setup, and drift diagnostics exposed through evidence APIs and control tower |
+| Evidence-learning dashboard/API exposure | Done | PR #190; EL8 read-only setup performance, promotion, weak setup, and drift diagnostics exposed through evidence APIs and control tower |
 | Support/resistance enrichment | Done | PR #163 |
 | Assisted-live valid stop requirement | Done | PR #163 |
 | VIX / market-regime guard | Done | PR #160 |
@@ -766,7 +766,7 @@ Known limitations and manual checks:
 
 ### Evidence-learning dashboard/API exposure
 
-Status: Current PR
+Status: Done in PR #190
 
 Checklist:
 
@@ -810,6 +810,11 @@ Known limitations and manual checks:
 
 - EL8 reads from the local evidence store only; it does not configure a
   default live setup-evidence provider or write approval history.
+
+Closeout note:
+
+- Issue #185 is ready to close after PR #190 and this tracker closeout lands;
+  EL3, EL4, EL5, EL6, and EL8 are all merged.
 
 ## 5. Maintenance rules
 
