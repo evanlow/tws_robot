@@ -4,6 +4,11 @@ from autonomous.autonomous_config import AutonomousTradingConfig
 from autonomous import AutonomousMode
 from autonomous.candidate_scanner import CandidateSignal
 from autonomous.trade_planner import TradePlanner
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+    YAHOO_SOURCE,
+)
 
 
 def _candidate(**kwargs):
@@ -130,6 +135,8 @@ def test_planner_blocks_stale_quote_for_assisted_live():
                 "ask": 100.05,
                 "execution_last": 100.0,
                 "quote_timestamp": (now - timedelta(seconds=90)).isoformat(),
+                "market_data_source": IBKR_SOURCE,
+                "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
             }
         ),
         deployable_cash=100_000.0,
@@ -147,6 +154,7 @@ def test_planner_can_block_missing_bid_ask_for_assisted_live_when_configured():
         AutonomousTradingConfig(
             mode=AutonomousMode.ASSISTED_LIVE,
             market_data_block_missing_bid_ask_live=True,
+            market_data_block_missing_timestamp_live=False,
             risk_per_trade_sizing_enabled=False,
             volatility_sizing_enabled=False,
             drawdown_governor_enabled=False,
@@ -155,7 +163,13 @@ def test_planner_can_block_missing_bid_ask_for_assisted_live_when_configured():
     reasons = []
 
     plan = planner.plan(
-        _candidate(extras={}),
+        _candidate(
+            extras={
+                "quote_timestamp": datetime.now(timezone.utc).isoformat(),
+                "market_data_source": IBKR_SOURCE,
+                "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+            }
+        ),
         deployable_cash=100_000.0,
         equity=100_000.0,
         reasons=reasons,
@@ -183,6 +197,8 @@ def test_planner_records_market_data_health_diagnostics_on_plan():
                 "execution_last": 100.0,
                 "quote_timestamp": (now - timedelta(seconds=5)).isoformat(),
                 "market_data_status": "healthy",
+                "market_data_source": IBKR_SOURCE,
+                "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
                 "market_is_open": True,
             }
         ),
@@ -194,3 +210,34 @@ def test_planner_records_market_data_health_diagnostics_on_plan():
     assert plan.market_data_health["allowed"] is True
     assert plan.market_data_health["quote_age_seconds"] is not None
     assert plan.to_dict()["market_data_health"]["reason"] == "market-data health acceptable"
+
+
+def test_planner_blocks_yahoo_quote_for_assisted_live():
+    now = datetime.now(timezone.utc)
+    planner = TradePlanner(
+        AutonomousTradingConfig(
+            mode=AutonomousMode.ASSISTED_LIVE,
+            risk_per_trade_sizing_enabled=False,
+            volatility_sizing_enabled=False,
+            drawdown_governor_enabled=False,
+        )
+    )
+    reasons = []
+
+    plan = planner.plan(
+        _candidate(
+            extras={
+                "bid": 99.95,
+                "ask": 100.05,
+                "execution_last": 100.0,
+                "quote_timestamp": now.isoformat(),
+                "market_data_source": YAHOO_SOURCE,
+            }
+        ),
+        deployable_cash=100_000.0,
+        equity=100_000.0,
+        reasons=reasons,
+    )
+
+    assert plan is None
+    assert any("Yahoo Finance" in reason for reason in reasons)

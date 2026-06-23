@@ -21,6 +21,7 @@ from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.edge_estimator import EdgeEstimate
 from autonomous.evidence_calibrator import SetupEvidenceSummary
 from autonomous.evidence_store import TradeEvidenceStore
+from autonomous.market_data_provider import MarketDataProvider
 from autonomous.market_regime import evaluate_market_regime
 from autonomous.risk_lifecycle import LossLimitGuard
 from autonomous.trade_planner import OptionChainHint, TradePlan, TradePlanner, TradeType
@@ -113,6 +114,7 @@ class AutonomousTradingEngine:
         option_hint_provider: Optional[OptionHintProvider] = None,
         spy_price_provider: Optional[SpyPriceProvider] = None,
         setup_evidence_provider: Optional[SetupEvidenceProvider] = None,
+        market_data_provider: Optional[MarketDataProvider] = None,
         audit_logger: Optional[AuditLogger] = None,
         evidence_store: Optional[TradeEvidenceStore] = None,
     ) -> None:
@@ -126,6 +128,7 @@ class AutonomousTradingEngine:
         self.paper_adapter = paper_adapter
         self.option_hint_provider = option_hint_provider
         self.spy_price_provider = spy_price_provider
+        self.market_data_provider = market_data_provider
         self.ranker = CandidateRanker(
             self.config,
             setup_evidence_provider=setup_evidence_provider,
@@ -212,6 +215,49 @@ class AutonomousTradingEngine:
             vix_caution_size_multiplier=self.config.vix_caution_size_multiplier,
             vix_high_size_multiplier=self.config.vix_high_size_multiplier,
         )
+
+    def _apply_live_market_data(self, candidates: List[CandidateSignal]) -> None:
+        if self.config.mode != AutonomousMode.ASSISTED_LIVE:
+            return
+        provider = self.market_data_provider
+        if provider is None:
+            for candidate in candidates:
+                candidate.extras.setdefault("market_data_status", "not_configured")
+                candidate.extras.setdefault("market_data_source", "UNKNOWN")
+            return
+
+        symbols = [candidate.symbol for candidate in candidates]
+        try:
+            provider.subscribe(symbols)
+        except Exception:
+            logger.exception("live market-data provider subscribe failed")
+            for candidate in candidates:
+                candidate.extras["market_data_status"] = "provider_error"
+                candidate.extras["market_data_source"] = "UNKNOWN"
+                candidate.extras["market_data_error_message"] = "provider subscribe failed"
+            return
+
+        for candidate in candidates:
+            try:
+                quote = provider.latest_quote(candidate.symbol)
+            except Exception:
+                logger.exception(
+                    "live market-data provider latest_quote failed for %s",
+                    candidate.symbol,
+                )
+                candidate.extras["market_data_status"] = "provider_error"
+                candidate.extras["market_data_source"] = "UNKNOWN"
+                candidate.extras["market_data_error_message"] = "latest_quote failed"
+                continue
+            if quote is None:
+                candidate.extras["market_data_status"] = "missing_quote"
+                candidate.extras.setdefault("market_data_source", "IBKR")
+                candidate.extras["market_data_error_message"] = "no IBKR live quote available"
+                continue
+            candidate.extras.update(quote.to_candidate_extras())
+            price = _execution_price_from_quote(quote.to_dict())
+            if price is not None:
+                candidate.last_price = price
 
     def run_once(
         self,
@@ -306,6 +352,7 @@ class AutonomousTradingEngine:
             symbol_whitelist=self.config.symbol_whitelist,
             symbol_blacklist=self.config.symbol_blacklist,
         )
+        self._apply_live_market_data(candidates)
         ranked, rejected = self.ranker.rank_with_rejections(
             candidates,
             positions=positions,
@@ -541,3 +588,22 @@ class AutonomousTradingEngine:
                 market_value=float(pos.get("market_value", 0) or 0),
             )
         return out
+
+
+def _execution_price_from_quote(payload: Dict[str, Any]) -> Optional[float]:
+    last = _positive_float(payload.get("last"))
+    if last is not None:
+        return last
+    bid = _positive_float(payload.get("bid"))
+    ask = _positive_float(payload.get("ask"))
+    if bid is not None and ask is not None and ask >= bid:
+        return round((bid + ask) / 2.0, 4)
+    return bid or ask
+
+
+def _positive_float(value: Any) -> Optional[float]:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0 else None

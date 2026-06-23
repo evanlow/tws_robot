@@ -46,6 +46,7 @@ Legend:
 | Evidence-learning setup eligibility gate | Done | PR #188 |
 | Evidence-learning evidence-aware sizing overlay | Done | PR #189 |
 | Validation framework | Done | PR #169 |
+| IBKR real-time market-data feed for assisted-live prices | In review | Issue #177; actual-live now requires healthy IBKR live quotes and rejects Yahoo/delayed/frozen feeds by default |
 | Realized outcome reconciliation | Done | PR #170 |
 | Slippage / commission / partial-fill outcome fields | Done | PR #170 |
 | Strategy equity curve | Done | PR #171 |
@@ -815,6 +816,81 @@ Closeout note:
 
 - Issue #185 is ready to close after PR #190 and this tracker closeout lands;
   EL3, EL4, EL5, EL6, and EL8 are all merged.
+
+### IBKR real-time market-data feed for assisted-live prices
+
+Status: In review for Issue #177
+
+Checklist:
+
+- [x] Add an autonomous market-data provider interface.
+- [x] Adapt `TWSBridge` IBKR tick callbacks into quote snapshots.
+- [x] Subscribe assisted-live candidate symbols before ranking/planning.
+- [x] Replace candidate execution prices with fresh IBKR bid/ask/last quotes
+  when available.
+- [x] Add a live-runner readiness gate for the IBKR market-data provider.
+- [x] Reject Yahoo, delayed, frozen, stale, missing bid/ask, missing
+  timestamp, and unhealthy feed inputs for actual-live autonomous trading by
+  default.
+- [x] Preserve recommend-only research paths so Yahoo-derived candidates remain
+  advisory only.
+- [x] Add tests and documentation.
+
+Implementation notes:
+
+- Added `autonomous/market_data_provider.py` with `MarketDataQuote`,
+  `MarketDataProviderStatus`, `MarketDataProvider`, and
+  `IBKRRealtimeMarketDataProvider`.
+- Extended `core/tws_bridge.py` with passive market-data subscription,
+  snapshot, status, and permission/error handling. Market-data permission
+  errors do not get misclassified as order rejections.
+- `AutonomousTradingEngine` now enriches assisted-live candidates from the
+  configured market-data provider before ranking and planning.
+- `MarketDataHealthGuard` and `TradePlanner` now require IBKR `LIVE` market
+  data for assisted-live execution by default and block Yahoo live feeds unless
+  a future reviewed configuration change explicitly allows them.
+- `AutonomousLiveRunner.evaluate_gates()` now includes
+  `live_market_data_ready` and `live_market_data_diagnostics`, and can reject
+  with `live_market_data_unavailable` before any order submission attempt.
+- `web.routes.api_autonomous` wires the live runner to the current
+  `ServiceManager.tws_bridge` by default, while still allowing tests or
+  deployments to inject `autonomous_live_market_data_provider`.
+- `.env.example` and `docs/ACTUAL_LIVE_TRADING.md` document the new live feed
+  safety settings.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_market_data_health.py tests\test_trade_planner_execution_quality.py tests\test_autonomous_live_runner.py tests\test_tws_bridge.py --basetemp=.pytest-tmp-177-target2 -q --no-cov`
+  (`159 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_api_autonomous_live.py -x --basetemp=.pytest-tmp-177-api2 -q`
+  (`79 passed`).
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_config.py tests\test_api_autonomous.py tests\test_api_autonomous_live.py tests\test_technical_analysis_signal_provider.py --basetemp=.pytest-tmp-177-api -q --no-cov`
+  (`156 passed`).
+
+Smoke-test evidence:
+
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests/test_safety_regression.py tests/test_web_api.py --basetemp=.pytest-tmp-177-smoke1 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`203 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_portfolio_analysis.py tests/test_auth.py tests/test_config_security.py --basetemp=.pytest-tmp-177-smoke2 --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`112 passed`);
+  `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-177-smoke3b --no-cov -q --tb=short -o faulthandler_timeout=60`
+  (`164 passed`). Total split smoke coverage: `479 passed`.
+- The first smoke group printed a non-failing post-pytest sparkline fallback
+  database message after pytest completed; the command exited 0.
+
+Known limitations and manual checks:
+
+- The provider uses live IBKR quotes only after TWS/Gateway grants market-data
+  permissions for the subscribed symbols. A human operator must verify account
+  subscriptions and TWS market-data settings before any actual-live session.
+- The bridge stores latest quote snapshots; it does not yet construct
+  real-time bars for strategy research.
+- The live-runner readiness gate checks provider health before the cycle; the
+  planner still performs the per-symbol quote freshness/source/type checks
+  immediately before a plan can be live-ready.
+- This change does not add a new live-order submission path and does not enable
+  live trading by default.
 
 ## 5. Maintenance rules
 

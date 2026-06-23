@@ -43,6 +43,7 @@ from autonomous.autonomous_engine import AutonomousDecision, AutonomousTradingEn
 from autonomous.broker_fill_ingestor import BrokerFillEventsProvider, BrokerFillIngestor
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.idempotency import IdempotencyStore, LockAcquisition
+from autonomous.market_data_provider import IBKR_SOURCE
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.recovery_manager import RecoveryManager, RecoveryReport
 from autonomous.runner_config import AutonomousLiveRunnerConfig
@@ -94,6 +95,7 @@ EXECUTION_FAILED = "execution_failed"
 PROTECTION_RECOVERY_REQUIRED = "protection_recovery_required"
 DUPLICATE_ORDER_BLOCKED = "duplicate_order_blocked"
 RESTART_RECOVERY_REQUIRED = "restart_recovery_required"
+LIVE_MARKET_DATA_UNAVAILABLE = "live_market_data_unavailable"
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +113,8 @@ class LiveReadinessGates:
     live_continuous_enabled: bool = False
     account_id_verified: bool = False
     signal_provider_ready: bool = False
+    live_market_data_ready: bool = False
+    live_market_data_diagnostics: Dict[str, Any] = field(default_factory=dict)
     emergency_stop_active: bool = False
     open_live_trades: int = 0
     max_open_live_trades: int = 1
@@ -137,6 +141,7 @@ class LiveReadinessGates:
             and self.live_enabled
             and self.account_id_verified
             and self.signal_provider_ready
+            and self.live_market_data_ready
             and not self.emergency_stop_active
             and self.open_live_trades < self.max_open_live_trades
             and self.live_trades_today < self.max_live_trades_per_day
@@ -169,6 +174,12 @@ class LiveReadinessGates:
             out.append("Live account ID could not be verified or does not match expected ID")
         if not self.signal_provider_ready:
             out.append("Signal provider not ready")
+        if not self.live_market_data_ready:
+            reason = self.live_market_data_diagnostics.get("reason")
+            out.append(
+                "Live IBKR market data is unavailable"
+                + (f": {reason}" if reason else "")
+            )
         if self.emergency_stop_active:
             out.append("Emergency stop active")
         if self.open_live_trades >= self.max_open_live_trades:
@@ -212,6 +223,8 @@ class LiveReadinessGates:
             "live_continuous_enabled": self.live_continuous_enabled,
             "account_id_verified": self.account_id_verified,
             "signal_provider_ready": self.signal_provider_ready,
+            "live_market_data_ready": self.live_market_data_ready,
+            "live_market_data_diagnostics": dict(self.live_market_data_diagnostics),
             "emergency_stop_active": self.emergency_stop_active,
             "open_live_trades": self.open_live_trades,
             "max_open_live_trades": self.max_open_live_trades,
@@ -372,6 +385,9 @@ class AutonomousLiveRunner:
         provided, the runner ingests fills before readiness gates so
         trade prices, partial-fill status, lifecycle state, and outcome
         evidence are reconciled from broker execution callbacks.
+    market_data_provider:
+        Live quote provider used to verify IBKR market-data readiness and
+        enrich assisted-live candidates before planning.
     continuous_mode:
         When ``True``, the ``AUTONOMOUS_LIVE_CONTINUOUS_ENABLED`` gate
         is also checked.  Set to ``True`` for continuous live cycles.
@@ -401,6 +417,7 @@ class AutonomousLiveRunner:
         recovery_manager: Optional[RecoveryManager] = None,
         outcome_writer: Optional[OutcomeEvidenceWriter] = None,
         evidence_store: Optional[TradeEvidenceStore] = None,
+        market_data_provider: Optional[Any] = None,
         continuous_mode: bool = False,
     ) -> None:
         self._engine = engine
@@ -415,6 +432,9 @@ class AutonomousLiveRunner:
         self._deployable_cash_provider = deployable_cash_provider
         self._broker_positions_provider = broker_positions_provider
         self._broker_open_orders_provider = broker_open_orders_provider
+        self._market_data_provider = market_data_provider
+        if market_data_provider is not None:
+            self._engine.market_data_provider = market_data_provider
         self._rejected_order_ids_provider = rejected_order_ids_provider
         self._filled_order_ids_provider = filled_order_ids_provider
         self._broker_fill_events_provider = broker_fill_events_provider
@@ -545,6 +565,9 @@ class AutonomousLiveRunner:
             protection_results=protection_results,
             deployable_cash=deployable_cash,
         )
+        live_market_data_ready, live_market_data_diagnostics = (
+            self._evaluate_live_market_data_provider()
+        )
 
         return LiveReadinessGates(
             connected=connected,
@@ -553,6 +576,8 @@ class AutonomousLiveRunner:
             live_continuous_enabled=self._config.live_continuous_enabled,
             account_id_verified=account_id_verified,
             signal_provider_ready=provider_ready,
+            live_market_data_ready=live_market_data_ready,
+            live_market_data_diagnostics=live_market_data_diagnostics,
             emergency_stop_active=estop,
             open_live_trades=self._store.count_open(),
             max_open_live_trades=self._config.max_open_live_trades,
@@ -568,6 +593,59 @@ class AutonomousLiveRunner:
             recovery_diagnostics=recovery_report.to_dict(),
             continuous_mode_required=self._continuous_mode,
         )
+
+    def _evaluate_live_market_data_provider(self) -> tuple[bool, Dict[str, Any]]:
+        provider = self._market_data_provider
+        if provider is None:
+            return False, {
+                "provider": None,
+                "ready": False,
+                "reason": "IBKR realtime market-data provider is not configured",
+            }
+        try:
+            status_obj = provider.status()
+            status = (
+                status_obj.to_dict()
+                if hasattr(status_obj, "to_dict")
+                else dict(status_obj or {})
+            )
+        except Exception:
+            logger.exception("live market-data provider status failed")
+            return False, {
+                "provider": None,
+                "ready": False,
+                "reason": "IBKR realtime market-data provider status failed",
+            }
+
+        provider_name = str(status.get("provider") or "").upper()
+        connected = bool(status.get("connected"))
+        healthy = bool(status.get("healthy"))
+        last_error = status.get("last_error")
+        ready = (
+            provider_name == IBKR_SOURCE
+            and connected
+            and healthy
+            and last_error is None
+            and not self._config.allow_yahoo_for_live_trading
+        )
+        reasons: List[str] = []
+        if provider_name != IBKR_SOURCE:
+            reasons.append(f"provider {provider_name or 'UNKNOWN'} is not IBKR")
+        if not connected:
+            reasons.append("provider is not connected")
+        if not healthy:
+            reasons.append("provider is unhealthy")
+        if last_error is not None:
+            msg = last_error.get("error_message") if isinstance(last_error, dict) else last_error
+            reasons.append(f"provider error: {msg}")
+        if self._config.allow_yahoo_for_live_trading:
+            reasons.append("ALLOW_YAHOO_FOR_LIVE_TRADING must remain false")
+        status["ready"] = ready
+        status["required_provider"] = IBKR_SOURCE
+        status["allow_yahoo_for_live_trading"] = self._config.allow_yahoo_for_live_trading
+        status["max_live_quote_age_seconds"] = self._config.max_live_quote_age_seconds
+        status["reason"] = "; ".join(reasons) if reasons else status.get("reason") or "IBKR market-data provider ready"
+        return ready, status
 
     def _verify_account_id(self, account_id: Optional[str]) -> bool:
         """Check the active account ID against the expected ID.
@@ -1759,6 +1837,8 @@ class AutonomousLiveRunner:
             return ACCOUNT_ID_MISMATCH
         if not gates.signal_provider_ready:
             return SIGNAL_PROVIDER_NOT_READY
+        if not gates.live_market_data_ready:
+            return LIVE_MARKET_DATA_UNAVAILABLE
         if gates.emergency_stop_active:
             return EMERGENCY_STOP_ACTIVE
         if gates.open_live_trades >= gates.max_open_live_trades:

@@ -147,6 +147,9 @@ class TradePlanner:
             block_missing_timestamp_live=config.market_data_block_missing_timestamp_live,
             block_feed_unhealthy_live=config.market_data_block_feed_unhealthy_live,
             block_market_closed_live=config.market_data_block_market_closed_live,
+            required_live_source=config.live_market_data_required_source,
+            require_live_market_data_type=config.live_market_data_require_live_type,
+            allow_yahoo_for_live_trading=config.allow_yahoo_for_live_trading,
         )
 
     def plan(
@@ -293,6 +296,8 @@ class TradePlanner:
                 "timestamp",
                 "as_of",
             ),
+            source=_first(extras, "market_data_source", "quote_source", "source"),
+            market_data_type=_first(extras, "market_data_type", "ibkr_market_data_type"),
             feed_healthy=_first(extras, "market_data_feed_healthy", "feed_healthy"),
             feed_status=_first(extras, "market_data_status", "feed_status", "data_status"),
             market_open=_first(extras, "market_is_open", "market_open"),

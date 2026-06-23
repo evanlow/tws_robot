@@ -568,7 +568,7 @@ autonomous/market_data_health.py
 
 #### Current implementation status
 
-Implemented in the Issue #161 continuation PR:
+Implemented in the Issue #161 continuation PR and tightened by Issue #177:
 
 - `autonomous/market_data_health.py` evaluates quote freshness, bid/ask
   presence, crossed/wide spreads, last-vs-mid deviation, market-open state,
@@ -582,15 +582,27 @@ Implemented in the Issue #161 continuation PR:
   `market_data_block_missing_timestamp_live`,
   `market_data_block_feed_unhealthy_live`, and
   `market_data_block_market_closed_live`.
+- Assisted-live defaults now fail closed on stale quotes older than 5 seconds,
+  missing bid/ask, missing quote timestamps, Yahoo-sourced live quotes, and
+  IBKR delayed/frozen market-data types.
+- `core.tws_bridge.TWSBridge` captures passive IBKR tick-price, tick-size,
+  market-data-type, and market-data permission/error callbacks for subscribed
+  symbols. `autonomous.market_data_provider.IBKRRealtimeMarketDataProvider`
+  adapts those snapshots for autonomous trading.
+- `AutonomousLiveRunner` has a pre-run live-market-data readiness gate. It
+  requires an IBKR provider that is connected, healthy, and free of market-data
+  errors before an actual-live cycle can proceed.
+- `AutonomousTradingEngine` subscribes candidate symbols and injects the
+  latest IBKR quote into assisted-live candidates before ranking/planning.
 - `TradePlanner` evaluates market-data health before execution-quality
   checks, blocks assisted-live stale/degraded/closed-market plans, records
   rejection reasons, and attaches `market_data_health` diagnostics to
   successful trade plans.
 - `TechnicalAnalysisSignalProvider` maps available quote metadata into
   candidate `extras` so planner diagnostics can be evidence-ready.
-- Missing bid/ask blocking remains configurable; the default preserves
-  current recommend-only and assisted-live fixtures while allowing operators
-  to fail closed by setting `market_data_block_missing_bid_ask_live=True`.
+- Yahoo remains available as a research/recommend-only signal source, but it is
+  rejected for actual-live autonomous trading unless a future reviewed change
+  explicitly opts into that risk.
 
 This phase does not add any new live-order submission path and does not
 enable live trading.
