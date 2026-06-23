@@ -1605,7 +1605,55 @@ class TestMarketEventsAPI:
 
         called_kwargs = event_svc.refresh_async.call_args.kwargs
         assert called_kwargs["force"] is True
+        assert called_kwargs["days_ahead"] == 28
         assert {"GOOG", "NVDA"}.issubset(set(called_kwargs["portfolio_symbols"]))
+
+    @patch("web.routes.api_market_events._get_event_service")
+    def test_upcoming_passes_filters(self, mock_get_event_service, client):
+        event_svc = mock_get_event_service.return_value
+        event_svc.get_upcoming_events.return_value = []
+
+        resp = client.get("/api/market-events/upcoming?event_type=EARNINGS,FOMC&symbol=aapl&status=active")
+        data = resp.get_json()
+
+        assert resp.status_code == 200
+        assert data["filters"]["event_type"] == ["EARNINGS", "FOMC"]
+        assert data["filters"]["symbol"] == ["AAPL"]
+        assert data["filters"]["status"] == ["ACTIVE"]
+        called_kwargs = event_svc.get_upcoming_events.call_args.kwargs
+        assert called_kwargs["event_types"] == ["EARNINGS", "FOMC"]
+        assert called_kwargs["symbols"] == ["AAPL"]
+        assert called_kwargs["statuses"] == ["ACTIVE"]
+
+    @patch("web.routes.api_market_events._get_event_service")
+    def test_sync_log_endpoint(self, mock_get_event_service, client):
+        event_svc = mock_get_event_service.return_value
+        event_svc.get_sync_logs.return_value = [{"provider": "test", "status": "success"}]
+        event_svc.get_last_sync_summary.return_value = {"status": "success"}
+
+        resp = client.get("/api/market-events/sync-log?limit=5")
+        data = resp.get_json()
+
+        assert resp.status_code == 200
+        assert data["count"] == 1
+        assert data["last_sync_summary"]["status"] == "success"
+        event_svc.get_sync_logs.assert_called_once_with(limit=5)
+
+    @patch("web.routes.api_market_events._get_event_service")
+    def test_ticker_and_reminders_endpoints(self, mock_get_event_service, client):
+        event_svc = mock_get_event_service.return_value
+        event_svc.get_ticker_items.return_value = [{"text": "FOMC tomorrow"}]
+        event_svc.get_reminders.return_value = [{"severity": "high"}]
+
+        ticker_resp = client.get("/api/market-events/ticker?days=28&limit=3")
+        reminders_resp = client.get("/api/market-events/reminders?days=7&mode=medium_high")
+
+        assert ticker_resp.status_code == 200
+        assert ticker_resp.get_json()["count"] == 1
+        assert reminders_resp.status_code == 200
+        assert reminders_resp.get_json()["count"] == 1
+        assert event_svc.get_ticker_items.call_args.kwargs["limit"] == 3
+        assert event_svc.get_reminders.call_args.kwargs["mode"] == "medium_high"
 
 
 # ==============================================================================

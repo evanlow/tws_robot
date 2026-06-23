@@ -130,6 +130,10 @@
         <span class="pulse-loading">Loading market data…</span>
       </div>
 
+      <div class="market-pulse-bar" id="eventTickerBar" style="margin-top:0.45rem;">
+        <span class="pulse-loading">Loading upcoming events...</span>
+      </div>
+
       <!-- AI-generated content (loaded async) -->
       <div class="market-outlook-body" id="marketOutlookBody" style="display:none;">
         <!-- Session Recap -->
@@ -519,8 +523,23 @@
               <option value="30">30 days</option>
             </select>
           </label>
+          <label style="font-size:0.8rem;color:#a0aec0;">Type
+            <select id="eventsTypeSelect" style="background:#1a2332;color:#e2e8f0;border:1px solid #2d4a5a;border-radius:4px;padding:2px 4px;font-size:0.8rem;">
+              <option value="">All</option>
+              <option value="EARNINGS">Earnings</option>
+              <option value="DIVIDEND">Dividends</option>
+              <option value="FOMC">FOMC</option>
+              <option value="MARKET_HOLIDAY,MARKET_EARLY_CLOSE">Holidays</option>
+            </select>
+          </label>
+          <label style="font-size:0.8rem;color:#a0aec0;">Symbol
+            <input id="eventsSymbolInput" type="text" placeholder="AAPL" style="width:5.5rem;background:#1a2332;color:#e2e8f0;border:1px solid #2d4a5a;border-radius:4px;padding:3px 5px;font-size:0.8rem;">
+          </label>
           <button class="btn-sm btn-secondary" id="eventsRefreshBtn" onclick="refreshEvents()">↻ Refresh</button>
         </div>
+      </div>
+      <div id="eventsSyncLog" style="font-size:0.75rem;color:#a0aec0;margin-bottom:0.6rem;">
+        Sync status unavailable
       </div>
       <div id="eventsTimeline">
         <p class="empty-state">Loading events…</p>
@@ -1084,13 +1103,21 @@
   if (daysSelect) {
     daysSelect.addEventListener('change', function() { loadEvents(false); });
   }
+  var typeSelect = document.getElementById('eventsTypeSelect');
+  if (typeSelect) {
+    typeSelect.addEventListener('change', function() { loadEvents(false); });
+  }
+  var symbolInput = document.getElementById('eventsSymbolInput');
+  if (symbolInput) {
+    symbolInput.addEventListener('change', function() { loadEvents(false); });
+  }
 
   window.refreshEvents = async function() {
     var btn = document.getElementById('eventsRefreshBtn');
     if (btn) { btn.disabled = true; btn.textContent = '↻ Loading…'; }
     try {
       // Trigger a backend re-fetch
-      await fetch('/api/market-events/refresh', { method: 'POST' });
+      await fetch('/api/market-events/refresh?days=28', { method: 'POST' });
 
       // Poll the upcoming endpoint until new data appears (up to ~15 s)
       var days = 14;
@@ -1100,7 +1127,7 @@
       var maxAttempts = 10;
       var baselineCount = null;
       try {
-        var baseRes = await fetch('/api/market-events/upcoming?days=' + days);
+        var baseRes = await fetch(_eventsUrl(days));
         if (baseRes.ok) {
           var baseData = await baseRes.json();
           baselineCount = baseData.count;
@@ -1110,7 +1137,7 @@
       for (var attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise(function(r) { setTimeout(r, 1500); });
         try {
-          var checkRes = await fetch('/api/market-events/upcoming?days=' + days);
+          var checkRes = await fetch(_eventsUrl(days));
           if (checkRes.ok) {
             var checkData = await checkRes.json();
             // Stop polling when count changed or we've reached the last attempt
@@ -1121,6 +1148,9 @@
               }).length;
               _updateEventsTabBadge(urgent);
               _eventsLoaded = true;
+              loadEventSyncLog();
+              loadEventTicker();
+              loadEventReminders();
               break;
             }
           }
@@ -1146,7 +1176,7 @@
     container.innerHTML = '<p class="empty-state">Loading events…</p>';
 
     try {
-      var res = await fetch('/api/market-events/upcoming?days=' + days);
+      var res = await fetch(_eventsUrl(days));
       if (!res.ok) {
         container.innerHTML = '<p class="empty-state">Failed to load events</p>';
         return;
@@ -1162,10 +1192,11 @@
       }
 
       _renderEvents(container, data.events);
+      loadEventSyncLog();
 
       // Badge: count portfolio-relevant events within 2 days
       var urgent = data.events.filter(function(e) {
-        return e.is_portfolio_relevant && (e.days_away || 0) <= 2;
+        return (e.severity === 'high' || e.severity === 'critical') || (e.is_portfolio_relevant && (e.days_away || 0) <= 2);
       }).length;
       _updateEventsTabBadge(urgent);
     } catch(e) {
@@ -1180,8 +1211,91 @@
     btn.textContent = count > 0 ? 'Events 🗓 (' + count + ')' : 'Events 🗓';
   }
 
+  function _eventsUrl(days) {
+    var url = '/api/market-events/upcoming?days=' + encodeURIComponent(days);
+    var typeEl = document.getElementById('eventsTypeSelect');
+    var symbolEl = document.getElementById('eventsSymbolInput');
+    if (typeEl && typeEl.value) url += '&event_type=' + encodeURIComponent(typeEl.value);
+    if (symbolEl && symbolEl.value.trim()) url += '&symbol=' + encodeURIComponent(symbolEl.value.trim());
+    return url;
+  }
+
+  async function loadEventSyncLog() {
+    var el = document.getElementById('eventsSyncLog');
+    if (!el) return;
+    try {
+      var res = await fetch('/api/market-events/sync-log?limit=4');
+      if (!res.ok) return;
+      var data = await res.json();
+      if (!data.logs || data.logs.length === 0) {
+        el.textContent = 'No sync attempts recorded yet';
+        return;
+      }
+      var latest = data.logs[0];
+      var finished = latest.sync_finished_at ? latest.sync_finished_at.replace('T', ' ').substring(0, 19) + ' UTC' : 'running';
+      var failures = data.logs.filter(function(row) { return row.status !== 'success'; }).length;
+      el.textContent = 'Last sync: ' + escapeHtml(latest.provider) + ' / ' + escapeHtml(latest.event_type) + ' · ' + escapeHtml(latest.status) + ' · ' + finished + (failures ? ' · ' + failures + ' provider issue(s)' : '');
+    } catch(e) {
+      el.textContent = 'Sync status unavailable';
+    }
+  }
+
+  async function loadEventTicker() {
+    var el = document.getElementById('eventTickerBar');
+    if (!el) return;
+    try {
+      var res = await fetch('/api/market-events/ticker?days=28&limit=6');
+      if (!res.ok) {
+        el.innerHTML = '<span class="pulse-loading">Upcoming events unavailable</span>';
+        return;
+      }
+      var data = await res.json();
+      if (!data.items || data.items.length === 0) {
+        el.innerHTML = '<span class="pulse-loading">No upcoming market events in the next 4 weeks</span>';
+        return;
+      }
+      var pieces = data.items.map(function(item) {
+        var cls = item.severity === 'critical' || item.severity === 'high' ? 'pnl-negative' : (item.severity === 'medium' ? 'pulse-vix-label' : '');
+        return '<span class="' + cls + '">' + escapeHtml(item.text) + '</span>';
+      });
+      el.innerHTML = '<span class="pulse-sentiment pulse-neutral">Upcoming</span><span class="pulse-summary">' + pieces.join(' &nbsp;|&nbsp; ') + '</span>';
+    } catch(e) {
+      el.innerHTML = '<span class="pulse-loading">Upcoming events unavailable</span>';
+    }
+  }
+
+  async function loadEventReminders() {
+    try {
+      var res = await fetch('/api/market-events/reminders?days=7&mode=high_only');
+      if (!res.ok) return;
+      var data = await res.json();
+      if (!data.reminders || data.reminders.length === 0) return;
+      var reminder = data.reminders[0];
+      var key = 'market-event-reminder-' + reminder.event_id;
+      if (window.sessionStorage && sessionStorage.getItem(key)) return;
+      if (window.sessionStorage) sessionStorage.setItem(key, 'shown');
+      _showEventReminder(reminder);
+    } catch(e) {}
+  }
+
+  function _showEventReminder(reminder) {
+    var old = document.getElementById('eventReminderPopup');
+    if (old) old.remove();
+    var div = document.createElement('div');
+    div.id = 'eventReminderPopup';
+    div.style.cssText = 'position:fixed;right:1rem;bottom:1rem;z-index:10000;max-width:360px;background:#101827;border:1px solid #4a5568;border-left:4px solid ' + (reminder.severity === 'critical' ? '#fc8181' : '#f6e05e') + ';border-radius:6px;padding:0.85rem;box-shadow:0 10px 30px rgba(0,0,0,0.35);color:#e2e8f0;';
+    div.innerHTML = '<div style="display:flex;justify-content:space-between;gap:0.75rem;align-items:flex-start;">' +
+      '<strong style="font-size:0.88rem;">' + escapeHtml((reminder.severity || 'event').toUpperCase()) + ' event reminder</strong>' +
+      '<button type="button" aria-label="Dismiss" style="background:transparent;border:0;color:#a0aec0;font-size:1rem;cursor:pointer;">x</button>' +
+      '</div>' +
+      '<div style="font-size:0.82rem;margin-top:0.45rem;line-height:1.4;">' + escapeHtml(reminder.message || '') + '</div>' +
+      '<div style="font-size:0.74rem;margin-top:0.45rem;color:#a0aec0;line-height:1.35;">' + escapeHtml(reminder.recommended_action || '') + '</div>';
+    div.querySelector('button').addEventListener('click', function() { div.remove(); });
+    document.body.appendChild(div);
+  }
+
   function _renderEvents(container, events) {
-    var icons = { EARNINGS: '📊', FOMC: '🏛', DIVIDEND: '💰', ECONOMIC: '📈' };
+    var icons = { EARNINGS: '📊', FOMC: '🏛', DIVIDEND: '💰', ECONOMIC: '📈', MARKET_HOLIDAY: '🛑', MARKET_EARLY_CLOSE: '⏱' };
     var html = '<div class="events-list">';
     var today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1192,8 +1306,11 @@
       var daysAway = ev.days_away !== null && ev.days_away !== undefined ? ev.days_away : '';
       var daysLabel = daysAway === 0 ? 'Today' : (daysAway === 1 ? 'Tomorrow' : daysAway + 'd away');
 
-      var borderColor = relevant ? '#f6e05e' : (ev.event_type === 'FOMC' ? '#63b3ed' : (ev.event_type === 'DIVIDEND' ? '#38b2ac' : '#4a5568'));
+      var borderColor = relevant ? '#f6e05e' : (ev.severity === 'critical' ? '#fc8181' : (ev.event_type === 'FOMC' ? '#63b3ed' : (ev.event_type === 'DIVIDEND' ? '#38b2ac' : '#4a5568')));
       var badgeHtml = relevant ? '<span style="font-size:0.65rem;background:#2d3218;color:#f6e05e;padding:1px 6px;border-radius:8px;margin-left:0.4rem;">⚡ Portfolio</span>' : '';
+      if (ev.severity && ev.severity !== 'info') {
+        badgeHtml += '<span style="font-size:0.65rem;background:#2d1f1f;color:#fc8181;padding:1px 6px;border-radius:8px;margin-left:0.4rem;">' + escapeHtml(ev.severity.toUpperCase()) + '</span>';
+      }
 
       // Format date
       var dateStr = ev.event_date ? ev.event_date.substring(0, 10) : '';
@@ -1225,6 +1342,9 @@
       html +=   '</div>';
       html +=   '<div style="font-size:0.72rem;color:#718096;margin-top:0.1rem;">' + escapeHtml(dateStr) + escapeHtml(timeStr) + ' &nbsp;·&nbsp; <span style="color:' + (daysAway <= 2 && relevant ? '#f6e05e' : '#a0aec0') + ';">' + daysLabel + '</span></div>';
       html +=   detailHtml;
+      if (ev.status && ev.status === 'stale') {
+        html += '<div style="font-size:0.7rem;color:#fc8181;margin-top:0.2rem;">Stale: not seen in latest provider sync</div>';
+      }
       html += '</div>';
       html += '</div>';
     });
@@ -1232,6 +1352,9 @@
     html += '</div>';
     container.innerHTML = html;
   }
+
+  loadEventTicker();
+  loadEventReminders();
 
 })();
 </script>

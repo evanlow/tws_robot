@@ -230,9 +230,25 @@ The landing page gives you an at-a-glance view of your trading system:
 | **Recent Trades** | Last 10 executed trades |
 | **Active Alerts** | Up to 10 recent risk or system alerts |
 | **Market Overview** | Multi-region market status (US, EU, Asia) refreshed automatically |
+| **Market Events** | Earnings, dividends, FOMC, and US market-holiday context with manual sync, filters, ticker, and reminders |
 | **Portfolio Analysis** | Allocation chart, concentration metrics, drawdown indicator, and rebalancing suggestions |
 
 > 💡 **Tip:** The Dashboard is read-only. Use the **Strategies** page to start or stop strategies, and the **Positions** page to manage open trades.
+
+#### Market Events on the Dashboard
+
+The Dashboard includes an **Events** tab and a passive **Upcoming** strip below Market Outlook.
+
+Use **Refresh** in the Events tab to sync the next 4 weeks of configured market events. The first implementation covers:
+
+- earnings dates for tracked symbols;
+- dividend ex-dates for tracked symbols;
+- FOMC meeting decision dates;
+- NYSE/Nasdaq full holidays and early closes.
+
+The Events tab supports quick filters by lookahead window, event type, and symbol. The sync status line shows the latest provider refresh result and flags provider errors without deleting existing events.
+
+Popup reminders are shown for high-impact or critical upcoming events, such as FOMC tomorrow or a market holiday today. These reminders are advisory in the dashboard, but critical market-calendar blockers are also surfaced in trading readiness and can prevent automated paper/live entries until the blocker is resolved or has passed.
 
 ---
 

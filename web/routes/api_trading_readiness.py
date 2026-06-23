@@ -136,6 +136,56 @@ def _deployable_cash(svc) -> Tuple[float, str]:
     return 0.0, "unavailable"
 
 
+def _portfolio_symbols(svc) -> List[str]:
+    symbols = set()
+    try:
+        for sym in svc.get_positions():
+            symbols.add(str(sym).upper())
+    except Exception:
+        pass
+    try:
+        registry = getattr(svc, "strategy_registry", None)
+        for strategy in registry.get_all_strategies() if registry else []:
+            for sym in (strategy.config.symbols or []):
+                symbols.add(str(sym).upper())
+    except Exception:
+        pass
+    return sorted(symbols)
+
+
+def _event_risk_report(svc) -> Dict[str, Any]:
+    """Return conservative market-event risk context for readiness output."""
+    try:
+        symbols = _portfolio_symbols(svc)
+        return svc.market_events.evaluate_event_risk(
+            portfolio_symbols=symbols,
+            days_ahead=7,
+        )
+    except Exception as exc:
+        return {
+            "enabled": False,
+            "error": str(exc),
+            "blockers": [],
+            "warnings": [],
+            "events_considered": 0,
+            "max_severity": "info",
+        }
+
+
+def _event_risk_reasons(event_risk: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    blockers = event_risk.get("blockers") or []
+    warnings = event_risk.get("warnings") or []
+    blocker_reasons = [
+        f"Critical market event risk: {item.get('message') or item.get('title')}"
+        for item in blockers
+    ]
+    warning_reasons = [
+        f"Market event warning: {item.get('message') or item.get('title')}"
+        for item in warnings
+    ]
+    return blocker_reasons, warning_reasons
+
+
 def _build_status_payload() -> Dict[str, Any]:
     svc = get_services()
     live_config = _current_live_config()
@@ -152,6 +202,8 @@ def _build_status_payload() -> Dict[str, Any]:
     account_data_ready = bool(getattr(svc, "account_data_ready", False))
 
     deployable_cash, deployable_cash_source = _deployable_cash(svc)
+    event_risk = _event_risk_report(svc)
+    event_blocker_reasons, event_warning_reasons = _event_risk_reasons(event_risk)
     max_single_trade_value = round(
         deployable_cash * live_config.max_deployable_cash_pct,
         2,
@@ -211,6 +263,9 @@ def _build_status_payload() -> Dict[str, Any]:
     if not paper_adapter_ready:
         paper_reasons.append("Paper execution adapter is not ready")
         paper_tasks.append("Verify the paper TWS bridge handshake and adapter wiring")
+    if event_blocker_reasons:
+        paper_reasons.extend(event_blocker_reasons)
+        paper_tasks.append("Review market calendar/event blockers before automated paper entries")
 
     criteria["paper_execution"] = _criterion(
         "paper_execution",
@@ -223,6 +278,7 @@ def _build_status_payload() -> Dict[str, Any]:
             "signal_provider_ready": signal_ready,
             "paper_adapter_ready": paper_adapter_ready,
             "emergency_stop_active": emergency_stop,
+            "event_risk": event_risk,
         },
         next_tasks=paper_tasks,
     )
@@ -253,6 +309,11 @@ def _build_status_payload() -> Dict[str, Any]:
             f"{live_config.min_deployable_cash:.2f}"
         )
         live_common_tasks.append("Confirm cash availability and minimum deployable cash setting")
+    if event_blocker_reasons:
+        live_common_reasons.extend(event_blocker_reasons)
+        live_common_tasks.append("Resolve or wait out critical market calendar/event blockers")
+    if event_warning_reasons:
+        live_common_tasks.append("Review market-event warnings before live rehearsal")
 
     criteria["live_dry_run"] = _criterion(
         "live_dry_run",
@@ -266,6 +327,7 @@ def _build_status_payload() -> Dict[str, Any]:
             "signal_provider_ready": signal_ready,
             "emergency_stop_active": emergency_stop,
             "orders_to_tws": False,
+            "event_risk": event_risk,
         },
         next_tasks=live_common_tasks,
     )
@@ -312,6 +374,7 @@ def _build_status_payload() -> Dict[str, Any]:
             "emergency_stop_active": emergency_stop,
             "requires_bracket_exit": True,
             "orders_to_tws": True,
+            "event_risk": event_risk,
         },
         next_tasks=single_tasks,
     )
@@ -346,6 +409,7 @@ def _build_status_payload() -> Dict[str, Any]:
             **config_evidence,
             "policy_flag": "FIT_FOR_TRADING_ALLOW_CONTINUOUS_EXPERIMENT",
             "policy_flag_enabled": continuous_allowed,
+            "event_risk": event_risk,
         },
         next_tasks=continuous_tasks,
     )
@@ -403,6 +467,8 @@ def _build_status_payload() -> Dict[str, Any]:
         "overall_reasons": overall_reasons,
         "connection": connection_evidence,
         "live_config": live_config_dict,
+        "event_risk": event_risk,
+        "event_risk_warnings": event_warning_reasons,
         "criteria": criteria,
     }
 

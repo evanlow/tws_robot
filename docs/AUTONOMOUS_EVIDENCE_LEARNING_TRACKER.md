@@ -520,6 +520,31 @@ Known limitations:
   recovery-required events remain for later operational metrics work once event
   streams are normalized.
 
+## Issue #179 operational context note
+
+Issue #179 adds market-event sync and readiness context, but it does not change
+evidence-learning behavior.
+
+- Evidence-learning behaviour changed: no.
+- Capital promotion behaviour changed: no.
+- Sizing behaviour changed: no.
+- Risk gates changed: additive readiness context only; critical event blockers
+  can make automated paper/live readiness more conservative, never more
+  permissive.
+- Future evidence-learning work may choose to record event proximity as a setup
+  context dimension, but this implementation does not use event proximity to
+  calibrate edge, promote capital, or size trades.
+
+Test evidence:
+
+- Passed: `.venv\Scripts\python.exe -m pytest tests\test_market_events.py tests\test_web_api.py::TestMarketEventsAPI tests\test_api_trading_readiness.py --basetemp=.pytest-tmp-179 -q`
+  (`31 passed`).
+- Passed split smoke verification:
+  `.venv\Scripts\python.exe -m pytest tests\test_web_api.py --basetemp=.pytest-tmp-179-smoke-web -q --no-cov --tb=short -o faulthandler_timeout=60`
+  (`187 passed`);
+  `.venv\Scripts\python.exe -m pytest tests\test_safety_regression.py --basetemp=.pytest-tmp-179-smoke-safety -q --no-cov --tb=short -o faulthandler_timeout=60`
+  (`19 passed`).
+
 ## 5. Maintenance rules
 
 Future evidence-learning PRs should update this tracker when they complete work.
