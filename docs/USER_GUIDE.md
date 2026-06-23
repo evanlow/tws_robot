@@ -246,9 +246,9 @@ Use **Refresh** in the Events tab to sync the next 4 weeks of configured market 
 - FOMC meeting decision dates;
 - NYSE/Nasdaq full holidays and early closes.
 
-The Events tab supports quick filters by lookahead window, event type, and symbol. The sync status line shows the latest provider refresh result and flags provider errors without deleting existing events.
+The Events tab supports quick filters by lookahead window, event type, and symbol. The sync status line shows the latest provider refresh result and flags provider errors without deleting existing events. Lightweight dashboard preferences let each browser hide the rolling ticker, choose popup reminder sensitivity (`High only`, `Medium+`, `All`, or `Off`), and choose the reminder window (`7 days`, `3 days`, `1 day`, or `Same day`).
 
-Popup reminders are shown for high-impact or critical upcoming events, such as FOMC tomorrow or a market holiday today. These reminders are advisory in the dashboard, but critical market-calendar blockers are also surfaced in trading readiness and can prevent automated paper/live entries until the blocker is resolved or has passed.
+Popup reminders are shown according to those local dashboard preferences for upcoming events such as FOMC tomorrow or a market holiday today. These reminders are advisory in the dashboard, but critical market-calendar blockers are also surfaced in trading readiness and can prevent automated paper/live entries until the blocker is resolved or has passed.
 
 ---
 

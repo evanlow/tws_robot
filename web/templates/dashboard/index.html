@@ -541,6 +541,28 @@
       <div id="eventsSyncLog" style="font-size:0.75rem;color:#a0aec0;margin-bottom:0.6rem;">
         Sync status unavailable
       </div>
+      <div id="eventsPreferenceControls" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.75rem;margin-bottom:0.7rem;font-size:0.78rem;color:#a0aec0;">
+        <label style="display:flex;align-items:center;gap:0.3rem;">
+          <input id="eventTickerToggle" type="checkbox" checked>
+          Ticker
+        </label>
+        <label>Popups
+          <select id="eventPopupModeSelect" style="background:#1a2332;color:#e2e8f0;border:1px solid #2d4a5a;border-radius:4px;padding:2px 4px;font-size:0.78rem;">
+            <option value="high_only" selected>High only</option>
+            <option value="medium_high">Medium+</option>
+            <option value="all">All</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label>Window
+          <select id="eventReminderWindowSelect" style="background:#1a2332;color:#e2e8f0;border:1px solid #2d4a5a;border-radius:4px;padding:2px 4px;font-size:0.78rem;">
+            <option value="7" selected>7 days</option>
+            <option value="3">3 days</option>
+            <option value="1">1 day</option>
+            <option value="same_day">Same day</option>
+          </select>
+        </label>
+      </div>
       <div id="eventsTimeline">
         <p class="empty-state">Loading events…</p>
       </div>
@@ -1088,6 +1110,8 @@
   // Market Events tab
   // ---------------------------------------------------------------
   var _eventsLoaded = false;
+  var _eventPrefsKey = 'twsRobot.marketEventPreferences';
+  var _eventPrefs = _loadEventPreferences();
 
   // Load events when the tab is first clicked
   document.querySelectorAll('.tab-btn').forEach(function(btn) {
@@ -1111,6 +1135,7 @@
   if (symbolInput) {
     symbolInput.addEventListener('change', function() { loadEvents(false); });
   }
+  _initEventPreferenceControls();
 
   window.refreshEvents = async function() {
     var btn = document.getElementById('eventsRefreshBtn');
@@ -1243,6 +1268,11 @@
   async function loadEventTicker() {
     var el = document.getElementById('eventTickerBar');
     if (!el) return;
+    if (!_eventPrefs.showTicker) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = '';
     try {
       var res = await fetch('/api/market-events/ticker?days=28&limit=6');
       if (!res.ok) {
@@ -1265,13 +1295,25 @@
   }
 
   async function loadEventReminders() {
+    if (_eventPrefs.popupMode === 'off') {
+      var old = document.getElementById('eventReminderPopup');
+      if (old) old.remove();
+      return;
+    }
     try {
-      var res = await fetch('/api/market-events/reminders?days=7&mode=high_only');
+      var days = _eventPrefs.reminderWindow === 'same_day' ? 1 : parseInt(_eventPrefs.reminderWindow, 10) || 7;
+      var res = await fetch('/api/market-events/reminders?days=' + encodeURIComponent(days) + '&mode=' + encodeURIComponent(_eventPrefs.popupMode));
       if (!res.ok) return;
       var data = await res.json();
-      if (!data.reminders || data.reminders.length === 0) return;
-      var reminder = data.reminders[0];
-      var key = reminder.event_id ? 'market-event-reminder-' + reminder.event_id : null;
+      var reminders = data.reminders || [];
+      if (_eventPrefs.reminderWindow === 'same_day') {
+        reminders = reminders.filter(function(item) {
+          return item.event && item.event.days_away === 0;
+        });
+      }
+      if (reminders.length === 0) return;
+      var reminder = reminders[0];
+      var key = reminder.event_id ? 'market-event-reminder-' + _eventPrefs.popupMode + '-' + _eventPrefs.reminderWindow + '-' + reminder.event_id : null;
       if (key && window.sessionStorage && sessionStorage.getItem(key)) return;
       if (key && window.sessionStorage) sessionStorage.setItem(key, 'shown');
       _showEventReminder(reminder);
@@ -1292,6 +1334,66 @@
       '<div style="font-size:0.74rem;margin-top:0.45rem;color:#a0aec0;line-height:1.35;">' + escapeHtml(reminder.recommended_action || '') + '</div>';
     div.querySelector('button').addEventListener('click', function() { div.remove(); });
     document.body.appendChild(div);
+  }
+
+  function _loadEventPreferences() {
+    var defaults = {
+      showTicker: true,
+      popupMode: 'high_only',
+      reminderWindow: '7'
+    };
+    try {
+      if (!window.localStorage) return defaults;
+      var raw = localStorage.getItem(_eventPrefsKey);
+      if (!raw) return defaults;
+      var parsed = JSON.parse(raw);
+      return {
+        showTicker: parsed.showTicker !== false,
+        popupMode: ['high_only', 'medium_high', 'all', 'off'].indexOf(parsed.popupMode) >= 0 ? parsed.popupMode : defaults.popupMode,
+        reminderWindow: ['7', '3', '1', 'same_day'].indexOf(String(parsed.reminderWindow)) >= 0 ? String(parsed.reminderWindow) : defaults.reminderWindow
+      };
+    } catch(e) {
+      return defaults;
+    }
+  }
+
+  function _saveEventPreferences() {
+    try {
+      if (window.localStorage) {
+        localStorage.setItem(_eventPrefsKey, JSON.stringify(_eventPrefs));
+      }
+    } catch(e) {}
+  }
+
+  function _initEventPreferenceControls() {
+    var tickerToggle = document.getElementById('eventTickerToggle');
+    var popupSelect = document.getElementById('eventPopupModeSelect');
+    var windowSelect = document.getElementById('eventReminderWindowSelect');
+
+    if (tickerToggle) {
+      tickerToggle.checked = !!_eventPrefs.showTicker;
+      tickerToggle.addEventListener('change', function() {
+        _eventPrefs.showTicker = tickerToggle.checked;
+        _saveEventPreferences();
+        loadEventTicker();
+      });
+    }
+    if (popupSelect) {
+      popupSelect.value = _eventPrefs.popupMode;
+      popupSelect.addEventListener('change', function() {
+        _eventPrefs.popupMode = popupSelect.value;
+        _saveEventPreferences();
+        loadEventReminders();
+      });
+    }
+    if (windowSelect) {
+      windowSelect.value = _eventPrefs.reminderWindow;
+      windowSelect.addEventListener('change', function() {
+        _eventPrefs.reminderWindow = windowSelect.value;
+        _saveEventPreferences();
+        loadEventReminders();
+      });
+    }
   }
 
   function _renderEvents(container, events) {
