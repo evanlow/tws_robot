@@ -53,18 +53,21 @@ def summarize_evidence_learning(
     calibrator = EvidenceCalibrator()
     summaries = calibrator.summarize(outcome_rows)
     grouped = _records_by_setup(outcome_rows)
-    promotion = CapitalPromotionEvaluator().evaluate(
+    evaluator = CapitalPromotionEvaluator()
+    promotion = evaluator.evaluate(
         outcome_rows,
         current_level=current_level,
         now=now,
     )
-    setup_performance = _setup_performance(
+    all_setup_performance = _setup_performance(
         summaries=summaries,
         grouped=grouped,
         current_level=current_level,
-        limit=setup_limit,
+        evaluator=evaluator,
+        now=now,
     )
-    weak_setups = _weak_setups(setup_performance)
+    weak_setups = _weak_setups(all_setup_performance)
+    setup_performance = all_setup_performance[: max(1, int(setup_limit or 50))]
     drift = _drift_report(
         grouped=grouped,
         recent_trades=drift_recent_trades,
@@ -106,14 +109,16 @@ def _setup_performance(
     summaries: Dict[str, SetupEvidenceSummary],
     grouped: Dict[str, List[Dict[str, Any]]],
     current_level: int,
-    limit: int,
+    evaluator: CapitalPromotionEvaluator,
+    now: Optional[datetime] = None,
 ) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for setup_id, summary in summaries.items():
         metrics = summary.metrics.to_dict()
-        promotion = CapitalPromotionEvaluator().evaluate(
+        promotion = evaluator.evaluate(
             grouped.get(setup_id, []),
             current_level=current_level,
+            now=now,
         )
         rows.append(
             {
@@ -147,7 +152,7 @@ def _setup_performance(
         ),
         reverse=True,
     )
-    return rows[: max(1, int(limit or 50))]
+    return rows
 
 
 def _weak_setups(setups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
