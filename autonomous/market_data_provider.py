@@ -128,7 +128,9 @@ class MarketDataQuote:
                 payload.get("market_data_type")
             ),
             feed_healthy=_bool_or_none(
-                payload.get("feed_healthy") or payload.get("market_data_feed_healthy")
+                payload.get("feed_healthy")
+                if payload.get("feed_healthy") is not None
+                else payload.get("market_data_feed_healthy")
             ),
             error_code=_optional_int(payload.get("error_code")),
             error_message=(

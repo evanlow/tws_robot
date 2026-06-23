@@ -193,7 +193,9 @@ class AutonomousLiveRunnerConfig:
         Defaults to ``false``.  Yahoo Finance may be advisory, but cannot
         satisfy live autonomous execution quote requirements.
     ``MAX_LIVE_QUOTE_AGE_SECONDS``
-        Maximum age for live IBKR quote snapshots.  Default ``5`` seconds.
+        Diagnostic threshold surfaced in live market-data status payloads.
+        It does not independently enforce planner or readiness quote gating.
+        Default ``5`` seconds.
     """
 
     # ---- Master live-mode switches ------------------------------------
