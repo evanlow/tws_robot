@@ -50,7 +50,7 @@ Legend:
 | Evidence-aware sizing overlay | Done | PR #189; setup evidence can hold, reduce, tiny-cap, or block share sizing without bypassing hard caps |
 | Capital promotion report | Done | PR #182; advisory EL7 report recommends approve/hold/demote from realized outcome evidence and operational incidents without applying capital changes |
 | Sharpe / Sortino / profit-factor metrics | Done | PR #183; implemented in reusable `autonomous/performance_metrics.py` for realized outcome evidence |
-| Evidence-learning dashboard/API exposure | Current PR | Read-only EL8 setup performance, promotion, weak setup, and drift diagnostics exposed through evidence APIs and control tower |
+| Evidence-learning dashboard/API exposure | Done | PR #190; read-only EL8 setup performance, promotion, weak setup, and drift diagnostics exposed through evidence APIs and control tower |
 
 ## 2. Evidence-learning phases
 
@@ -63,7 +63,7 @@ Legend:
 | EL5 | Setup eligibility gate | Done | PR #188 |
 | EL6 | Evidence-aware sizing overlay | Done | PR #189 |
 | EL7 | Capital promotion report | Done | PR #182 |
-| EL8 | Dashboard/API exposure | Current PR | Issue #185 |
+| EL8 | Dashboard/API exposure | Done | PR #190 |
 
 ## 3. Phase detail tracker
 
@@ -343,11 +343,12 @@ Smoke-test evidence:
 
 Tracking note:
 
-- EL5 is complete in PR #188. Remaining Issue #185 work is EL6 and EL8.
+- EL3 through EL8 are complete after PR #190. Issue #185 is ready to close
+  after this tracker closeout lands.
 
 ### EL6 — Evidence-aware sizing overlay
 
-Status: Current PR
+Status: Done in PR #189
 
 Goal:
 
@@ -383,8 +384,9 @@ Tracking note:
 - Targeted verification passed:
   `.venv\Scripts\python.exe -m pytest tests\test_evidence_aware_sizer.py tests\test_trade_planner_evidence_sizing.py tests\test_trade_planner_sizing.py tests\test_trade_planner_fractional_drawdown.py tests\test_setup_eligibility.py tests\test_candidate_ranker_edge.py tests\test_autonomous_engine.py --basetemp=.pytest-tmp-el6-target2 -q`
   (`46 passed`).
-- Smoke-test evidence will be recorded after final split verification for this
-  PR.
+- Smoke-test evidence passed in PR #189: split smoke groups reported
+  `203 passed`, `112 passed`, and `161 passed`, for total split smoke
+  coverage of `476 passed`.
 
 ### EL7 — Capital promotion report
 
@@ -426,7 +428,7 @@ Test evidence:
 
 ### EL8 — Dashboard/API exposure
 
-Status: Current PR
+Status: Done in PR #190
 
 Goal:
 
@@ -469,9 +471,17 @@ Smoke-test evidence:
   `.venv\Scripts\python.exe -m pytest tests/test_order_executor.py tests/test_tws_bridge.py tests/test_fx_research.py --basetemp=.pytest-tmp-el8-smoke3 --no-cov -q --tb=short -o faulthandler_timeout=60`
   (`161 passed`). Total split smoke coverage: `476 passed`.
 
-## 4. Current PR note
+## 4. Issue #185 closeout note
 
-The current Issue #185 continuation work implements EL8 dashboard/API exposure:
+Issue #185 is complete after PR #190 merged. The follow-up sequence delivered:
+
+- EL3 evidence calibrator in PR #186.
+- EL4 adaptive edge estimator in PR #187.
+- EL5 setup eligibility gate in PR #188.
+- EL6 evidence-aware sizing overlay in PR #189.
+- EL8 dashboard/API exposure in PR #190.
+
+The final EL8 work implements dashboard/API exposure:
 
 - `autonomous/evidence_learning_summary.py` builds read-only setup
   performance, promotion, weak setup, and drift diagnostics.
@@ -503,7 +513,7 @@ Smoke-test evidence:
 Known limitations:
 
 - The setup-evidence provider hook is explicit; no default live evidence source
-  is configured in this PR. EL8 summarizes evidence already available through
+  is configured by PR #190. EL8 summarizes evidence already available through
   the evidence store.
 - Operational incident rates such as rejected-order rate, stale-quote rejection
   rate, broker disconnect frequency, unconfirmed-protection events, and
