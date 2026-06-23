@@ -69,6 +69,7 @@ class AutonomousRunnerConfig:
     max_new_trades_per_run: int = 1
     max_open_autonomous_trades: int = 1
     max_holding_days: int = 5
+    min_profit_threshold_usd: float = 100.0  # Exit when unrealized P/L >= this
 
     # ---- Market-hours guard rails (informational; not currently enforced
     # by the runner — these fields are reserved for future use) ----------
@@ -87,6 +88,7 @@ class AutonomousRunnerConfig:
             "max_new_trades_per_run": self.max_new_trades_per_run,
             "max_open_autonomous_trades": self.max_open_autonomous_trades,
             "max_holding_days": self.max_holding_days,
+            "min_profit_threshold_usd": self.min_profit_threshold_usd,
             "run_during_market_hours_only": self.run_during_market_hours_only,
             "avoid_first_minutes_after_open": self.avoid_first_minutes_after_open,
             "avoid_last_minutes_before_close": self.avoid_last_minutes_before_close,

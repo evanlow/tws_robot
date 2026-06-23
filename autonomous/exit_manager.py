@@ -52,6 +52,7 @@ TAKE_PROFIT = "TAKE_PROFIT"
 STOP_LOSS = "STOP_LOSS"
 TIME_EXIT = "TIME_EXIT"
 RISK_EXIT = "RISK_EXIT"
+PROFIT_EXIT = "PROFIT_EXIT"  # Unrealized P/L threshold exit
 NO_PRICE_AVAILABLE = "NO_PRICE_AVAILABLE"
 NO_EXIT = "NO_EXIT"
 
@@ -335,6 +336,21 @@ class AutonomousExitManager:
                 f"price {price:.2f} <= stop {float(trade.stop_price):.2f}",
                 price=price,
             )
+
+        # 4. Profit-based exit — when unrealized P/L hits the threshold.
+        #    Checked after target/stop so price-specific targets take priority.
+        min_profit_usd = getattr(trade, "min_profit_threshold_usd", 100.0)
+        if min_profit_usd > 0 and trade.quantity > 0:
+            entry_price = trade.entry_filled_price or trade.entry_limit_price
+            if entry_price and entry_price > 0:
+                unrealized_pnl = (price - entry_price) * trade.quantity
+                if unrealized_pnl >= min_profit_usd:
+                    return self._submit_exit(
+                        trade,
+                        PROFIT_EXIT,
+                        f"unrealized P/L ${unrealized_pnl:.2f} >= ${min_profit_usd:.2f}",
+                        price=price,
+                    )
 
         return ExitDecision(
             autonomous_trade_id=trade.autonomous_trade_id,

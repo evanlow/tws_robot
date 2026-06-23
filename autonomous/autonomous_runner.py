@@ -373,6 +373,7 @@ class AutonomousPaperRunner:
                 target_price=_as_float(plan.get("target_price")),
                 stop_price=_as_float(plan.get("stop_price")),
                 max_holding_days=int(self._config.max_holding_days),
+                min_profit_threshold_usd=float(self._config.min_profit_threshold_usd),
                 notes=["recorded by AutonomousPaperRunner"],
             )
         except Exception:  # pragma: no cover - defensive

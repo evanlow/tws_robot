@@ -67,6 +67,7 @@ class AutonomousTrade:
     target_price: Optional[float] = None
     stop_price: Optional[float] = None
     max_holding_days: int = 5
+    min_profit_threshold_usd: float = 100.0  # Exit when unrealized P/L >= this
     exit_order_id: Optional[int] = None
     exit_time: Optional[datetime] = None
     exit_price: Optional[float] = None
