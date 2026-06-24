@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>🛠️ System Maintenance</h1>
+<p style="color:#a0aec0;margin-bottom:1.5rem;">
+  Refresh market metadata safely. Dry-run previews changes; apply mode writes only validated metadata and reports.
+</p>
+
+<section style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+  <button class="btn-primary" id="dryRunAllBtn">Dry Run All</button>
+  <button class="btn-primary" id="dryRunConstituentsBtn">Dry Run Constituents</button>
+  <button class="btn-primary" id="applyConstituentsBtn">Apply Constituents Refresh</button>
+  <button class="btn-primary" id="refreshEventsBtn">Refresh Market Events</button>
+  <button class="btn-primary" id="validateBtn">Validate Metadata Only</button>
+</section>
+
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Metadata Status</h2>
+  <div id="statusPanel" class="empty-state">Loading maintenance status…</div>
+</section>
+
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Latest Run Result</h2>
+  <pre id="runOutput" style="white-space:pre-wrap;background:#0f1929;border:1px solid #2d3748;border-radius:8px;padding:1rem;color:#e2e8f0;min-height:5rem;">No run yet.</pre>
+</section>
+
+<section>
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Recent Reports</h2>
+  <div id="reportsPanel" class="empty-state">Loading reports…</div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const statusPanel = document.getElementById('statusPanel');
+  const reportsPanel = document.getElementById('reportsPanel');
+  const runOutput = document.getElementById('runOutput');
+
+  async function loadStatus() {
+    try {
+      const res = await fetch('/api/maintenance/status');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.status);
+      renderStatus(data);
+      renderReports(data.reports || []);
+    } catch (err) {
+      statusPanel.textContent = 'Could not load maintenance status: ' + err.message;
+    }
+  }
+
+  function renderStatus(data) {
+    const rows = data.constituents || [];
+    if (!rows.length) {
+      statusPanel.textContent = 'No constituent files found.';
+      return;
+    }
+    statusPanel.innerHTML = '<table class="data-table"><thead><tr><th>Area</th><th>Rows</th><th>Last Modified</th><th>Validation</th></tr></thead><tbody>' +
+      rows.map(row => {
+        const validation = row.validation || {};
+        const status = validation.status || 'unknown';
+        const warnings = (validation.warnings || []).length;
+        const errors = (validation.errors || []).length;
+        return '<tr>' +
+          '<td>' + escapeHtml(row.task) + '</td>' +
+          '<td>' + escapeHtml(String(row.row_count ?? '-')) + '</td>' +
+          '<td>' + escapeHtml(row.last_modified_at || '-') + '</td>' +
+          '<td>' + escapeHtml(status + ' (' + warnings + ' warnings, ' + errors + ' errors)') + '</td>' +
+          '</tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function renderReports(reports) {
+    if (!reports.length) {
+      reportsPanel.textContent = 'No maintenance reports yet.';
+      return;
+    }
+    reportsPanel.innerHTML = '<table class="data-table"><thead><tr><th>Report</th><th>Status</th><th>Dry Run</th><th>Finished</th><th>Warnings</th><th>Errors</th></tr></thead><tbody>' +
+      reports.map(report => '<tr>' +
+        '<td>' + escapeHtml(report.report_id || '-') + '</td>' +
+        '<td>' + escapeHtml(report.status || '-') + '</td>' +
+        '<td>' + escapeHtml(String(report.dry_run)) + '</td>' +
+        '<td>' + escapeHtml(report.finished_at || '-') + '</td>' +
+        '<td>' + escapeHtml(String(report.warnings_count || 0)) + '</td>' +
+        '<td>' + escapeHtml(String(report.errors_count || 0)) + '</td>' +
+      '</tr>').join('') + '</tbody></table>';
+  }
+
+  async function runMaintenance(payload, confirmMessage) {
+    if (confirmMessage && !confirm(confirmMessage)) return;
+    runOutput.textContent = 'Running maintenance…';
+    try {
+      const res = await fetch('/api/maintenance/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      runOutput.textContent = JSON.stringify(data, null, 2);
+      await loadStatus();
+    } catch (err) {
+      runOutput.textContent = 'Maintenance run failed: ' + err.message;
+    }
+  }
+
+  document.getElementById('dryRunAllBtn').addEventListener('click', () => runMaintenance({ dry_run: true }));
+  document.getElementById('dryRunConstituentsBtn').addEventListener('click', () => runMaintenance({
+    dry_run: true,
+    tasks: ['sp500_constituents', 'sti_constituents', 'hsi_constituents']
+  }));
+  document.getElementById('applyConstituentsBtn').addEventListener('click', () => runMaintenance({
+    dry_run: false,
+    tasks: ['sp500_constituents', 'sti_constituents', 'hsi_constituents']
+  }, 'Apply validated constituent refresh? Existing files will be backed up first.'));
+  document.getElementById('refreshEventsBtn').addEventListener('click', () => runMaintenance({
+    dry_run: false,
+    tasks: ['market_events'],
+    include_portfolio_symbols: true
+  }, 'Refresh market events for portfolio/strategy symbols now?'));
+  document.getElementById('validateBtn').addEventListener('click', () => runMaintenance({
+    dry_run: true,
+    tasks: ['metadata_validation']
+  }));
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+  }
+
+  loadStatus();
+})();
+</script>
+{% endblock %}
