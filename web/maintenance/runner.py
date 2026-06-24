@@ -9,6 +9,7 @@ adapters.
 from __future__ import annotations
 
 import csv
+import logging
 import os
 import shutil
 import tempfile
@@ -28,6 +29,8 @@ from web.maintenance.tasks import (
     ValidationResult,
 )
 from web.maintenance.validators import validate_constituent_rows
+
+logger = logging.getLogger(__name__)
 
 ConstituentLoader = Callable[[], List[Dict[str, str]]]
 
@@ -192,6 +195,7 @@ class MaintenanceRunner:
             self._invalidate_screener_cache(task_name, result)
             return result
         except Exception as exc:
+            logger.error("Constituent task %s failed: %s", task_name, exc, exc_info=True)
             result.status = STATUS_FAILED
             result.errors.append(str(exc))
             return result
@@ -250,6 +254,7 @@ class MaintenanceRunner:
                 result.warnings.append("One or more market-event providers failed; see provider_results")
             return result
         except Exception as exc:
+            logger.error("Market events task failed: %s", exc, exc_info=True)
             result.status = STATUS_FAILED
             result.errors.append(str(exc))
             return result
