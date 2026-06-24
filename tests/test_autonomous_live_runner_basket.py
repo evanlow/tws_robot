@@ -1,13 +1,82 @@
+from datetime import datetime, timezone
+
 from autonomous import AutonomousMode, AutonomousTradingConfig
 from autonomous.autonomous_engine import AutonomousTradingEngine
 from autonomous.autonomous_live_runner import AutonomousLiveRunner, EXECUTED, NO_TRADE
 from autonomous.live_basket_patch import _execute_one_live_plan
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+    MarketDataProviderStatus,
+    MarketDataQuote,
+)
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 from autonomous.trade_planner import TradeType
 from autonomous.trade_store import TradeStore
 from data.cash_availability import CashAvailabilityAnalyzer
 from execution.order_executor import OrderResult, OrderStatus
+
+
+class _LiveMarketDataProvider:
+    """Healthy IBKR realtime market-data provider stub for the live readiness gate."""
+
+    def __init__(self, *, connected: bool = True, healthy: bool = True) -> None:
+        self.connected = connected
+        self.healthy = healthy
+        self.subscribed: list[str] = []
+
+    def subscribe(self, symbols):
+        self.subscribed.extend([str(s).upper() for s in symbols])
+
+    def unsubscribe(self, symbols):
+        pass
+
+    def latest_quote(self, symbol):
+        now = datetime.now(timezone.utc)
+        return MarketDataQuote(
+            symbol=str(symbol).upper(),
+            bid=99.95,
+            ask=100.05,
+            last=100.0,
+            timestamp=now,
+            bid_timestamp=now,
+            ask_timestamp=now,
+            last_timestamp=now,
+            source=IBKR_SOURCE,
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            feed_healthy=True,
+        )
+
+    def status(self):
+        return MarketDataProviderStatus(
+            provider=IBKR_SOURCE,
+            connected=self.connected,
+            healthy=self.healthy,
+            subscribed_symbols=list(self.subscribed),
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            last_error=None,
+            reason="test market-data provider",
+        )
+
+
+def _live_quote_extras() -> dict:
+    """Healthy IBKR live-quote snapshot so the planner market-data guard allows
+    assisted-live planning for each basket leg."""
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "bid": 99.95,
+        "ask": 100.05,
+        "quote_last": 100.0,
+        "quote_timestamp": now,
+        "bid_timestamp": now,
+        "ask_timestamp": now,
+        "last_timestamp": now,
+        "market_data_source": IBKR_SOURCE,
+        "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+        "market_data_status": "healthy",
+        "market_data_feed_healthy": True,
+    }
 
 
 class _Provider:
@@ -46,6 +115,7 @@ def _signal(symbol, sector):
         last_price=100.0,
         support_price=95.0,
         resistance_price=110.0,
+        extras=_live_quote_extras(),
     )
 
 
@@ -101,6 +171,7 @@ def test_live_runner_executes_all_basket_legs_when_slots_allow(tmp_path):
         emergency_stop_provider=lambda: False,
         deployable_cash_provider=lambda: 100_000.0,
         broker_positions_provider=lambda: {},
+        market_data_provider=_LiveMarketDataProvider(),
     )
 
     result = runner.run_once()
@@ -160,6 +231,7 @@ def test_live_runner_blocks_basket_when_slots_insufficient(tmp_path):
         emergency_stop_provider=lambda: False,
         deployable_cash_provider=lambda: 100_000.0,
         broker_positions_provider=lambda: {},
+        market_data_provider=_LiveMarketDataProvider(),
     )
 
     result = runner.run_once()

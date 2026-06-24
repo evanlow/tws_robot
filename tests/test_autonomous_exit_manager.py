@@ -9,8 +9,10 @@ import pytest
 from autonomous.exit_manager import (
     AutonomousExitManager,
     EXIT_PENDING,
+    MANUAL_CLOSE,
     NO_EXIT,
     NO_PRICE_AVAILABLE,
+    PROFIT_EXIT,
     RISK_EXIT,
     STOP_LOSS,
     TAKE_PROFIT,
@@ -42,6 +44,7 @@ def _open_trade(symbol="AAA", *, target=110.0, stop=95.0, age_days=0):
         entry_order_id=11,
         entry_time=datetime.now(timezone.utc) - timedelta(days=age_days),
         entry_limit_price=100.0,
+        entry_filled_price=100.0,
         quantity=10,
         target_price=target,
         stop_price=stop,
@@ -59,7 +62,7 @@ def test_target_price_triggers_take_profit(store, tmp_path):
     store.record_trade(trade)
     adapter = _FakeAdapter()
 
-    positions = {"AAA": {"current_price": 112.5}}
+    positions = {"AAA": {"current_price": 112.5, "quantity": 100}}
     mgr = AutonomousExitManager(
         trade_store=store,
         paper_adapter=adapter,
@@ -83,7 +86,7 @@ def test_stop_price_triggers_stop_loss(store, tmp_path):
     trade = _open_trade()
     store.record_trade(trade)
     adapter = _FakeAdapter()
-    positions = {"AAA": {"current_price": 90.0}}
+    positions = {"AAA": {"current_price": 90.0, "quantity": 100}}
 
     mgr = AutonomousExitManager(
         trade_store=store,
@@ -101,7 +104,7 @@ def test_time_exit(store, tmp_path):
     trade = _open_trade(age_days=10)
     store.record_trade(trade)
     adapter = _FakeAdapter()
-    positions = {"AAA": {"current_price": 101.0}}  # within band
+    positions = {"AAA": {"current_price": 101.0, "quantity": 100}}  # within band
 
     mgr = AutonomousExitManager(
         trade_store=store,
@@ -123,7 +126,7 @@ def test_emergency_stop_triggers_risk_exit(store, tmp_path):
     mgr = AutonomousExitManager(
         trade_store=store,
         paper_adapter=adapter,
-        positions_provider=lambda: {"AAA": {"current_price": 100.0}},
+        positions_provider=lambda: {"AAA": {"current_price": 100.0, "quantity": 100}},
         emergency_stop_file=str(estop),
     )
     d = mgr.evaluate_open_trades()[0]
@@ -170,7 +173,7 @@ def test_force_risk_exit_reason_exits_even_when_price_within_band(store, tmp_pat
     mgr = AutonomousExitManager(
         trade_store=store,
         paper_adapter=adapter,
-        positions_provider=lambda: {"AAA": {"current_price": 102.0}},
+        positions_provider=lambda: {"AAA": {"current_price": 102.0, "quantity": 100}},
         emergency_stop_file=str(tmp_path / "ESTOP"),
     )
     d = mgr.evaluate_open_trades(
@@ -198,6 +201,111 @@ def test_no_paper_adapter_records_decision_without_order(store, tmp_path):
     assert store.get(trade.autonomous_trade_id).status == "OPEN"
 
 
+def test_exit_limit_price_is_rounded_to_valid_tick(store, tmp_path):
+    # IBKR position market prices routinely carry sub-penny precision.
+    # The submitted SELL LIMIT must be tick-aligned ($0.01 for >= $1),
+    # otherwise TWS rejects with error code 110 in an endless retry loop.
+    trade = _open_trade()
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+
+    positions = {"AAA": {"current_price": 112.5067, "quantity": 100}}
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: positions,
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+    assert decisions and decisions[0].decision == TAKE_PROFIT
+    assert adapter.calls
+    assert adapter.calls[0]["limit_price"] == 112.51
+
+
+def test_sub_dollar_exit_limit_price_uses_four_decimals():
+    from autonomous.exit_manager import _round_to_tick
+
+    assert _round_to_tick(0.123456) == 0.1235
+    assert _round_to_tick(171.40533) == 171.41
+
+
+def test_force_close_submits_tick_rounded_sell(store, tmp_path):
+    # "Close Now": flatten a filled OPEN position at the current price even
+    # though no rule-based trigger (target/stop/profit/time) has fired.
+    trade = _open_trade(target=999.0)  # target far above so no auto-exit
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {"AAA": {"current_price": 103.4567, "quantity": 100}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+
+    # No auto-exit at this price (below target, above stop).
+    auto = mgr.evaluate_open_trades()
+    assert auto and auto[0].decision == NO_EXIT
+    assert not adapter.calls
+
+    decision = mgr.force_close_trade(trade.autonomous_trade_id)
+    assert decision.decision == MANUAL_CLOSE
+    assert adapter.calls
+    assert adapter.calls[0]["order_type"] == "LIMIT"
+    assert adapter.calls[0]["limit_price"] == 103.46  # tick-rounded
+    assert store.get(trade.autonomous_trade_id).status == EXIT_PENDING
+
+
+def test_force_close_rejects_non_open_trade(store, tmp_path):
+    trade = _open_trade()
+    trade.status = EXIT_PENDING
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {"AAA": {"current_price": 105.0, "quantity": 100}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+
+    decision = mgr.force_close_trade(trade.autonomous_trade_id)
+    assert decision.decision == NO_EXIT
+    assert not adapter.calls
+
+
+def test_force_close_unknown_trade_is_safe(store, tmp_path):
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+
+    decision = mgr.force_close_trade("does-not-exist")
+    assert decision.decision == NO_EXIT
+    assert not adapter.calls
+
+
+def test_force_close_without_price_does_not_submit(store, tmp_path):
+    trade = _open_trade(target=999.0)
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {},  # no current price for AAA
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+
+    decision = mgr.force_close_trade(trade.autonomous_trade_id)
+    assert decision.decision == NO_PRICE_AVAILABLE
+    assert not adapter.calls
+    assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
 def test_paper_sell_uses_limit_order_only(store, tmp_path):
     trade = _open_trade()
     store.record_trade(trade)
@@ -205,7 +313,7 @@ def test_paper_sell_uses_limit_order_only(store, tmp_path):
     mgr = AutonomousExitManager(
         trade_store=store,
         paper_adapter=adapter,
-        positions_provider=lambda: {"AAA": {"current_price": 112.0}},
+        positions_provider=lambda: {"AAA": {"current_price": 112.0, "quantity": 100}},
         emergency_stop_file=str(tmp_path / "ESTOP"),
     )
     mgr.evaluate_open_trades()
@@ -248,7 +356,7 @@ def test_emergency_stop_with_price_submits_paper_sell_limit(store, tmp_path):
     mgr = AutonomousExitManager(
         trade_store=store,
         paper_adapter=adapter,
-        positions_provider=lambda: {"AAA": {"current_price": 101.25}},
+        positions_provider=lambda: {"AAA": {"current_price": 101.25, "quantity": 100}},
         emergency_stop_file=str(estop),
     )
     d = mgr.evaluate_open_trades()[0]
@@ -304,6 +412,84 @@ def test_non_buy_shares_trade_is_skipped(store, tmp_path):
     assert "BUY_SHARES" in d.reason
     assert adapter.calls == []
     assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+def test_open_trade_without_entry_fill_falls_back_to_limit_price(store, tmp_path):
+    """An OPEN trade with no entry_filled_price uses entry_limit_price as fallback.
+    This covers trades created before the field was tracked (schema migration)."""
+    # Set target/stop well outside current price so only the aggregate profit
+    # path triggers — current=120, entry_limit=100, threshold=50, qty=10 → $200.
+    trade = _open_trade(target=300.0, stop=50.0)
+    trade.entry_filled_price = None
+    trade.entry_limit_price = 100.0
+    trade.min_profit_threshold_usd = 50.0
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {"AAA": {"current_price": 120.0, "quantity": 100}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+    # Aggregate profit path fires: (120-100)*10=$200 >= $50
+    assert any(d.decision == PROFIT_EXIT for d in decisions)
+    assert len(adapter.calls) == 1
+
+
+def test_open_trade_without_any_entry_price_is_not_exited(store, tmp_path):
+    """Guard: if both entry_filled_price and entry_limit_price are missing, skip."""
+    trade = _open_trade()
+    trade.entry_filled_price = None
+    trade.entry_limit_price = None
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {"AAA": {"current_price": 200.0}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    d = mgr.evaluate_open_trades()[0]
+    assert d.decision == NO_EXIT
+    assert adapter.calls == []
+    assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+def test_aggregate_symbol_profit_exit_triggers_across_multiple_legs(store, tmp_path):
+    """Aggregate P/L by symbol can trigger profit exits even when each leg
+    is below threshold individually."""
+    t1 = _open_trade(symbol="AAA", target=200.0, stop=50.0)
+    t1.quantity = 5
+    t1.entry_filled_price = 100.0
+    t1.min_profit_threshold_usd = 80.0
+    t2 = _open_trade(symbol="AAA", target=200.0, stop=50.0)
+    t2.quantity = 5
+    t2.entry_filled_price = 101.0
+    t2.min_profit_threshold_usd = 80.0
+    store.record_trade(t1)
+    store.record_trade(t2)
+
+    # Individual P/L: 45 and 40 (< 80), aggregate = 85 (>= 80).
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {"AAA": {"current_price": 109.0, "quantity": 100}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    decisions = mgr.evaluate_open_trades()
+
+    assert len(decisions) == 2
+    assert all(d.decision == PROFIT_EXIT for d in decisions)
+    assert len(adapter.calls) == 2
+    assert all(call["symbol"] == "AAA" for call in adapter.calls)
+    assert all(call["order_type"] == "LIMIT" for call in adapter.calls)
+
+    refreshed_1 = store.get(t1.autonomous_trade_id)
+    refreshed_2 = store.get(t2.autonomous_trade_id)
+    assert refreshed_1.status == EXIT_PENDING
+    assert refreshed_2.status == EXIT_PENDING
 
 
 # ---------------------------------------------------------------------------
@@ -789,3 +975,80 @@ def test_live_exit_equity_provider_raises_uses_fallback(store, tmp_path):
     d = decisions[0]
     assert d.decision == TAKE_PROFIT
     assert any("equity_source:fallback_estimate" in n for n in d.notes)
+
+
+# --- Oversell guard (paper path) -----------------------------------------
+
+
+def test_paper_exit_blocked_when_broker_holds_fewer_than_trade_quantity(store, tmp_path):
+    """Paper exit must NOT sell more shares than the broker actually holds."""
+    trade = _open_trade()  # quantity=10
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        # Broker only holds 4 of the 10 shares the trade thinks it owns.
+        positions_provider=lambda: {"AAA": {"current_price": 112.0, "quantity": 4}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    d = mgr.evaluate_open_trades()[0]
+    assert d.decision == NO_EXIT
+    assert "exceeds broker-held" in d.reason
+    assert adapter.calls == []
+    assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+def test_paper_exit_blocked_when_broker_is_flat(store, tmp_path):
+    """If the broker is already flat, the exit must be refused (never short)."""
+    trade = _open_trade()
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        positions_provider=lambda: {"AAA": {"current_price": 112.0, "quantity": 0}},
+        paper_adapter=adapter,
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    d = mgr.evaluate_open_trades()[0]
+    assert d.decision == NO_EXIT
+    assert "already flat/short" in d.reason
+    assert adapter.calls == []
+    assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+def test_paper_exit_blocked_when_held_quantity_unknown(store, tmp_path):
+    """If broker-held quantity cannot be determined, fail closed (no sell)."""
+    trade = _open_trade()
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        # Symbol present but quantity is not parseable → unknown.
+        positions_provider=lambda: {"AAA": {"current_price": 112.0, "quantity": "n/a"}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    d = mgr.evaluate_open_trades()[0]
+    assert d.decision == NO_EXIT
+    assert "cannot determine broker-held quantity" in d.reason
+    assert adapter.calls == []
+    assert store.get(trade.autonomous_trade_id).status == "OPEN"
+
+
+def test_paper_exit_allowed_when_broker_holds_full_quantity(store, tmp_path):
+    """Sanity: when the broker holds the full quantity, the exit proceeds."""
+    trade = _open_trade()  # quantity=10
+    store.record_trade(trade)
+    adapter = _FakeAdapter()
+    mgr = AutonomousExitManager(
+        trade_store=store,
+        paper_adapter=adapter,
+        positions_provider=lambda: {"AAA": {"current_price": 112.0, "quantity": 10}},
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    d = mgr.evaluate_open_trades()[0]
+    assert d.decision == TAKE_PROFIT
+    assert len(adapter.calls) == 1
+    assert adapter.calls[0]["quantity"] == 10
+    assert store.get(trade.autonomous_trade_id).status == EXIT_PENDING

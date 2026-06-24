@@ -328,6 +328,63 @@
   font-style: italic;
 }
 
+/* Current-price pulse effects to make quote updates more visible. */
+.auto-trading-page .data-table td.price-cell {
+  font-variant-numeric: tabular-nums;
+  transition: color 200ms ease;
+}
+
+.auto-trading-page .data-table td.price-flash-up {
+  animation: priceFlashUp 1.2s ease-out;
+}
+
+.auto-trading-page .data-table td.price-flash-down {
+  animation: priceFlashDown 1.2s ease-out;
+}
+
+.auto-trading-page .data-table td.price-flash-flat {
+  animation: priceFlashFlat 1.0s ease-out;
+}
+
+@keyframes priceFlashUp {
+  0% {
+    color: #9ae6b4;
+    text-shadow: 0 0 0.55rem rgba(72, 187, 120, 0.55);
+    background: rgba(72, 187, 120, 0.16);
+  }
+  100% {
+    color: inherit;
+    text-shadow: none;
+    background: transparent;
+  }
+}
+
+@keyframes priceFlashDown {
+  0% {
+    color: #feb2b2;
+    text-shadow: 0 0 0.55rem rgba(245, 101, 101, 0.55);
+    background: rgba(245, 101, 101, 0.16);
+  }
+  100% {
+    color: inherit;
+    text-shadow: none;
+    background: transparent;
+  }
+}
+
+@keyframes priceFlashFlat {
+  0% {
+    color: #90cdf4;
+    text-shadow: 0 0 0.5rem rgba(66, 153, 225, 0.45);
+    background: rgba(66, 153, 225, 0.14);
+  }
+  100% {
+    color: inherit;
+    text-shadow: none;
+    background: transparent;
+  }
+}
+
 .rejected-block {
   margin-top: 0.75rem;
   border-top: 1px solid #2d3748;

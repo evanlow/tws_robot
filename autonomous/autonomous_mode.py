@@ -66,6 +66,7 @@ class AutonomousModeState:
     activated_at: Optional[str] = None
     cycles_started: int = 0  # Incremented each time run_once is called in this activation
     dry_run: bool = False  # True when the live runner is operating in dry-run mode
+    operator_halted: bool = False  # True after an explicit operator halt; suppresses auto-reactivation
 
     @property
     def is_on(self) -> bool:
@@ -121,6 +122,7 @@ class AutonomousModeState:
         self.message = None
         self.activated_at = datetime.now(timezone.utc).isoformat()
         self.cycles_started = 0
+        self.operator_halted = False
         self.refresh()
 
     def to_dict(self) -> Dict[str, Any]:

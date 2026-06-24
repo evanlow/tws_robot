@@ -43,6 +43,16 @@ class _FakeServiceManager:
         self.connected = connected
         self.connection_env = env
         self._tws_bridge = bridge or _FakeBridge()
+        self._orders = []
+
+    def get_orders(self):
+        return list(self._orders)
+
+    def set_orders(self, orders):
+        self._orders = list(orders)
+
+    def add_order(self, order):
+        self._orders.append(dict(order))
 
 
 class TestReadiness:
@@ -183,3 +193,54 @@ class TestOrderIdReservation:
         with pytest.raises(RuntimeError, match="nextValidId"):
             adapter.buy(symbol="AAPL", quantity=1, order_type="LIMIT",
                         limit_price=10.0)
+
+    def test_place_order_exception_records_rejected_order_event(self):
+        class _FailingApp:
+            def placeOrder(self, order_id, contract, order):
+                raise RuntimeError("socket closed")
+
+        bridge = _FakeBridge(app=_FailingApp(), next_id=9000)
+        svc = _FakeServiceManager(bridge=bridge)
+        adapter = AutonomousPaperAdapter(svc)
+
+        with pytest.raises(RuntimeError, match="placeOrder failed"):
+            adapter.sell(
+                symbol="AAPL",
+                quantity=2,
+                order_type="LIMIT",
+                limit_price=150.0,
+            )
+
+        rejected = svc.get_orders()[-1]
+        assert rejected["order_id"] == 9000
+        assert rejected["broker_order_id"] == 9000
+        assert rejected["status"] == "REJECTED"
+        assert rejected["action"] == "SELL"
+        assert rejected["quantity"] == 2
+        assert "placeOrder exception" in rejected["error_message"]
+
+
+class TestOrderLookup:
+    def test_get_order_returns_latest_cached_order_event(self):
+        svc = _FakeServiceManager()
+        svc.set_orders([
+            {"order_id": 200, "status": "SUBMITTED", "updated_at": "t1"},
+            {"order_id": 200, "status": "INACTIVE", "updated_at": "t2"},
+        ])
+        adapter = AutonomousPaperAdapter(svc)
+
+        order = adapter.get_order(200)
+        assert order is not None
+        assert order["status"] == "INACTIVE"
+
+    def test_get_order_uses_open_order_snapshots_fallback(self):
+        class _BridgeWithSnapshots(_FakeBridge):
+            def get_open_order_snapshots(self):
+                return [{"order_id": 333, "status": "Submitted"}]
+
+        svc = _FakeServiceManager(bridge=_BridgeWithSnapshots())
+        adapter = AutonomousPaperAdapter(svc)
+
+        order = adapter.get_order(333)
+        assert order is not None
+        assert order["order_id"] == 333

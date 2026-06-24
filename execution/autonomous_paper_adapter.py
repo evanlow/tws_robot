@@ -124,6 +124,71 @@ class AutonomousPaperAdapter:
             limit_price=limit_price,
         )
 
+    def get_order(self, order_id: int) -> Optional[Any]:
+        """Return the latest known broker order snapshot for ``order_id``.
+
+        This lookup allows autonomous reconciliation to inspect terminal
+        statuses (e.g. REJECTED/INACTIVE) for exit orders and avoid leaving
+        trades stuck in EXIT_PENDING when no fill will ever arrive.
+        """
+        try:
+            oid = int(order_id)
+        except (TypeError, ValueError):
+            return None
+
+        # Search cached order events first (most recent to oldest).
+        get_orders = getattr(self._svc, "get_orders", None)
+        if callable(get_orders):
+            try:
+                for order in reversed(list(get_orders() or [])):
+                    candidate = None
+                    if isinstance(order, dict):
+                        candidate = (
+                            order.get("broker_order_id")
+                            or order.get("order_id")
+                            or order.get("orderId")
+                            or order.get("id")
+                        )
+                    else:
+                        candidate = getattr(order, "broker_order_id", None)
+                        if candidate is None:
+                            candidate = getattr(order, "order_id", None)
+                        if candidate is None:
+                            candidate = getattr(order, "orderId", None)
+                        if candidate is None:
+                            candidate = getattr(order, "id", None)
+                    try:
+                        if int(candidate) == oid:
+                            return order
+                    except (TypeError, ValueError):
+                        continue
+            except Exception:
+                logger.debug("AutonomousPaperAdapter.get_order: get_orders failed", exc_info=True)
+
+        # Fall back to broker open-order snapshots when available.
+        bridge = getattr(self._svc, "_tws_bridge", None)
+        snapshots = getattr(bridge, "get_open_order_snapshots", None)
+        if callable(snapshots):
+            try:
+                for order in snapshots() or []:
+                    try:
+                        candidate = (
+                            order.get("broker_order_id")
+                            or order.get("order_id")
+                            or order.get("orderId")
+                            or order.get("id")
+                        )
+                        if int(candidate) == oid:
+                            return order
+                    except (AttributeError, TypeError, ValueError):
+                        continue
+            except Exception:
+                logger.debug(
+                    "AutonomousPaperAdapter.get_order: open-order snapshot lookup failed",
+                    exc_info=True,
+                )
+        return None
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
@@ -201,5 +266,34 @@ class AutonomousPaperAdapter:
             "AutonomousPaperAdapter: placing %s %s x%s @ LMT %.4f (orderId=%s)",
             action, contract.symbol, quantity, float(limit_price), order_id,
         )
-        app.placeOrder(order_id, contract, order)
+        try:
+            app.placeOrder(order_id, contract, order)
+        except Exception as exc:
+            logger.exception(
+                "AutonomousPaperAdapter: placeOrder failed for orderId=%s (%s %s x%s)",
+                order_id,
+                action,
+                contract.symbol,
+                quantity,
+            )
+            add_order = getattr(self._svc, "add_order", None)
+            if callable(add_order):
+                add_order({
+                    "id": str(order_id),
+                    "order_id": int(order_id),
+                    "broker_order_id": int(order_id),
+                    "symbol": contract.symbol,
+                    "action": str(action),
+                    "quantity": int(quantity),
+                    "status": "REJECTED",
+                    "error_message": (
+                        "AutonomousPaperAdapter placeOrder exception: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                    "source": "autonomous_paper_adapter_exception",
+                })
+            raise RuntimeError(
+                "AutonomousPaperAdapter placeOrder failed "
+                f"for order_id={order_id}: {exc}"
+            ) from exc
         return order_id

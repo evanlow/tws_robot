@@ -20,6 +20,9 @@ class TestSecretKeyEnforcement:
 
     def test_production_missing_secret_key_raises(self, monkeypatch):
         """Production mode fails fast when SECRET_KEY is missing."""
+        # Stub load_dotenv so create_app (non-TESTING) does not load the real
+        # .env into os.environ and pollute later tests in the suite.
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: False)
         monkeypatch.setattr(
             "web.services.ServiceManager._start_market_events_refresh",
             lambda self: None,
@@ -32,6 +35,7 @@ class TestSecretKeyEnforcement:
 
     def test_production_default_secret_key_raises(self, monkeypatch):
         """Production mode fails fast when SECRET_KEY is still the default."""
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: False)
         monkeypatch.setattr(
             "web.services.ServiceManager._start_market_events_refresh",
             lambda self: None,
@@ -44,6 +48,7 @@ class TestSecretKeyEnforcement:
 
     def test_production_with_secure_key_starts_ok(self, monkeypatch):
         """Production mode starts fine with a secure SECRET_KEY."""
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: False)
         monkeypatch.setattr(
             "web.services.ServiceManager._start_market_events_refresh",
             lambda self: None,

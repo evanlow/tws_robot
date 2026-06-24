@@ -22,7 +22,11 @@
     paperAdapterConfigured: false,
     autonomousModeOn: false,
     liveAccountId: '',
+    tradesRefreshTimer: null,
+    currentPriceByTradeId: {},
   };
+
+  const OPEN_TRADES_REFRESH_MS = 15000;
 
   const ENDPOINTS = {
     paper: {
@@ -31,6 +35,7 @@
       halt: '/api/autonomous/mode/halt',
       runOnce: '/api/autonomous/runner/run-once-paper',
       evaluateExits: '/api/autonomous/runner/evaluate-exits',
+      closeNow: '/api/autonomous/runner/close-now',
       trades: '/api/autonomous/runner/trades',
     },
     live: {
@@ -39,6 +44,7 @@
       halt: '/api/autonomous/live/halt',
       runOnce: '/api/autonomous/live/run-once',
       evaluateExits: '/api/autonomous/live/evaluate-exits',
+      closeNow: '/api/autonomous/live/close-now',
       trades: '/api/autonomous/live/trades',
     },
   };
@@ -1202,23 +1208,49 @@
     if (openBody) {
       openBody.innerHTML = '';
       const open = (payload && payload.open) || [];
+      const nextPriceByTradeId = {};
       if (!open.length) {
-        openBody.innerHTML = '<tr><td colspan="9" class="empty">No open autonomous trades.</td></tr>';
+        openBody.innerHTML = '<tr><td colspan="10" class="empty">No open autonomous trades.</td></tr>';
+        state.currentPriceByTradeId = {};
       } else {
         open.forEach((t) => {
           const tr = document.createElement('tr');
-          [
+          const rowValues = [
             t.autonomous_trade_id || '',
             t.symbol || '',
             t.quantity != null ? t.quantity : '',
             fmtMoney(t.entry_limit_price),
             fmtMoney(t.target_price),
+            fmtMoney(t.current_price),
             fmtMoney(t.stop_price),
             t.status || '',
             t.entry_order_id != null ? t.entry_order_id : '',
-          ].forEach((c) => {
+          ];
+
+          rowValues.forEach((c, idx) => {
             const td = document.createElement('td');
             td.textContent = String(c);
+
+            // Current price column flash animation on refresh.
+            if (idx === 5) {
+              td.classList.add('price-cell');
+              const tradeId = String(t.autonomous_trade_id || '');
+              const current = Number(t.current_price);
+              if (tradeId && Number.isFinite(current) && current > 0) {
+                nextPriceByTradeId[tradeId] = current;
+                const prev = state.currentPriceByTradeId[tradeId];
+                if (Number.isFinite(prev)) {
+                  if (current > prev) {
+                    td.classList.add('price-flash-up');
+                  } else if (current < prev) {
+                    td.classList.add('price-flash-down');
+                  } else {
+                    td.classList.add('price-flash-flat');
+                  }
+                }
+              }
+            }
+
             tr.appendChild(td);
           });
 
@@ -1235,10 +1267,31 @@
             cancelAutonomousEntry(t.autonomous_trade_id, t.symbol, t.entry_order_id);
           });
           tdAction.appendChild(btnCancel);
+
+          // Discretionary "Close Now": flatten a filled OPEN position at the
+          // current price, bypassing the rule-based exit triggers.
+          const isFilled = t.entry_filled_price != null
+            || String(t.status || '').toUpperCase() === 'OPEN';
+          if (isFilled) {
+            const btnClose = document.createElement('button');
+            btnClose.className = 'btn-sm btn-warning';
+            btnClose.type = 'button';
+            btnClose.textContent = 'Close Now';
+            btnClose.style.marginLeft = '6px';
+            btnClose.title = 'Submit a SELL LIMIT at the current price to close '
+              + 'this position immediately.';
+            btnClose.addEventListener('click', () => {
+              closeAutonomousTradeNow(
+                t.autonomous_trade_id, t.symbol, t.current_price);
+            });
+            tdAction.appendChild(btnClose);
+          }
+
           tr.appendChild(tdAction);
 
           openBody.appendChild(tr);
         });
+        state.currentPriceByTradeId = nextPriceByTradeId;
       }
     }
     if (closedBody) {
@@ -1247,7 +1300,7 @@
         .concat((payload && payload.exit_pending) || [])
         .concat((payload && payload.closed) || []);
       if (!combined.length) {
-        closedBody.innerHTML = '<tr><td colspan="7" class="empty">No closed autonomous trades yet.</td></tr>';
+        closedBody.innerHTML = '<tr><td colspan="8" class="empty">No closed autonomous trades yet.</td></tr>';
       } else {
         combined.forEach((t) => {
           const tr = document.createElement('tr');
@@ -1259,6 +1312,7 @@
             t.exit_reason || '',
             fmtMoney(t.exit_price),
             fmtMoney(t.realised_pnl),
+            t.broker_detail || '',
           ].forEach((c) => {
             const td = document.createElement('td');
             td.textContent = String(c);
@@ -1395,6 +1449,41 @@
       refreshAutonomousTrades();
     } catch (err) {
       setRunnerFeedback('Cancel entry failed: ' + err.message, 'error');
+    }
+  }
+
+  async function closeAutonomousTradeNow(tradeId, symbol, currentPrice) {
+    if (!tradeId) return;
+    const label = symbol || tradeId;
+    const endpoint = currentEndpoint('closeNow') || ENDPOINTS.paper.closeNow;
+    const isLive = state.accountMode === 'live';
+    const pricePart = (currentPrice != null && Number.isFinite(Number(currentPrice)))
+      ? (' at ~' + fmtMoney(currentPrice))
+      : '';
+    const scope = isLive ? 'LIVE' : 'paper';
+    if (!window.confirm(
+        'Close ' + scope + ' position ' + label + pricePart + ' now?\n'
+        + 'A SELL LIMIT will be submitted at the current price.')) {
+      return;
+    }
+
+    setRunnerFeedback('Submitting close for ' + label + '…');
+    try {
+      const body = await postJson(endpoint, { autonomous_trade_id: tradeId });
+      const decision = body.decision || {};
+      if (body.status === 'close_submitted') {
+        setRunnerFeedback(
+          'Close submitted for ' + label
+          + (decision.price != null ? (' at ' + fmtMoney(decision.price)) : '')
+          + '.', 'success');
+      } else {
+        const reason = decision.reason || body.reason || body.status || 'not submitted';
+        setRunnerFeedback('Close not submitted: ' + reason, 'warning');
+      }
+      refreshRunnerStatus();
+      refreshAutonomousTrades();
+    } catch (err) {
+      setRunnerFeedback('Close now failed: ' + err.message, 'error');
     }
   }
 
@@ -1547,5 +1636,19 @@
     refreshAudit();
     refreshRunnerStatus();
     refreshAutonomousTrades();
+
+    // Keep open-trade pricing fresh during monitoring without manual refresh.
+    if (state.tradesRefreshTimer == null) {
+      state.tradesRefreshTimer = window.setInterval(() => {
+        refreshAutonomousTrades();
+      }, OPEN_TRADES_REFRESH_MS);
+    }
+
+    window.addEventListener('beforeunload', () => {
+      if (state.tradesRefreshTimer != null) {
+        window.clearInterval(state.tradesRefreshTimer);
+        state.tradesRefreshTimer = null;
+      }
+    });
   });
 })();

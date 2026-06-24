@@ -380,6 +380,7 @@ class _BridgeApp(EWrapper, EClient):
     # enter the book and will not fill — they must surface as ERROR, not
     # buried as a generic warning, because the order ID returned by
     # placeOrder() looks successful otherwise.
+    #   103 — duplicate order ID
     #   110 — price/qty violates exchange rules
     #   200 — no security definition has been found
     #   201 — order rejected (generic; see message for cause)
@@ -388,7 +389,7 @@ class _BridgeApp(EWrapper, EClient):
     #   321 — server validation failed (e.g. API in Read-Only mode)
     #   388 — order size too small
     #   434 — order size cannot be zero
-    _ORDER_REJECT_CODES = frozenset({110, 200, 201, 202, 203, 321, 388, 434})
+    _ORDER_REJECT_CODES = frozenset({103, 110, 200, 201, 202, 203, 321, 388, 434})
 
     # Known root causes keyed by errorCode — surfaced so the operator
     # gets an actionable hint rather than just the raw IBKR string.
@@ -436,6 +437,19 @@ class _BridgeApp(EWrapper, EClient):
             if isinstance(reqId, int) and reqId > 0:
                 with self._rejected_order_ids_lock:
                     self._rejected_order_ids.add(reqId)
+                # Emit a local REJECTED order snapshot so paper/live
+                # reconciliation logic can detect terminal non-fill
+                # outcomes and unwind stale EXIT_PENDING entries.
+                self._svc.add_order({
+                    "id": str(reqId),
+                    "order_id": int(reqId),
+                    "broker_order_id": int(reqId),
+                    "status": "REJECTED",
+                    "error_code": int(errorCode),
+                    "error_message": str(errorString or ""),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "source": "tws_error_rejected",
+                })
             return
         logger.warning("TWS error %s (reqId %s): %s", errorCode, reqId,
                        errorString)

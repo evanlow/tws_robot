@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -104,7 +104,7 @@ def _install_runner(app, tmp_path: Path, *, runner_enabled=True, with_signal=Tru
         scanner=scanner,
         cash_analyzer=CashAvailabilityAnalyzer(),
         account_provider=lambda: {"cash_balance": 100_000, "equity": 100_000},
-        positions_provider=lambda: {"AAA": {"current_price": 112.5}},
+        positions_provider=lambda: {"AAA": {"current_price": 112.5, "quantity": 100}},
         config=engine_cfg,
         paper_adapter=adapter,
         spy_price_provider=app.config.get("autonomous_spy_price_provider"),
@@ -129,7 +129,7 @@ def _install_runner(app, tmp_path: Path, *, runner_enabled=True, with_signal=Tru
         return AutonomousExitManager(
             trade_store=store,
             paper_adapter=adapter,
-            positions_provider=lambda: {"AAA": {"current_price": 112.5}},
+            positions_provider=lambda: {"AAA": {"current_price": 112.5, "quantity": 100}},
             emergency_stop_file=str(tmp_path / "ESTOP"),
         )
 
@@ -174,6 +174,16 @@ class TestRunnerStatus:
         assert AutonomousRunnerConfig.from_env().runner_enabled is False
         monkeypatch.setenv("AUTONOMOUS_RUNNER_ENABLED", "1")
         assert AutonomousRunnerConfig.from_env().runner_enabled is True
+
+    def test_runner_config_reads_min_profit_threshold_env(self, monkeypatch):
+        monkeypatch.delenv("AUTONOMOUS_MIN_PROFIT_THRESHOLD_USD", raising=False)
+        assert AutonomousRunnerConfig.from_env().min_profit_threshold_usd == 100.0
+
+        monkeypatch.setenv("AUTONOMOUS_MIN_PROFIT_THRESHOLD_USD", "50")
+        assert AutonomousRunnerConfig.from_env().min_profit_threshold_usd == 50.0
+
+        monkeypatch.setenv("AUTONOMOUS_MIN_PROFIT_THRESHOLD_USD", "not_a_number")
+        assert AutonomousRunnerConfig.from_env().min_profit_threshold_usd == 100.0
 
 
 class TestRunOncePaper:
@@ -402,9 +412,11 @@ class TestAutonomousMode:
 
 class TestEvaluateExits:
     def test_spy_bearish_forces_risk_exit(self, app, client, tmp_path):
+        # SPY must be meaningfully bearish (>0.5% below open) for the forced
+        # portfolio-protection exit to engage; a tiny intraday dip is ignored.
         app.config["autonomous_spy_price_provider"] = lambda: {
             "open": 500.0,
-            "current": 499.0,
+            "current": 495.0,
             "source": "test",
         }
         seed = [AutonomousTrade(
@@ -415,6 +427,7 @@ class TestEvaluateExits:
             entry_order_id=1,
             entry_time=datetime.now(timezone.utc),
             entry_limit_price=100.0,
+            entry_filled_price=100.0,
             quantity=10,
             target_price=130.0,
             stop_price=90.0,
@@ -440,6 +453,7 @@ class TestEvaluateExits:
             entry_order_id=1,
             entry_time=datetime.now(timezone.utc),
             entry_limit_price=100.0,
+            entry_filled_price=100.0,
             quantity=10,
             target_price=110.0,
             stop_price=95.0,
@@ -512,6 +526,7 @@ class TestEvaluateExits:
         store.update_trade(
             trade.autonomous_trade_id,
             status=EXIT_PENDING,
+            entry_filled_price=100.0,
             exit_order_id=5555,
             exit_reason="TAKE_PROFIT",
         )
@@ -566,6 +581,36 @@ class TestTrades:
         body = client.get("/api/autonomous/runner/trades").get_json()
         assert body["counts"]["open"] == 1
         assert body["open"][0]["symbol"] == "AAA"
+
+    def test_runner_trades_refresh_reconciles_stale_exit_pending(self, app, client, tmp_path):
+        seed = [
+            AutonomousTrade(
+                autonomous_trade_id="stale1",
+                symbol="AAA",
+                trade_type="buy_shares",
+                status=EXIT_PENDING,
+                entry_order_id=1,
+                entry_time=datetime.now(timezone.utc),
+                entry_limit_price=100.0,
+                entry_filled_price=100.0,
+                quantity=10,
+                exit_order_id=2222,
+                exit_reason="TAKE_PROFIT",
+                exit_time=datetime.now(timezone.utc) - timedelta(seconds=120),
+            ),
+        ]
+        store, _ = _install_runner(app, tmp_path, store_seed=seed)
+        # A stale exit may still be working at the broker; the reconciler must
+        # cancel it before reverting to OPEN so the retry cannot double-fill.
+        app.config["autonomous_cancel_order"] = lambda order_id: order_id == 2222
+
+        body = client.get("/api/autonomous/runner/trades").get_json()
+
+        trade = store.get("stale1")
+        assert trade is not None
+        assert trade.status == OPEN
+        assert body["counts"]["open"] == 1
+        assert body["counts"]["exit_pending"] == 0
 
 
 class TestCancelEntry:

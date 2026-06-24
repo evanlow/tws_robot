@@ -322,6 +322,9 @@ class TestProductionSecretKey:
 
     def test_production_rejects_default_secret(self, monkeypatch):
         """App must refuse to start in production with default SECRET_KEY."""
+        # Stub load_dotenv so create_app (non-TESTING) does not load the real
+        # .env into os.environ and pollute later tests in the suite.
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: False)
         monkeypatch.setattr(
             "web.services.ServiceManager._start_market_events_refresh",
             lambda self: None,
@@ -334,6 +337,7 @@ class TestProductionSecretKey:
 
     def test_production_rejects_empty_secret(self, monkeypatch):
         """App must refuse to start in production with empty SECRET_KEY."""
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: False)
         monkeypatch.setattr(
             "web.services.ServiceManager._start_market_events_refresh",
             lambda self: None,
@@ -346,6 +350,7 @@ class TestProductionSecretKey:
 
     def test_production_accepts_secure_key(self, monkeypatch):
         """App starts normally in production with a proper SECRET_KEY."""
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: False)
         monkeypatch.setattr(
             "web.services.ServiceManager._start_market_events_refresh",
             lambda self: None,

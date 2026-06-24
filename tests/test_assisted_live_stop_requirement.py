@@ -1,6 +1,30 @@
+from datetime import datetime, timezone
+
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+)
 from autonomous.trade_planner import TradePlanner
+
+
+def _live_quote_extras(price=100.0):
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return {
+        "bid": round(price - 0.05, 2),
+        "ask": round(price + 0.05, 2),
+        "quote_last": price,
+        "bid_timestamp": now_iso,
+        "ask_timestamp": now_iso,
+        "last_timestamp": now_iso,
+        "quote_timestamp": now_iso,
+        "market_data_source": IBKR_SOURCE,
+        "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+        "market_data_status": "healthy",
+        "market_data_feed_healthy": True,
+        "market_is_open": True,
+    }
 
 
 def _candidate(**kwargs):
@@ -11,6 +35,7 @@ def _candidate(**kwargs):
         "last_price": 100.0,
         "support_price": None,
         "resistance_price": 108.0,
+        "extras": _live_quote_extras(100.0),
     }
     data.update(kwargs)
     return CandidateSignal(**data)

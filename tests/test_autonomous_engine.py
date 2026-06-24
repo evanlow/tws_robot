@@ -1,6 +1,7 @@
 """Tests for autonomous.autonomous_engine.AutonomousTradingEngine."""
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -15,12 +16,35 @@ from autonomous import (
     StaticSignalProvider,
 )
 from autonomous.audit import AuditLogger
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+)
 from data.cash_availability import CashAvailabilityAnalyzer
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+def _live_quote_extras() -> dict:
+    """Healthy IBKR live-quote snapshot so the market-data health guard allows
+    assisted-live planning.  Mirrors the production signal-provider payload."""
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "bid": 99.95,
+        "ask": 100.05,
+        "quote_last": 100.0,
+        "quote_timestamp": now,
+        "bid_timestamp": now,
+        "ask_timestamp": now,
+        "last_timestamp": now,
+        "market_data_source": IBKR_SOURCE,
+        "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+        "market_data_status": "healthy",
+        "market_data_feed_healthy": True,
+    }
+
 
 def _make_signal(symbol="AAA", strength=120, label="Confirmed Rebound", **kw):
     return CandidateSignal(
@@ -247,7 +271,11 @@ def test_live_execution_blocked_unless_explicitly_enabled(tmp_path):
         emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
         audit_log_dir=str(tmp_path),
     )
-    engine = _make_engine(tmp_path, signals=[_make_signal("AAA")], config=cfg)
+    engine = _make_engine(
+        tmp_path,
+        signals=[_make_signal("AAA", extras=_live_quote_extras())],
+        config=cfg,
+    )
     d = engine.run_once(confirm=True)
     assert d.status is DecisionStatus.LIVE_BLOCKED
 
@@ -259,7 +287,11 @@ def test_live_execution_with_flag_but_no_confirm_requires_confirmation(tmp_path)
         emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
         audit_log_dir=str(tmp_path),
     )
-    engine = _make_engine(tmp_path, signals=[_make_signal("AAA")], config=cfg)
+    engine = _make_engine(
+        tmp_path,
+        signals=[_make_signal("AAA", extras=_live_quote_extras())],
+        config=cfg,
+    )
     d = engine.run_once(confirm=False)
     assert d.status is DecisionStatus.CONFIRMATION_REQUIRED
 
@@ -382,7 +414,7 @@ def test_live_execution_returns_live_plan_ready_when_allow_live_true_and_confirm
         emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
         audit_log_dir=str(tmp_path),
     )
-    engine = _make_engine(tmp_path, signals=[_make_signal("AAA")], config=cfg)
+    engine = _make_engine(tmp_path, signals=[_make_signal("AAA", extras=_live_quote_extras())], config=cfg)
     d = engine.run_once(confirm=True)
     assert d.status is DecisionStatus.LIVE_PLAN_READY
     assert d.trade_plan is not None

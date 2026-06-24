@@ -13,13 +13,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from autonomous.trade_store import CLOSED, ENTRY_PENDING, EXIT_PENDING, OPEN, TradeStore
+from autonomous.trade_store import CLOSED, ENTRY_PENDING, EXIT_PENDING, FAILED, OPEN, TradeStore
 
 logger = logging.getLogger(__name__)
 
 
 OrdersProvider = Callable[[], Iterable[Any]]
 OrderLookupProvider = Callable[[int], Any]
+CancelOrderProvider = Callable[[int], bool]
 
 
 @dataclass
@@ -49,16 +50,22 @@ class TradeReconciler:
     exposing ``get_order(order_id)``.
     """
 
+    # If an EXIT_PENDING trade has no matching broker order snapshot for long
+    # enough, assume submission never became active and reopen for retry.
+    _STALE_UNCONFIRMED_EXIT_SECONDS = 60.0
+
     def __init__(
         self,
         trade_store: TradeStore,
         *,
         orders_provider: Optional[OrdersProvider] = None,
         order_lookup_provider: Optional[OrderLookupProvider] = None,
+        cancel_order_provider: Optional[CancelOrderProvider] = None,
     ) -> None:
         self._store = trade_store
         self._orders_provider = orders_provider
         self._order_lookup_provider = order_lookup_provider
+        self._cancel_order_provider = cancel_order_provider
 
     def reconcile(self, now: Optional[datetime] = None) -> ReconciliationResult:
         moment = now or datetime.now(timezone.utc)
@@ -90,32 +97,152 @@ class TradeReconciler:
                 continue
 
             if trade.status == EXIT_PENDING and trade.exit_order_id is not None:
-                fill = self._find_filled_order(trade.exit_order_id, orders)
-                if fill is None:
+                if trade.entry_filled_price is None:
+                    notes = list(trade.notes or [])
+                    notes.append(
+                        "exit pending without entry fill; marked FAILED for manual review"
+                    )
+                    self._store.update_trade(
+                        trade.autonomous_trade_id,
+                        status=FAILED,
+                        exit_reason=(trade.exit_reason or "INVALID_EXIT_PENDING"),
+                        exit_price=None,
+                        realised_pnl=None,
+                        notes=notes,
+                    )
+                    result.notes.append(
+                        f"invalid exit pending: {trade.symbol} order={trade.exit_order_id}"
+                    )
                     continue
-                exit_price = (
-                    fill.fill_price or trade.exit_price or trade.entry_limit_price
-                )
-                entry_price = trade.entry_filled_price or trade.entry_limit_price
-                realised = (exit_price - entry_price) * int(trade.quantity)
+
+                fill = self._find_filled_order(trade.exit_order_id, orders)
+                if fill is not None:
+                    exit_price = (
+                        fill.fill_price or trade.exit_price or trade.entry_limit_price
+                    )
+                    entry_price = trade.entry_filled_price or trade.entry_limit_price
+                    realised = (exit_price - entry_price) * int(trade.quantity)
+                    notes = list(trade.notes or [])
+                    notes.append(
+                        f"exit fill reconciled from order {trade.exit_order_id}"
+                    )
+                    self._store.update_trade(
+                        trade.autonomous_trade_id,
+                        status=CLOSED,
+                        exit_price=round(float(exit_price), 4),
+                        realised_pnl=round(float(realised), 2),
+                        exit_time=moment,
+                        notes=notes,
+                    )
+                    result.exit_fills += 1
+                    result.notes.append(
+                        f"exit filled: {trade.symbol} order={trade.exit_order_id}"
+                    )
+                    continue
+
+                # Broker may reject/cancel an exit order.  In that case,
+                # keeping the trade EXIT_PENDING forever hides the failure and
+                # blocks re-evaluation. Revert to OPEN so exits can be retried.
+                terminal = self._find_terminal_nonfill_order(trade.exit_order_id, orders)
+                if terminal is None:
+                    if self._is_stale_unconfirmed_exit(trade, moment):
+                        # The exit order was not observed at the broker, but it
+                        # may simply be a working order we have not seen in this
+                        # snapshot.  Reverting to OPEN and resubmitting WITHOUT
+                        # first cancelling the original would orphan a live SELL
+                        # and the retry could double-fill, flipping the long
+                        # into a SHORT.  Cancel the original first; only revert
+                        # once the cancel is confirmed.  If we cannot confirm
+                        # the cancel, fail closed and keep EXIT_PENDING.
+                        if not self._cancel_exit_order_before_revert(trade):
+                            result.notes.append(
+                                "exit cancel unconfirmed: "
+                                f"{trade.symbol} order={trade.exit_order_id}; "
+                                "kept EXIT_PENDING to avoid oversell"
+                            )
+                            continue
+                        notes = list(trade.notes or [])
+                        notes.append(
+                            "exit order "
+                            f"{trade.exit_order_id} not observed at broker after "
+                            f"{int(self._STALE_UNCONFIRMED_EXIT_SECONDS)}s; "
+                            "cancelled and reverted to OPEN for retry"
+                        )
+                        self._store.update_trade(
+                            trade.autonomous_trade_id,
+                            status=OPEN,
+                            exit_order_id=None,
+                            exit_time=None,
+                            notes=notes,
+                        )
+                        result.notes.append(
+                            "exit unconfirmed: "
+                            f"{trade.symbol} order={trade.exit_order_id}"
+                        )
+                    continue
                 notes = list(trade.notes or [])
+                reason_suffix = terminal.reason_suffix()
                 notes.append(
-                    f"exit fill reconciled from order {trade.exit_order_id}"
+                    "exit order "
+                    f"{trade.exit_order_id} ended as {terminal.status}"
+                    f"{reason_suffix}; "
+                    "reverted to OPEN for retry"
                 )
                 self._store.update_trade(
                     trade.autonomous_trade_id,
-                    status=CLOSED,
-                    exit_price=round(float(exit_price), 4),
-                    realised_pnl=round(float(realised), 2),
-                    exit_time=moment,
+                    status=OPEN,
+                    exit_order_id=None,
+                    exit_time=None,
                     notes=notes,
                 )
-                result.exit_fills += 1
                 result.notes.append(
-                    f"exit filled: {trade.symbol} order={trade.exit_order_id}"
+                    "exit not active: "
+                    f"{trade.symbol} order={trade.exit_order_id} "
+                    f"status={terminal.status}{reason_suffix}"
                 )
 
         return result
+
+    def _cancel_exit_order_before_revert(self, trade: Any) -> bool:
+        """Cancel a trade's working exit order before reverting it to OPEN.
+
+        Returns ``True`` when it is safe to revert (the order was cancelled,
+        or no cancel hook is configured so the caller retains legacy
+        behaviour) and ``False`` when the cancel could not be confirmed and
+        the trade must stay ``EXIT_PENDING`` to avoid orphaning a live SELL
+        order that could later double-fill.
+        """
+        if self._cancel_order_provider is None:
+            # No cancel capability wired (e.g. unit tests / adapters without
+            # order cancellation).  Preserve legacy revert behaviour.
+            return True
+        order_id = getattr(trade, "exit_order_id", None)
+        if order_id is None:
+            return True
+        try:
+            cancelled = self._cancel_order_provider(int(order_id))
+        except Exception:  # pragma: no cover - defensive
+            logger.warning(
+                "cancel_order_provider raised cancelling exit order %s; "
+                "keeping EXIT_PENDING to avoid oversell",
+                order_id,
+            )
+            return False
+        return bool(cancelled)
+
+    def _is_stale_unconfirmed_exit(self, trade: Any, moment: datetime) -> bool:
+        exit_time = getattr(trade, "exit_time", None)
+        if isinstance(exit_time, str):
+            try:
+                exit_time = datetime.fromisoformat(exit_time)
+            except ValueError:
+                return False
+        if not isinstance(exit_time, datetime):
+            return False
+        if exit_time.tzinfo is None:
+            exit_time = exit_time.replace(tzinfo=timezone.utc)
+        age_seconds = (moment - exit_time).total_seconds()
+        return age_seconds >= self._STALE_UNCONFIRMED_EXIT_SECONDS
 
     def _safe_orders(self) -> List[Any]:
         if self._orders_provider is None:
@@ -146,6 +273,32 @@ class TradeReconciler:
             fill = _Fill.from_order(order, expected_order_id=oid)
             if fill is not None:
                 return fill
+        return None
+
+    def _find_terminal_nonfill_order(
+        self,
+        order_id: Any,
+        orders: List[Any],
+    ) -> Optional["_TerminalOrder"]:
+        try:
+            oid = int(order_id)
+        except (TypeError, ValueError):
+            return None
+
+        if self._order_lookup_provider is not None:
+            try:
+                found = self._order_lookup_provider(oid)
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("order_lookup_provider raised for order_id=%s", oid)
+                found = None
+            terminal = _TerminalOrder.from_order(found, expected_order_id=oid)
+            if terminal is not None:
+                return terminal
+
+        for order in reversed(orders):
+            terminal = _TerminalOrder.from_order(order, expected_order_id=oid)
+            if terminal is not None:
+                return terminal
         return None
 
 
@@ -186,6 +339,48 @@ class _Fill:
                 "quantity",
             )),
         )
+
+
+@dataclass
+class _TerminalOrder:
+    order_id: int
+    status: str
+    error_code: Optional[int] = None
+    error_message: Optional[str] = None
+
+    @classmethod
+    def from_order(cls, order: Any, expected_order_id: int) -> Optional["_TerminalOrder"]:
+        if order is None:
+            return None
+        order_id = _extract_order_id(order)
+        if order_id != expected_order_id:
+            return None
+        status = _normalise_status(_get(order, "status", "order_status"))
+        if status not in {"REJECTED", "CANCELLED", "API_CANCELLED", "INACTIVE", "EXPIRED"}:
+            return None
+        code_raw = _get(order, "error_code", "errorCode", "reject_code")
+        try:
+            error_code = int(code_raw) if code_raw is not None else None
+        except (TypeError, ValueError):
+            error_code = None
+        message = _get(order, "error_message", "errorString", "reason", "message")
+        error_message = str(message) if message else None
+        return cls(
+            order_id=order_id,
+            status=status,
+            error_code=error_code,
+            error_message=error_message,
+        )
+
+    def reason_suffix(self) -> str:
+        parts = []
+        if self.error_code is not None:
+            parts.append(f"code {self.error_code}")
+        if self.error_message:
+            parts.append(self.error_message)
+        if not parts:
+            return ""
+        return " (" + ": ".join(parts) + ")"
 
 
 def _extract_order_id(order: Any) -> Optional[int]:

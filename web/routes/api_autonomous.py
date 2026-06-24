@@ -62,7 +62,7 @@ from autonomous.continuous_supervisor import (
     SupervisorFault,
 )
 from autonomous.evidence_learning_summary import summarize_evidence_learning
-from autonomous.exit_manager import AutonomousExitManager
+from autonomous.exit_manager import AutonomousExitManager, MANUAL_CLOSE
 from autonomous.lifecycle_worker import AutonomousLifecycleWorker
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.idempotency import IdempotencyStore
@@ -421,6 +421,10 @@ def _reconcile_store(store: TradeStore, *, adapter=None):
         trade_store=store,
         orders_provider=svc.get_orders,
         order_lookup_provider=lookup,
+        # Cancel a stale/working exit order at the broker before reverting a
+        # trade to OPEN for retry.  Without this, a working SELL could be
+        # orphaned and the retry double-fill, flipping a long into a SHORT.
+        cancel_order_provider=_cancel_entry_order,
     ).reconcile()
     if result.entry_fills or result.exit_fills:
         _audit_mode_event("reconcile", result.to_dict())
@@ -613,6 +617,20 @@ def _audit_mode_event(event: str, payload: Dict[str, Any] | None = None) -> None
     })
 
 
+def _ensure_paper_lifecycle_worker_running() -> None:
+    """Restart the paper lifecycle worker if mode is ON but the worker stopped.
+
+    Called from the status payload so any request that observes mode=ON will
+    rehydrate the worker after a server restart or unexpected thread death.
+    """
+    if not _mode_state().is_on:
+        return
+    existing = current_app.config.get("autonomous_paper_lifecycle_worker")
+    if isinstance(existing, AutonomousLifecycleWorker) and existing.running:
+        return
+    _start_paper_lifecycle_worker()
+
+
 def _start_paper_lifecycle_worker() -> None:
     _start_lifecycle_worker(
         config_key="autonomous_paper_lifecycle_worker",
@@ -729,11 +747,18 @@ def _spy_forced_exit_reason() -> Optional[str]:
     if current_price >= open_price:
         return None
 
+    # Only force exits when SPY is meaningfully bearish — at least 0.5% below
+    # its open.  Noise within ±0.5% is ignored so tiny intraday dips don't
+    # cause mass RISK_EXIT rejections during normal market sessions.
+    bearish_pct = (open_price - current_price) / open_price
+    if bearish_pct < 0.005:
+        return None
+
     source = str(payload.get("source") or "unknown")
     return (
         "SPY intraday bearish (forced portfolio protection): "
         f"current {current_price:.2f} < open {open_price:.2f} "
-        f"[source: {source}]"
+        f"({bearish_pct:.2%} below open) [source: {source}]"
     )
 
 
@@ -884,8 +909,13 @@ def _autonomous_status_payload() -> Dict[str, Any]:
     # Auto-activate for monitoring if open autonomous trades exist.
     # This allows the exit manager, risk controls, and lifecycle supervision
     # to remain active even when no new trades are being proposed.
+    #
+    # An explicit operator halt (``operator_halted``) suppresses this so the
+    # operator's stop is respected until they re-activate; otherwise the
+    # dashboard would silently flip back ON while a position is open.
     if (
         not state.is_on
+        and not state.operator_halted
         and gates.monitoring_eligible
         and match_status == "Verified"
         and gates.open_autonomous_trades > 0
@@ -903,6 +933,12 @@ def _autonomous_status_payload() -> Dict[str, Any]:
             "Auto-activated Autonomous Mode (Continuous) for monitoring %d open trade(s)",
             gates.open_autonomous_trades,
         )
+        _start_paper_lifecycle_worker()
+
+    # Ensure the background worker is alive whenever mode is ON.  This guards
+    # against server restarts where mode persisted but the worker thread died.
+    if state.is_on:
+        _ensure_paper_lifecycle_worker_running()
 
     readiness = state.readiness_status
     if not state.is_on and gates.emergency_stop_active:
@@ -1468,7 +1504,12 @@ def autonomous_mode_halt():
 
     body = request.get_json(silent=True) or {}
     reason = str(body.get("reason") or "Operator turned Autonomous Mode OFF")
-    _mode_state().turn_off(message=reason, status="Halted")
+    state = _mode_state()
+    state.turn_off(message=reason, status="Halted")
+    # Sticky: an explicit operator halt must not be silently re-activated by the
+    # auto-monitor-for-open-trades logic.  Cleared only when the operator
+    # explicitly activates Autonomous Mode again (turn_on).
+    state.operator_halted = True
     _stop_paper_lifecycle_worker()
     _audit_mode_event("halt", {"reason": reason, "source": "operator"})
     return jsonify({"status": "halted", "autonomous_mode": _autonomous_status_payload()})
@@ -2281,14 +2322,164 @@ def runner_cancel_entry():
     })
 
 
+@bp.route("/runner/close-now", methods=["POST"])
+def runner_close_now():
+    """Discretionary close: sell one OPEN paper trade at the current price.
+
+    Request body:
+        {"autonomous_trade_id": "..."}
+
+    Submits a tick-rounded SELL LIMIT at the latest known price for the
+    trade's symbol through the paper exit path, bypassing the rule-based
+    triggers.  The trade lifecycle moves to ``EXIT_PENDING`` and is
+    reconciled normally.
+    """
+    body = request.get_json(silent=True) or {}
+    trade_id = str(body.get("autonomous_trade_id") or "").strip()
+    if not trade_id:
+        return jsonify({"error": "autonomous_trade_id is required"}), 400
+
+    _reconcile_paper_trades()
+    manager = _build_exit_manager()
+    decision = manager.force_close_trade(trade_id)
+    after = _reconcile_paper_trades()
+
+    submitted = decision.decision == MANUAL_CLOSE
+    return jsonify({
+        "status": "close_submitted" if submitted else "close_not_submitted",
+        "autonomous_trade_id": trade_id,
+        "decision": decision.to_dict(),
+        "reconciliation": {"after": after.to_dict()},
+    })
+
+
+def _extract_order_id(order: Any) -> Optional[int]:
+    if isinstance(order, dict):
+        candidate = (
+            order.get("broker_order_id")
+            or order.get("order_id")
+            or order.get("orderId")
+            or order.get("id")
+        )
+    else:
+        candidate = getattr(order, "broker_order_id", None)
+        if candidate is None:
+            candidate = getattr(order, "order_id", None)
+        if candidate is None:
+            candidate = getattr(order, "orderId", None)
+        if candidate is None:
+            candidate = getattr(order, "id", None)
+    try:
+        value = int(candidate)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _build_latest_order_details_by_id(orders: Any) -> Dict[int, Dict[str, Any]]:
+    index: Dict[int, Dict[str, Any]] = {}
+    for order in list(orders or []):
+        oid = _extract_order_id(order)
+        if oid is None:
+            continue
+        if isinstance(order, dict):
+            status = str(order.get("status") or order.get("order_status") or "").strip()
+            message = str(order.get("error_message") or order.get("message") or "").strip()
+            raw_code = order.get("error_code")
+        else:
+            status = str(
+                getattr(order, "status", None)
+                or getattr(order, "order_status", None)
+                or ""
+            ).strip()
+            message = str(
+                getattr(order, "error_message", None)
+                or getattr(order, "message", None)
+                or ""
+            ).strip()
+            raw_code = getattr(order, "error_code", None)
+        code: Optional[int] = None
+        try:
+            code = int(raw_code)
+        except (TypeError, ValueError):
+            code = None
+        detail_parts = []
+        if status:
+            detail_parts.append(status)
+        if code is not None:
+            detail_parts.append(f"code={code}")
+        if message:
+            detail_parts.append(message)
+        index[oid] = {
+            "broker_status": status or None,
+            "broker_error_code": code,
+            "broker_error_message": message or None,
+            "broker_detail": " | ".join(detail_parts),
+        }
+    return index
+
+
+def _attach_trade_broker_detail(trade: Dict[str, Any], order_details: Dict[int, Dict[str, Any]]) -> None:
+    raw_order_id = trade.get("exit_order_id")
+    if raw_order_id in (None, ""):
+        raw_order_id = trade.get("entry_order_id")
+    try:
+        order_id = int(raw_order_id)
+    except (TypeError, ValueError):
+        return
+    if order_id <= 0:
+        return
+    details = order_details.get(order_id)
+    if not details:
+        return
+    trade.update(details)
+
+
 @bp.route("/runner/trades", methods=["GET"])
 def runner_trades():
     """Return open and recently-closed autonomous trades."""
+    def _position_current_price(symbol: str, positions: Dict[str, Any]) -> Optional[float]:
+        pos = positions.get(symbol) or positions.get(str(symbol or "").upper())
+        if not isinstance(pos, dict):
+            return None
+        for key in ("current_price", "market_price", "last_price"):
+            raw = pos.get(key)
+            if raw is None:
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+        return None
+
+    # Keep lifecycle view consistent with broker/order truth on every refresh.
+    _reconcile_paper_trades()
+
     store = _trade_store()
     trades = store.list_all()
     open_trades = [t.to_dict() for t in trades if t.status == "OPEN"]
+    svc = get_services()
+    try:
+        positions = svc.get_positions() or {}
+    except Exception:
+        positions = {}
+    try:
+        order_details = _build_latest_order_details_by_id(svc.get_orders() or [])
+    except Exception:
+        order_details = {}
+    for trade in open_trades:
+        trade["current_price"] = _position_current_price(
+            str(trade.get("symbol") or ""),
+            positions,
+        )
     exit_pending = [t.to_dict() for t in trades if t.status == "EXIT_PENDING"]
     closed = [t.to_dict() for t in trades if t.status in ("CLOSED", "FAILED")]
+    for trade in exit_pending:
+        _attach_trade_broker_detail(trade, order_details)
+    for trade in closed:
+        _attach_trade_broker_detail(trade, order_details)
     return jsonify({
         "open": open_trades,
         "exit_pending": exit_pending,
@@ -3775,14 +3966,93 @@ def live_evaluate_exits():
     })
 
 
+@bp.route("/live/close-now", methods=["POST"])
+def live_close_now():
+    """Discretionary close: sell one OPEN live trade at the current price.
+
+    Request body:
+        {"autonomous_trade_id": "..."}
+
+    Reuses :func:`_build_live_exit_manager`, which fails closed (account
+    confirmation, dry-run executor rejection, actual-live guards) before
+    any live order can be placed.  On success a tick-rounded SELL LIMIT is
+    submitted at the latest known price and the trade moves to
+    ``EXIT_PENDING``.
+    """
+    body = request.get_json(silent=True) or {}
+    trade_id = str(body.get("autonomous_trade_id") or "").strip()
+    if not trade_id:
+        return jsonify({"error": "autonomous_trade_id is required"}), 400
+
+    _reconcile_live_trades()
+    try:
+        manager = _build_live_exit_manager()
+    except (_LiveValidationError, _LiveConnectionError) as exc:
+        return jsonify({
+            "status": "close_not_submitted",
+            "autonomous_trade_id": trade_id,
+            "outcome": "NO_EXIT",
+            "rejection_code": getattr(exc, "rejection_code", "validation_error"),
+            "error": str(exc),
+        }), getattr(exc, "http_status", 400)
+
+    decision = manager.force_close_trade(trade_id)
+    after = _reconcile_live_trades()
+
+    submitted = decision.decision == MANUAL_CLOSE
+    return jsonify({
+        "status": "close_submitted" if submitted else "close_not_submitted",
+        "autonomous_trade_id": trade_id,
+        "decision": decision.to_dict(),
+        "reconciliation": {"after": after.to_dict()},
+    })
+
+
 @bp.route("/live/trades", methods=["GET"])
 def live_trades():
     """Return open and recently-closed live autonomous trades."""
+    def _position_current_price(symbol: str, positions: Dict[str, Any]) -> Optional[float]:
+        pos = positions.get(symbol) or positions.get(str(symbol or "").upper())
+        if not isinstance(pos, dict):
+            return None
+        for key in ("current_price", "market_price", "last_price"):
+            raw = pos.get(key)
+            if raw is None:
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+        return None
+
+    # Keep lifecycle view consistent with broker/order truth on every refresh.
+    _reconcile_live_trades()
+
     store = _live_trade_store()
     trades = store.list_all()
     open_trades = [t.to_dict() for t in trades if t.status == "OPEN"]
+    svc = get_services()
+    try:
+        positions = svc.get_positions() or {}
+    except Exception:
+        positions = {}
+    try:
+        order_details = _build_latest_order_details_by_id(svc.get_orders() or [])
+    except Exception:
+        order_details = {}
+    for trade in open_trades:
+        trade["current_price"] = _position_current_price(
+            str(trade.get("symbol") or ""),
+            positions,
+        )
     exit_pending = [t.to_dict() for t in trades if t.status == "EXIT_PENDING"]
     closed = [t.to_dict() for t in trades if t.status in ("CLOSED", "FAILED")]
+    for trade in exit_pending:
+        _attach_trade_broker_detail(trade, order_details)
+    for trade in closed:
+        _attach_trade_broker_detail(trade, order_details)
     return jsonify({
         "open": open_trades,
         "exit_pending": exit_pending,

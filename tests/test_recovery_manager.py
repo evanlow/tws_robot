@@ -19,6 +19,12 @@ from autonomous import (
 )
 from autonomous.idempotency import IdempotencyLock
 from autonomous.audit import AuditLogger
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+    MarketDataProviderStatus,
+    MarketDataQuote,
+)
 from autonomous.continuous_supervisor import (
     PAUSED,
     UNRECONCILED_LIFECYCLE_STATE,
@@ -31,6 +37,47 @@ from execution.order_executor import OrderResult, OrderStatus
 
 class _RealProvider:
     pass
+
+
+class _LiveMarketDataProvider:
+    def __init__(self, symbol: str = "AAA", price: float = 100.0) -> None:
+        now = datetime.now(timezone.utc)
+        self.quote = MarketDataQuote(
+            symbol=symbol,
+            bid=round(price - 0.05, 2),
+            ask=round(price + 0.05, 2),
+            last=price,
+            timestamp=now,
+            bid_timestamp=now,
+            ask_timestamp=now,
+            last_timestamp=now,
+            source=IBKR_SOURCE,
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            feed_healthy=True,
+        )
+        self.subscribed: list[str] = []
+
+    def subscribe(self, symbols):
+        self.subscribed.extend([str(s).upper() for s in symbols])
+
+    def unsubscribe(self, symbols):
+        pass
+
+    def latest_quote(self, symbol):
+        if str(symbol).upper() == self.quote.symbol:
+            return self.quote
+        return None
+
+    def status(self):
+        return MarketDataProviderStatus(
+            provider=IBKR_SOURCE,
+            connected=True,
+            healthy=True,
+            subscribed_symbols=list(self.subscribed),
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            last_error=None,
+            reason="test market-data provider",
+        )
 
 
 class _Executor:
@@ -82,6 +129,20 @@ def _signal(symbol: str = "AAA") -> CandidateSignal:
         last_price=100.0,
         support_price=95.0,
         resistance_price=110.0,
+        extras={
+            "bid": 99.95,
+            "ask": 100.05,
+            "quote_last": 100.0,
+            "bid_timestamp": datetime.now(timezone.utc).isoformat(),
+            "ask_timestamp": datetime.now(timezone.utc).isoformat(),
+            "last_timestamp": datetime.now(timezone.utc).isoformat(),
+            "quote_timestamp": datetime.now(timezone.utc).isoformat(),
+            "market_data_source": IBKR_SOURCE,
+            "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+            "market_data_status": "healthy",
+            "market_data_feed_healthy": True,
+            "market_is_open": True,
+        },
     )
 
 
@@ -145,6 +206,7 @@ def _runner(
         broker_open_orders_provider=lambda: broker_open_orders,
         order_lifecycle_store=lifecycle_store,
         idempotency_store=idempotency_store,
+        market_data_provider=_LiveMarketDataProvider(),
     )
 
 

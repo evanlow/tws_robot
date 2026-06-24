@@ -46,6 +46,18 @@ from autonomous.trade_store import (
 logger = logging.getLogger(__name__)
 
 
+def _round_to_tick(price: float) -> float:
+    """Round a price to a valid US-equity minimum price variation.
+
+    Stocks priced >= $1 trade in $0.01 increments; below $1 in $0.0001.
+    Submitting a SELL LIMIT that violates the minimum tick is rejected by
+    TWS (error code 110), so exits must be tick-aligned before submission.
+    """
+    if price >= 1.0:
+        return round(price, 2)
+    return round(price, 4)
+
+
 # Exit reasons --------------------------------------------------------------
 
 TAKE_PROFIT = "TAKE_PROFIT"
@@ -53,6 +65,7 @@ STOP_LOSS = "STOP_LOSS"
 TIME_EXIT = "TIME_EXIT"
 RISK_EXIT = "RISK_EXIT"
 PROFIT_EXIT = "PROFIT_EXIT"  # Unrealized P/L threshold exit
+MANUAL_CLOSE = "MANUAL_CLOSE"  # Operator-initiated discretionary close
 NO_PRICE_AVAILABLE = "NO_PRICE_AVAILABLE"
 NO_EXIT = "NO_EXIT"
 
@@ -170,18 +183,169 @@ class AutonomousExitManager:
             risk_active = True
         positions = self._positions_provider() or {}
 
+        trades = list(self._store.list_open())
         decisions: List[ExitDecision] = []
-        for trade in self._store.list_open():
+        # symbol -> [(index, trade, current_price, entry_price, threshold)]
+        aggregate_profit_candidates: Dict[
+            str,
+            List[Tuple[int, AutonomousTrade, float, float, float]],
+        ] = {}
+
+        for idx, trade in enumerate(trades):
             decision = self._evaluate_one(
                 trade,
                 positions,
                 moment,
                 risk_active,
                 forced_risk_reason=forced_reason,
+                allow_profit_exit=False,
             )
             decisions.append(decision)
+
+            if decision.decision != NO_EXIT:
+                continue
+            candidate = self._aggregate_profit_candidate(trade, positions)
+            if candidate is None:
+                continue
+            symbol = str(getattr(trade, "symbol", "") or "")
+            current_price, entry_price, min_profit_usd = candidate
+            aggregate_profit_candidates.setdefault(symbol, []).append(
+                (idx, trade, current_price, entry_price, min_profit_usd)
+            )
+
+        # Aggregate-by-symbol profit exits: a symbol with multiple OPEN trades
+        # can trigger exits when total unrealized P/L crosses the threshold,
+        # even if no single leg crosses it by itself.
+        for symbol, items in aggregate_profit_candidates.items():
+            aggregate_unrealized = sum(
+                (price - entry) * int(trade.quantity)
+                for _, trade, price, entry, _ in items
+            )
+            threshold = min(min_profit for _, _, _, _, min_profit in items)
+            if aggregate_unrealized < threshold:
+                continue
+
+            reason = (
+                f"aggregate unrealized P/L ${aggregate_unrealized:.2f} "
+                f"for {symbol} >= ${threshold:.2f}"
+            )
+            for idx, trade, price, _, _ in items:
+                decisions[idx] = self._submit_exit(
+                    trade,
+                    PROFIT_EXIT,
+                    reason,
+                    price=price,
+                )
+
+        for decision in decisions:
             self._audit_decision(decision)
         return decisions
+
+    def force_close_trade(
+        self,
+        autonomous_trade_id: str,
+        reason_text: str = "operator-initiated discretionary close",
+    ) -> ExitDecision:
+        """Submit an immediate SELL for one OPEN trade at the current price.
+
+        This is the discretionary "Close Now" path: it bypasses the
+        rule-based triggers (target/stop/profit/time) and submits a
+        tick-rounded SELL LIMIT at the latest known price through the
+        same broker submission path used by :meth:`evaluate_open_trades`
+        (paper adapter or live order executor).  The trade lifecycle is
+        moved to ``EXIT_PENDING`` so the result is reconciled normally.
+
+        Safety: this only ever submits a SELL to flatten an existing long
+        position — it can never open or increase exposure.
+        """
+        trade = self._store.get(autonomous_trade_id)
+        if trade is None:
+            return ExitDecision(
+                autonomous_trade_id=autonomous_trade_id,
+                symbol="",
+                decision=NO_EXIT,
+                reason=f"autonomous trade '{autonomous_trade_id}' not found",
+            )
+
+        if str(getattr(trade, "status", "")) != "OPEN":
+            return ExitDecision(
+                autonomous_trade_id=autonomous_trade_id,
+                symbol=str(getattr(trade, "symbol", "") or ""),
+                decision=NO_EXIT,
+                reason=(
+                    f"trade is not OPEN (status: {getattr(trade, 'status', '')}); "
+                    "cannot force close"
+                ),
+            )
+
+        trade_type = str(getattr(trade, "trade_type", "") or "")
+        if trade_type.upper() != TradeType.BUY_SHARES.value:
+            return ExitDecision(
+                autonomous_trade_id=autonomous_trade_id,
+                symbol=str(getattr(trade, "symbol", "") or ""),
+                decision=NO_EXIT,
+                reason=f"trade_type {trade_type!r} is not BUY_SHARES; cannot force close",
+            )
+
+        if int(getattr(trade, "quantity", 0) or 0) <= 0:
+            return ExitDecision(
+                autonomous_trade_id=autonomous_trade_id,
+                symbol=str(getattr(trade, "symbol", "") or ""),
+                decision=NO_EXIT,
+                reason="trade has no positive quantity; cannot force close",
+            )
+
+        positions = self._positions_provider() or {}
+        price = self._last_price(str(getattr(trade, "symbol", "")), positions)
+
+        decision = self._submit_exit(
+            trade,
+            MANUAL_CLOSE,
+            reason_text,
+            price=price,
+        )
+        self._audit_decision(decision)
+        return decision
+
+    def _aggregate_profit_candidate(
+        self,
+        trade: AutonomousTrade,
+        positions: Dict[str, Dict[str, Any]],
+    ) -> Optional[Tuple[float, float, float]]:
+        """Return candidate tuple for aggregate profit evaluation.
+
+        Tuple is ``(current_price, entry_price, min_profit_threshold_usd)``.
+        Returns ``None`` when the trade is ineligible.
+        """
+        if str(getattr(trade, "status", "")) != "OPEN":
+            return None
+        trade_type = str(getattr(trade, "trade_type", "") or "")
+        if trade_type.upper() != TradeType.BUY_SHARES.value:
+            return None
+        if int(getattr(trade, "quantity", 0) or 0) <= 0:
+            return None
+        entry_price = (
+            getattr(trade, "entry_filled_price", None)
+            or getattr(trade, "entry_limit_price", None)
+        )
+        try:
+            entry_price = float(entry_price)
+        except (TypeError, ValueError):
+            return None
+        if entry_price <= 0:
+            return None
+        current_price = self._last_price(str(getattr(trade, "symbol", "")), positions)
+        if current_price is None or current_price <= 0:
+            return None
+        try:
+            min_profit_usd = float(
+                getattr(trade, "min_profit_threshold_usd", None) or 100.0
+            )
+        except (TypeError, ValueError):
+            min_profit_usd = 100.0
+        if min_profit_usd <= 0:
+            min_profit_usd = 100.0
+        return (current_price, entry_price, min_profit_usd)
 
     # ------------------------------------------------------------------
     # Internal
@@ -218,6 +382,99 @@ class AutonomousExitManager:
                 return value
         return None
 
+    def _held_long_quantity(self, symbol: str) -> Optional[int]:
+        """Return the broker-held long quantity for ``symbol``.
+
+        Prefers ``broker_positions_provider`` (full broker snapshot used on
+        the live path) and falls back to ``positions_provider``.  Returns
+        ``None`` when the holding cannot be determined so callers can fail
+        closed rather than risk an oversell.  A symbol that is absent from
+        the snapshot is treated as a 0 holding (flat), not unknown.
+        """
+        sources = []
+        if self._broker_positions_provider is not None:
+            sources.append(self._broker_positions_provider)
+        if self._positions_provider is not None:
+            sources.append(self._positions_provider)
+
+        for source in sources:
+            try:
+                positions = source() or {}
+            except Exception:  # pragma: no cover - defensive
+                logger.warning("positions provider raised in oversell guard")
+                continue
+            if symbol not in positions:
+                # Symbol not held according to this snapshot → flat.
+                return 0
+            pos = positions.get(symbol)
+            qty = None
+            if isinstance(pos, dict):
+                for key in ("quantity", "position", "shares", "qty"):
+                    if key in pos and pos[key] is not None:
+                        qty = pos[key]
+                        break
+            else:
+                qty = getattr(pos, "quantity", None)
+            try:
+                return int(qty)
+            except (TypeError, ValueError):
+                # Present but unparseable → cannot determine; fail closed.
+                return None
+        return None
+
+    def _oversell_guard(
+        self,
+        trade: AutonomousTrade,
+        reason_code: str,
+        reason_text: str,
+        limit_price: float,
+    ) -> Optional[ExitDecision]:
+        """Refuse a SELL that would exceed the broker-held long quantity.
+
+        Returns a ``NO_EXIT`` :class:`ExitDecision` when the exit must be
+        blocked (held quantity unknown, already flat/short, or exit larger
+        than the holding), or ``None`` when the exit is safe to submit.
+        """
+        exit_qty = int(getattr(trade, "quantity", 0) or 0)
+        held_qty = self._held_long_quantity(trade.symbol)
+        if held_qty is None:
+            return ExitDecision(
+                autonomous_trade_id=trade.autonomous_trade_id,
+                symbol=trade.symbol,
+                decision=NO_EXIT,
+                reason=(
+                    f"cannot determine broker-held quantity for {trade.symbol}; "
+                    "refusing exit to avoid oversell"
+                ),
+                price=limit_price,
+                notes=[f"would_exit:{reason_code}", reason_text],
+            )
+        if held_qty <= 0:
+            return ExitDecision(
+                autonomous_trade_id=trade.autonomous_trade_id,
+                symbol=trade.symbol,
+                decision=NO_EXIT,
+                reason=(
+                    f"broker holds {held_qty} shares of {trade.symbol} "
+                    "(already flat/short); refusing exit to avoid going short"
+                ),
+                price=limit_price,
+                notes=[f"would_exit:{reason_code}", reason_text],
+            )
+        if exit_qty > held_qty:
+            return ExitDecision(
+                autonomous_trade_id=trade.autonomous_trade_id,
+                symbol=trade.symbol,
+                decision=NO_EXIT,
+                reason=(
+                    f"exit quantity {exit_qty} exceeds broker-held "
+                    f"{held_qty} shares of {trade.symbol}; refusing to avoid oversell"
+                ),
+                price=limit_price,
+                notes=[f"would_exit:{reason_code}", reason_text],
+            )
+        return None
+
     def _evaluate_one(
         self,
         trade: AutonomousTrade,
@@ -225,6 +482,7 @@ class AutonomousExitManager:
         now: datetime,
         risk_active: bool,
         forced_risk_reason: str = "",
+        allow_profit_exit: bool = True,
     ) -> ExitDecision:
         if str(getattr(trade, "status", "")) == ENTRY_PENDING:
             return ExitDecision(
@@ -245,6 +503,26 @@ class AutonomousExitManager:
                 symbol=trade.symbol,
                 decision=NO_EXIT,
                 reason=f"trade_type {trade_type!r} is not BUY_SHARES; skipped",
+            )
+
+        # Only filled entries can be exited.  Fall back to entry_limit_price
+        # for OPEN trades whose fill was never recorded (e.g. schema predates
+        # the entry_filled_price field, or reconciler missed the fill callback).
+        # ENTRY_PENDING trades are blocked above, so reaching here with status
+        # OPEN and no fill price means the entry was placed and likely filled.
+        _effective_entry_price = (
+            getattr(trade, "entry_filled_price", None)
+            or getattr(trade, "entry_limit_price", None)
+        )
+        if not _effective_entry_price:
+            return ExitDecision(
+                autonomous_trade_id=trade.autonomous_trade_id,
+                symbol=trade.symbol,
+                decision=NO_EXIT,
+                reason=(
+                    "no entry price available (entry_filled_price and "
+                    "entry_limit_price both missing); skipping exit"
+                ),
             )
 
         # 1. Risk / emergency stop overrides everything else — but we
@@ -337,13 +615,19 @@ class AutonomousExitManager:
                 price=price,
             )
 
-        # 4. Profit-based exit — when unrealized P/L hits the threshold.
-        #    Checked after target/stop so price-specific targets take priority.
-        min_profit_usd = getattr(trade, "min_profit_threshold_usd", 100.0)
-        if min_profit_usd > 0 and trade.quantity > 0:
-            entry_price = trade.entry_filled_price or trade.entry_limit_price
-            if entry_price and entry_price > 0:
-                unrealized_pnl = (price - entry_price) * trade.quantity
+        # 4. Per-trade profit exit (kept for direct/unit callers). The main
+        # evaluate_open_trades flow uses aggregate-by-symbol profit exits.
+        if allow_profit_exit:
+            try:
+                min_profit_usd = float(
+                    getattr(trade, "min_profit_threshold_usd", None) or 100.0
+                )
+            except (TypeError, ValueError):
+                min_profit_usd = 100.0
+            if min_profit_usd <= 0:
+                min_profit_usd = 100.0
+            if trade.quantity > 0 and _effective_entry_price > 0:
+                unrealized_pnl = (price - _effective_entry_price) * trade.quantity
                 if unrealized_pnl >= min_profit_usd:
                     return self._submit_exit(
                         trade,
@@ -398,10 +682,26 @@ class AutonomousExitManager:
                 price=price,
                 notes=[f"would_exit:{reason_code}", reason_text],
             )
-        limit_price = float(price)
+        # Round to a valid tick before submitting.  IBKR position market
+        # prices routinely carry sub-penny precision (e.g. 171.405), and a
+        # SELL LIMIT that violates the minimum price variation is rejected
+        # by TWS (error code 110), causing an endless reject/retry loop.
+        # US stocks >= $1 trade in $0.01 increments; below $1 in $0.0001.
+        limit_price = _round_to_tick(float(price))
 
         # --- Paper adapter path -------------------------------------------
         if self._paper_adapter is not None:
+            # Oversell guard (paper path).  NEVER submit a SELL that exceeds
+            # the broker's current long quantity for this symbol.  This is
+            # the structural safety net that makes flipping a long into a
+            # SHORT impossible, even if duplicate exit orders are generated
+            # (e.g. a stale working order plus a retry).  When the held
+            # quantity cannot be determined we fail closed (refuse the exit)
+            # rather than risk an oversell.  The live/order_executor path has
+            # its own broker-grounded check in _pre_validate_exit_position.
+            guard = self._oversell_guard(trade, reason_code, reason_text, limit_price)
+            if guard is not None:
+                return guard
             return self._submit_exit_via_paper_adapter(
                 trade, reason_code, reason_text, limit_price
             )

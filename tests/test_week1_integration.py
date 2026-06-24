@@ -13,10 +13,6 @@ Run with: pytest test_week1_integration.py -v
 import pytest
 import os
 from datetime import datetime
-from dotenv import load_dotenv
-
-# Load environment for database tests
-load_dotenv()
 
 
 class TestWeek1EventBus:
@@ -215,7 +211,13 @@ class TestWeek1Database:
     def test_heroku_database_connection(self):
         """Verify Heroku MySQL database is accessible (requires DATABASE_URL)"""
         database_url = os.getenv('DATABASE_URL')
-        
+        if not database_url:
+            # Read .env non-destructively so we do not leak unrelated values
+            # (e.g. MANUAL_CASH_BUFFER_PCT) into os.environ for the rest of
+            # the suite. dotenv_values() returns a dict without mutating env.
+            from dotenv import dotenv_values
+            database_url = dotenv_values().get('DATABASE_URL')
+
         if not database_url or 'sqlite' in database_url:
             pytest.skip("Heroku DATABASE_URL not configured")
         

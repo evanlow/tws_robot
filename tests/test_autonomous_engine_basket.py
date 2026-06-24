@@ -1,7 +1,32 @@
+from datetime import datetime, timezone
+
 from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.autonomous_engine import AutonomousTradingEngine, DecisionStatus
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+)
 from data.cash_availability import CashAvailabilityAnalyzer
+
+
+def _live_quote_extras(price: float = 100.0) -> dict:
+    """Healthy IBKR live-quote snapshot so the market-data health guard allows
+    assisted-live planning for each basket leg."""
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "bid": round(price - 0.05, 2),
+        "ask": round(price + 0.05, 2),
+        "quote_last": price,
+        "quote_timestamp": now,
+        "bid_timestamp": now,
+        "ask_timestamp": now,
+        "last_timestamp": now,
+        "market_data_source": IBKR_SOURCE,
+        "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+        "market_data_status": "healthy",
+        "market_data_feed_healthy": True,
+    }
 
 
 class _Provider:
@@ -26,7 +51,7 @@ class _PaperAdapter:
         return 1000 + len(self.calls)
 
 
-def _signal(symbol, sector, price=100.0):
+def _signal(symbol, sector, price=100.0, extras=None):
     return CandidateSignal(
         symbol=symbol,
         strength_score=100,
@@ -38,14 +63,15 @@ def _signal(symbol, sector, price=100.0):
         resistance_price=110.0,
         volume_ok=True,
         trend_ok=True,
+        extras=extras if extras is not None else {},
     )
 
 
 def _engine(config, paper_adapter=None):
     signals = [
-        _signal("AAA", "Tech"),
-        _signal("BBB", "Health"),
-        _signal("CCC", "Finance"),
+        _signal("AAA", "Tech", extras=_live_quote_extras()),
+        _signal("BBB", "Health", extras=_live_quote_extras()),
+        _signal("CCC", "Finance", extras=_live_quote_extras()),
     ]
     scanner = CandidateScanner(
         signal_provider=_Provider(signals),

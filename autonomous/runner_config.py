@@ -108,6 +108,7 @@ class AutonomousRunnerConfig:
         return cls(
             runner_enabled=_env_bool("AUTONOMOUS_RUNNER_ENABLED", False),
             max_open_autonomous_trades=_env_int("AUTONOMOUS_MAX_OPEN_LIVE_TRADES", 1),
+            min_profit_threshold_usd=_env_float("AUTONOMOUS_MIN_PROFIT_THRESHOLD_USD", 100.0),
         )
 
 

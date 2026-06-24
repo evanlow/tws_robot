@@ -18,6 +18,12 @@ from autonomous import (
     StaticSignalProvider,
 )
 from autonomous.audit import AuditLogger
+from autonomous.market_data_provider import (
+    IBKR_MARKET_DATA_TYPE_LIVE,
+    IBKR_SOURCE,
+    MarketDataProviderStatus,
+    MarketDataQuote,
+)
 from autonomous.trade_store import AutonomousTrade, OPEN, TradeStore
 from data.cash_availability import CashAvailabilityAnalyzer
 from execution.order_executor import OrderResult, OrderStatus
@@ -25,6 +31,65 @@ from execution.order_executor import OrderResult, OrderStatus
 
 class _RealProvider:
     pass
+
+
+class _LiveMarketDataProvider:
+    def __init__(self, symbol: str = "AAA", price: float = 100.0) -> None:
+        now = datetime.now(timezone.utc)
+        self.quote = MarketDataQuote(
+            symbol=symbol,
+            bid=round(price - 0.05, 2),
+            ask=round(price + 0.05, 2),
+            last=price,
+            timestamp=now,
+            bid_timestamp=now,
+            ask_timestamp=now,
+            last_timestamp=now,
+            source=IBKR_SOURCE,
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            feed_healthy=True,
+        )
+        self.subscribed: list[str] = []
+
+    def subscribe(self, symbols):
+        self.subscribed.extend([str(s).upper() for s in symbols])
+
+    def unsubscribe(self, symbols):
+        pass
+
+    def latest_quote(self, symbol):
+        if str(symbol).upper() == self.quote.symbol:
+            return self.quote
+        return None
+
+    def status(self):
+        return MarketDataProviderStatus(
+            provider=IBKR_SOURCE,
+            connected=True,
+            healthy=True,
+            subscribed_symbols=list(self.subscribed),
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            last_error=None,
+            reason="test market-data provider",
+        )
+
+
+def _live_quote_extras(price: float = 100.0):
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return {
+        "bid": round(price - 0.05, 2),
+        "ask": round(price + 0.05, 2),
+        "quote_last": price,
+        "bid_timestamp": now_iso,
+        "ask_timestamp": now_iso,
+        "last_timestamp": now_iso,
+        "quote_timestamp": now_iso,
+        "market_data_source": IBKR_SOURCE,
+        "market_data_type": IBKR_MARKET_DATA_TYPE_LIVE,
+        "market_data_status": "healthy",
+        "market_data_feed_healthy": True,
+        "market_is_open": True,
+    }
 
 
 class _BracketSubmittingExecutor:
@@ -57,6 +122,7 @@ def _signal(symbol: str = "AAA") -> CandidateSignal:
         last_price=100.0,
         support_price=95.0,
         resistance_price=110.0,
+        extras=_live_quote_extras(100.0),
     )
 
 
@@ -127,6 +193,7 @@ def _runner(
         broker_open_orders_provider=broker_open_orders_provider,
         order_lifecycle_store=lifecycle_store,
         idempotency_store=idempotency_store,
+        market_data_provider=_LiveMarketDataProvider(),
     )
 
 

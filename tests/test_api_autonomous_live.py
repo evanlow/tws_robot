@@ -316,7 +316,7 @@ class TestControlTower:
                 return {"deployable_cash": 1000.0}
 
         class _Analyzer:
-            def analyze(self, *, account_summary, positions, orders):
+            def analyze(self, *, account_summary, positions, orders, usd_sgd_rate=None):
                 captured["orders"] = orders
                 return _Analysis()
 
@@ -349,7 +349,7 @@ class TestControlTower:
                 return {"deployable_cash": 1000.0}
 
         class _Analyzer:
-            def analyze(self, *, account_summary, positions, orders):
+            def analyze(self, *, account_summary, positions, orders, usd_sgd_rate=None):
                 captured["orders"] = orders
                 return _Analysis()
 
