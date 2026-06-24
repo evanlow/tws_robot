@@ -281,9 +281,9 @@ class MaintenanceRunner:
     def _backup_existing_file(self, output_path: Path) -> Optional[Path]:
         if not output_path.exists():
             return None
-        backup_timestamp_dir = self.backup_root / datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-        backup_timestamp_dir.mkdir(parents=True, exist_ok=True)
-        backup_path = backup_timestamp_dir / output_path.name
+        timestamped_backup_dir = self.backup_root / datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        timestamped_backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = timestamped_backup_dir / output_path.name
         shutil.copy2(output_path, backup_path)
         return backup_path
 
