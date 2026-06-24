@@ -95,6 +95,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.sti_screener import bp as sti_screener_bp
     from web.routes.hsi_screener import bp as hsi_screener_bp
     from web.routes.autonomous_trading import bp as autonomous_trading_bp
+    from web.routes.maintenance import bp as maintenance_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(strategies_bp)
@@ -112,6 +113,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     app.register_blueprint(sti_screener_bp)
     app.register_blueprint(hsi_screener_bp)
     app.register_blueprint(autonomous_trading_bp)
+    app.register_blueprint(maintenance_bp)
 
     # ---- JSON API blueprints ----
     # Session-authenticated API requests remain CSRF-protected and the web
@@ -139,6 +141,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_autonomous import bp as api_autonomous_bp
     from web.routes.api_trading_readiness import bp as api_trading_readiness_bp
     from web.routes.api_autonomous_evidence import bp as api_autonomous_evidence_bp
+    from web.routes.api_maintenance import bp as api_maintenance_bp
 
     # Patch the default autonomous market provider so the existing SPY gate
     # receives VIX values as an additional regime/sizing safeguard. Operator
@@ -154,6 +157,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
         api_market_events_bp, api_stock_analysis_bp, api_sp500_screener_bp,
         api_sti_screener_bp, api_hsi_screener_bp, api_autonomous_bp,
         api_trading_readiness_bp, api_autonomous_evidence_bp,
+        api_maintenance_bp,
     ]
     for api_bp in api_blueprints:
         app.register_blueprint(api_bp)
