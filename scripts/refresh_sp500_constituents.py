@@ -5,11 +5,16 @@ The maintained implementation now lives in ``web.maintenance`` so refreshes are
 validated, backed up, cache-invalidated, and reported consistently.
 """
 
+from pathlib import Path
 import json
 import sys
 
-from web.maintenance.runner import MaintenanceRunner
-from web.maintenance.tasks import STATUS_FAILED
+# Allow direct execution via ``python scripts/refresh_sp500_constituents.py``
+# without requiring the package to be installed first.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from web.maintenance.runner import MaintenanceRunner  # noqa: E402
+from web.maintenance.tasks import STATUS_FAILED  # noqa: E402
 
 
 def main() -> int:
