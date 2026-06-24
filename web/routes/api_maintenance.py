@@ -45,6 +45,8 @@ def run():
         event_symbols: list[str], optional
         days_ahead: int, default 28
         allow_large_change: bool, default False
+        include_portfolio_symbols: bool, default True — when True and the market_events
+            task is included, portfolio and strategy symbols are appended to event_symbols
     """
     payload = request.get_json(silent=True) or {}
     tasks = payload.get("tasks") or None
