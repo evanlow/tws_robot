@@ -57,7 +57,7 @@ def run():
     days_ahead = _bounded_int(payload.get("days_ahead"), default=28, minimum=1, maximum=90)
     event_symbols = _csv_or_list(payload.get("event_symbols"))
     include_portfolio = bool(payload.get("include_portfolio_symbols", True))
-    if include_portfolio:
+    if include_portfolio and (tasks is None or "market_events" in tasks):
         event_symbols.extend(_portfolio_symbols())
 
     try:
@@ -72,7 +72,7 @@ def run():
         return jsonify(report.to_dict()), status_code
     except Exception as exc:
         logger.error("Maintenance run failed: %s", exc, exc_info=True)
-        return jsonify({"error": "Maintenance run could not be completed.", "detail": str(exc)}), 500
+        return jsonify({"error": "Maintenance run could not be completed."}), 500
 
 
 @bp.route("/reports", methods=["GET"])

@@ -106,7 +106,7 @@ class MaintenanceRunReport:
         self.finished_at = utc_now_iso()
         self.duration_seconds = round(max(0.0, now_monotonic - started_monotonic), 3)
         self.warnings = [w for r in self.results for w in r.warnings]
-        self.errors = [e for r in self.results for e in r.errors]
+        self.errors = [e for r in self.results for e in list(r.errors) + list(r.validation.errors)]
         if any(r.status == STATUS_FAILED for r in self.results):
             self.status = STATUS_FAILED
         elif any(r.status == STATUS_PARTIAL_FAILURE for r in self.results):

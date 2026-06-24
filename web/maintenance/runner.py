@@ -108,9 +108,10 @@ class MaintenanceRunner:
             elif task_name == "metadata_validation":
                 result = self._run_metadata_validation_task(dry_run=dry_run)
             else:
+                task_started = time.monotonic()
                 result = MaintenanceTaskResult(task=task_name, status=STATUS_FAILED, dry_run=dry_run)
                 result.errors.append(f"Unknown maintenance task: {task_name}")
-                result.finished_at = _utc_now().isoformat()
+                result.finish(started_monotonic=task_started, now_monotonic=time.monotonic())
             report.results.append(result)
 
         report.finalize(started_monotonic=started, now_monotonic=time.monotonic())
@@ -122,10 +123,11 @@ class MaintenanceRunner:
         constituent_status = []
         for task_name, cfg in _CONSTITUENT_TASKS.items():
             path = self.data_dir / str(cfg["filename"])
-            row_count = len(_read_csv_rows(path)) if path.exists() else 0
+            rows = _read_csv_rows(path) if path.exists() else []
+            row_count = len(rows)
             mtime = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat() if path.exists() else None
             validation = validate_constituent_rows(
-                _read_csv_rows(path),
+                rows,
                 market=str(cfg["market"]),
                 before_count=row_count,
             ) if path.exists() else ValidationResult(status=STATUS_FAILED, errors=["File not found"])
@@ -240,12 +242,12 @@ class MaintenanceRunner:
             result.detail["summary"] = summary
             result.after_count = int(summary.get("total_upserted") or 0)
             total_errors = int(summary.get("total_errors") or 0)
-            if summary.get("status") == "partial_failure" or total_errors:
-                result.status = STATUS_PARTIAL_FAILURE
-                result.warnings.append("One or more market-event providers failed; see provider_results")
-            elif summary.get("status") == "failed":
+            if summary.get("status") == "failed":
                 result.status = STATUS_FAILED
                 result.errors.append(str(summary.get("error") or "Market events refresh failed"))
+            elif summary.get("status") == "partial_failure" or total_errors:
+                result.status = STATUS_PARTIAL_FAILURE
+                result.warnings.append("One or more market-event providers failed; see provider_results")
             return result
         except Exception as exc:
             result.status = STATUS_FAILED
@@ -274,7 +276,7 @@ class MaintenanceRunner:
     def _backup_existing_file(self, output_path: Path) -> Optional[Path]:
         if not output_path.exists():
             return None
-        backup_dir = self.backup_root / datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        backup_dir = self.backup_root / datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup_path = backup_dir / output_path.name
         shutil.copy2(output_path, backup_path)
