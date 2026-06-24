@@ -3,6 +3,10 @@
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[TWS Robot] UI ready');
 
+  // Ensure optional/operator pages are discoverable even when the server-side
+  // navbar template has not been expanded yet.
+  _ensureMaintenanceNavLink();
+
   // Auto-enrich symbol cells with company names
   _enrichSymbolNames();
 });
@@ -78,6 +82,38 @@ window.renderMarkdown = function renderMarkdown(text) {
     .replace(/`(.+?)`/g,      '<code>$1</code>')
     .replace(/\n/g,           '<br>');
 };
+
+/**
+ * Add the System Maintenance console to the Monitoring dropdown.
+ * This keeps the operator-only page discoverable from the web UI.
+ * @private
+ */
+function _ensureMaintenanceNavLink() {
+  const existing = document.querySelector('a[href="/maintenance"]');
+  if (existing) return;
+
+  const monitoringToggle = Array.from(document.querySelectorAll('.nav-dropdown-toggle'))
+    .find(btn => (btn.textContent || '').includes('Monitoring'));
+  if (!monitoringToggle) return;
+
+  const dropdown = monitoringToggle.closest('.nav-dropdown');
+  const menu = dropdown ? dropdown.querySelector('.nav-dropdown-menu') : null;
+  if (!menu) return;
+
+  const li = document.createElement('li');
+  const isMaintenancePage = window.location.pathname === '/maintenance' ||
+    window.location.pathname.startsWith('/maintenance/');
+  if (isMaintenancePage) {
+    li.className = 'active';
+    dropdown.classList.add('active');
+  }
+
+  const link = document.createElement('a');
+  link.href = '/maintenance';
+  link.textContent = 'Maintenance';
+  li.appendChild(link);
+  menu.appendChild(li);
+}
 
 /**
  * Fetch company names for all ``[data-symbol]`` elements on the page

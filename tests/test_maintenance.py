@@ -76,6 +76,25 @@ def test_apply_creates_backup_and_replaces_file(tmp_path, monkeypatch):
     assert report.results[0].detail["cache_invalidated"] is True
 
 
+def test_source_failure_preserves_existing_file_and_reports_error(tmp_path, monkeypatch):
+    current = _sp500_rows(450)
+    output_path = tmp_path / "data" / "sp500_constituents.csv"
+    _write_constituents(output_path, current)
+    _disable_cache_invalidation(monkeypatch)
+
+    def failing_source():
+        raise RuntimeError("source unavailable")
+
+    runner = _runner(tmp_path, {"sp500_constituents": failing_source})
+
+    report = runner.run(tasks=["sp500_constituents"], dry_run=False)
+
+    assert report.status == "failed"
+    assert "source unavailable" in report.errors
+    assert _read_symbols(output_path) == [r["symbol"] for r in current]
+    assert not (tmp_path / "data" / "backups" / "constituents").exists()
+
+
 def test_validation_failure_preserves_existing_file(tmp_path, monkeypatch):
     current = _sp500_rows(450)
     invalid = _sp500_rows(1)
@@ -105,6 +124,14 @@ def test_maintenance_page_loads(client):
 
     assert response.status_code == 200
     assert b"System Maintenance" in response.data
+
+
+def test_maintenance_nav_link_registered_in_main_js(client):
+    response = client.get("/static/js/main.js")
+
+    assert response.status_code == 200
+    assert b"/maintenance" in response.data
+    assert b"Maintenance" in response.data
 
 
 def test_maintenance_status_api_loads(client):
