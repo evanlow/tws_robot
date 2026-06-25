@@ -7,6 +7,7 @@ market-regime gates, evidence logging, and optional paper/live execution.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from enum import Enum
@@ -241,17 +242,30 @@ class AutonomousTradingEngine:
             return
 
         for candidate in candidates:
-            try:
-                quote = provider.latest_quote(candidate.symbol)
-            except Exception:
-                logger.exception(
-                    "live market-data provider latest_quote failed for %s",
-                    candidate.symbol,
-                )
-                candidate.extras["market_data_status"] = "provider_error"
-                candidate.extras["market_data_source"] = "UNKNOWN"
-                candidate.extras["market_data_error_message"] = "latest_quote failed"
-                continue
+            quote = None
+            for _ in range(10):
+                try:
+                    quote = provider.latest_quote(candidate.symbol)
+                except Exception:
+                    logger.exception(
+                        "live market-data provider latest_quote failed for %s",
+                        candidate.symbol,
+                    )
+                    candidate.extras["market_data_status"] = "provider_error"
+                    candidate.extras["market_data_source"] = "UNKNOWN"
+                    candidate.extras["market_data_error_message"] = "latest_quote failed"
+                    quote = None
+                    break
+                if quote is not None:
+                    quote_data = quote.to_dict()
+                    if (
+                        quote_data.get("bid") is not None
+                        and quote_data.get("ask") is not None
+                        and quote_data.get("quote_timestamp") is not None
+                        and str(quote_data.get("market_data_type") or "").upper() == "LIVE"
+                    ):
+                        break
+                time.sleep(0.1)
             if quote is None:
                 candidate.extras["market_data_status"] = "missing_quote"
                 candidate.extras.setdefault("market_data_source", "IBKR")
@@ -362,7 +376,6 @@ class AutonomousTradingEngine:
             symbol_whitelist=self.config.symbol_whitelist,
             symbol_blacklist=self.config.symbol_blacklist,
         )
-        self._apply_live_market_data(candidates)
         ranked, rejected = self.ranker.rank_with_rejections(
             candidates,
             positions=positions,
@@ -370,6 +383,22 @@ class AutonomousTradingEngine:
             today=today,
             market_gate=decision.market_gate,
         )
+        if ranked and self.config.mode == AutonomousMode.ASSISTED_LIVE:
+            # Keep IBKR line usage small in assisted-live mode: screening can
+            # be broad, but live quote validation should focus on symbols that
+            # are actually eligible for immediate planning/execution.
+            live_quote_limit = 10
+            live_quote_targets = [
+                rc.candidate
+                for rc in ranked[
+                    : (
+                        self.config.basket_max_size
+                        if self.config.basket_enabled
+                        else live_quote_limit
+                    )
+                ]
+            ]
+            self._apply_live_market_data(live_quote_targets)
         decision.shortlist = [rc.to_dict() for rc in ranked]
         decision.rejected_candidates = rejected
 
@@ -399,28 +428,39 @@ class AutonomousTradingEngine:
                 decision.notes.append("basket mode enabled but no basket plan produced; falling back to top candidate")
 
         if basket_plan is None:
-            best = ranked[0]
-            decision.selected = best.to_dict()
-            option_hint = None
-            if self.option_hint_provider is not None:
-                try:
-                    option_hint = self.option_hint_provider(best.candidate)
-                except Exception as exc:
-                    logger.warning("option_hint_provider raised: %s", exc)
-                    option_hint = None
+            planner_reasons_all: list[str] = []
+            plan = None
+            selected_candidate = None
+            for ranked_candidate in ranked:
+                option_hint = None
+                if self.option_hint_provider is not None:
+                    try:
+                        option_hint = self.option_hint_provider(ranked_candidate.candidate)
+                    except Exception as exc:
+                        logger.warning("option_hint_provider raised: %s", exc)
+                        option_hint = None
 
-            plan = self.planner.plan(
-                best.candidate,
-                deployable_cash=decision.deployable_cash,
-                equity=equity,
-                option_hint=option_hint,
-                reasons=(planner_reasons := []),
-            )
-            if plan is None:
+                planner_reasons: list[str] = []
+                candidate_plan = self.planner.plan(
+                    ranked_candidate.candidate,
+                    deployable_cash=decision.deployable_cash,
+                    equity=equity,
+                    option_hint=option_hint,
+                    reasons=planner_reasons,
+                )
+                if candidate_plan is not None:
+                    plan = candidate_plan
+                    selected_candidate = ranked_candidate
+                    break
+                if planner_reasons:
+                    planner_reasons_all.extend(planner_reasons[:3])
+
+            if plan is None or selected_candidate is None:
                 decision.status = DecisionStatus.NO_TRADE_PLAN
-                detail = "; ".join(planner_reasons) if planner_reasons else "insufficient cash or no allowed trade type"
+                detail = "; ".join(planner_reasons_all) if planner_reasons_all else "insufficient cash or no allowed trade type"
                 decision.rejection_reason = f"no tradable plan — {detail}"
                 return self._emit(decision)
+            decision.selected = selected_candidate.to_dict()
             decision.trade_plan = plan.to_dict()
             decision.trade_plans = [decision.trade_plan]
 

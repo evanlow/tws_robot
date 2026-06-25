@@ -419,3 +419,28 @@ def test_live_execution_returns_live_plan_ready_when_allow_live_true_and_confirm
     assert d.status is DecisionStatus.LIVE_PLAN_READY
     assert d.trade_plan is not None
     assert "live_plan_ready" in (d.notes[0] if d.notes else "")
+
+
+def test_assisted_live_skips_candidate_with_missing_ibkr_quote_and_uses_next_candidate(tmp_path):
+    cfg = AutonomousTradingConfig(
+        mode=AutonomousMode.ASSISTED_LIVE,
+        allow_live_execution=True,
+        require_user_confirmation=True,
+        max_trades_per_day=5,
+        emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
+        audit_log_dir=str(tmp_path),
+    )
+    engine = _make_engine(
+        tmp_path,
+        signals=[
+            _make_signal("AAA", strength=150, extras={}),
+            _make_signal("BBB", strength=140, extras=_live_quote_extras()),
+        ],
+        config=cfg,
+    )
+
+    d = engine.run_once(confirm=True)
+
+    assert d.status is DecisionStatus.LIVE_PLAN_READY
+    assert d.selected["candidate"]["symbol"] == "BBB"
+    assert d.trade_plan["symbol"] == "BBB"

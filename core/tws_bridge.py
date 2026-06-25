@@ -928,13 +928,25 @@ class TWSBridge:
                 for symbol, quote in self._app._market_data_quotes.items()
             }
             subscribed = sorted(self._app._market_data_symbol_to_req_id)
+            subscribed_set = set(subscribed)
+            active_quotes = {
+                symbol: quote
+                for symbol, quote in quotes.items()
+                if symbol in subscribed_set
+            }
             last_error = (
                 dict(self._app._market_data_last_error)
                 if self._app._market_data_last_error
                 else None
             )
+            # Symbol-level errors from previously unsubscribed symbols should
+            # not keep provider health red forever.
+            if isinstance(last_error, dict):
+                err_symbol = str(last_error.get("symbol") or "").strip().upper()
+                if err_symbol and err_symbol not in subscribed_set:
+                    last_error = None
             any_unhealthy_quote = any(
-                quote.get("feed_healthy") is False for quote in quotes.values()
+                quote.get("feed_healthy") is False for quote in active_quotes.values()
             )
             healthy = (
                 self.is_connected
