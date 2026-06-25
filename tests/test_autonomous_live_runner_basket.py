@@ -1,9 +1,14 @@
 from datetime import datetime, timezone
 
 from autonomous import AutonomousMode, AutonomousTradingConfig
-from autonomous.autonomous_engine import AutonomousTradingEngine
-from autonomous.autonomous_live_runner import AutonomousLiveRunner, EXECUTED, NO_TRADE
+from autonomous.autonomous_engine import (
+    AutonomousDecision,
+    AutonomousTradingEngine,
+    DecisionStatus,
+)
+from autonomous.autonomous_live_runner import AutonomousLiveRunner, EXECUTED, EXECUTION_FAILED, NO_TRADE
 from autonomous.live_basket_patch import _execute_one_live_plan
+from autonomous.profitability_gate import ProfitabilityGate
 from autonomous.candidate_scanner import CandidateScanner, CandidateSignal
 from autonomous.market_data_provider import (
     IBKR_MARKET_DATA_TYPE_LIVE,
@@ -255,3 +260,196 @@ def test_execute_one_live_plan_returns_lifecycle_tuple_for_unsupported_trade_typ
     assert trade is None
     assert "not BUY_SHARES" in error
     assert lifecycle_events == []
+
+
+def test_basket_preflight_skips_profitability_for_non_buy_shares(tmp_path):
+    """Non-BUY_SHARES legs should not be rejected by profitability preflight."""
+    signals = [_signal("AAA", "Tech")]
+    scanner = CandidateScanner(
+        signal_provider=_Provider(signals),
+        symbols=[
+            {"symbol": s.symbol, "security": s.symbol, "sector": s.sector, "sub_industry": ""}
+            for s in signals
+        ],
+    )
+    cfg = AutonomousTradingConfig(
+        mode=AutonomousMode.ASSISTED_LIVE,
+        allow_live_execution=True,
+        basket_enabled=True,
+        basket_max_size=1,
+        max_trades_per_day=5,
+        audit_log_dir=str(tmp_path),
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    engine = AutonomousTradingEngine(
+        scanner=scanner,
+        cash_analyzer=CashAvailabilityAnalyzer(),
+        account_provider=lambda: {"cash_balance": 100_000, "available_funds": 100_000, "equity": 100_000},
+        positions_provider=lambda: {},
+        orders_provider=lambda: [],
+        config=cfg,
+        spy_price_provider=lambda: {"open": 500, "current": 505},
+    )
+    engine.profitability_gate = ProfitabilityGate(
+        enabled=True,
+        estimated_commission_per_order=1.09,
+        min_net_profit_usd=9999.0,
+        min_net_profit_pct_of_trade=0.5,
+    )
+
+    def _fake_run_once(confirm=False):
+        plan = {
+            "symbol": "AAA",
+            "trade_type": TradeType.SELL_CASH_SECURED_PUT.value,
+            "limit_price": 50.0,
+            "quantity": 1,
+            "target_price": 50.1,
+        }
+        return AutonomousDecision(
+            status=DecisionStatus.LIVE_PLAN_READY,
+            mode=AutonomousMode.ASSISTED_LIVE,
+            trade_plan=plan,
+            trade_plans=[plan],
+        )
+
+    engine.run_once = _fake_run_once
+
+    runner = AutonomousLiveRunner(
+        engine=engine,
+        trade_store=TradeStore(path=str(tmp_path / "live_trades.jsonl")),
+        live_config=AutonomousLiveRunnerConfig(
+            live_enabled=True,
+            live_continuous_enabled=True,
+            expected_account_id="U1234567",
+            max_open_live_trades=5,
+            max_live_trades_per_day=5,
+            max_deployable_cash_pct=1.0,
+            trade_store_path=str(tmp_path / "live_trades.jsonl"),
+            idempotency_store_path=str(tmp_path / "idempotency.jsonl"),
+        ),
+        order_executor=_Executor(),
+        connected_provider=lambda: True,
+        connection_env_provider=lambda: "live",
+        account_id_provider=lambda: "U1234567",
+        signal_provider_provider=lambda: _ReadyProvider(),
+        emergency_stop_provider=lambda: False,
+        deployable_cash_provider=lambda: 100_000.0,
+        broker_positions_provider=lambda: {},
+        market_data_provider=_LiveMarketDataProvider(),
+    )
+
+    result = runner.run_once()
+    assert result.status == EXECUTION_FAILED
+    assert "not BUY_SHARES" in (result.rejection_reason or "")
+    assert "uneconomic after commission" not in (result.rejection_reason or "")
+
+
+def test_live_runner_rejects_whole_basket_when_a_capped_leg_is_uneconomic(tmp_path):
+    """Regression: the post-cap profitability re-check must reject the entire
+    basket before *any* leg is submitted.
+
+    Both legs are sized so the deployable-cash cap shrinks them to 10 shares.
+    The first leg stays economical at that size while the second does not.  No
+    executor calls must be made, so a partial basket can never be left in the
+    market unsurfaced.
+    """
+
+    signals = [_signal("AAA", "Tech"), _signal("BBB", "Health")]
+    scanner = CandidateScanner(
+        signal_provider=_Provider(signals),
+        symbols=[
+            {"symbol": s.symbol, "security": s.symbol, "sector": s.sector, "sub_industry": ""}
+            for s in signals
+        ],
+    )
+    cfg = AutonomousTradingConfig(
+        mode=AutonomousMode.ASSISTED_LIVE,
+        allow_live_execution=True,
+        basket_enabled=True,
+        basket_max_size=2,
+        max_trades_per_day=5,
+        audit_log_dir=str(tmp_path),
+        emergency_stop_file=str(tmp_path / "ESTOP"),
+    )
+    engine = AutonomousTradingEngine(
+        scanner=scanner,
+        cash_analyzer=CashAvailabilityAnalyzer(),
+        account_provider=lambda: {"cash_balance": 100_000, "available_funds": 100_000, "equity": 100_000},
+        positions_provider=lambda: {},
+        orders_provider=lambda: [],
+        config=cfg,
+        spy_price_provider=lambda: {"open": 500, "current": 505},
+    )
+    # Enable the commission-aware gate on the engine so the live runner's
+    # post-cap re-check is active.
+    engine.profitability_gate = ProfitabilityGate(
+        enabled=True,
+        estimated_commission_per_order=1.09,
+        min_net_profit_usd=0.0,
+        min_net_profit_pct_of_trade=0.0,
+    )
+
+    # Return a ready two-leg live plan.  Both legs price at 50 with a planned
+    # quantity of 100 (value 5000); the deployable-cash cap below shrinks each
+    # to 10 shares.  Leg AAA (target 51.00) nets +7.82; leg BBB (target 50.10)
+    # nets -1.18 and must veto the whole basket.
+    def _fake_run_once(confirm=False):
+        plans = [
+            {
+                "symbol": "AAA",
+                "trade_type": TradeType.BUY_SHARES.value,
+                "limit_price": 50.0,
+                "quantity": 100,
+                "target_price": 51.0,
+            },
+            {
+                "symbol": "BBB",
+                "trade_type": TradeType.BUY_SHARES.value,
+                "limit_price": 50.0,
+                "quantity": 100,
+                "target_price": 50.10,
+            },
+        ]
+        return AutonomousDecision(
+            status=DecisionStatus.LIVE_PLAN_READY,
+            mode=AutonomousMode.ASSISTED_LIVE,
+            trade_plan=plans[0],
+            trade_plans=plans,
+        )
+
+    engine.run_once = _fake_run_once
+
+    executor = _Executor()
+    store = TradeStore(path=str(tmp_path / "live_trades.jsonl"))
+    runner = AutonomousLiveRunner(
+        engine=engine,
+        trade_store=store,
+        live_config=AutonomousLiveRunnerConfig(
+            live_enabled=True,
+            live_continuous_enabled=True,
+            expected_account_id="U1234567",
+            max_open_live_trades=5,
+            max_live_trades_per_day=5,
+            max_deployable_cash_pct=0.005,
+            trade_store_path=str(tmp_path / "live_trades.jsonl"),
+            idempotency_store_path=str(tmp_path / "idempotency.jsonl"),
+        ),
+        order_executor=executor,
+        connected_provider=lambda: True,
+        connection_env_provider=lambda: "live",
+        account_id_provider=lambda: "U1234567",
+        signal_provider_provider=lambda: _ReadyProvider(),
+        emergency_stop_provider=lambda: False,
+        deployable_cash_provider=lambda: 100_000.0,
+        broker_positions_provider=lambda: {},
+        market_data_provider=_LiveMarketDataProvider(),
+    )
+
+    result = runner.run_once()
+
+    assert result.status == NO_TRADE
+    assert "uneconomic after commission" in result.rejection_reason
+    # The vetoing leg must be the second one (BBB); the first leg stays economical.
+    assert "BBB" in result.rejection_reason
+    # Critically: no leg may have been submitted.
+    assert executor.calls == []

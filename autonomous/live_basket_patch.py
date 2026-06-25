@@ -323,6 +323,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
         DecisionStatus.MARKET_NOT_SUITABLE,
         DecisionStatus.DAILY_LIMIT_REACHED,
         DecisionStatus.RISK_REJECTED,
+        DecisionStatus.UNECONOMIC_AFTER_COMMISSION,
     )
     if decision.status in no_trade_statuses:
         return AutonomousLiveRunResult(
@@ -409,6 +410,15 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
     dry_run_seen = False
     lifecycle_events: List[Dict[str, Any]] = []
 
+    # Preflight pass: compute the deployable-cash-capped quantity and run the
+    # commission-aware profitability re-check for *every* basket leg before any
+    # leg is submitted.  Submitting leg 1 and then rejecting leg 2 after the cap
+    # would leave unsurfaced partial live exposure, so the whole basket must be
+    # rejected up front if any capped leg is unbuyable or uneconomic.  The
+    # profitability gate is a no-op when disabled.
+    gate = getattr(self._engine, "profitability_gate", None)
+    gate_enabled = gate is not None and getattr(gate, "enabled", False)
+    capped_plans: List[Dict[str, Any]] = []
     for plan in trade_plans:
         limit_price = float(plan.get("limit_price") or 0.0)
         quantity = int(plan.get("quantity") or 0)
@@ -428,6 +438,30 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
                 notes=notes,
             )
 
+        if gate_enabled and plan.get("trade_type") == TradeType.BUY_SHARES.value:
+            profit_decision = gate.evaluate_buy_shares(
+                symbol=str(plan.get("symbol") or ""),
+                quantity=quantity,
+                entry_price=limit_price,
+                target_price=plan.get("target_price"),
+            )
+            if not profit_decision.allowed:
+                return AutonomousLiveRunResult(
+                    status=NO_TRADE,
+                    gates=gates,
+                    rejection_reason=(
+                        f"uneconomic after commission — {profit_decision.reason}"
+                    ),
+                    decision=decision_payload,
+                    dry_run=self._config.live_dry_run,
+                    notes=notes + [f"profitability={profit_decision.to_dict()}"],
+                )
+
+        capped_plans.append({"plan": plan, "quantity": quantity})
+
+    for entry in capped_plans:
+        plan = entry["plan"]
+        quantity = entry["quantity"]
         result, trade, error, leg_lifecycle_events = _execute_one_live_plan(
             self, decision, plan, quantity, gates, deployable_cash, max_trade_value
         )

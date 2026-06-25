@@ -304,7 +304,7 @@ class AutonomousPaperRunner:
             )
 
         if decision.status in (DecisionStatus.NO_CANDIDATE, DecisionStatus.NO_TRADE_PLAN,
-                               DecisionStatus.NO_DEPLOYABLE_CASH):
+                               DecisionStatus.NO_DEPLOYABLE_CASH, DecisionStatus.UNECONOMIC_AFTER_COMMISSION):
             return AutonomousRunResult(
                 status=NO_TRADE,
                 gates=gates,

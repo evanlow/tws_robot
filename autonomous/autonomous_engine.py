@@ -24,6 +24,7 @@ from autonomous.evidence_calibrator import SetupEvidenceSummary
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.market_data_provider import MarketDataProvider
 from autonomous.market_regime import evaluate_market_regime
+from autonomous.profitability_gate import ProfitabilityDecision, ProfitabilityGate
 from autonomous.risk_lifecycle import LossLimitGuard
 from autonomous.trade_planner import OptionChainHint, TradePlan, TradePlanner, TradeType
 
@@ -36,6 +37,7 @@ class DecisionStatus(str, Enum):
     NO_CANDIDATE = "no_candidate"
     NO_TRADE_PLAN = "no_trade_plan"
     RISK_REJECTED = "risk_rejected"
+    UNECONOMIC_AFTER_COMMISSION = "uneconomic_after_commission"
     LIVE_BLOCKED = "live_blocked"
     LIVE_PLAN_READY = "live_plan_ready"
     CONFIRMATION_REQUIRED = "confirmation_required"
@@ -64,6 +66,7 @@ class AutonomousDecision:
     basket_plan: Optional[Dict[str, Any]] = None
     risk_check: Optional[Dict[str, Any]] = None
     risk_lifecycle: Optional[Dict[str, Any]] = None
+    profitability: Optional[Dict[str, Any]] = None
     order_id: Optional[int] = None
     order_ids: List[int] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
@@ -86,6 +89,7 @@ class AutonomousDecision:
             "basket_plan": self.basket_plan,
             "risk_check": self.risk_check,
             "risk_lifecycle": self.risk_lifecycle,
+            "profitability": self.profitability,
             "order_id": self.order_id,
             "order_ids": list(self.order_ids),
             "notes": list(self.notes),
@@ -139,6 +143,12 @@ class AutonomousTradingEngine:
         )
         self.planner = TradePlanner(self.config)
         self.basket_planner = BasketPlanner(self.config)
+        self.profitability_gate = ProfitabilityGate(
+            enabled=self.config.commission_aware_sizing_enabled,
+            estimated_commission_per_order=self.config.estimated_commission_per_order,
+            min_net_profit_usd=self.config.min_net_profit_usd,
+            min_net_profit_pct_of_trade=self.config.min_net_profit_pct_of_trade,
+        )
         self.audit = audit_logger or AuditLogger(self.config.audit_log_dir)
         self.evidence = evidence_store or TradeEvidenceStore(self.config.audit_log_dir)
         self.loss_limit_guard = LossLimitGuard(
@@ -473,6 +483,15 @@ class AutonomousTradingEngine:
                 decision.rejection_reason = reason
                 return self._emit(decision)
 
+        profit_result = self._check_profitability(decision.trade_plans)
+        if profit_result is not None:
+            allowed, reason, payload = profit_result
+            decision.profitability = payload
+            if not allowed:
+                decision.status = DecisionStatus.UNECONOMIC_AFTER_COMMISSION
+                decision.rejection_reason = reason
+                return self._emit(decision)
+
         if self.config.mode == AutonomousMode.RECOMMEND_ONLY:
             decision.status = DecisionStatus.RECOMMENDED
             decision.notes.append("recommend_only mode — no order placed")
@@ -511,6 +530,51 @@ class AutonomousTradingEngine:
         decision.status = DecisionStatus.LIVE_BLOCKED
         decision.rejection_reason = f"unknown mode {self.config.mode!r}"
         return self._emit(decision)
+
+    def _check_profitability(
+        self,
+        trade_plans: List[Dict[str, Any]],
+    ) -> Optional[tuple[bool, str, Dict[str, Any]]]:
+        """Reject share-buy plans whose expected net profit after estimated
+        round-trip commission falls below the configured minimum.
+
+        Returns ``None`` when the gate is disabled (so it leaves no trace on
+        the decision), otherwise a ``(allowed, reason, payload)`` tuple where
+        ``payload`` is recorded on the decision for the API, dashboard, and
+        audit log.  The first failing share-buy leg short-circuits.
+        """
+
+        if not self.profitability_gate.enabled:
+            return None
+
+        evaluations: List[Dict[str, Any]] = []
+        first_rejection: Optional[ProfitabilityDecision] = None
+        for plan in trade_plans:
+            if plan.get("trade_type") != TradeType.BUY_SHARES.value:
+                continue
+            decision = self.profitability_gate.evaluate_buy_shares(
+                symbol=str(plan.get("symbol") or ""),
+                quantity=int(plan.get("quantity") or 0),
+                entry_price=float(plan.get("limit_price") or 0.0),
+                target_price=plan.get("target_price"),
+            )
+            evaluations.append(decision.to_dict())
+            if not decision.allowed and first_rejection is None:
+                first_rejection = decision
+
+        if not evaluations:
+            return None
+
+        payload: Dict[str, Any] = {
+            "enabled": True,
+            "approved": first_rejection is None,
+            "evaluations": evaluations,
+        }
+        if first_rejection is None:
+            payload["reason"] = "all planned trades clear minimum net profit after commissions"
+            return True, payload["reason"], payload
+        payload["reason"] = first_rejection.reason
+        return False, first_rejection.reason, payload
 
     def _check_trade_plans_risk(
         self,

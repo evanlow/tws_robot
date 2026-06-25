@@ -18,6 +18,7 @@ from autonomous.autonomous_runner import (
     EXECUTED,
     EMERGENCY_STOP_ACTIVE,
     MAX_OPEN_TRADES,
+    NO_TRADE,
     NOT_CONNECTED,
     NOT_PAPER_MODE,
     PAPER_ADAPTER_NOT_READY,
@@ -221,3 +222,35 @@ def test_gates_payload_lists_failure_reasons(tmp_path):
     payload = gates.to_dict()
     assert payload["ready"] is False
     assert any("connected" in r.lower() or "paper" in r.lower() for r in payload["reasons"])
+
+
+def test_uneconomic_after_commission_maps_to_no_trade(tmp_path):
+    from autonomous.autonomous_engine import AutonomousDecision, DecisionStatus
+
+    class _UneconomicEngine:
+        config = AutonomousTradingConfig(mode=AutonomousMode.PAPER_EXECUTE)
+
+        def run_once(self, **kwargs):
+            return AutonomousDecision(
+                status=DecisionStatus.UNECONOMIC_AFTER_COMMISSION,
+                mode=AutonomousMode.PAPER_EXECUTE,
+                rejection_reason="uneconomic after commission — below minimum net profit",
+            )
+
+    runner = AutonomousPaperRunner(
+        engine=_UneconomicEngine(),
+        trade_store=TradeStore(path=str(tmp_path / "t.jsonl")),
+        runner_config=AutonomousRunnerConfig(
+            runner_enabled=True,
+            trade_store_path=str(tmp_path / "t.jsonl"),
+        ),
+        connected_provider=lambda: True,
+        connection_env_provider=lambda: "paper",
+        paper_adapter_provider=lambda: _ReadyAdapter(),
+        signal_provider_provider=lambda: object(),
+        emergency_stop_provider=lambda: False,
+    )
+
+    result = runner.run_once()
+    assert result.status == NO_TRADE
+    assert "uneconomic after commission" in (result.rejection_reason or "")

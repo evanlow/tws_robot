@@ -481,6 +481,15 @@ class TestADREnvConfig:
         assert cfg.max_position_deployable_cash_pct is None
         assert cfg.max_position_equity_pct is None
 
+    def test_zero_estimated_commission_env_is_applied(self, monkeypatch, app):
+        monkeypatch.setenv("AUTONOMOUS_ESTIMATED_COMMISSION_PER_ORDER", "0")
+
+        from web.routes.api_autonomous import _build_engine
+        with app.app_context():
+            engine = _build_engine()
+
+        assert engine.config.estimated_commission_per_order == 0.0
+
     def test_api_override_changes_target_mode(self, monkeypatch, app):
         """HTTP config override for exit_target_mode flows through."""
         from web.routes.api_autonomous import _build_engine
