@@ -172,6 +172,7 @@ class TestSECFilingScoring:
         assert record.importance_score >= 80.0
         assert record.confidence == CONFIDENCE_SIGNAL
         assert "AAPL" in record.title
+        assert "company=AAPL" in record.source_url
 
 
 # ── Macro calendar tests ─────────────────────────────────────────────────────
@@ -284,6 +285,23 @@ class TestNullableStartAtUTC:
         assert normalized["start_at_utc"] == published
         assert normalized["confidence"] == "signal"
 
+    def test_normalize_event_lowercases_signal_confidence_and_normalizes_timezone(self):
+        published = datetime(2026, 6, 20, 15, 30, tzinfo=timezone(timedelta(hours=8)))
+        event = {
+            "event_type": "CONGRESSIONAL_TRADE",
+            "title": "Congressional trade: Test Senator Purchase NVDA",
+            "source": "congressional-trades",
+            "source_event_id": "CONGRESS:NVDA:Test:2026-06-20",
+            "confidence": "Signal",
+            "published_at_utc": published,
+        }
+
+        normalized = _normalize_event(event)
+
+        assert normalized["confidence"] == "signal"
+        assert normalized["start_at_utc"] == datetime(2026, 6, 20, 7, 30)
+        assert normalized["start_at_utc"].tzinfo is None
+
     def test_normalize_event_raises_for_non_signal_without_date(self):
         """Non-signal events must have a parseable datetime."""
         event = {
@@ -342,6 +360,15 @@ class TestEnrichmentSeverityScoring:
             "days_away": 3,
             "importance_score": 80.0,
             "confidence": "confirmed",
+        })
+        assert severity == SEVERITY_MEDIUM
+
+    def test_cpi_release_signal_within_1_day_is_capped_at_medium(self):
+        severity = _severity_for_event({
+            "event_type": "CPI_RELEASE",
+            "days_away": 1,
+            "importance_score": 80.0,
+            "confidence": "signal",
         })
         assert severity == SEVERITY_MEDIUM
 
@@ -595,12 +622,14 @@ class TestProviderFailureIsolation:
         now = _utc_naive()
 
         # Use default providers (they return empty but still log)
-        results = svc._sync_enrichment_providers(
-            symbols=["AAPL"],
-            force=True,
-            window_start=now,
-            window_end=now + timedelta(days=28),
-        )
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.return_value.__enter__.return_value = object()
+            results = svc._sync_enrichment_providers(
+                symbols=["AAPL"],
+                force=True,
+                window_start=now,
+                window_end=now + timedelta(days=28),
+            )
 
         logs = svc.get_sync_logs(limit=50)
         enrichment_logs = [

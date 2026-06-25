@@ -401,7 +401,7 @@ class SECFilingProvider(EnrichmentProvider):
             event_date=filed_date,
             start_at_utc=filed_date,
             published_at_utc=filed_date,
-            source_url=source_url or f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={symbol}&type={form_type}",
+            source_url=source_url or f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={symbol}&type={form_type}",
             confidence=confidence,
             importance_score=importance,
             raw_payload={"form_type": form_type, "accession": accession_number},

@@ -178,12 +178,15 @@ def _normalize_event(event: Dict[str, Any], portfolio_symbols: Optional[Set[str]
             event.get("event_time"),
             market_tz,
         )
+    confidence = str(event.get("confidence") or CONFIRMED).lower()
+
     if start_at_utc is None:
         # Allow nullable start_at_utc for signal-only enrichment events
-        confidence = str(event.get("confidence") or CONFIRMED)
         if confidence == SIGNAL:
             # Use published_at_utc or current time as event_date fallback
             published = _coerce_datetime(event.get("published_at_utc"))
+            if published is not None and published.tzinfo is not None:
+                published = published.astimezone(timezone.utc).replace(tzinfo=None)
             start_at_utc = published or _utcnow()
         else:
             raise ValueError(f"Event has no parseable datetime: {event}")
@@ -211,7 +214,7 @@ def _normalize_event(event: Dict[str, Any], portfolio_symbols: Optional[Set[str]
         "start_at_utc": start_at_utc,
         "end_at_utc": end_at_utc,
         "market_timezone": market_tz,
-        "confidence": str(event.get("confidence") or CONFIRMED),
+        "confidence": confidence,
         "importance_score": float(event.get("importance_score") or 0.0),
         "source_url": event.get("source_url"),
         "detail": detail,
@@ -1368,7 +1371,7 @@ def _severity_for_event(event: Dict[str, Any], now: Optional[datetime] = None) -
                       "CPI_RELEASE", "PPI_RELEASE", "GDP_RELEASE",
                       "FED_MINUTES"} and days is not None:
         if days <= 1:
-            return SEVERITY_HIGH
+            return SEVERITY_MEDIUM if is_signal else SEVERITY_HIGH
         if days <= 3:
             return SEVERITY_MEDIUM
     if event_type == "EARNINGS" and days is not None:
