@@ -323,6 +323,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
         DecisionStatus.MARKET_NOT_SUITABLE,
         DecisionStatus.DAILY_LIMIT_REACHED,
         DecisionStatus.RISK_REJECTED,
+        DecisionStatus.UNECONOMIC_AFTER_COMMISSION,
     )
     if decision.status in no_trade_statuses:
         return AutonomousLiveRunResult(
@@ -437,7 +438,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
                 notes=notes,
             )
 
-        if gate_enabled:
+        if gate_enabled and plan.get("trade_type") == TradeType.BUY_SHARES.value:
             profit_decision = gate.evaluate_buy_shares(
                 symbol=str(plan.get("symbol") or ""),
                 quantity=quantity,

@@ -269,7 +269,7 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
                 }:
                     if 0 < val <= 1:
                         env_config_kwargs[config_key] = val
-                elif config_key in {"min_net_profit_usd"}:
+                elif config_key in {"estimated_commission_per_order", "min_net_profit_usd"}:
                     if val >= 0:
                         env_config_kwargs[config_key] = val
                 elif val > 0:

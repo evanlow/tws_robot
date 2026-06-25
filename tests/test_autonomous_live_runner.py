@@ -836,6 +836,45 @@ def test_runner_rejects_live_blocked_engine_status(tmp_path):
     assert result.trade is None
 
 
+def test_runner_maps_uneconomic_after_commission_to_no_trade(tmp_path):
+    from autonomous.autonomous_engine import AutonomousDecision, DecisionStatus
+
+    store = TradeStore(path=str(tmp_path / "t.jsonl"))
+    live_cfg = AutonomousLiveRunnerConfig(
+        live_enabled=True,
+        live_continuous_enabled=True,
+        expected_account_id="U1234567",
+        trade_store_path=str(tmp_path / "t.jsonl"),
+    )
+
+    class _UneconomicEngine:
+        config = MagicMock()
+
+        def run_once(self, **kwargs):
+            return AutonomousDecision(
+                status=DecisionStatus.UNECONOMIC_AFTER_COMMISSION,
+                mode=AutonomousMode.ASSISTED_LIVE,
+                rejection_reason="uneconomic after commission — below minimum net profit",
+            )
+
+    runner = AutonomousLiveRunner(
+        engine=_UneconomicEngine(),
+        trade_store=store,
+        live_config=live_cfg,
+        order_executor=_SubmittingExecutor(),
+        connected_provider=lambda: True,
+        connection_env_provider=lambda: "live",
+        account_id_provider=lambda: "U1234567",
+        signal_provider_provider=lambda: _RealProvider(),
+        emergency_stop_provider=lambda: False,
+        deployable_cash_provider=lambda: 50_000.0,
+        market_data_provider=_LiveMarketDataProvider(),
+    )
+    result = runner.run_once()
+    assert result.status == NO_TRADE
+    assert "uneconomic after commission" in (result.rejection_reason or "")
+
+
 # ---------------------------------------------------------------------------
 # Fix #6: Daily live trade cap
 # ---------------------------------------------------------------------------

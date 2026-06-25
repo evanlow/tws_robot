@@ -713,6 +713,7 @@ class AutonomousLiveRunner:
             DecisionStatus.MARKET_NOT_SUITABLE,
             DecisionStatus.DAILY_LIMIT_REACHED,
             DecisionStatus.RISK_REJECTED,
+            DecisionStatus.UNECONOMIC_AFTER_COMMISSION,
         )
         if decision.status in no_trade_statuses:
             return AutonomousLiveRunResult(
@@ -809,7 +810,11 @@ class AutonomousLiveRunner:
         # capped live order is never submitted below the configured minimum
         # net profit.  No-op when the gate is disabled.
         gate = getattr(self._engine, "profitability_gate", None)
-        if gate is not None and getattr(gate, "enabled", False):
+        if (
+            gate is not None
+            and getattr(gate, "enabled", False)
+            and plan.get("trade_type") == TradeType.BUY_SHARES.value
+        ):
             profit_decision = gate.evaluate_buy_shares(
                 symbol=str(plan.get("symbol") or ""),
                 quantity=quantity,
