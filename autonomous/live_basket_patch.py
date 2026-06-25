@@ -409,6 +409,15 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
     dry_run_seen = False
     lifecycle_events: List[Dict[str, Any]] = []
 
+    # Preflight pass: compute the deployable-cash-capped quantity and run the
+    # commission-aware profitability re-check for *every* basket leg before any
+    # leg is submitted.  Submitting leg 1 and then rejecting leg 2 after the cap
+    # would leave unsurfaced partial live exposure, so the whole basket must be
+    # rejected up front if any capped leg is unbuyable or uneconomic.  The
+    # profitability gate is a no-op when disabled.
+    gate = getattr(self._engine, "profitability_gate", None)
+    gate_enabled = gate is not None and getattr(gate, "enabled", False)
+    capped_plans: List[Dict[str, Any]] = []
     for plan in trade_plans:
         limit_price = float(plan.get("limit_price") or 0.0)
         quantity = int(plan.get("quantity") or 0)
@@ -428,13 +437,7 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
                 notes=notes,
             )
 
-        # Commission-aware profitability re-check after the deployable-cash cap.
-        # The engine approved the planned quantity, but the cap above can shrink
-        # it to an uneconomic size; reject before submission so a capped live
-        # order never clears below the configured minimum net profit.  No-op
-        # when the gate is disabled.
-        gate = getattr(self._engine, "profitability_gate", None)
-        if gate is not None and getattr(gate, "enabled", False):
+        if gate_enabled:
             profit_decision = gate.evaluate_buy_shares(
                 symbol=str(plan.get("symbol") or ""),
                 quantity=quantity,
@@ -453,6 +456,11 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
                     notes=notes + [f"profitability={profit_decision.to_dict()}"],
                 )
 
+        capped_plans.append({"plan": plan, "quantity": quantity})
+
+    for entry in capped_plans:
+        plan = entry["plan"]
+        quantity = entry["quantity"]
         result, trade, error, leg_lifecycle_events = _execute_one_live_plan(
             self, decision, plan, quantity, gates, deployable_cash, max_trade_value
         )
