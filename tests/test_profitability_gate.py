@@ -133,6 +133,13 @@ def test_to_dict_is_json_friendly():
     assert payload["allowed"] is False
     assert payload["net_profit"] == round(-0.88, 4)
     assert payload["min_quantity_for_profit"] == 4
+    # Net profit is consistently derived from gross profit and commissions.
+    assert payload["net_profit"] == pytest.approx(
+        payload["gross_profit"] - payload["round_trip_commission"]
+    )
+    assert payload["round_trip_commission"] == pytest.approx(
+        payload["entry_commission"] + payload["exit_commission"]
+    )
     assert set(payload).issuperset(
         {
             "gross_profit",

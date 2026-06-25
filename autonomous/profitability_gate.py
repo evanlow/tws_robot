@@ -212,6 +212,9 @@ class ProfitabilityGate:
         q = max(q_usd, q_pct)
         if q <= 0:
             return 1
+        # Subtract a tiny epsilon before the ceiling so floating-point rounding
+        # error (e.g. an exact integer represented as 4.0000000001) does not
+        # inflate the required quantity by one whole share.
         return max(1, math.ceil(q - 1e-9))
 
 
