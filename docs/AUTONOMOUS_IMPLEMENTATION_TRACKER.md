@@ -950,6 +950,81 @@ Known limitations and manual checks:
 - Human review should confirm event-risk wording and blocker severity before
   relying on it operationally.
 
+## Issue #195 — Market catalyst enrichment sources
+
+Builds on Issue #179. Adds broader market catalyst sources to make TWS Robot
+more context-aware without weakening any trading safety controls.
+
+Work completed:
+
+- Formalized `EnrichmentProvider` abstract base class with `fetch`/`fetch_safe`
+  interface for isolated, independently-failing enrichment providers.
+- Added `EnrichmentRecord` dataclass for normalized provider output.
+- Added `signal` confidence level (joins existing `confirmed`/`estimated`/`tentative`).
+- Added event type constants: `SEC_8K`, `SEC_10Q`, `SEC_10K`, `SEC_S3`,
+  `SEC_FORM4`, `CPI_RELEASE`, `PPI_RELEASE`, `JOBS_REPORT`, `GDP_RELEASE`,
+  `FED_MINUTES`, `CONGRESSIONAL_TRADE`, `NEWS_CATALYST`, `INVESTOR_DAY`,
+  `CONFERENCE`, `PRODUCT_EVENT`, `SHAREHOLDER_MEETING`.
+- Added event category classification: `SCHEDULED_EVENT`, `FILING_ALERT`,
+  `CATALYST_SIGNAL`, `NEWS_CATALYST`.
+- Added SEC filing provider with deterministic importance scoring for material
+  8-K items, bankruptcy/M&A keywords, and filing type base scores.
+- Added macro calendar provider with static 2026 CPI/PPI/Jobs/GDP/Fed Minutes
+  release dates (confirmed confidence, offline-safe).
+- Added congressional trading provider (catalyst signals, no confirmed future
+  event date, degraded gracefully).
+- Added company event and news catalyst provider stubs (degraded gracefully).
+- Integrated enrichment providers into `sync_market_events` flow with 12-hour
+  TTL and per-provider failure isolation.
+- Updated `_normalize_event` to allow nullable `start_at_utc` for
+  signal-confidence events (uses `published_at_utc` as fallback).
+- Updated `_severity_for_event` to handle new macro types (`CPI_RELEASE`,
+  `PPI_RELEASE`, `GDP_RELEASE`, `FED_MINUTES`) and SEC/signal types.
+- Signal-confidence events capped at medium severity maximum.
+- Ticker excludes low-importance signals (importance < 70).
+- Reminders exclude all signal-confidence events unless mode is `all`.
+- `evaluate_event_risk` ensures signal events can only produce warnings,
+  never blockers — enrichment cannot make readiness more permissive.
+- Extended `/api/market-events/upcoming` with `confidence` and `category`
+  filter parameters and `available_categories` response field.
+- Extended `_reminder_message` and `_recommended_action` for new event types.
+- Updated `docs/WEB_API_REFERENCE.md` with new parameters and behavior.
+
+Safety stance:
+
+- No live trading enabled.
+- No dry-run / paper-trading / risk / kill-switch protections weakened.
+- Signal-confidence enrichment can only warn, never block or enable.
+- Provider failures are isolated and logged; they cannot delete existing events.
+- Deterministic scoring only; no ML-assisted scoring in this phase.
+- Sizing unchanged. Risk gates unchanged (additive only).
+
+Test evidence:
+
+- 38 new tests in `tests/test_enrichment_providers.py` covering:
+  provider interface, SEC scoring, macro calendar, congressional signals,
+  nullable start_at_utc, severity scoring, ticker/reminder filtering,
+  readiness behavior, provider failure isolation, dedupe, and sync logs.
+- All 22 existing `tests/test_market_events.py` tests pass.
+- All 6 `tests/test_web_api.py::TestMarketEventsAPI` tests pass.
+- All 5 `tests/test_api_trading_readiness.py` tests pass.
+- Full suite: 3062 passed, 18 skipped.
+
+Known limitations:
+
+- SEC provider returns empty results when EDGAR API is unreachable (graceful
+  degradation). Production use requires network access and respecting SEC
+  rate limits.
+- Macro calendar uses static 2026 dates. Future enhancement: fetch from
+  BLS/BEA/Fed APIs for dynamic calendar data.
+- Congressional trading provider is a stub pending CapitolTrades or equivalent
+  API integration. The `normalize_disclosure` static method is available for
+  custom integrations.
+- Company event and news catalyst providers are stubs pending reliable source
+  APIs.
+- Some enrichment sources may require API keys or configuration not yet
+  implemented.
+
 ## 5. Maintenance rules
 
 Future PRs should update this tracker when they complete a phase or checklist item.
