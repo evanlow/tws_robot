@@ -1302,14 +1302,22 @@ Get upcoming market-moving events from the cached event store.
 
 **Query Parameters:**
 - `days` (optional, default `14`) - Calendar days ahead to return events for
-- `event_type` (optional) - Comma-separated event types, such as `EARNINGS,FOMC`
+- `event_type` (optional) - Comma-separated event types, such as `EARNINGS,FOMC,CPI_RELEASE,SEC_8K`
 - `symbol` (optional) - Comma-separated symbols, such as `AAPL,MSFT`
 - `status` (optional) - Comma-separated lifecycle statuses, such as `active,updated,stale`
+- `confidence` (optional) - Comma-separated confidence levels: `confirmed`, `estimated`, `tentative`, `signal`
+- `category` (optional) - Comma-separated enrichment category groups: `Filings`, `Macro`, `Company Events`, `Catalyst Signals`
 
 Validation rules:
 - Minimum = `1`
 - Maximum = `90`
 - Non-numeric values fall back to `14`
+
+**Enrichment event types:**
+- SEC filings: `SEC_8K`, `SEC_10Q`, `SEC_10K`, `SEC_S3`, `SEC_FORM4`
+- Macro releases: `CPI_RELEASE`, `PPI_RELEASE`, `JOBS_REPORT`, `GDP_RELEASE`, `FED_MINUTES`
+- Company events: `INVESTOR_DAY`, `CONFERENCE`, `PRODUCT_EVENT`, `SHAREHOLDER_MEETING`
+- Catalyst signals: `CONGRESSIONAL_TRADE`, `NEWS_CATALYST`
 
 **Response:**
 ```json
@@ -1346,8 +1354,11 @@ Validation rules:
   "filters": {
     "event_type": ["EARNINGS"],
     "symbol": ["AAPL"],
-    "status": []
-  }
+    "status": [],
+    "confidence": [],
+    "category": []
+  },
+  "available_categories": ["Filings", "Macro", "Company Events", "Catalyst Signals"]
 }
 ```
 
@@ -1356,6 +1367,8 @@ Validation rules:
 - Event records are returned in chronological order.
 - Default status filtering returns `active` and `updated` events. Request `status=stale` to inspect provider-missing future events.
 - Datetimes are normalized to UTC in `start_at_utc`; legacy `event_date` remains for existing clients.
+- Signal-confidence events (`confidence=signal`) have `start_at_utc` derived from publication time and are clearly labeled.
+- Use `category=Filings` to see SEC filing alerts, `category=Macro` for economic releases, etc.
 
 ### `POST /api/market-events/refresh`
 
@@ -1379,7 +1392,7 @@ Trigger a non-blocking refresh of market events from external sources.
 
 ### `GET /api/market-events/sync-log`
 
-Return recent market-event provider sync attempts.
+Return recent market-event provider sync attempts, including enrichment providers.
 
 **Query Parameters:**
 - `limit` (optional, default `20`, max `100`) - Number of sync log rows
@@ -1398,18 +1411,36 @@ Return recent market-event provider sync attempts.
       "error_count": 0,
       "sync_started_at": "2026-06-23T05:00:00",
       "sync_finished_at": "2026-06-23T05:00:02"
+    },
+    {
+      "provider": "macro-calendar",
+      "event_type": "CPI_RELEASE,PPI_RELEASE,JOBS_REPORT,GDP_RELEASE,FED_MINUTES",
+      "status": "success",
+      "fetched_count": 5,
+      "upserted_count": 5,
+      "stale_count": 0,
+      "error_count": 0,
+      "sync_started_at": "2026-06-23T05:00:02",
+      "sync_finished_at": "2026-06-23T05:00:02"
     }
   ],
-  "count": 1,
+  "count": 2,
   "last_sync_summary": {
     "status": "success",
-    "total_fetched": 4,
-    "total_upserted": 4,
+    "total_fetched": 7,
+    "total_upserted": 7,
     "total_stale": 0,
     "total_errors": 0
   }
 }
 ```
+
+**Enrichment providers in sync log:**
+- `sec-edgar` — SEC filing alerts
+- `macro-calendar` — CPI, PPI, Jobs, GDP, Fed Minutes releases
+- `congressional-trades` — Congressional trading disclosures
+- `company-events` — Investor days, conferences, product events
+- `news-catalyst` — News-derived catalyst signals
 
 ### `GET /api/market-events/ticker`
 
@@ -1418,6 +1449,11 @@ Return compact upcoming-event items for the dashboard rolling event strip.
 **Query Parameters:**
 - `days` (optional, default `28`, max `90`)
 - `limit` (optional, default `8`, max `20`)
+
+**Behavior:**
+- Low-confidence signal events (confidence=signal, importance < 70) are excluded from the ticker to avoid noise.
+- High-importance signals (importance ≥ 70) are included with clear labeling.
+- Each item includes a `confidence` field for UI differentiation.
 
 ### `GET /api/market-events/reminders`
 
@@ -1431,6 +1467,8 @@ Return popup reminder candidates for upcoming medium/high/critical events.
 - Reminder output is advisory and does not place orders.
 - Critical market calendar events are also surfaced in `/api/trading-readiness/status` as fail-closed blockers for automated paper/live entries.
 - Medium/high event warnings appear in readiness context but do not loosen any existing gate.
+- Signal-confidence events are excluded from reminders by default (modes `high_only` and `medium_high`). Use `mode=all` to include them.
+- Signal-confidence events can never be readiness blockers regardless of importance score.
 
 ---
 
