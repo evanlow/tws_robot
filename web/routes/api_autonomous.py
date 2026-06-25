@@ -67,7 +67,7 @@ from autonomous.lifecycle_worker import AutonomousLifecycleWorker
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.idempotency import IdempotencyStore
 from autonomous.market_data_provider import IBKRRealtimeMarketDataProvider
-from autonomous.order_lifecycle import OrderLifecycleStore
+from autonomous.order_lifecycle import OrderLifecycleState, OrderLifecycleStore
 from autonomous.outcome_evidence_writer import OutcomeEvidenceWriter
 from autonomous.protection_verifier import ProtectionVerifier
 from autonomous.recovery_manager import RecoveryManager
@@ -4021,6 +4021,98 @@ def live_close_now():
         "decision": decision.to_dict(),
         "reconciliation": {"after": after.to_dict()},
     })
+
+
+@bp.route("/live/acknowledge-orphaned", methods=["POST"])
+def live_acknowledge_orphaned():
+    """Acknowledge an orphaned order after manual reconciliation.
+
+    Use this after manually confirming that an ORPHANED_ORDER was legitimately
+    closed (e.g., position hit its target while robot was disconnected).
+
+    Request body:
+        {
+            "lifecycle_id": "...",
+            "reason": "position closed at target while disconnected (optional)"
+        }
+
+    This records a transition from ORPHANED_ORDER to RECONCILED in the lifecycle
+    store, which clears the recovery block and allows autonomous mode to resume.
+    """
+    body = request.get_json(silent=True) or {}
+    lifecycle_id = str(body.get("lifecycle_id") or "").strip()
+    reason = str(body.get("reason") or "").strip()
+
+    if not lifecycle_id:
+        return jsonify({
+            "status": "error",
+            "error": "lifecycle_id is required",
+        }), 400
+
+    try:
+        # Get the lifecycle store and current state
+        lifecycle_store = OrderLifecycleStore()
+        current_event = lifecycle_store.get_current(lifecycle_id)
+
+        if current_event is None:
+            return jsonify({
+                "status": "error",
+                "error": f"lifecycle_id {lifecycle_id} not found",
+            }), 404
+
+        if current_event.state != OrderLifecycleState.ORPHANED_ORDER:
+            return jsonify({
+                "status": "error",
+                "error": (
+                    f"lifecycle {lifecycle_id} is in state {current_event.state.value}, "
+                    "not ORPHANED_ORDER; cannot acknowledge"
+                ),
+            }), 409
+
+        # Record the acknowledgement transition
+        default_reason = reason or (
+            f"operator acknowledged orphaned order for {current_event.symbol}; "
+            "position was closed legitimately (e.g., at target while disconnected)"
+        )
+        lifecycle_store.record_transition(
+            lifecycle_id=lifecycle_id,
+            state=OrderLifecycleState.RECONCILED,
+            symbol=current_event.symbol,
+            order_role=current_event.order_role,
+            broker_order_id=current_event.broker_order_id,
+            autonomous_trade_id=current_event.autonomous_trade_id,
+            parent_lifecycle_id=current_event.parent_lifecycle_id,
+            reason=default_reason,
+            metadata={"acknowledged_by": "operator", "previous_state": "ORPHANED_ORDER"},
+        )
+
+        logger.info(
+            "Orphaned order acknowledged: lifecycle=%s, symbol=%s, reason=%s",
+            lifecycle_id,
+            current_event.symbol,
+            default_reason,
+        )
+
+        # Re-evaluate readiness
+        supervisor = _live_continuous_supervisor()
+        supervisor.evaluate_readiness()
+
+        return jsonify({
+            "status": "acknowledged",
+            "lifecycle_id": lifecycle_id,
+            "symbol": current_event.symbol,
+            "previous_state": current_event.state.value,
+            "new_state": OrderLifecycleState.RECONCILED.value,
+            "reason": default_reason,
+            "supervisor_status": supervisor.status(),
+        })
+
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Failed to acknowledge orphaned order: %s", lifecycle_id)
+        return jsonify({
+            "status": "error",
+            "error": f"Failed to acknowledge orphaned order: {str(exc)}",
+        }), 500
 
 
 @bp.route("/live/trades", methods=["GET"])
