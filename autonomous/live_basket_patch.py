@@ -428,6 +428,31 @@ def _basket_aware_run_once(self: AutonomousLiveRunner) -> AutonomousLiveRunResul
                 notes=notes,
             )
 
+        # Commission-aware profitability re-check after the deployable-cash cap.
+        # The engine approved the planned quantity, but the cap above can shrink
+        # it to an uneconomic size; reject before submission so a capped live
+        # order never clears below the configured minimum net profit.  No-op
+        # when the gate is disabled.
+        gate = getattr(self._engine, "profitability_gate", None)
+        if gate is not None and getattr(gate, "enabled", False):
+            profit_decision = gate.evaluate_buy_shares(
+                symbol=str(plan.get("symbol") or ""),
+                quantity=quantity,
+                entry_price=limit_price,
+                target_price=plan.get("target_price"),
+            )
+            if not profit_decision.allowed:
+                return AutonomousLiveRunResult(
+                    status=NO_TRADE,
+                    gates=gates,
+                    rejection_reason=(
+                        f"uneconomic after commission — {profit_decision.reason}"
+                    ),
+                    decision=decision_payload,
+                    dry_run=self._config.live_dry_run,
+                    notes=notes + [f"profitability={profit_decision.to_dict()}"],
+                )
+
         result, trade, error, leg_lifecycle_events = _execute_one_live_plan(
             self, decision, plan, quantity, gates, deployable_cash, max_trade_value
         )

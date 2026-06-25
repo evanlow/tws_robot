@@ -803,6 +803,36 @@ class AutonomousLiveRunner:
                 ],
             )
 
+        # Re-apply the commission-aware profitability gate after the
+        # deployable-cash cap.  The engine approved the planned quantity, but
+        # the cap above can shrink it to an uneconomic size; re-check so a
+        # capped live order is never submitted below the configured minimum
+        # net profit.  No-op when the gate is disabled.
+        gate = getattr(self._engine, "profitability_gate", None)
+        if gate is not None and getattr(gate, "enabled", False):
+            profit_decision = gate.evaluate_buy_shares(
+                symbol=str(plan.get("symbol") or ""),
+                quantity=quantity,
+                entry_price=limit_price,
+                target_price=plan.get("target_price"),
+            )
+            if not profit_decision.allowed:
+                return AutonomousLiveRunResult(
+                    status=NO_TRADE,
+                    gates=gates,
+                    rejection_reason=(
+                        f"uneconomic after commission — {profit_decision.reason}"
+                    ),
+                    decision=decision_payload,
+                    dry_run=self._config.live_dry_run,
+                    notes=[
+                        f"deployable_cash={deployable_cash:.2f}",
+                        f"max_deployable_cash_pct={self._config.max_deployable_cash_pct}",
+                        f"capped_quantity={quantity}",
+                        f"profitability={profit_decision.to_dict()}",
+                    ],
+                )
+
         # Submit via OrderExecutor.
         symbol = str(plan.get("symbol") or "")
         # Build the bracket exit legs from the plan.  When the planner did

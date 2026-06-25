@@ -550,6 +550,92 @@ def test_deployable_cash_cap_reduces_quantity(tmp_path):
     assert result.status in (EXECUTED, DRY_RUN_EXECUTED, NO_TRADE, EXECUTION_FAILED)
 
 
+def test_commission_gate_rejects_uneconomic_capped_quantity(tmp_path):
+    """When the deployable-cash cap shrinks the engine-approved quantity to an
+    uneconomic size, the runner re-applies the profitability gate and refuses
+    to submit the live order."""
+    from autonomous.profitability_gate import ProfitabilityGate
+
+    signal = CandidateSignal(
+        symbol="AAA",
+        strength_score=120,
+        signal_label="Confirmed Rebound",
+        last_price=100.0,
+        support_price=95.0,
+        resistance_price=110.0,
+    )
+    cfg = AutonomousLiveRunnerConfig(
+        live_enabled=True,
+        live_continuous_enabled=True,
+        expected_account_id="U1234567",
+        # 0.4% of 50k deployable = 200 → cap quantity to 2 shares at 100.
+        max_deployable_cash_pct=0.004,
+        min_deployable_cash=100.0,
+        trade_store_path=str(tmp_path / "t.jsonl"),
+    )
+    executor = _SubmittingExecutor()
+    runner = _runner(
+        tmp_path,
+        signal=signal,
+        config=cfg,
+        deployable_cash=50_000.0,
+        executor=executor,
+    )
+    # Enable a profitability gate that the full engine-approved size clears
+    # but the capped 2-share size cannot (net = 10*2 - 2 = 18 < 50).
+    runner._engine.profitability_gate = ProfitabilityGate(
+        enabled=True,
+        estimated_commission_per_order=1.0,
+        min_net_profit_usd=50.0,
+    )
+
+    result = runner.run_once()
+
+    assert result.status == NO_TRADE
+    assert "uneconomic after commission" in result.rejection_reason
+    # No order was submitted.
+    assert executor.calls == []
+
+
+def test_commission_gate_allows_economical_capped_quantity(tmp_path):
+    """The runner re-check passes when the capped quantity still clears the
+    minimum net profit, so execution proceeds normally."""
+    from autonomous.profitability_gate import ProfitabilityGate
+
+    signal = CandidateSignal(
+        symbol="AAA",
+        strength_score=120,
+        signal_label="Confirmed Rebound",
+        last_price=100.0,
+        support_price=95.0,
+        resistance_price=110.0,
+    )
+    cfg = AutonomousLiveRunnerConfig(
+        live_enabled=True,
+        live_continuous_enabled=True,
+        expected_account_id="U1234567",
+        max_deployable_cash_pct=0.004,
+        min_deployable_cash=100.0,
+        trade_store_path=str(tmp_path / "t.jsonl"),
+    )
+    runner = _runner(
+        tmp_path,
+        signal=signal,
+        config=cfg,
+        deployable_cash=50_000.0,
+        executor=_SubmittingExecutor(),
+    )
+    runner._engine.profitability_gate = ProfitabilityGate(
+        enabled=True,
+        estimated_commission_per_order=1.0,
+        min_net_profit_usd=5.0,  # capped 2-share net 18 clears this
+    )
+
+    result = runner.run_once()
+
+    assert result.status in (EXECUTED, DRY_RUN_EXECUTED)
+
+
 def test_cap_too_small_returns_no_trade(tmp_path):
     """When cap is too small to buy 1 share, return no_trade."""
     cfg = AutonomousLiveRunnerConfig(
