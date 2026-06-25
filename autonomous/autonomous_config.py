@@ -51,6 +51,16 @@ class AutonomousTradingConfig:
     drawdown_governor_enabled: bool = True
     strategy_drawdown_pct: float = 0.0
 
+    # Commission-aware minimum-profitability gate.  When enabled, a planned
+    # share buy is rejected before submission if its expected net profit at
+    # target (gross profit minus estimated round-trip commission) falls below
+    # the configured minimum.  Disabled by default so existing behavior is
+    # unchanged until an operator opts in.
+    commission_aware_sizing_enabled: bool = False
+    estimated_commission_per_order: float = 1.0
+    min_net_profit_usd: float = 0.0
+    min_net_profit_pct_of_trade: float = 0.0
+
     execution_quality_guard_enabled: bool = True
     execution_max_spread_pct: float = 0.003
     execution_max_slippage_pct: float = 0.005
@@ -174,6 +184,12 @@ class AutonomousTradingConfig:
                 raise ValueError(f"{label} must be >= 0")
         if self.strategy_drawdown_pct < 0 or self.strategy_drawdown_pct > 1:
             raise ValueError("strategy_drawdown_pct must be in [0, 1]")
+        if self.estimated_commission_per_order < 0:
+            raise ValueError("estimated_commission_per_order must be >= 0")
+        if self.min_net_profit_usd < 0:
+            raise ValueError("min_net_profit_usd must be >= 0")
+        if self.min_net_profit_pct_of_trade < 0 or self.min_net_profit_pct_of_trade > 1:
+            raise ValueError("min_net_profit_pct_of_trade must be in [0, 1]")
         for label, value in (
             ("execution_max_spread_pct", self.execution_max_spread_pct),
             ("execution_max_slippage_pct", self.execution_max_slippage_pct),
@@ -271,6 +287,10 @@ class AutonomousTradingConfig:
             "evidence_aware_allow_size_increase": self.evidence_aware_allow_size_increase,
             "drawdown_governor_enabled": self.drawdown_governor_enabled,
             "strategy_drawdown_pct": self.strategy_drawdown_pct,
+            "commission_aware_sizing_enabled": self.commission_aware_sizing_enabled,
+            "estimated_commission_per_order": self.estimated_commission_per_order,
+            "min_net_profit_usd": self.min_net_profit_usd,
+            "min_net_profit_pct_of_trade": self.min_net_profit_pct_of_trade,
             "execution_quality_guard_enabled": self.execution_quality_guard_enabled,
             "execution_max_spread_pct": self.execution_max_spread_pct,
             "execution_max_slippage_pct": self.execution_max_slippage_pct,

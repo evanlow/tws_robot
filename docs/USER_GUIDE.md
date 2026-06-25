@@ -1104,6 +1104,28 @@ min(deployable_cash, max_new_position_pct × equity)
 
 This ensures no single autonomous trade consumes more than the configured fraction of your account equity, regardless of how much cash is available.
 
+#### Commission-Aware Minimum Profitability Gate
+
+A directionally correct trade can still finish net negative when the share quantity is too small relative to broker commissions. For example, buying 2 shares with a +0.65/share expected gross gain produces ~1.30 USD gross, but ~1.09 USD commission per leg (≈2.18 USD round trip) leaves a net loss of ~0.88 USD.
+
+When `AUTONOMOUS_COMMISSION_AWARE_SIZING_ENABLED=true`, the engine evaluates each planned `BUY_SHARES` leg **before** order submission and rejects it when the expected net profit at target is below the configured minimum:
+
+```
+gross_profit          = (target_price − limit_price) × quantity
+round_trip_commission = 2 × estimated_commission_per_order
+net_profit            = gross_profit − round_trip_commission
+required_net_profit   = max(min_net_profit_usd, min_net_profit_pct_of_trade × limit_price × quantity)
+```
+
+If `net_profit < required_net_profit`, the decision status becomes `uneconomic_after_commission`, and the rejection reason (including the minimum quantity that would clear commissions) is surfaced in the API payload, dashboard, and audit log. A plan with no positive expected gross profit at target is rejected fail-closed. The gate never increases position size; it only rejects uneconomic trades. It is **disabled by default**, so existing behaviour is unchanged until you opt in.
+
+| Env Var | Default | Meaning |
+|--------|---------|---------|
+| `AUTONOMOUS_COMMISSION_AWARE_SIZING_ENABLED` | `false` | Enable the gate |
+| `AUTONOMOUS_ESTIMATED_COMMISSION_PER_ORDER` | `1.00` | Conservative flat commission estimate per leg (USD) |
+| `AUTONOMOUS_MIN_NET_PROFIT_USD` | `0.00` | Minimum expected net profit after commissions (USD) |
+| `AUTONOMOUS_MIN_NET_PROFIT_PCT_OF_TRADE` | `0.00` | Additional minimum net profit as a fraction of traded notional |
+
 ---
 
 ### 11.10 Trade Lifecycle & Exit Management

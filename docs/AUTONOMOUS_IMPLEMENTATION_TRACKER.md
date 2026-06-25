@@ -38,6 +38,7 @@ Legend:
 | Fractional edge / fractional-Kelly-style sizing | Done | PR #167; implemented as `FractionalEdgeSizer`, not literal `KellySizer` |
 | Drawdown governor | Done | PR #167 |
 | Execution quality guard | Done | PR #168; pre-submission only |
+| Commission-aware minimum profitability gate | Done | Issue #199; pre-submission gate rejects share buys whose expected net profit at target is below the configured minimum after estimated round-trip commission |
 | Strategy-arm learning | Done | PR #169 |
 | Evidence-learning performance metrics | Done | PR #183 |
 | Evidence-learning setup registry | Done | PR #184 |

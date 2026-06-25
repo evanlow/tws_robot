@@ -253,6 +253,9 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
             float,
             None,
         ),
+        ("AUTONOMOUS_ESTIMATED_COMMISSION_PER_ORDER", "estimated_commission_per_order", float, None),
+        ("AUTONOMOUS_MIN_NET_PROFIT_USD", "min_net_profit_usd", float, None),
+        ("AUTONOMOUS_MIN_NET_PROFIT_PCT_OF_TRADE", "min_net_profit_pct_of_trade", float, None),
     ]:
         raw = os.environ.get(env_key, "").strip()
         if raw:
@@ -262,13 +265,25 @@ def _build_engine(config_overrides: Dict[str, Any] | None = None) -> AutonomousT
                     "max_new_position_pct",
                     "max_position_deployable_cash_pct",
                     "max_position_equity_pct",
+                    "min_net_profit_pct_of_trade",
                 }:
                     if 0 < val <= 1:
+                        env_config_kwargs[config_key] = val
+                elif config_key in {"min_net_profit_usd"}:
+                    if val >= 0:
                         env_config_kwargs[config_key] = val
                 elif val > 0:
                     env_config_kwargs[config_key] = val
             except (ValueError, TypeError):
                 pass  # Invalid env value — use dataclass default
+
+    _commission_gate_raw = os.environ.get(
+        "AUTONOMOUS_COMMISSION_AWARE_SIZING_ENABLED", ""
+    ).strip().lower()
+    if _commission_gate_raw in ("true", "1", "yes", "on"):
+        env_config_kwargs["commission_aware_sizing_enabled"] = True
+    elif _commission_gate_raw in ("false", "0", "no", "off"):
+        env_config_kwargs["commission_aware_sizing_enabled"] = False
 
     _adr_resist_raw = os.environ.get(
         "AUTONOMOUS_ADR_RESPECT_RESISTANCE_CAP", ""
