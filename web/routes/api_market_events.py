@@ -29,6 +29,11 @@ def upcoming():
 
     Query parameters:
         days  (int, default 14) — how many calendar days ahead to look
+        event_type — filter by event type (CSV or repeated)
+        symbol — filter by symbol (CSV or repeated)
+        status — filter by status (CSV or repeated)
+        confidence — filter by confidence level (CSV or repeated)
+        category — filter by enrichment category group (Filings, Macro, etc.)
     """
     try:
         days = max(1, min(int(request.args.get("days", 14)), 90))
@@ -38,6 +43,17 @@ def upcoming():
     event_types = _csv_arg("event_type")
     symbols = _csv_arg("symbol")
     statuses = _csv_arg("status")
+    confidence_filter = _csv_arg_lower("confidence")
+    category_filter = _csv_arg("category")
+
+    # Map category group names to event types
+    if category_filter:
+        from data.enrichment_providers import EVENT_TYPE_TO_FILTER_GROUP
+        category_event_types = [
+            et for et, group in EVENT_TYPE_TO_FILTER_GROUP.items()
+            if group.upper() in {c.upper() for c in category_filter}
+        ]
+        event_types = list(set(event_types + category_event_types))
 
     svc = _get_event_service()
     portfolio_symbols = _get_portfolio_symbols(get_services())
@@ -49,6 +65,13 @@ def upcoming():
         statuses=statuses,
     )
 
+    # Apply confidence filter post-query if specified
+    if confidence_filter:
+        events = [
+            e for e in events
+            if str(e.get("confidence") or "confirmed").lower() in confidence_filter
+        ]
+
     return jsonify({
         "events": events,
         "count": len(events),
@@ -58,7 +81,10 @@ def upcoming():
             "event_type": event_types,
             "symbol": symbols,
             "status": statuses,
+            "confidence": confidence_filter,
+            "category": category_filter,
         },
+        "available_categories": ["Filings", "Macro", "Company Events", "Catalyst Signals"],
     })
 
 
@@ -181,6 +207,17 @@ def _csv_arg(name: str) -> list:
     for raw in request.args.getlist(name):
         for part in str(raw).split(","):
             item = part.strip().upper()
+            if item:
+                values.append(item)
+    return values
+
+
+def _csv_arg_lower(name: str) -> list:
+    """Like _csv_arg but lowercases values (for confidence filters)."""
+    values = []
+    for raw in request.args.getlist(name):
+        for part in str(raw).split(","):
+            item = part.strip().lower()
             if item:
                 values.append(item)
     return values

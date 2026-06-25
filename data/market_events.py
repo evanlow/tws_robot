@@ -30,6 +30,7 @@ EVENT_STATUS_STALE = "stale"
 CONFIRMED = "confirmed"
 ESTIMATED = "estimated"
 TENTATIVE = "tentative"
+SIGNAL = "signal"
 
 SEVERITY_INFO = "info"
 SEVERITY_MEDIUM = "medium"
@@ -178,7 +179,14 @@ def _normalize_event(event: Dict[str, Any], portfolio_symbols: Optional[Set[str]
             market_tz,
         )
     if start_at_utc is None:
-        raise ValueError(f"Event has no parseable datetime: {event}")
+        # Allow nullable start_at_utc for signal-only enrichment events
+        confidence = str(event.get("confidence") or CONFIRMED)
+        if confidence == SIGNAL:
+            # Use published_at_utc or current time as event_date fallback
+            published = _coerce_datetime(event.get("published_at_utc"))
+            start_at_utc = published or _utcnow()
+        else:
+            raise ValueError(f"Event has no parseable datetime: {event}")
 
     end_at_utc = _coerce_datetime(event.get("end_at_utc"))
     if end_at_utc is not None and end_at_utc.tzinfo is not None:
@@ -808,6 +816,16 @@ class MarketEventsService:
             )
         )
 
+        # ── Enrichment providers ─────────────────────────────────────────
+        provider_results.extend(
+            self._sync_enrichment_providers(
+                symbols=symbols,
+                force=force,
+                window_start=window_start,
+                window_end=window_end,
+            )
+        )
+
         status = "success"
         if any(r.status == "failed" for r in provider_results):
             status = "partial_failure"
@@ -926,6 +944,67 @@ class MarketEventsService:
             result.finished_at = _utcnow()
             self._record_sync_log(result, window_start, window_end, {})
         return result
+
+    def _sync_enrichment_providers(
+        self,
+        *,
+        symbols: List[str],
+        force: bool,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> List[ProviderSyncResult]:
+        """Run all enrichment providers and return their sync results.
+
+        Each provider is isolated: a failure in one provider does not affect
+        others or existing durable events.
+        """
+        from data.enrichment_providers import get_default_providers
+
+        results: List[ProviderSyncResult] = []
+        ttl_hours = 12  # Enrichment providers refresh every 12 hours
+
+        for provider in get_default_providers():
+            ttl_key = f"enrichment:{provider.provider_name}"
+            if not force and self._ttl_ok(ttl_key, ttl_hours):
+                continue
+
+            result = ProviderSyncResult(
+                provider=provider.provider_name,
+                event_type=",".join(provider.event_types),
+            )
+            try:
+                records, error = provider.fetch_safe(symbols, window_start, window_end)
+                if error:
+                    result.error_count = 1
+                    result.error_message = error
+                    result.status = "failed"
+                else:
+                    event_dicts = [r.to_event_dict() for r in records]
+                    result.fetched_count = len(event_dicts)
+                    result.upserted_count, seen_ids = self._upsert_events(
+                        event_dicts,
+                        portfolio_symbols=set(symbols),
+                        window_start=window_start,
+                        window_end=window_end,
+                    )
+                    with self._lock:
+                        self._last_fetched[ttl_key] = datetime.now()
+            except Exception as exc:
+                result.status = "failed"
+                result.error_count += 1
+                result.error_message = str(exc)
+                logger.warning(
+                    "Enrichment provider %s failed: %s",
+                    provider.provider_name,
+                    exc,
+                )
+            finally:
+                result.finished_at = _utcnow()
+                self._record_sync_log(result, window_start, window_end, {
+                    "provider_type": "enrichment",
+                })
+            results.append(result)
+        return results
 
     def _upsert_events(
         self,
@@ -1111,6 +1190,14 @@ class MarketEventsService:
         limit: int = 8,
     ) -> List[Dict[str, Any]]:
         events = self.get_upcoming_events(days_ahead=days_ahead, portfolio_symbols=portfolio_symbols)
+        # Exclude low-confidence signals from ticker unless high importance
+        filtered = []
+        for event in events:
+            confidence = str(event.get("confidence") or CONFIRMED).lower()
+            importance = float(event.get("importance_score") or 0.0)
+            if confidence == SIGNAL and importance < 70:
+                continue
+            filtered.append(event)
         return [
             {
                 "event_id": event.get("event_id"),
@@ -1119,9 +1206,10 @@ class MarketEventsService:
                 "title": event.get("title"),
                 "days_away": event.get("days_away"),
                 "severity": event.get("severity"),
+                "confidence": event.get("confidence"),
                 "text": _ticker_text(event),
             }
-            for event in events[: max(1, min(limit, 20))]
+            for event in filtered[: max(1, min(limit, 20))]
         ]
 
     def get_reminders(
@@ -1135,6 +1223,10 @@ class MarketEventsService:
         mode = (mode or "high_only").lower()
         for event in events:
             severity = event.get("severity") or SEVERITY_INFO
+            confidence = str(event.get("confidence") or CONFIRMED).lower()
+            # Exclude low-confidence signals from reminders unless mode is "all"
+            if confidence == SIGNAL and mode != "all":
+                continue
             if mode == "off":
                 continue
             if mode == "high_only" and severity not in {SEVERITY_HIGH, SEVERITY_CRITICAL}:
@@ -1144,6 +1236,7 @@ class MarketEventsService:
             reminders.append({
                 "event_id": event.get("event_id"),
                 "severity": severity,
+                "confidence": confidence,
                 "event": event,
                 "message": _reminder_message(event),
                 "recommended_action": _recommended_action(event),
@@ -1160,6 +1253,7 @@ class MarketEventsService:
         blockers = []
         for event in events:
             severity = event.get("severity")
+            confidence = str(event.get("confidence") or CONFIRMED).lower()
             item = {
                 "event_id": event.get("event_id"),
                 "event_type": event.get("event_type"),
@@ -1167,8 +1261,16 @@ class MarketEventsService:
                 "title": event.get("title"),
                 "days_away": event.get("days_away"),
                 "severity": severity,
+                "confidence": confidence,
                 "message": _reminder_message(event),
             }
+            # Signal-confidence events can only produce warnings, never blockers.
+            # This ensures enrichment sources cannot make readiness more permissive
+            # or accidentally block trading from unconfirmed signals.
+            if confidence == SIGNAL:
+                if severity in {SEVERITY_MEDIUM, SEVERITY_HIGH}:
+                    warnings.append(item)
+                continue
             if severity == SEVERITY_CRITICAL:
                 blockers.append(item)
             elif severity in {SEVERITY_MEDIUM, SEVERITY_HIGH}:
@@ -1252,12 +1354,19 @@ def _severity_for_event(event: Dict[str, Any], now: Optional[datetime] = None) -
     event_type = str(event.get("event_type") or "").upper()
     relevant = bool(event.get("is_portfolio_relevant"))
     importance = float(event.get("importance_score") or 0.0)
+    confidence = str(event.get("confidence") or CONFIRMED).lower()
+
+    # Signal-only events (low confidence) are capped at medium severity
+    # to avoid false alarms from unconfirmed catalysts
+    is_signal = confidence == SIGNAL
 
     if event_type == "MARKET_HOLIDAY" and days == 0:
         return SEVERITY_CRITICAL
     if event_type == "MARKET_EARLY_CLOSE" and days == 0:
         return SEVERITY_CRITICAL
-    if event_type in {"FOMC", "CPI", "PPI", "JOBS_REPORT", "GDP"} and days is not None:
+    if event_type in {"FOMC", "CPI", "PPI", "JOBS_REPORT", "GDP",
+                      "CPI_RELEASE", "PPI_RELEASE", "GDP_RELEASE",
+                      "FED_MINUTES"} and days is not None:
         if days <= 1:
             return SEVERITY_HIGH
         if days <= 3:
@@ -1271,8 +1380,25 @@ def _severity_for_event(event: Dict[str, Any], now: Optional[datetime] = None) -
         if relevant and days <= 1:
             return SEVERITY_MEDIUM
         return SEVERITY_INFO
+    # SEC filings with high importance
+    if event_type.startswith("SEC_") and days is not None:
+        if is_signal:
+            if importance >= 80 and days <= 1:
+                return SEVERITY_MEDIUM
+            return SEVERITY_INFO
+        if importance >= 80 and days <= 1:
+            return SEVERITY_HIGH
+        if importance >= 60 and days <= 3:
+            return SEVERITY_MEDIUM
+    # Congressional trades and news catalysts: warn-only by default
+    if event_type in {"CONGRESSIONAL_TRADE", "NEWS_CATALYST"}:
+        if is_signal:
+            if importance >= 80:
+                return SEVERITY_MEDIUM
+            return SEVERITY_INFO
+        return SEVERITY_INFO
     if importance >= 90 and days is not None and days <= 1:
-        return SEVERITY_HIGH
+        return SEVERITY_HIGH if not is_signal else SEVERITY_MEDIUM
     if importance >= 70 and days is not None and days <= 3:
         return SEVERITY_MEDIUM
     return SEVERITY_INFO
@@ -1326,17 +1452,34 @@ def _reminder_message(event: Dict[str, Any]) -> str:
         return f"Market holiday: {title} is {when}."
     if event_type == "MARKET_EARLY_CLOSE":
         return f"Market early close: {title} is {when}."
+    if event_type in {"CPI_RELEASE", "PPI_RELEASE", "JOBS_REPORT", "GDP_RELEASE", "FED_MINUTES"}:
+        return f"High-impact macro event: {title} is {when}."
+    if event_type.startswith("SEC_"):
+        return f"SEC filing alert: {title} {when}."
+    if event_type == "CONGRESSIONAL_TRADE":
+        return f"Congressional trade signal: {title} {when}."
+    if event_type == "NEWS_CATALYST":
+        return f"Market catalyst signal: {title} {when}."
+    if event_type in {"INVESTOR_DAY", "CONFERENCE", "PRODUCT_EVENT", "SHAREHOLDER_MEETING"}:
+        return f"Company event: {title} is {when}."
     return f"Upcoming event: {title} is {when}."
 
 
 def _recommended_action(event: Dict[str, Any]) -> str:
     event_type = str(event.get("event_type") or "").upper()
+    confidence = str(event.get("confidence") or CONFIRMED).lower()
     if event_type in {"MARKET_HOLIDAY", "MARKET_EARLY_CLOSE"}:
         return "Verify market-hours assumptions before allowing automated entries."
     if event_type == "EARNINGS":
         return "Review open exposure and avoid fresh entries unless earnings-event trading is allowed."
     if event_type == "FOMC":
         return "Review open positions and consider reducing new trade aggressiveness."
+    if event_type in {"CPI_RELEASE", "PPI_RELEASE", "JOBS_REPORT", "GDP_RELEASE", "FED_MINUTES"}:
+        return "Review open positions and consider reducing new trade aggressiveness ahead of macro release."
+    if event_type.startswith("SEC_"):
+        return "Review filing details for material impact before opening new positions."
+    if confidence == SIGNAL:
+        return "Informational signal only. Review context but no automated action required."
     return "Review event context before opening new risk."
 
 
