@@ -320,6 +320,19 @@ pytest test_backtest_engine.py -v
 - [Emergency Procedures](docs/runbooks/emergency-procedures.md)
 - [Architecture Documentation](docs/architecture/overview.md)
 
+### Smoke Tests
+
+```bash
+# Run safety-critical smoke coverage
+python tests/run_all_smoke.py
+
+# Equivalent direct pytest command
+pytest -m smoke --no-cov
+```
+
+The smoke suite covers the safety-critical autonomous, execution, emergency,
+auth, broker-state, recovery, evidence-learning, and risk-lifecycle paths.
+
 ---
 
 ## 📚 Documentation Index

@@ -5,56 +5,51 @@ Usage:
     Scripts/python.exe tests/run_all_smoke.py -k emergency
     Scripts/python.exe tests/run_all_smoke.py -- -x
 
-By default, this script runs smoke-focused test modules that cover critical
-safety, auth, API, and execution paths.
+By default, this script runs tests marked ``smoke``. The smoke inventory lives
+in ``tests/smoke_manifest.py`` and is applied during pytest collection.
 """
 
 from __future__ import annotations
 
-import argparse
+from pathlib import Path
 import sys
 
 import pytest
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-DEFAULT_SMOKE_TARGETS = [
-    "tests/test_safety_regression.py",
-    "tests/test_web_api.py",
-    "tests/test_portfolio_analysis.py",
-    "tests/test_auth.py",
-    "tests/test_config_security.py",
-    "tests/test_order_executor.py",
-    "tests/test_tws_bridge.py",
-    "tests/test_fx_research.py",
-]
-
-
-def parse_args() -> tuple[argparse.Namespace, list[str]]:
-    parser = argparse.ArgumentParser(
-        description="Run the TWS Robot smoke suite.",
-    )
-    parser.add_argument(
-        "pytest_args",
-        nargs="*",
-        help="Optional extra pytest args (for example: -k emergency -x).",
-    )
-    # Allow direct pytest flags (for example: -q, -k, -x) without forcing
-    # users to add "--" in front of them.
-    return parser.parse_known_args()
+from tests.smoke_manifest import SMOKE_TEST_MODULES
 
 
 def main() -> int:
-    args, passthrough = parse_args()
+    pytest_args = _normalise_pytest_args(sys.argv[1:])
+    pytest_cmd = ["-m", "smoke"]
+    if not _requests_coverage(pytest_args):
+        pytest_cmd.append("--no-cov")
+    pytest_cmd.extend(pytest_args)
 
-    pytest_cmd = [*DEFAULT_SMOKE_TARGETS, *args.pytest_args, *passthrough]
-    print("Running smoke suite:")
-    for target in DEFAULT_SMOKE_TARGETS:
-        print(f"  - {target}")
-    extra_args = [*args.pytest_args, *passthrough]
-    if extra_args:
-        print("Extra pytest args:", " ".join(extra_args))
+    print(f"Running smoke suite from {len(SMOKE_TEST_MODULES)} marked modules.")
+    if pytest_args:
+        print("Extra pytest args:", " ".join(pytest_args))
 
     return pytest.main(pytest_cmd)
+
+
+def _normalise_pytest_args(args: list[str]) -> list[str]:
+    """Allow both ``run_all_smoke.py -k x`` and ``run_all_smoke.py -- -k x``."""
+
+    if args and args[0] == "--":
+        return args[1:]
+    return args
+
+
+def _requests_coverage(args: list[str]) -> bool:
+    return any(
+        arg == "--cov" or arg == "--no-cov" or arg.startswith("--cov=")
+        for arg in args
+    )
 
 
 if __name__ == "__main__":

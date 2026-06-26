@@ -18,6 +18,9 @@ python scripts/run_web.py
 # Run tests (Prime Directive: 100% pass rate)
 pytest -v
 
+# Run safety-critical smoke tests
+python tests/run_all_smoke.py
+
 # Check coverage
 pytest --cov
 ```
