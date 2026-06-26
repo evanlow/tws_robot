@@ -601,6 +601,13 @@ class TestActivityLogPanel:
         src = self._js_source()
         assert "ended with NO TRADE; Autonomous Mode turned OFF" in src
 
+    def test_no_trade_logs_candidate_diagnostics(self):
+        """No-trade flow should log shortlist/rejection diagnostics for quick troubleshooting."""
+        src = self._js_source()
+        assert "function logNoTradeDiagnostics(" in src
+        assert "Top rejected candidates:" in src
+        assert "Planned-candidate checks reached:" in src
+
     def test_api_error_logs_error_entry(self):
         """API errors during activation must be logged at error level."""
         src = self._js_source()

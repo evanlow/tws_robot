@@ -1044,6 +1044,7 @@
         logActivity('success', 'Autonomous Mode activated successfully');
       } else if (status === 'no_trade' || runStatus === 'no_trade') {
         logActivity('info', 'No Trade: ' + (reason || 'no qualifying candidates found'));
+        logNoTradeDiagnostics(decision);
         logActivity('info', cycleLabel + ' ended with NO TRADE; Autonomous Mode turned OFF');
         logActivity('info', '=== AUTONOMOUS TRADING OFF ===');
       } else if (reason) {
@@ -1070,6 +1071,31 @@
   function selectedTradingCycle() {
     const selected = document.querySelector('input[name="tradingCycle"]:checked');
     return selected ? selected.value : 'single_trade';
+  }
+
+  function logNoTradeDiagnostics(decision) {
+    if (!decision || typeof decision !== 'object') return;
+
+    const rejected = Array.isArray(decision.rejected_candidates) ? decision.rejected_candidates : [];
+    if (rejected.length > 0) {
+      const topRejected = rejected.slice(0, 5).map(function (row) {
+        const symbol = String((row && row.symbol) || '?').toUpperCase();
+        const reason = String((row && row.reason) || 'rejected by rank filters');
+        return symbol + ': ' + reason;
+      });
+      logActivity('info', 'Top rejected candidates: ' + topRejected.join(' | '));
+      if (rejected.length > 5) {
+        logActivity('info', 'Additional rejected candidates: +' + String(rejected.length - 5));
+      }
+    }
+
+    const shortlist = Array.isArray(decision.shortlist) ? decision.shortlist : [];
+    if (shortlist.length > 0) {
+      const topShortlist = shortlist.slice(0, 5).map(function (row) {
+        return String((row && row.symbol) || '?').toUpperCase();
+      });
+      logActivity('info', 'Planned-candidate checks reached: ' + topShortlist.join(', '));
+    }
   }
 
   async function haltAutonomousMode() {
@@ -1617,6 +1643,7 @@
       } else if (outcome === 'NO_TRADE') {
         const reason = (body.run && body.run.rejection_reason) || 'no qualifying candidates';
         logActivity('info', 'NO TRADE: ' + reason);
+        logNoTradeDiagnostics(decision);
         setFeedback('NO TRADE: ' + reason, 'info');
       } else if (outcome === 'LIVE_ORDER_REJECTED') {
         const reason = (body.run && body.run.rejection_reason) || body.error || 'unknown';
