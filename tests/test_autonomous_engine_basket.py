@@ -166,7 +166,6 @@ def test_engine_assisted_live_returns_basket_live_plan_ready(tmp_path):
     cfg = _basket_config(
         mode=AutonomousMode.ASSISTED_LIVE,
         allow_live_execution=True,
-        market_data_health_guard_enabled=False,
         audit_log_dir=str(tmp_path),
     )
     engine = _engine(cfg)

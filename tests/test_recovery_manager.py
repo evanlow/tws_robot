@@ -64,7 +64,7 @@ class _LiveMarketDataProvider:
         pass
 
     def latest_quote(self, symbol):
-        if str(symbol).upper() == self.quote.symbol:
+        if str(symbol).upper() == self.quote.symbol.upper():
             return self.quote
         return None
 
@@ -117,7 +117,7 @@ class _LiveMarketDataProvider:
         pass
 
     def latest_quote(self, symbol):
-        if str(symbol).upper() == self.quote.symbol:
+        if str(symbol).upper() == self.quote.symbol.upper():
             return self.quote
         return None
 

@@ -268,7 +268,6 @@ def test_live_execution_blocked_unless_explicitly_enabled(tmp_path):
     cfg = AutonomousTradingConfig(
         mode=AutonomousMode.ASSISTED_LIVE,
         allow_live_execution=False,
-        market_data_health_guard_enabled=False,
         emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
         audit_log_dir=str(tmp_path),
     )
@@ -285,7 +284,6 @@ def test_live_execution_with_flag_but_no_confirm_requires_confirmation(tmp_path)
     cfg = AutonomousTradingConfig(
         mode=AutonomousMode.ASSISTED_LIVE,
         allow_live_execution=True,
-        market_data_health_guard_enabled=False,
         emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
         audit_log_dir=str(tmp_path),
     )
@@ -412,7 +410,6 @@ def test_live_execution_returns_live_plan_ready_when_allow_live_true_and_confirm
         mode=AutonomousMode.ASSISTED_LIVE,
         allow_live_execution=True,
         require_user_confirmation=True,
-        market_data_health_guard_enabled=False,
         max_trades_per_day=5,
         emergency_stop_file=str(tmp_path / "EMERGENCY_STOP"),
         audit_log_dir=str(tmp_path),
