@@ -254,6 +254,26 @@ pytest tests/test_strategy_registry.py::TestStrategyRegistry::test_initializatio
 pytest -k "test_signal"
 ```
 
+### Smoke Suite
+
+```bash
+# Run safety-critical smoke tests
+python tests/run_all_smoke.py
+
+# Equivalent direct pytest command
+pytest -m smoke --no-cov
+
+# Narrow the smoke suite while keeping the smoke marker
+python tests/run_all_smoke.py -k emergency -x
+```
+
+The smoke inventory is maintained in `tests/smoke_manifest.py` and applied as
+the `smoke` marker during pytest collection. It covers emergency stops, auth,
+config security, order execution, TWS bridge behavior, autonomous API/runner
+paths, live dry-run gates, order lifecycle, idempotency, recovery, replay,
+market-data health, evidence learning, risk lifecycle, and capital-promotion
+advisory behavior.
+
 ### Coverage Analysis
 
 ```bash

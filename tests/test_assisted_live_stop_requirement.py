@@ -46,6 +46,7 @@ def test_assisted_live_share_plan_requires_stop_price():
         AutonomousTradingConfig(
             mode=AutonomousMode.ASSISTED_LIVE,
             require_stop_price_for_assisted_live=True,
+            market_data_health_guard_enabled=False,
         )
     )
     reasons = []
@@ -66,6 +67,7 @@ def test_assisted_live_share_plan_allows_valid_support_stop():
         AutonomousTradingConfig(
             mode=AutonomousMode.ASSISTED_LIVE,
             require_stop_price_for_assisted_live=True,
+            market_data_health_guard_enabled=False,
         )
     )
 

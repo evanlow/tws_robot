@@ -92,6 +92,46 @@ class _Executor:
         )
 
 
+class _LiveMarketDataProvider:
+    def __init__(self, symbol: str = "AAA"):
+        now = datetime.now(timezone.utc)
+        self.quote = MarketDataQuote(
+            symbol=symbol,
+            bid=99.95,
+            ask=100.05,
+            last=100.0,
+            timestamp=now,
+            bid_timestamp=now,
+            ask_timestamp=now,
+            last_timestamp=now,
+            source=IBKR_SOURCE,
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            feed_healthy=True,
+        )
+        self.subscribed: list[str] = []
+
+    def subscribe(self, symbols):
+        self.subscribed.extend([str(symbol).upper() for symbol in symbols])
+
+    def unsubscribe(self, symbols):
+        pass
+
+    def latest_quote(self, symbol):
+        if str(symbol).upper() == self.quote.symbol:
+            return self.quote
+        return None
+
+    def status(self):
+        return MarketDataProviderStatus(
+            provider=IBKR_SOURCE,
+            connected=True,
+            healthy=True,
+            subscribed_symbols=list(self.subscribed),
+            market_data_type=IBKR_MARKET_DATA_TYPE_LIVE,
+            reason="test market-data provider",
+        )
+
+
 def _trade(
     *,
     trade_id: str = "trade-1",
@@ -204,9 +244,9 @@ def _runner(
         deployable_cash_provider=lambda: 50_000.0,
         broker_positions_provider=lambda: broker_positions,
         broker_open_orders_provider=lambda: broker_open_orders,
+        market_data_provider=_LiveMarketDataProvider(),
         order_lifecycle_store=lifecycle_store,
         idempotency_store=idempotency_store,
-        market_data_provider=_LiveMarketDataProvider(),
     )
 
 

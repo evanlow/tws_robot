@@ -24,14 +24,15 @@
 7. [Strategies API](#strategies-api)
 8. [Backtest API](#backtest-api)
 9. [Emergency Controls API](#emergency-controls-api)
-10. [Events & Monitoring API](#events--monitoring-api)
-11. [System API](#system-api)
-12. [Account Intelligence API](#account-intelligence-api)
-13. [AI Assistant APIs](#ai-assistant-apis)
-14. [S&P 500 Screener API](#sp500-screener-api)
-15. [STI Screener API](#sti-screener-api)
-16. [HSI Screener API](#hsi-screener-api)
-17. [Stock Analysis API](#stock-analysis-api)
+10. [Autonomous Trading API](#autonomous-trading-api)
+11. [Events & Monitoring API](#events--monitoring-api)
+12. [System API](#system-api)
+13. [Account Intelligence API](#account-intelligence-api)
+14. [AI Assistant APIs](#ai-assistant-apis)
+15. [S&P 500 Screener API](#sp500-screener-api)
+16. [STI Screener API](#sti-screener-api)
+17. [HSI Screener API](#hsi-screener-api)
+18. [Stock Analysis API](#stock-analysis-api)
 
 ---
 
@@ -2020,6 +2021,125 @@ Get current emergency and risk state.
   "daily_limit_breached": false
 }
 ```
+
+---
+
+## Autonomous Trading API
+
+Autonomous endpoints expose the safety-gated scan, paper runner, live-readiness, evidence, and operator control-tower surfaces. State-changing endpoints require the same authentication and CSRF protections as the rest of the web API.
+
+### `GET /api/autonomous/status`
+
+Return current autonomous configuration, mode state, and emergency-stop status.
+
+Safety notes:
+- Read-only.
+- Does not submit, cancel, or flatten orders.
+
+### `POST /api/autonomous/scan`
+
+Run the autonomous candidate scan and return ranked candidates and rejection reasons.
+
+Safety notes:
+- Recommend-only scan path.
+- Does not place orders.
+
+### `POST /api/autonomous/propose`
+
+Build a proposed autonomous trade plan after scanner, ranker, planner, and engine gates run.
+
+Safety notes:
+- Returns a plan for review.
+- Does not place live orders.
+
+### `POST /api/autonomous/execute-paper`
+
+Submit an approved autonomous plan through the paper-execution path.
+
+Safety notes:
+- Paper only.
+- Requires paper-mode readiness gates to pass.
+
+### `GET /api/autonomous/control-tower`
+
+Return the consolidated passive operator snapshot for autonomous readiness.
+
+The response includes mode state, connection verification, supervisor heartbeat, paper/live readiness, market-data health, cash/deployable-cash diagnostics, open autonomous trades, broker-visible orders, order-lifecycle state, basket-risk diagnostics, broker-protection diagnostics, recovery/risk lifecycle status, recent evidence, evidence-learning summary, and emergency-stop status.
+
+Safety notes:
+- Read-only/passive.
+- Does not call live-runner reconciliation.
+- Does not submit orders, cancel orders, flatten positions, or advance lifecycle state.
+
+### `GET /api/autonomous/evidence`
+
+Return recent autonomous evidence records.
+
+Query parameters:
+- `limit` (optional, default `100`)
+
+### `GET /api/autonomous/evidence/learning-status`
+
+Return the full read-only evidence-learning dashboard payload.
+
+Query parameters:
+- `limit` (optional, default `1000`, max `1000`)
+- `setup_limit` (optional, default `50`, max `250`)
+- `current_level` (optional, default `0`, range `0-6`)
+- `recent_trades` (optional, default `10`)
+- `min_trades` (optional, default `3`)
+- `expected_r_delta` (optional, default `0.25`)
+
+### `GET /api/autonomous/evidence/setup-performance`
+
+Return setup-level realized performance, eligibility, and evidence diagnostics.
+
+### `GET /api/autonomous/evidence/promotion-report`
+
+Return the advisory capital promotion report.
+
+Safety notes:
+- Advisory only.
+- Does not apply approvals, change capital caps, or enable live trading.
+
+### `GET /api/autonomous/evidence/weak-setups`
+
+Return setups that should remain paper-only, reduced, weak, or retired based on realized evidence.
+
+### `GET /api/autonomous/evidence/drift-report`
+
+Return setup families whose recent realized evidence diverges from historical evidence.
+
+### `GET /api/autonomous/live/status`
+
+Return live-runner status and readiness gates.
+
+Safety notes:
+- May perform live-runner readiness/reconciliation work.
+- Does not submit a new live order by itself.
+
+### `POST /api/autonomous/emergency-stop`
+
+Create the autonomous emergency-stop marker, turn autonomous paper/live modes off, stop lifecycle workers, pause the live continuous supervisor, and write an audit event.
+
+Optional body fields:
+- `cancel_pending_entries` (boolean): request cancellation for pending live autonomous entry order IDs only.
+
+Safety notes:
+- Does not flatten positions.
+- Preserves protective exit orders unless a separate explicit flatten control is used.
+
+### `POST /api/autonomous/emergency-reset`
+
+Reset an autonomous emergency-stop marker created by `/api/autonomous/emergency-stop`.
+
+Required body fields:
+- `confirm: true`
+
+Safety notes:
+- Keeps autonomous modes off.
+- Does not clear global/manual emergency markers from `/api/emergency/halt`.
+- Does not reactivate live trading.
 
 ---
 
