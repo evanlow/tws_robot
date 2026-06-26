@@ -583,6 +583,7 @@ Choose your comfort level:
 - Configuration via `.env` files for security
 - Easy switching between environments
 - Separate settings for paper/live accounts
+- Full configuration reference: [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md)
 
 **Market Status Integration:**
 - Real-time US stock market status checking

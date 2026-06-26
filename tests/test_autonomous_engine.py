@@ -181,13 +181,14 @@ def test_spy_bearish_gate_blocks_before_scan(tmp_path):
         account_provider=lambda: {"cash_balance": 100_000, "equity": 100_000},
         positions_provider=lambda: {},
         config=cfg,
-        spy_price_provider=lambda: {"open": 500.0, "current": 499.0},
+        spy_price_provider=lambda: {"open": 500.0, "current": 499.0, "source": "IBKR"},
         audit_logger=AuditLogger(log_dir=str(tmp_path)),
     )
     d = engine.run_once()
     assert d.status is DecisionStatus.MARKET_NOT_SUITABLE
     assert d.shortlist == []
     assert "market regime" in d.rejection_reason
+    assert "Source: IBKR" in d.rejection_reason
     assert "SPY is not bullish intraday" in d.market_gate.get("reasons", [])
     assert d.market_gate["classification"] == "Bearish / Not Suitable"
 

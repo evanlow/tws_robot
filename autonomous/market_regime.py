@@ -147,6 +147,7 @@ def evaluate_market_regime(
         "symbol": "SPY",
         "open": spy_open,
         "current": spy_current,
+        "source": payload.get("source"),
         "bullish": spy_bullish,
         "classification": classification,
         "trade_allowed": trade_allowed,

@@ -333,6 +333,15 @@ http {
 ```
 
 ### **Environment Variables**
+
+Use [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) as the canonical reference
+for application runtime `.env` keys such as broker connection, autonomous
+trading, web/auth, FX, AI, and database settings.
+
+The variables below are deployment-stack examples only. Some are infrastructure
+or historical placeholders rather than the canonical app runtime config
+surface.
+
 ```bash
 # .env.production
 ENVIRONMENT=production
@@ -348,7 +357,9 @@ DB_PASSWORD=secure_password_here
 REDIS_URL=redis://redis:6379
 REDIS_PASSWORD=redis_password_here
 
-# TWS Connection
+# TWS Connection / deployment-specific placeholders
+# Prefer the app runtime names documented in CONFIGURATION_GUIDE.md
+# (for example TRADING_ENV, PAPER_HOST, PAPER_PORT, PAPER_CLIENT_ID).
 TWS_HOST=127.0.0.1
 TWS_PORT=7497
 TWS_CLIENT_ID=1

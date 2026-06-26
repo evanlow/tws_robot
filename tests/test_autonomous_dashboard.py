@@ -566,6 +566,12 @@ class TestActivityLogPanel:
             "Activity Log panel must appear before the Cash panel"
         )
 
+    def test_cash_panel_has_adjusted_deployable_placeholders(self, client):
+        """Cash panel must expose DOM anchors for adjusted deployable cash."""
+        html = self._html_source(client)
+        assert 'id="cashDeployableAdjustedLabel"' in html
+        assert 'id="cashDeployableAdjusted"' in html
+
     # ---- JS source checks ----
 
     def test_log_activity_function_exists(self):
@@ -642,6 +648,14 @@ class TestActivityLogPanel:
         # Must distinguish between IBKR (real-time) and yfinance (delayed)
         assert "IBKR real-time" in src
         assert "yfinance (~15 min delayed)" in src
+
+    def test_cash_panel_shows_adjusted_deployable_when_market_regime_applies(self):
+        """JS must render a separate adjusted deployable-cash line when the regime multiplier is active."""
+        src = self._js_source()
+        assert "snapshot.market_regime_adjustment || {}" in src
+        assert "cashDeployableAdjustedLabel" in src
+        assert "cashDeployableAdjusted" in src
+        assert "Raw deployable cash is shown above; adjusted deployable cash is shown separately." in src
 
     def test_no_trade_feedback_not_error(self):
         """A no_trade run status must not produce error-level feedback."""

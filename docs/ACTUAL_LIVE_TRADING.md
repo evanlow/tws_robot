@@ -72,16 +72,18 @@ Only after all four fields validate does the frontend submit to the backend.
 
 ## Required `.env` Switches
 
-| Variable | Required for | Value |
-|----------|-------------|-------|
-| `AUTONOMOUS_LIVE_ENABLED` | All actual-live | `true` |
-| `AUTONOMOUS_LIVE_CONTINUOUS_ENABLED` | Continuous actual-live | `true` |
-| `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY` | Continuous actual-live | > 1 (e.g. `3`) |
-| `AUTONOMOUS_MAX_OPEN_LIVE_TRADES` | All actual-live | Conservative int (default: `1`) |
-| `AUTONOMOUS_LIVE_DRY_RUN` | Must be absent/false for actual-live | `false` |
-| `LIVE_MARKET_DATA_PROVIDER` | All actual-live | `ibkr` |
-| `ALLOW_YAHOO_FOR_LIVE_TRADING` | All actual-live | `false` |
-| `MAX_LIVE_QUOTE_AGE_SECONDS` | All actual-live diagnostics | Conservative seconds (default: `5`) |
+For actual-live activation, verify these settings in `.env`:
+
+- `AUTONOMOUS_LIVE_ENABLED=true`
+- `AUTONOMOUS_LIVE_DRY_RUN=false`
+- `LIVE_MARKET_DATA_PROVIDER=ibkr`
+- `ALLOW_YAHOO_FOR_LIVE_TRADING=false`
+- `MAX_LIVE_QUOTE_AGE_SECONDS` remains conservative, normally `5`
+- Continuous mode also requires `AUTONOMOUS_LIVE_CONTINUOUS_ENABLED=true`
+- Continuous mode also requires `AUTONOMOUS_MAX_LIVE_TRADES_PER_DAY > 1`
+
+Use [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) as the canonical source
+for defaults, related live-autonomous safety flags, and code-vs-template drift.
 
 ## Backend Architecture
 

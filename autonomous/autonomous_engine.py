@@ -348,7 +348,13 @@ class AutonomousTradingEngine:
                 decision.status = DecisionStatus.MARKET_NOT_SUITABLE
                 open_p = float(spy_gate.get("open") or 0.0)
                 curr_p = float(spy_gate.get("current") or 0.0)
-                price_info = f" (SPY Open: ${open_p:.2f}, Current: ${curr_p:.2f})" if open_p > 0 or curr_p > 0 else " (SPY price unavailable)"
+                source = str(spy_gate.get("source") or "").strip()
+                source_info = f", Source: {source}" if source else ""
+                price_info = (
+                    f" (SPY Open: ${open_p:.2f}, Current: ${curr_p:.2f}{source_info})"
+                    if open_p > 0 or curr_p > 0
+                    else f" (SPY price unavailable{source_info})"
+                )
                 reasons = "; ".join(spy_gate.get("reasons") or [])
                 reason_suffix = f" {reasons}." if reasons else ""
                 decision.rejection_reason = (

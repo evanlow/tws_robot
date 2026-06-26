@@ -497,6 +497,7 @@
 
   function renderCashSnapshot(snapshot) {
     snapshot = snapshot || {};
+    const adjustment = snapshot.market_regime_adjustment || {};
     const map = {
       cashBalance:         snapshot.cash_balance,
       cashBalanceUsd:      snapshot.cash_balance_usd ?? snapshot.cash_balance,
@@ -513,6 +514,23 @@
       if (el) el.textContent = fmtMoney(value);
     }
 
+    const adjustedLabel = $('cashDeployableAdjustedLabel');
+    const adjustedValue = $('cashDeployableAdjusted');
+    const rawDeployable = snapshot.deployable_cash_usd ?? snapshot.deployable_cash;
+    const adjustedDeployable = adjustment.adjusted_deployable_cash;
+    const originalDeployable = adjustment.original_deployable_cash;
+    const showAdjusted = Number.isFinite(adjustedDeployable)
+      && Number.isFinite(originalDeployable)
+      && adjustedDeployable < originalDeployable
+      && Number.isFinite(rawDeployable)
+      && Math.abs(rawDeployable - originalDeployable) < 0.01;
+
+    if (adjustedLabel) adjustedLabel.hidden = !showAdjusted;
+    if (adjustedValue) {
+      adjustedValue.hidden = !showAdjusted;
+      adjustedValue.textContent = showAdjusted ? fmtMoney(adjustedDeployable) : '—';
+    }
+
     const list = $('cashWarnings');
     list.innerHTML = '';
     const warnings = snapshot.warnings || snapshot.cash_warnings || [];
@@ -522,6 +540,16 @@
         li.textContent = typeof w === 'string' ? w : JSON.stringify(w);
         list.appendChild(li);
       });
+    }
+    if (showAdjusted) {
+      const li = document.createElement('li');
+      const multiplier = Number.isFinite(adjustment.size_multiplier)
+        ? adjustment.size_multiplier.toFixed(2)
+        : '?';
+      li.textContent =
+        'Market regime size multiplier active (' + multiplier + 'x). ' +
+        'Raw deployable cash is shown above; adjusted deployable cash is shown separately.';
+      list.appendChild(li);
     }
   }
 

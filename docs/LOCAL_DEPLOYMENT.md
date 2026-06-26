@@ -69,6 +69,9 @@ PAPER_PORT=7497
 PAPER_ACCOUNT=YOUR_PAPER_ACCOUNT_ID    # Replace with your paper account ID
 ```
 
+For the full set of runtime configuration options, use
+[CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) as the canonical reference.
+
 ### 3. Initialize Database
 
 ```bash
@@ -199,6 +202,9 @@ LIVE_ACCOUNT=YOUR_LIVE_ACCOUNT_ID    # Replace with your live account ID
 # ⚠️ CRITICAL: Verify risk limits are appropriate for live capital
 ```
 
+Use [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for the full live setup,
+including autonomous live safety flags and recommended defaults.
+
 4. **Start with Small Capital**
    - Begin with minimal position sizes
    - Gradually increase as confidence grows
@@ -294,7 +300,7 @@ cp strategy_lifecycle.db strategy_lifecycle.db.backup
 **Problem:** Can't connect to database
 
 **Solutions:**
-1. Verify DATABASE_URL in .env is correct
+1. Verify `DATABASE_URL` in `.env` is correct. See [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for the canonical runtime database setting.
 2. Check database server is running
 3. Verify credentials are correct
 4. Run `python init_database.py` to reinitialize

@@ -118,23 +118,16 @@ cp .env.example .env
 2. Open `.env` in a text editor and fill in your details:
 
 ```env
-# Which environment to use by default: 'paper' or 'live'
 TRADING_ENV=paper
-
-# Paper Trading Configuration
 PAPER_HOST=127.0.0.1
 PAPER_PORT=7497
 PAPER_CLIENT_ID=0
 PAPER_ACCOUNT=DU1234567        # ← Replace with YOUR paper account ID
-
-# Live Trading Configuration (set up later)
-LIVE_HOST=127.0.0.1
-LIVE_PORT=7496
-LIVE_CLIENT_ID=1
-LIVE_ACCOUNT=YOUR_LIVE_ACCOUNT_ID   # ← Replace when ready for live trading
-
-LOG_LEVEL=INFO
 ```
+
+For the full `.env` surface, defaults, live-autonomous safety flags, and
+current code-vs-template notes, use [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md)
+as the canonical reference.
 
 **Where to find your account IDs:**
 - **Paper account ID:** Shown in the TWS title bar when logged into paper trading (e.g., `DU1234567`)

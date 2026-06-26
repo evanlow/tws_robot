@@ -8,11 +8,13 @@ def test_market_regime_allows_bullish_spy_with_normal_vix():
             "current": 505.0,
             "vix_open": 16.0,
             "vix_current": 15.5,
+            "source": "IBKR",
         }
     )
 
     assert gate["trade_allowed"] is True
     assert gate["bullish"] is True
+    assert gate["source"] == "IBKR"
     assert gate["size_multiplier"] == 1.0
     assert gate["vix"]["level_regime"] == "normal"
 

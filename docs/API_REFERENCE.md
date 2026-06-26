@@ -1577,6 +1577,10 @@ The `ai.client` module provides a thin wrapper around OpenAI's API with automati
 
 AI features are configured via environment variables (in `.env`):
 
+Canonical reference: use [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for
+the full application configuration surface, defaults, and safety notes. The
+settings below are the AI-specific subset relevant to `ai.client`.
+
 ```bash
 # Auto-enable AI when API key is present
 OPENAI_API_KEY=sk-...

@@ -127,44 +127,19 @@ cp .env.example .env
 Then open `.env` in any text editor and fill in your values:
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `TRADING_ENV` | `paper` | `paper` or `live` — which account to use by default |
-| `PAPER_HOST` | `127.0.0.1` | Host where TWS is running (paper account) |
-| `PAPER_PORT` | `7497` | TWS API port for paper trading |
-| `PAPER_CLIENT_ID` | `0` | Client ID sent to TWS (paper) |
-| `PAPER_ACCOUNT` | *(your ID)* | Your IB paper account number |
-| `LIVE_HOST` | `127.0.0.1` | Host where TWS is running (live account) |
-| `LIVE_PORT` | `7496` | TWS API port for live trading |
-| `LIVE_CLIENT_ID` | `1` | Client ID sent to TWS (live) |
-| `LIVE_ACCOUNT` | *(your ID)* | Your IB live account number |
-| `LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `TWS_ADMIN_USERNAME` | `admin` | Web dashboard login username |
-| `TWS_ADMIN_PASSWORD` | `changeme` | Web dashboard login password (plain-text; hashed at startup) |
-| `TWS_ADMIN_PASSWORD_HASH` | *(unset)* | Pre-hashed bcrypt/PBKDF2 password — takes priority over `TWS_ADMIN_PASSWORD` |
-| `ALLOW_DEFAULT_PASSWORD` | `false` | Set to `true` in local dev to suppress the insecure-default-password warning |
-| `SECRET_KEY` | *(random)* | Flask session secret — **change in production** |
-| `OPENAI_API_KEY` | *(unset)* | Your OpenAI API key — required to enable AI features |
-| `OPENAI_MODEL` | `gpt-4o` | OpenAI model used for AI chat and insights |
-| `AI_ENABLED` | *(auto)* | Explicitly force AI on (`true`) or off (`false`); defaults to enabled when `OPENAI_API_KEY` is set |
-| `LOGIN_DISABLED` | *(unset)* | Set to `true` to bypass auth in local development |
-| `ENVIRONMENT` | *(unset)* | Set to `production` to enforce strict security checks (e.g. `SECRET_KEY` required) |
-| `AUTONOMOUS_RUNNER_ENABLED` | `false` | Set to `true` to allow the autonomous paper-trading runner to open/close positions automatically |
-| `DATABASE_URL` | *(SQLite)* | SQLAlchemy connection string; defaults to a local SQLite file when unset |
-| `FX_DATA_MODE` | `not_configured` | FX research data source: `not_configured`, `demo`, or `live_research` |
-| `FX_PROVIDER` | `yfinance` | FX data provider library (currently only `yfinance` is supported) |
-| `FX_PROVIDER_TIMEOUT_SECONDS` | `10` | HTTP timeout in seconds for FX provider requests |
-| `EMERGENCY_STOP_FILE` | `EMERGENCY_STOP` | Path to the emergency-stop sentinel file; trading halts when this file exists |
-| `DISCLAIMER_ACCEPTANCE_FILE` | `disclaimer_acceptance.json` | Path to the disclaimer acceptance record |
-| `STRATEGY_DB_PATH` | `strategy_lifecycle.db` | Path to the strategy lifecycle SQLite database |
-| `CASH_RESERVE_MODE` | `gross_assignment` | Cash reserve calculation method: `gross_assignment`, `net_premium`, or `broker_margin` |
-| `MANUAL_CASH_BUFFER_PCT` | `0.05` | Fraction of cash balance kept as an untouched buffer (e.g. `0.10` = 10 %) |
-| `MANUAL_CASH_BUFFER_AMOUNT` | `0` | Fixed dollar amount kept as an untouched buffer (larger of this or `MANUAL_CASH_BUFFER_PCT` applies) |
-| `OPTION_CONTRACT_MULTIPLIER_DEFAULT` | `100` | Default option-contract multiplier when not available from position data |
-| `ENABLE_CASH_AVAILABILITY_GUARD` | `true` | Enable the deployable-cash safety guard |
-| `BLOCK_AUTOMATED_TRADING_IF_UNCOVERED_SHORT_CALL` | `true` | Block automated trades when an uncovered short call is detected |
-| `BLOCK_AUTOMATED_TRADING_IF_DEPLOYABLE_CASH_NEGATIVE` | `true` | Block automated trades when deployable cash is negative |
+| Category | Key examples | Purpose |
+|----------|--------------|---------|
+| Broker connection | `TRADING_ENV`, `PAPER_*`, `LIVE_*` | Select paper vs live account and TWS connection details |
+| Web/auth | `TWS_ADMIN_*`, `SECRET_KEY`, `LOGIN_DISABLED`, `ENVIRONMENT` | Dashboard authentication and Flask security |
+| AI | `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_ENABLED` | AI chat and market insight configuration |
+| Data/storage | `DATABASE_URL`, `STRATEGY_DB_PATH`, `DISCLAIMER_ACCEPTANCE_FILE` | Persistence and local file locations |
+| FX research | `FX_DATA_MODE`, `FX_PROVIDER`, `FX_PROVIDER_TIMEOUT_SECONDS` | FX research dashboard behavior |
+| Cash/reserves | `CASH_RESERVE_MODE`, `MANUAL_CASH_BUFFER_*`, `OPTION_CONTRACT_MULTIPLIER_DEFAULT` | Deployable cash and reserve calculations |
+| Autonomous | `AUTONOMOUS_*`, `LIVE_MARKET_DATA_PROVIDER`, `ALLOW_YAHOO_FOR_LIVE_TRADING` | Paper/live autonomous runner and execution safety |
 
 > 💡 **Tip:** Never commit your `.env` file to version control. It is already in `.gitignore`.
+>
+> Canonical reference: [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) is the code-backed configuration guide for environment variables, defaults, safety notes, and current code-vs-template drift. Use it as the source of truth.
 
 ### Environment-Specific Config Files
 
@@ -769,17 +744,16 @@ See [docs/WEB_API_REFERENCE.md](WEB_API_REFERENCE.md#get-apiaccountcash-availabi
 
 ### Configuration
 
-Add these keys to your `.env` file to customize behaviour:
+Cash-availability settings are documented centrally in [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md).
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CASH_RESERVE_MODE` | `gross_assignment` | Reserve mode: `gross_assignment`, `net_premium`, or `broker_margin` |
-| `MANUAL_CASH_BUFFER_PCT` | `0.10` | Fraction of cash balance to keep untouched (e.g. `0.10` = 10%) |
-| `MANUAL_CASH_BUFFER_AMOUNT` | `0` | Fixed dollar amount to keep untouched (larger of the two is used) |
-| `OPTION_CONTRACT_MULTIPLIER_DEFAULT` | `100` | Multiplier when not available from position data |
-| `ENABLE_CASH_AVAILABILITY_GUARD` | `true` | Enable/disable the deployable-cash safety gate |
-| `BLOCK_AUTOMATED_TRADING_IF_UNCOVERED_SHORT_CALL` | `true` | Block automated recommendations when uncovered short calls exist |
-| `BLOCK_AUTOMATED_TRADING_IF_DEPLOYABLE_CASH_NEGATIVE` | `true` | Block automated recommendations when deployable cash ≤ 0 |
+The most commonly adjusted keys are:
+
+- `CASH_RESERVE_MODE`
+- `MANUAL_CASH_BUFFER_PCT`
+- `MANUAL_CASH_BUFFER_AMOUNT`
+- `OPTION_CONTRACT_MULTIPLIER_DEFAULT`
+
+Refer to the config guide for defaults, allowed values, and notes about template-only drift.
 
 ### Warnings
 
