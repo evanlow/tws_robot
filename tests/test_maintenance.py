@@ -247,6 +247,40 @@ def test_apply_does_not_override_present_source_enrichment(tmp_path, monkeypatch
     assert report.results[0].detail.get("enrichment_backfilled") in (None, 0)
 
 
+def test_run_records_named_constituent_changes(tmp_path):
+    """The report should pair added/removed symbols with company names."""
+    current = _sp500_rows(450)            # T000..T449
+    proposed = _sp500_rows(451)[1:]       # T001..T450 (drops T000, adds T450)
+    _write_constituents(tmp_path / "data" / "sp500_constituents.csv", current)
+    runner = _runner(tmp_path, {"sp500_constituents": lambda: proposed})
+
+    report = runner.run(tasks=["sp500_constituents"], dry_run=True)
+
+    changes = report.results[0].detail["changes"]
+    assert changes["added"] == [{"symbol": "T450", "security": "Test Company 450"}]
+    assert changes["removed"] == [{"symbol": "T000", "security": "Test Company 0"}]
+
+    from web.maintenance.reports import render_markdown_report
+
+    markdown = render_markdown_report(report)
+    assert "T450 (Test Company 450)" in markdown
+    assert "T000 (Test Company 0)" in markdown
+
+
+def test_run_without_membership_change_records_no_changes(tmp_path):
+    """No added/removed symbols means no changes block is emitted."""
+    rows = _sp500_rows(450)
+    _write_constituents(tmp_path / "data" / "sp500_constituents.csv", rows)
+    runner = _runner(tmp_path, {"sp500_constituents": lambda: _sp500_rows(450)})
+
+    report = runner.run(tasks=["sp500_constituents"], dry_run=True)
+
+    result = report.results[0]
+    assert result.added == []
+    assert result.removed == []
+    assert "changes" not in result.detail
+
+
 def test_maintenance_page_loads(client):
     response = client.get("/maintenance")
 

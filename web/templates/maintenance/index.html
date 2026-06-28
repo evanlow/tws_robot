@@ -21,12 +21,18 @@
 
 <section style="margin-bottom:2rem;">
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Latest Run Result</h2>
-  <pre id="runOutput" style="white-space:pre-wrap;background:#0f1929;border:1px solid #2d3748;border-radius:8px;padding:1rem;color:#e2e8f0;min-height:5rem;">No run yet.</pre>
+  <div id="changesPanel" class="empty-state" style="margin-bottom:1rem;">No constituent changes to show yet.</div>
+  <details style="margin-bottom:0.5rem;">
+    <summary style="cursor:pointer;color:#a0aec0;">Raw run output (JSON)</summary>
+    <pre id="runOutput" style="white-space:pre-wrap;background:#0f1929;border:1px solid #2d3748;border-radius:8px;padding:1rem;color:#e2e8f0;min-height:5rem;margin-top:0.5rem;">No run yet.</pre>
+  </details>
 </section>
 
 <section>
   <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">Recent Reports</h2>
+  <p style="color:#a0aec0;margin-bottom:0.5rem;font-size:0.85rem;">Select a report to view which constituents were added or removed.</p>
   <div id="reportsPanel" class="empty-state">Loading reports…</div>
+  <div id="reportDetail" style="margin-top:1rem;"></div>
 </section>
 {% endblock %}
 
@@ -37,6 +43,8 @@
   const statusPanel = document.getElementById('statusPanel');
   const reportsPanel = document.getElementById('reportsPanel');
   const runOutput = document.getElementById('runOutput');
+  const changesPanel = document.getElementById('changesPanel');
+  const reportDetail = document.getElementById('reportDetail');
 
   async function loadStatus() {
     try {
@@ -77,7 +85,7 @@
       return;
     }
     reportsPanel.innerHTML = '<table class="data-table"><thead><tr><th>Report</th><th>Status</th><th>Dry Run</th><th>Finished</th><th>Warnings</th><th>Errors</th></tr></thead><tbody>' +
-      reports.map(report => '<tr>' +
+      reports.map(report => '<tr class="report-row" data-report-id="' + escapeHtml(report.report_id || '') + '" style="cursor:pointer;">' +
         '<td>' + escapeHtml(report.report_id || '-') + '</td>' +
         '<td>' + escapeHtml(report.status || '-') + '</td>' +
         '<td>' + escapeHtml(String(report.dry_run)) + '</td>' +
@@ -85,11 +93,72 @@
         '<td>' + escapeHtml(String(report.warnings_count || 0)) + '</td>' +
         '<td>' + escapeHtml(String(report.errors_count || 0)) + '</td>' +
       '</tr>').join('') + '</tbody></table>';
+    reportsPanel.querySelectorAll('.report-row').forEach(row => {
+      row.addEventListener('click', () => loadReportDetail(row.dataset.reportId));
+    });
+  }
+
+  async function loadReportDetail(reportId) {
+    if (!reportId) return;
+    reportDetail.innerHTML = '<div class="empty-state">Loading report ' + escapeHtml(reportId) + '…</div>';
+    try {
+      const res = await fetch('/api/maintenance/reports/' + encodeURIComponent(reportId));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.status);
+      renderChanges(reportDetail, data, 'Report ' + reportId);
+    } catch (err) {
+      reportDetail.innerHTML = '<div class="empty-state">Could not load report: ' + escapeHtml(err.message) + '</div>';
+    }
+  }
+
+  // Render added/removed constituents (with names) for every constituent task in a report.
+  function renderChanges(container, report, heading) {
+    const results = (report && report.results) || [];
+    // A task is "interesting" if it carries the named changes block (new reports)
+    // or a non-empty added/removed symbol list (older reports predating that block).
+    const constituentResults = results.filter(r => r && (
+      (r.detail && r.detail.changes) ||
+      (r.added && r.added.length) ||
+      (r.removed && r.removed.length)
+    ));
+    if (!constituentResults.length) {
+      const noun = report && report.dry_run ? 'previewed' : 'applied';
+      container.innerHTML = '<div class="empty-state">No constituent additions or removals were ' + noun + '.</div>';
+      return;
+    }
+    let html = heading ? '<h3 style="font-size:1rem;color:#90cdf4;margin-bottom:0.5rem;">' + escapeHtml(heading) + '</h3>' : '';
+    constituentResults.forEach(result => {
+      const changes = (result.detail && result.detail.changes) || {};
+      const added = changes.added || (result.added || []).map(sym => ({ symbol: sym, security: '' }));
+      const removed = changes.removed || (result.removed || []).map(sym => ({ symbol: sym, security: '' }));
+      html += '<div style="margin-bottom:1rem;">' +
+        '<h4 style="font-size:0.95rem;color:#63b3ed;margin-bottom:0.4rem;">' + escapeHtml(result.task) +
+        ' <span style="color:#a0aec0;font-weight:normal;">(' + added.length + ' added, ' + removed.length + ' removed)</span></h4>';
+      if (!added.length && !removed.length) {
+        html += '<p style="color:#a0aec0;">No membership changes.</p>';
+      } else {
+        html += '<table class="data-table"><thead><tr><th>Change</th><th>Symbol</th><th>Company</th></tr></thead><tbody>' +
+          added.map(item => changeRow('➕ Added', item, '#48bb78')).join('') +
+          removed.map(item => changeRow('➖ Removed', item, '#f56565')).join('') +
+          '</tbody></table>';
+      }
+      html += '</div>';
+    });
+    container.innerHTML = html;
+  }
+
+  function changeRow(label, item, color) {
+    return '<tr>' +
+      '<td style="color:' + color + ';white-space:nowrap;">' + escapeHtml(label) + '</td>' +
+      '<td>' + escapeHtml(item.symbol || '-') + '</td>' +
+      '<td>' + escapeHtml(item.security || '—') + '</td>' +
+      '</tr>';
   }
 
   async function runMaintenance(payload, confirmMessage) {
     if (confirmMessage && !confirm(confirmMessage)) return;
     runOutput.textContent = 'Running maintenance…';
+    changesPanel.innerHTML = '<div class="empty-state">Running maintenance…</div>';
     try {
       const res = await fetch('/api/maintenance/run', {
         method: 'POST',
@@ -98,9 +167,11 @@
       });
       const data = await res.json();
       runOutput.textContent = JSON.stringify(data, null, 2);
+      renderChanges(changesPanel, data, null);
       await loadStatus();
     } catch (err) {
       runOutput.textContent = 'Maintenance run failed: ' + err.message;
+      changesPanel.innerHTML = '<div class="empty-state">Maintenance run failed: ' + escapeHtml(err.message) + '</div>';
     }
   }
 

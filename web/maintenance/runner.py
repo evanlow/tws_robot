@@ -178,6 +178,10 @@ class MaintenanceRunner:
                 result.detail["enrichment_backfilled"] = backfilled
             result.after_count = len(proposed_rows)
             result.added, result.removed = _symbol_diff(current_rows, proposed_rows)
+            if result.added or result.removed:
+                result.detail["changes"] = _named_changes(
+                    current_rows, proposed_rows, result.added, result.removed
+                )
             result.validation = validate_constituent_rows(
                 proposed_rows,
                 market=str(cfg["market"]),
@@ -368,6 +372,35 @@ def _symbol_diff(before: Sequence[Mapping[str, object]], after: Sequence[Mapping
     before_symbols = {str(row.get("symbol") or "").strip().upper() for row in before if row.get("symbol")}
     after_symbols = {str(row.get("symbol") or "").strip().upper() for row in after if row.get("symbol")}
     return sorted(after_symbols - before_symbols), sorted(before_symbols - after_symbols)
+
+
+def _named_changes(
+    before: Sequence[Mapping[str, object]],
+    after: Sequence[Mapping[str, object]],
+    added_symbols: Sequence[str],
+    removed_symbols: Sequence[str],
+) -> Dict[str, List[Dict[str, str]]]:
+    """Pair added/removed symbols with their company names for readable reports."""
+
+    def _index(rows: Sequence[Mapping[str, object]]) -> Dict[str, Mapping[str, object]]:
+        return {
+            str(row.get("symbol") or "").strip().upper(): row
+            for row in rows
+            if row.get("symbol")
+        }
+
+    after_by_symbol = _index(after)
+    before_by_symbol = _index(before)
+    added = [
+        {"symbol": sym, "security": str(after_by_symbol.get(sym, {}).get("security") or "")}
+        for sym in added_symbols
+    ]
+    removed = [
+        {"symbol": sym, "security": str(before_by_symbol.get(sym, {}).get("security") or "")}
+        for sym in removed_symbols
+    ]
+    return {"added": added, "removed": removed}
+
 
 
 _ENRICHMENT_FIELDS = ("sector", "sub_industry")

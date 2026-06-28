@@ -63,10 +63,13 @@ def render_markdown_report(report: MaintenanceRunReport) -> str:
         lines.extend(["", f"## {result.task}", ""])
         lines.append(f"- Source: `{result.source or 'n/a'}`")
         lines.append(f"- Status: `{result.status}`")
+        changes = result.detail.get("changes") if isinstance(result.detail, dict) else None
+        added_named = changes.get("added") if isinstance(changes, dict) else None
+        removed_named = changes.get("removed") if isinstance(changes, dict) else None
         if result.added:
-            lines.append("- Added: " + ", ".join(result.added[:50]))
+            lines.append(f"- Added ({len(result.added)}): " + _format_changes(added_named, result.added))
         if result.removed:
-            lines.append("- Removed: " + ", ".join(result.removed[:50]))
+            lines.append(f"- Removed ({len(result.removed)}): " + _format_changes(removed_named, result.removed))
         for warning in result.warnings:
             lines.append(f"- Warning: {warning}")
         for error in result.validation.errors + result.errors:
@@ -115,3 +118,16 @@ def read_report(report_dir: Path, report_id: str) -> Optional[Dict[str, Any]]:
 
 def _fmt_count(value: Any) -> str:
     return "-" if value is None else str(value)
+
+
+def _format_changes(named: Optional[List[Dict[str, Any]]], symbols: List[str]) -> str:
+    """Render a comma-separated change list, preferring "SYMBOL (Name)" form."""
+    if named:
+        parts = []
+        for item in named[:50]:
+            symbol = str(item.get("symbol") or "").strip()
+            security = str(item.get("security") or "").strip()
+            parts.append(f"{symbol} ({security})" if security else symbol)
+        return ", ".join(parts)
+    return ", ".join(symbols[:50])
+
