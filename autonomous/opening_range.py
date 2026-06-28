@@ -253,9 +253,9 @@ class OpeningRangeSession:
         self._post_range_1m: List[Candle] = []
         self._open = config.parse_time(config.session_open)
         self._cutoff = config.parse_time(config.entry_cutoff_time)
-        self._range_end_min = _session_minutes(
-            datetime(2000, 1, 1, self._open.hour, self._open.minute)
-        ) + config.opening_range_minutes
+        self._range_end_min = (
+            self._open.hour * 60 + self._open.minute + config.opening_range_minutes
+        )
 
     # ------------------------------------------------------------------
     def on_closed_1m(self, candle: Candle) -> Optional[ORBSetup]:
