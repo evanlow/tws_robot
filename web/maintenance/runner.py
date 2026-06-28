@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -172,6 +173,9 @@ class MaintenanceRunner:
 
         try:
             proposed_rows = self._fetch_constituent_rows(task_name)
+            proposed_rows, backfilled = _backfill_enrichment(proposed_rows, current_rows)
+            if backfilled:
+                result.detail["enrichment_backfilled"] = backfilled
             result.after_count = len(proposed_rows)
             result.added, result.removed = _symbol_diff(current_rows, proposed_rows)
             result.validation = validate_constituent_rows(
@@ -364,6 +368,66 @@ def _symbol_diff(before: Sequence[Mapping[str, object]], after: Sequence[Mapping
     before_symbols = {str(row.get("symbol") or "").strip().upper() for row in before if row.get("symbol")}
     after_symbols = {str(row.get("symbol") or "").strip().upper() for row in after if row.get("symbol")}
     return sorted(after_symbols - before_symbols), sorted(before_symbols - after_symbols)
+
+
+_ENRICHMENT_FIELDS = ("sector", "sub_industry")
+
+# Corporate suffixes stripped when matching companies by name so a symbol change
+# (e.g. STI "T39" -> "5E2" for Seatrium) still recovers prior sector enrichment.
+_NAME_SUFFIXES = (
+    "limited", "ltd", "plc", "holdings", "holding", "corporation", "corp",
+    "incorporated", "inc", "company", "co", "group", "the",
+)
+
+
+def _normalise_security_name(value: object) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"\[[^\]]*\]", " ", text)  # drop footnote markers like "[zh]"
+    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    if not text:
+        return ""
+    tokens = [tok for tok in text.split() if tok not in _NAME_SUFFIXES]
+    return " ".join(tokens) if tokens else text
+
+
+def _backfill_enrichment(
+    proposed: Sequence[Mapping[str, str]],
+    current: Sequence[Mapping[str, str]],
+) -> tuple[List[Dict[str, str]], int]:
+    """Fill empty enrichment fields on proposed rows from existing rows.
+
+    Matches on symbol first, then on a normalized company name so a source that
+    no longer exposes sector/sub_industry cannot silently wipe curated metadata.
+    Only blank fields are filled; non-empty source values are never overridden.
+    """
+    by_symbol: Dict[str, Mapping[str, str]] = {}
+    by_name: Dict[str, Mapping[str, str]] = {}
+    for row in current:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if symbol:
+            by_symbol.setdefault(symbol, row)
+        name = _normalise_security_name(row.get("security"))
+        if name:
+            by_name.setdefault(name, row)
+
+    enriched: List[Dict[str, str]] = []
+    backfilled = 0
+    for row in proposed:
+        new_row = dict(row)
+        symbol = str(new_row.get("symbol") or "").strip().upper()
+        source = by_symbol.get(symbol) or by_name.get(_normalise_security_name(new_row.get("security")))
+        if source:
+            row_changed = False
+            for field in _ENRICHMENT_FIELDS:
+                current_value = str(new_row.get(field) or "").strip()
+                fallback_value = str(source.get(field) or "").strip()
+                if not current_value and fallback_value:
+                    new_row[field] = fallback_value
+                    row_changed = True
+            if row_changed:
+                backfilled += 1
+        enriched.append(new_row)
+    return enriched, backfilled
 
 
 def _import_module(module_name: str):

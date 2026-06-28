@@ -142,6 +142,111 @@ def test_dry_run_all_is_failed_when_any_task_fails(tmp_path):
     assert any(result.task == "sti_constituents" and result.status == "failed" for result in report.results)
 
 
+def test_apply_backfills_missing_enrichment_from_existing_file(tmp_path, monkeypatch):
+    """A source that drops sector/sub_industry must not wipe curated enrichment."""
+    existing = [
+        {
+            "symbol": f"X{i:02d}.SI",
+            "display_symbol": f"X{i:02d}",
+            "security": f"Company {i}",
+            "sector": "Financials",
+            "sub_industry": "Banks",
+        }
+        for i in range(30)
+    ]
+    output_path = tmp_path / "data" / "sti_constituents.csv"
+    _write_sti_constituents(output_path, existing)
+    _disable_cache_invalidation(monkeypatch)
+
+    # Source returns the same names/symbols but with empty sector/sub_industry.
+    stripped = [
+        {**row, "sector": "", "sub_industry": ""}
+        for row in existing
+    ]
+    runner = _runner(tmp_path, {"sti_constituents": lambda: stripped})
+
+    report = runner.run(tasks=["sti_constituents"], dry_run=False)
+
+    assert report.status in {"success", "warning"}
+    written = {row["symbol"]: row for row in _read_rows(output_path)}
+    assert all(written[sym]["sector"] == "Financials" for sym in written)
+    assert all(written[sym]["sub_industry"] == "Banks" for sym in written)
+    assert report.results[0].detail.get("enrichment_backfilled") == 30
+
+
+def test_apply_backfills_enrichment_across_symbol_change_by_name(tmp_path, monkeypatch):
+    """Enrichment should follow a company when only its ticker changes."""
+    existing = [
+        {
+            "symbol": f"OLD{i:02d}.SI",
+            "display_symbol": f"OLD{i:02d}",
+            "security": f"Company {i}",
+            "sector": "Industrials",
+            "sub_industry": "Airlines",
+        }
+        for i in range(30)
+    ]
+    output_path = tmp_path / "data" / "sti_constituents.csv"
+    _write_sti_constituents(output_path, existing)
+    _disable_cache_invalidation(monkeypatch)
+
+    # Same companies, new tickers, with corporate suffix variations and no sectors.
+    renamed = [
+        {
+            "symbol": f"NEW{i:02d}.SI",
+            "display_symbol": f"NEW{i:02d}",
+            "security": f"Company {i} Limited",
+            "sector": "",
+            "sub_industry": "",
+        }
+        for i in range(30)
+    ]
+    runner = _runner(tmp_path, {"sti_constituents": lambda: renamed})
+
+    report = runner.run(tasks=["sti_constituents"], dry_run=False)
+
+    assert report.status in {"success", "warning"}
+    written = _read_rows(output_path)
+    assert all(row["sector"] == "Industrials" for row in written)
+    assert all(row["sub_industry"] == "Airlines" for row in written)
+
+
+def test_apply_does_not_override_present_source_enrichment(tmp_path, monkeypatch):
+    """Backfill must never overwrite non-empty sector values from the source."""
+    existing = [
+        {
+            "symbol": f"X{i:02d}.SI",
+            "display_symbol": f"X{i:02d}",
+            "security": f"Company {i}",
+            "sector": "StaleSector",
+            "sub_industry": "StaleSub",
+        }
+        for i in range(30)
+    ]
+    output_path = tmp_path / "data" / "sti_constituents.csv"
+    _write_sti_constituents(output_path, existing)
+    _disable_cache_invalidation(monkeypatch)
+
+    fresh = [
+        {
+            "symbol": f"X{i:02d}.SI",
+            "display_symbol": f"X{i:02d}",
+            "security": f"Company {i}",
+            "sector": "FreshSector",
+            "sub_industry": "FreshSub",
+        }
+        for i in range(30)
+    ]
+    runner = _runner(tmp_path, {"sti_constituents": lambda: fresh})
+
+    report = runner.run(tasks=["sti_constituents"], dry_run=False)
+
+    assert report.status in {"success", "warning"}
+    written = _read_rows(output_path)
+    assert all(row["sector"] == "FreshSector" for row in written)
+    assert report.results[0].detail.get("enrichment_backfilled") in (None, 0)
+
+
 def test_maintenance_page_loads(client):
     response = client.get("/maintenance")
 
@@ -199,6 +304,20 @@ def _write_constituents(path, rows):
         writer.writerows(rows)
 
 
+def _write_sti_constituents(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["symbol", "display_symbol", "security", "sector", "sub_industry"]
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def _read_symbols(path):
     with path.open(newline="", encoding="utf-8") as fh:
         return [row["symbol"] for row in csv.DictReader(fh)]
+
+
+def _read_rows(path):
+    with path.open(newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
