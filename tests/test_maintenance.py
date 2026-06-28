@@ -119,6 +119,29 @@ def test_market_events_dry_run_is_metadata_only(tmp_path):
     assert "Dry-run does not update market-event DB rows" in report.results[0].warnings[0]
 
 
+def test_dry_run_all_is_failed_when_any_task_fails(tmp_path):
+    current_hsi = _sp500_rows(85)
+    _write_constituents(tmp_path / "data" / "hsi_constituents.csv", current_hsi)
+
+    def failing_source():
+        raise RuntimeError("HTTP Error 403: Forbidden")
+
+    runner = _runner(
+        tmp_path,
+        {
+            "sp500_constituents": failing_source,
+            "sti_constituents": failing_source,
+            "hsi_constituents": lambda: current_hsi,
+        },
+    )
+
+    report = runner.run(dry_run=True)
+
+    assert report.status == "failed"
+    assert any(result.task == "sp500_constituents" and result.status == "failed" for result in report.results)
+    assert any(result.task == "sti_constituents" and result.status == "failed" for result in report.results)
+
+
 def test_maintenance_page_loads(client):
     response = client.get("/maintenance")
 

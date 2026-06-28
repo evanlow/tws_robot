@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from io import StringIO
 from typing import Dict, List
 
+from web.maintenance.sources.http_utils import fetch_html_with_retries
+
 SOURCE_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+FALLBACK_SOURCE_URL = "https://en.m.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
 
 def fetch_constituents() -> List[Dict[str, str]]:
@@ -14,15 +18,18 @@ def fetch_constituents() -> List[Dict[str, str]]:
     except ImportError as exc:
         raise RuntimeError("pandas is required to refresh S&P 500 constituents") from exc
 
-    tables = pd.read_html(SOURCE_URL)
+    html, source_url = fetch_html_with_retries([SOURCE_URL, FALLBACK_SOURCE_URL])
+    tables = pd.read_html(StringIO(html))
     if not tables:
-        raise RuntimeError("No tables found on S&P 500 source page")
+        raise RuntimeError(f"No tables found on S&P 500 source page ({source_url})")
 
     df = tables[0]
     required = ["Symbol", "Security", "GICS Sector", "GICS Sub-Industry"]
     missing = [col for col in required if col not in df.columns]
     if missing:
-        raise RuntimeError("S&P 500 source table missing columns: " + ", ".join(missing))
+        raise RuntimeError(
+            "S&P 500 source table missing columns: " + ", ".join(missing) + f" ({source_url})"
+        )
 
     out = df[required].copy()
     out.columns = ["symbol", "security", "sector", "sub_industry"]

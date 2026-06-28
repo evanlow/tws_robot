@@ -6,7 +6,10 @@ import re
 from io import StringIO
 from typing import Dict, List, Optional, Tuple
 
+from web.maintenance.sources.http_utils import fetch_html_with_retries
+
 SOURCE_URL = "https://en.wikipedia.org/wiki/Hang_Seng_Index"
+FALLBACK_SOURCE_URL = "https://en.m.wikipedia.org/wiki/Hang_Seng_Index"
 
 
 def normalise_hk_ticker(raw: object) -> Optional[Tuple[str, str]]:
@@ -25,13 +28,11 @@ def fetch_constituents() -> List[Dict[str, str]]:
     """Fetch and normalize HSI constituents for app-compatible CSV output."""
     try:
         import pandas as pd
-        import requests
     except ImportError as exc:
-        raise RuntimeError("pandas and requests are required to refresh HSI constituents") from exc
+        raise RuntimeError("pandas is required to refresh HSI constituents") from exc
 
-    resp = requests.get(SOURCE_URL, headers={"User-Agent": "tws_robot/1.0"}, timeout=30)
-    resp.raise_for_status()
-    tables = pd.read_html(StringIO(resp.text))
+    html, _ = fetch_html_with_retries([SOURCE_URL, FALLBACK_SOURCE_URL])
+    tables = pd.read_html(StringIO(html))
 
     source_df = None
     for df in tables:
