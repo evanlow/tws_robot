@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 from autonomous.opening_range import Candle, OpeningRangeConfig
 from autonomous.orb_backtest_reports import (
@@ -22,11 +22,31 @@ from autonomous.orb_backtest_reports import (
     run_sweep,
     save_evidence,
 )
+from autonomous.orb_session_manager import ORBSessionManager, ORBValidationError
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("api_opening_range", __name__, url_prefix="/api/opening-range")
+orb_bp = Blueprint("api_orb", __name__, url_prefix="/api/orb")
 page_bp = Blueprint("opening_range", __name__, url_prefix="/opening-range")
+
+_manager: Optional[ORBSessionManager] = None
+
+
+def get_manager() -> ORBSessionManager:
+    """Lazily build the singleton ORB session manager.
+
+    Honors ``orb_config_dir`` / ``orb_evidence_dir`` app config for test
+    isolation; defaults to the production config/logs directories.
+    """
+    global _manager
+    if _manager is None:
+        cfg = current_app.config if current_app else {}
+        _manager = ORBSessionManager(
+            config_dir=cfg.get("orb_config_dir", "config"),
+            evidence_dir=cfg.get("orb_evidence_dir", "logs"),
+        )
+    return _manager
 
 
 @page_bp.route("/backtest")
@@ -34,6 +54,16 @@ def backtest_page():
     return render_template(
         "opening_range/backtest.html",
         title="ORB Backtest Lab",
+        active_page="opening_range_backtest",
+        defaults=OpeningRangeConfig(),
+    )
+
+
+@page_bp.route("/")
+def index():
+    return render_template(
+        "opening_range/index.html",
+        title="ORB Autonomous Session",
         active_page="opening_range",
         defaults=OpeningRangeConfig(),
     )
@@ -190,3 +220,78 @@ def save():
     path = save_evidence(report, readiness, symbols=data.get("symbols"),
                          params=data.get("params"))
     return jsonify({"saved": True, "path": path, "readiness": readiness})
+
+
+# ---------------------------------------------------------------------------
+# ORB strategy configuration & autonomous session controls (Phase 2.3, #207)
+# These manage trader-facing config, mode, and arm/disarm state only. No paper
+# or live order is placed here; live modes are locked and paper-autonomous is
+# gated on readiness. All control actions are audit logged.
+# ---------------------------------------------------------------------------
+
+
+@orb_bp.route("/strategies", methods=["GET"])
+def list_orb_strategies():
+    return jsonify({"strategies": get_manager().list_strategies()})
+
+
+@orb_bp.route("/strategies", methods=["POST"])
+def create_orb_strategy():
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(get_manager().upsert_strategy(data)), 201
+    except ORBValidationError as exc:
+        return jsonify({"error": "validation_failed", "messages": exc.errors}), 400
+
+
+@orb_bp.route("/strategies/<name>", methods=["GET"])
+def get_orb_strategy(name):
+    rec = get_manager().get_strategy(name)
+    if rec is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(rec)
+
+
+@orb_bp.route("/strategies/<name>", methods=["PUT"])
+def update_orb_strategy(name):
+    data = request.get_json(silent=True) or {}
+    data["name"] = name
+    try:
+        return jsonify(get_manager().upsert_strategy(data))
+    except ORBValidationError as exc:
+        return jsonify({"error": "validation_failed", "messages": exc.errors}), 400
+
+
+@orb_bp.route("/strategies/<name>/arm", methods=["POST"])
+def arm_orb_strategy(name):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(get_manager().arm(name, when=str(data.get("when", "today"))))
+    except ORBValidationError as exc:
+        return jsonify({"error": "validation_failed", "messages": exc.errors}), 400
+
+
+@orb_bp.route("/strategies/<name>/disarm", methods=["POST"])
+def disarm_orb_strategy(name):
+    try:
+        return jsonify(get_manager().disarm(name))
+    except ORBValidationError as exc:
+        return jsonify({"error": "validation_failed", "messages": exc.errors}), 400
+
+
+@orb_bp.route("/strategies/<name>/disable-today", methods=["POST"])
+def disable_orb_today(name):
+    try:
+        return jsonify(get_manager().disable_today(name))
+    except ORBValidationError as exc:
+        return jsonify({"error": "validation_failed", "messages": exc.errors}), 400
+
+
+@orb_bp.route("/emergency-stop", methods=["POST"])
+def emergency_stop_orb():
+    return jsonify(get_manager().emergency_stop())
+
+
+@orb_bp.route("/status", methods=["GET"])
+def orb_status():
+    return jsonify(get_manager().status())

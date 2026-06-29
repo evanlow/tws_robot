@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p style="color:#a0aec0;font-size:0.85rem;">
+  Configure ORB, choose a mode, and arm/disarm a session. No orders are placed
+  here. Live modes are locked. Paper-autonomous cannot arm unless paper readiness
+  gates pass; recommend-only may arm with missing execution gates shown below.
+</p>
+
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;">1. Mode &amp; Strategy Configuration</h2>
+  <div style="max-width:760px;">
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;"><label class="form-label">Strategy name</label><input id="orbName" class="form-input" value="ORB_Core" /></div>
+      <div style="flex:1;"><label class="form-label">Mode</label>
+        <select id="orbMode" class="form-input">
+          <option value="off">Off</option>
+          <option value="backtest_only">Backtest only</option>
+          <option value="recommend_only">Recommend only</option>
+          <option value="paper_autonomous">Paper autonomous</option>
+          <option value="tiny_live_candidate">Tiny live candidate (locked)</option>
+          <option value="assisted_live">Assisted live (locked)</option>
+        </select></div>
+    </div>
+    <div style="margin-bottom:0.75rem;"><label class="form-label">Symbol whitelist (comma-separated)</label>
+      <input id="orbSymbols" class="form-input" value="{{ defaults.symbols|join(', ')|e }}" /></div>
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;"><label class="form-label">Timezone</label><input id="orbTz" class="form-input" value="{{ defaults.timezone }}" /></div>
+      <div style="flex:1;"><label class="form-label">Session open</label><input id="orbOpen" class="form-input" value="{{ defaults.session_open }}" /></div>
+      <div style="flex:1;"><label class="form-label">Range window (min)</label><input id="orbRange" class="form-input" type="number" value="{{ defaults.opening_range_minutes }}" /></div>
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;"><label class="form-label">Entry cutoff</label><input id="orbCutoff" class="form-input" value="{{ defaults.entry_cutoff_time }}" /></div>
+      <div style="flex:1;"><label class="form-label">Force-flat</label><input id="orbFlat" class="form-input" value="{{ defaults.force_flat_time }}" /></div>
+      <div style="flex:1;"><label class="form-label">Slippage cap (bps)</label><input id="orbSlip" class="form-input" type="number" value="{{ defaults.max_entry_slippage_bps }}" /></div>
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;"><label class="form-label">Risk per trade %</label><input id="orbRisk" class="form-input" type="number" step="0.001" value="{{ defaults.risk_per_trade_equity_pct }}" /></div>
+      <div style="flex:1;"><label class="form-label">Max/symbol/session</label><input id="orbMaxSym" class="form-input" type="number" value="{{ defaults.max_trades_per_symbol_per_session }}" /></div>
+      <div style="flex:1;"><label class="form-label">Max total/session</label><input id="orbMaxTot" class="form-input" type="number" value="{{ defaults.max_total_orb_trades_per_session }}" /></div>
+    </div>
+    <div style="display:flex;gap:1.5rem;margin-bottom:0.75rem;flex-wrap:wrap;">
+      <label><input id="orbModelA" type="checkbox" checked /> Model A</label>
+      <label><input id="orbModelB" type="checkbox" checked /> Model B</label>
+      <label><input type="checkbox" disabled /> Model C (diagnostic-only)</label>
+      <label><input id="orbStop" type="checkbox" checked /> Require stop</label>
+      <label><input id="orbTarget" type="checkbox" checked /> Require target</label>
+      <label><input id="orbBracket" type="checkbox" checked /> Require bracket</label>
+    </div>
+    <button class="btn-primary" onclick="orbCfgSave()">Save Strategy</button>
+    <span id="orbCfgStatus" style="margin-left:1rem;color:#a0aec0;font-size:0.85rem;"></span>
+  </div>
+</section>
+
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;">2. Session arming controls</h2>
+  <button class="btn-primary" onclick="orbAct('arm',{when:'today'})">Arm for today</button>
+  <button class="btn-primary" onclick="orbAct('arm',{when:'tomorrow'})">Arm for tomorrow</button>
+  <button class="btn-primary" onclick="orbAct('disarm')">Disarm</button>
+  <button class="btn-primary" onclick="orbAct('disable-today')">Disable ORB today</button>
+  <button class="btn-primary" style="background:#c53030;" onclick="orbEmergency()">Emergency stop</button>
+  <span id="orbActStatus" style="margin-left:1rem;color:#a0aec0;font-size:0.85rem;"></span>
+</section>
+
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;">3. Runtime readiness / status</h2>
+  <div id="orbStatusBox"><p class="empty-state">Loading…</p></div>
+</section>
+
+<section>
+  <h2 style="font-size:1.1rem;color:#63b3ed;">4. Links</h2>
+  <a href="{{ url_for('opening_range.backtest_page') }}">ORB Backtest Lab</a> ·
+  <a href="{{ url_for('positions.index') }}">Trades / Positions</a> ·
+  <a href="{{ url_for('autonomous_trading.index') }}">Autonomous Dashboard</a>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/opening_range.js') }}"></script>
+{% endblock %}
