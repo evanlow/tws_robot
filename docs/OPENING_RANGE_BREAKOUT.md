@@ -141,3 +141,37 @@ disable-today, and emergency-stop are audit logged. No orders are placed.
 ```bash
 python -m pytest tests/test_orb_session_manager.py tests/test_orb_session_api.py
 ```
+
+## Recommend-only proposals & setup audit trail (Phase 2.4, #208)
+
+`autonomous/orb_proposals.py` turns a deterministic `ORBSetup` into a
+transparent *recommend-only* trade card (`ORBProposal`) — what ORB would do
+**before** any order is placed. Each proposal carries entry/stop/target, sizing
+(quantity, risk dollars, position value), R/R, the opening range, confirmation
+candle metadata, setup evidence, and transparent `ProposalGates` (opening range
+valid, 5m breakout confirmed, 1m model detected, market data healthy, spread
+acceptable when quote data exists, risk manager approved, stop/target present,
+session cap available, no existing open ORB trade, emergency stop inactive). The
+entry is always a marketable `LIMIT` price — a proposal can never be a raw
+market order — and `build_proposal` rejects any setup missing a stop/target,
+non-long direction, or a stop that is not below the entry.
+
+`ORBProposalStore` keeps proposals in memory and audit-logs every lifecycle
+event (`proposal_created`, `proposal_skipped`, `proposal_expired`) to the
+autonomous audit log. A trader can skip a proposal with an optional reason;
+proposals expire on entry cutoff (`expire_due`), invalidation, stale data, or
+session-cap consumption. API (read + skip/expire only; no execution):
+
+```text
+GET  /api/orb/proposals
+GET  /api/orb/proposals/<proposal_id>
+POST /api/orb/proposals/<proposal_id>/skip
+POST /api/orb/proposals/<proposal_id>/expire
+```
+
+The `execute-paper` endpoint is intentionally reserved for the later paper
+execution phase. No paper or live order is placed in this phase.
+
+```bash
+python -m pytest tests/test_orb_trade_proposals.py tests/test_orb_session_api.py
+```

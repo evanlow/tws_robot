@@ -23,6 +23,11 @@ from autonomous.orb_backtest_reports import (
     save_evidence,
 )
 from autonomous.orb_session_manager import ORBSessionManager, ORBValidationError
+from autonomous.orb_proposals import (
+    ExpiryReason,
+    ORBProposalStore,
+    ProposalError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,7 @@ orb_bp = Blueprint("api_orb", __name__, url_prefix="/api/orb")
 page_bp = Blueprint("opening_range", __name__, url_prefix="/opening-range")
 
 _manager: Optional[ORBSessionManager] = None
+_proposal_store: Optional[ORBProposalStore] = None
 
 
 def get_manager() -> ORBSessionManager:
@@ -47,6 +53,19 @@ def get_manager() -> ORBSessionManager:
             evidence_dir=cfg.get("orb_evidence_dir", "logs"),
         )
     return _manager
+
+
+def get_proposal_store() -> ORBProposalStore:
+    """Lazily build the singleton recommend-only ORB proposal store.
+
+    Honors ``orb_evidence_dir`` app config (audit log directory) for test
+    isolation; defaults to the production logs directory.
+    """
+    global _proposal_store
+    if _proposal_store is None:
+        cfg = current_app.config if current_app else {}
+        _proposal_store = ORBProposalStore(log_dir=cfg.get("orb_evidence_dir", "logs"))
+    return _proposal_store
 
 
 @page_bp.route("/backtest")
@@ -295,3 +314,58 @@ def emergency_stop_orb():
 @orb_bp.route("/status", methods=["GET"])
 def orb_status():
     return jsonify(get_manager().status())
+
+
+# ---------------------------------------------------------------------------
+# ORB recommend-only proposals (Phase 2.4, #208)
+# Transparent trade cards showing what ORB would do before any order is placed.
+# Read-only plus skip/expire lifecycle controls; every action is audit logged.
+# The execute-paper endpoint is intentionally reserved for the paper-execution
+# phase. No paper or live order is placed here.
+# ---------------------------------------------------------------------------
+
+
+@orb_bp.route("/proposals", methods=["GET"])
+def list_orb_proposals():
+    args = request.args
+    store = get_proposal_store()
+    # Surface any past-cutoff proposals as expired before listing.
+    store.expire_due()
+    proposals = store.list(
+        status=args.get("status"),
+        symbol=args.get("symbol"),
+        strategy_name=args.get("strategy"),
+    )
+    return jsonify({"proposals": [p.to_dict() for p in proposals]})
+
+
+@orb_bp.route("/proposals/<proposal_id>", methods=["GET"])
+def get_orb_proposal(proposal_id):
+    proposal = get_proposal_store().get(proposal_id)
+    if proposal is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(proposal.to_dict())
+
+
+@orb_bp.route("/proposals/<proposal_id>/skip", methods=["POST"])
+def skip_orb_proposal(proposal_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        proposal = get_proposal_store().skip(proposal_id, reason=data.get("reason"))
+        return jsonify(proposal.to_dict())
+    except ProposalError as exc:
+        return jsonify({"error": str(exc)}), 404 if "not found" in str(exc) else 400
+
+
+@orb_bp.route("/proposals/<proposal_id>/expire", methods=["POST"])
+def expire_orb_proposal(proposal_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        reason = ExpiryReason(str(data.get("reason", ExpiryReason.MANUAL.value)))
+    except ValueError:
+        reason = ExpiryReason.MANUAL
+    try:
+        proposal = get_proposal_store().expire(proposal_id, reason=reason)
+        return jsonify(proposal.to_dict())
+    except ProposalError as exc:
+        return jsonify({"error": str(exc)}), 404 if "not found" in str(exc) else 400
