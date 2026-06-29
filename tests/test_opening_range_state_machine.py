@@ -186,3 +186,35 @@ def test_model_a_requires_bar_after_confirmation():
     nxt = s.on_closed_1m(candle(t, 105.5, 107.0, 105.3, 106.9))
     assert nxt is not None
     assert nxt.model == ORBEntryModel.MODEL_A_DISPLACEMENT_GAP
+
+
+def test_zero_max_trades_per_symbol_blocks_all_setups():
+    """max_trades_per_symbol_per_session=0 must prevent any setup from being emitted."""
+    cfg = OpeningRangeConfig(max_trades_per_symbol_per_session=0)
+    s = OpeningRangeSession("QQQ", "2026-06-01", cfg)
+    for b in range_bars():
+        s.on_closed_1m(b)
+    t = _drive_5m_confirm(s)
+    assert s.state == OpeningRangeState.BREAKOUT_CONFIRMED
+    s.on_closed_1m(candle(t, 103.1, 103.3, 103.0, 103.2)); t += timedelta(minutes=1)
+    setup = s.on_closed_1m(candle(t, 103.6, 105.0, 103.5, 104.9))
+    assert setup is None
+    assert s.trades_taken == 0
+
+
+def test_bearish_breakout_diagnostic_not_duplicated():
+    """Each bearish 5m candle should only produce one diagnostic entry."""
+    s = OpeningRangeSession("QQQ", "2026-06-01", OpeningRangeConfig())
+    for b in range_bars():
+        s.on_closed_1m(b)
+    # Drive a full bearish 5m bucket (5 bars below range low)
+    t = datetime(2026, 6, 1, 9, 45)
+    for _ in range(5):
+        s.on_closed_1m(candle(t, 99, 99.5, 98, 98.5))
+        t += timedelta(minutes=1)
+    # Add more bars so _check_confirmation is called again for the same 5m bucket
+    for _ in range(3):
+        s.on_closed_1m(candle(t, 99, 99.5, 98, 98.5))
+        t += timedelta(minutes=1)
+    bearish = [d for d in s.diagnostics if d["type"] == "bearish_breakout"]
+    assert len(bearish) == 1, f"Expected 1 diagnostic, got {len(bearish)}"

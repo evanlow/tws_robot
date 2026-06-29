@@ -53,3 +53,26 @@ def test_aligned_to_boundaries():
 def test_factor_one_returns_same():
     bars = make_1m(3)
     assert aggregate_candles(bars, 1) == bars
+
+
+def test_group_with_too_many_bars_not_emitted():
+    """A bucket with more than `factor` bars (e.g. duplicate timestamps) is rejected."""
+    bars = make_1m(5)
+    # Inject a duplicate bar at 9:30 to produce 6 bars in the same 5m bucket.
+    dup = Candle("QQQ", "1m", bars[0].start, bars[0].end, 99, 99.5, 98.5, 99.2, 10.0)
+    bars_with_dup = [dup] + bars  # 6 bars in 9:30-9:34 bucket
+    agg = aggregate_candles(bars_with_dup, 5)
+    assert len(agg) == 0
+
+
+def test_group_with_duplicate_minutes_not_emitted():
+    """Exactly `factor` bars but with duplicate minute timestamps must be rejected."""
+    t = datetime(2026, 6, 1, 9, 30)
+    # 4 unique minutes (9:30, 9:32, 9:33, 9:34) plus a duplicate 9:30
+    times = [t, t, t + timedelta(minutes=2), t + timedelta(minutes=3), t + timedelta(minutes=4)]
+    bars = [
+        Candle("QQQ", "1m", ts, ts + timedelta(minutes=1), 100, 100.5, 99.5, 100.2, 10.0)
+        for ts in times
+    ]
+    agg = aggregate_candles(bars, 5)
+    assert len(agg) == 0

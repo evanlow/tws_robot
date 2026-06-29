@@ -122,3 +122,29 @@ def test_backtest_cap_picks_earliest_setup_not_alphabetical():
     res = OpeningRangeBacktest(OpeningRangeConfig()).run(early + late)
     assert res.total_trades == 1
     assert res.trades[0].symbol == "ZZZ"
+
+
+def test_backtest_groups_candles_by_ny_date_not_utc_date():
+    """UTC candles whose date() differs from their NY date must be bucketed to the NY date."""
+    from datetime import timezone
+    # Build a session on 2026-06-01 in UTC (13:30-14:10 UTC = 09:30-10:10 NY).
+    bars = []
+    t = datetime(2026, 6, 1, 13, 30, tzinfo=timezone.utc)  # 09:30 NY June 1
+    for _ in range(15):
+        bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 101, 102, 100, 101, 1000.0))
+        t += timedelta(minutes=1)
+    for _ in range(5):
+        bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103, 103.3, 102.8, 103, 1000.0))
+        t += timedelta(minutes=1)
+    bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103.1, 103.3, 103.0, 103.2, 1000.0)); t += timedelta(minutes=1)
+    bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103.6, 105.0, 103.5, 104.9, 1000.0)); t += timedelta(minutes=1)
+    for _ in range(20):
+        bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 105, 110, 105, 110, 1000.0)); t += timedelta(minutes=1)
+    # Inject a stray after-hours UTC candle whose UTC date() is June 2 but NY date is June 1
+    # (00:30 UTC on June 2 = 20:30 NY on June 1 — same NY session)
+    stray_t = datetime(2026, 6, 2, 0, 30, tzinfo=timezone.utc)
+    bars.append(Candle("QQQ", "1m", stray_t, stray_t + timedelta(minutes=1), 109, 110, 108, 109, 100.0))
+    # With NY-normalised bucketing, the stray goes to the June 1 NY bucket (not a new June 2 session)
+    # so the backtest still produces exactly 1 trade (one day, one session-cap slot).
+    res = OpeningRangeBacktest(OpeningRangeConfig()).run(bars)
+    assert res.total_trades == 1

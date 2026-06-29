@@ -115,13 +115,14 @@ class OpeningRangeBacktest:
 
     def run(self, candles_1m: List[Candle]) -> ORBBacktestResult:
         result = ORBBacktestResult()
+        tz = self.config.tzinfo()
         by_day: Dict[tuple, List[Candle]] = defaultdict(list)
         for c in candles_1m:
-            by_day[(c.symbol, c.start.date())].append(c)
+            ny_date = (c.start.astimezone(tz) if c.start.tzinfo is not None else c.start).date()
+            by_day[(c.symbol, ny_date)].append(c)
 
         force_flat = self.config.parse_time(self.config.force_flat_time)
         max_per_session = self.config.max_total_orb_trades_per_session
-        tz = self.config.tzinfo()
 
         # Collect one candidate setup per (symbol, day), then allocate per-date
         # by actual setup time so the per-session cap selects the first eligible

@@ -259,6 +259,7 @@ class OpeningRangeSession:
 
         self._range_1m: List[Candle] = []
         self._post_range_1m: List[Candle] = []
+        self._seen_bearish_diag_ends: set = set()
         self._tz = config.tzinfo()
         self._open = config.parse_time(config.session_open)
         self._cutoff = config.parse_time(config.entry_cutoff_time)
@@ -386,12 +387,17 @@ class OpeningRangeSession:
                     self.state = OpeningRangeState.BREAKOUT_CONFIRMED
                     return
             elif c5.close < self.opening_range.low:
-                self.diagnostics.append(
-                    {"type": "bearish_breakout", "rejected": not self.config.short_enabled,
-                     "time": c5.end.isoformat()}
-                )
+                end_key = c5.end.isoformat()
+                if end_key not in self._seen_bearish_diag_ends:
+                    self._seen_bearish_diag_ends.add(end_key)
+                    self.diagnostics.append(
+                        {"type": "bearish_breakout", "rejected": not self.config.short_enabled,
+                         "time": end_key}
+                    )
 
     def _scan_entry_models(self) -> Optional[ORBSetup]:
+        if self.trades_taken >= self.config.max_trades_per_symbol_per_session:
+            return None
         bars = self._post_range_1m
         if not bars:
             return None
@@ -450,8 +456,11 @@ def aggregate_candles(one_min: List[Candle], factor: int,
         groups.append(bucket)
     out: List[Candle] = []
     for g in groups:
-        if len(g) < factor:
-            continue  # partial, not closed
+        if len(g) != factor:
+            continue  # too many or too few bars; not a clean closed group
+        mins = [_session_minutes(c.start, tzinfo) for c in g]
+        if len(set(mins)) != factor:
+            continue  # duplicate minute timestamps within the bucket
         out.append(
             Candle(
                 symbol=g[0].symbol,
