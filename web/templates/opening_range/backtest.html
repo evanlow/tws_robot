@@ -12,7 +12,7 @@
   <div style="max-width:760px;">
     <div style="margin-bottom:0.75rem;">
       <label class="form-label">Symbols (comma-separated)</label>
-      <input id="orbSymbols" class="form-input" value="{{ defaults.symbols|join(', ') }}" />
+      <input id="orbSymbols" class="form-input" value="{{ defaults.symbols|join(', ')|e }}" />
     </div>
     <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
       <div style="flex:1;"><label class="form-label">Start Date</label><input id="orbStart" class="form-input" type="date" /></div>

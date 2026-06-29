@@ -23,6 +23,10 @@ def _inline_candles(symbol="QQQ", day=datetime(2026, 6, 1)):
     return rows
 
 
+def _raise_boom(*_args, **_kwargs):
+    raise Exception("boom")
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
@@ -92,14 +96,14 @@ def test_run_endpoint_invalid_payload_returns_400(client):
 
 
 def test_run_endpoint_unexpected_error_sanitized(client, monkeypatch):
-    monkeypatch.setattr("web.routes.api_opening_range.run_backtest", lambda *_args, **_kwargs: (_ for _ in ()).throw(Exception("boom")))
+    monkeypatch.setattr("web.routes.api_opening_range.run_backtest", _raise_boom)
     res = client.post("/api/opening-range/backtest/run", json={"candles": _inline_candles()})
     assert res.status_code == 400
     assert res.get_json()["error"] == "Backtest run failed"
 
 
 def test_sweep_endpoint_unexpected_error_sanitized(client, monkeypatch):
-    monkeypatch.setattr("web.routes.api_opening_range.run_sweep", lambda *_args, **_kwargs: (_ for _ in ()).throw(Exception("boom")))
+    monkeypatch.setattr("web.routes.api_opening_range.run_sweep", _raise_boom)
     res = client.post(
         "/api/opening-range/backtest/sweep",
         json={"candles": _inline_candles(), "sweep": {"entry_cutoff_time": ["10:30"]}},
