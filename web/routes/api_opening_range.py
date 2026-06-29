@@ -124,7 +124,7 @@ def run():
         candles = _load_candles(data)
     except RuntimeError as exc:
         logger.warning("ORB backtest data load failed: %s", exc)
-        return jsonify({"error": "could not load candle data"}), 400
+        return jsonify({"error": "Unable to load candle data; check symbols and date range"}), 400
     cfg = _config_from(data)
     equity = float(data.get("equity", 100_000.0))
     commission = float(data.get("commission_per_share", 0.005))
@@ -140,7 +140,7 @@ def sweep():
         candles = _load_candles(data)
     except RuntimeError as exc:
         logger.warning("ORB sweep data load failed: %s", exc)
-        return jsonify({"error": "could not load candle data"}), 400
+        return jsonify({"error": "Unable to load candle data; check symbols and date range"}), 400
     cfg = _config_from(data)
     grid = data.get("sweep") or {}
     results = run_sweep(
