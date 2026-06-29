@@ -97,6 +97,29 @@ python -m pytest tests/test_orb_runtime_candle_aggregation.py \
   tests/test_orb_runtime_candle_provider.py
 ```
 
+## Phase 2.2: Runtime ORB strategy plugin (Issue #206)
+
+`strategies/opening_range_breakout.py`: `OpeningRangeBreakoutStrategy` subclasses
+`BaseStrategy` and wraps the Phase 1 `OpeningRangeSession` state machine so ORB
+can run inside `StrategyRegistry`. It builds an `OpeningRangeConfig` from the
+persisted `StrategyConfig.parameters`, maintains one session per symbol/session
+date, consumes only closed 1m candles via `on_bar`, and advances ORB state
+deterministically. On a valid long-only Model A/B setup it emits exactly one
+`Signal` (BUY, with stop/target/metadata) and a structured `ORBTradeProposal`;
+it never submits orders. Model C and bearish breakouts stay diagnostic-only.
+Closed 1m bars that arrive duplicated, out of order, or with a single dropped
+bar inside a forming 5m bucket are skipped and the symbol is marked
+DATA_DEGRADED, protecting the session's internal 5m aggregation. Per-symbol
+`runtime_state` exposes WAITING_FOR_SESSION, BUILDING_RANGE, RANGE_READY,
+BREAKOUT_CONFIRMED, PROPOSAL_READY, DONE_FOR_SESSION, INVALIDATED, and
+DATA_DEGRADED for the dashboard/API. In this proposal-only phase the session's
+IN_TRADE collapses to PROPOSAL_READY; a true IN_TRADE belongs to the later paper
+execution / trade lifecycle work (#209/#210).
+
+```bash
+python -m pytest tests/test_orb_runtime_strategy.py
+```
+
 ## Limitations
 
 Model C disabled. Runtime strategy, autonomous adapter, and live-readiness gates
