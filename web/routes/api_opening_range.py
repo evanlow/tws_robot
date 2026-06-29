@@ -29,6 +29,13 @@ from autonomous.orb_proposals import (
     ProposalError,
     ProposalNotFoundError,
 )
+from autonomous.orb_execution import (
+    ORBExecutionBlocked,
+    ORBExecutionError,
+    ORBExecutionMode,
+    ORBPaperExecutor,
+)
+from autonomous.orb_session_manager import ORBMode
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +45,7 @@ page_bp = Blueprint("opening_range", __name__, url_prefix="/opening-range")
 
 _manager: Optional[ORBSessionManager] = None
 _proposal_store: Optional[ORBProposalStore] = None
+_executor: Optional[ORBPaperExecutor] = None
 
 
 def get_manager() -> ORBSessionManager:
@@ -67,6 +75,27 @@ def get_proposal_store() -> ORBProposalStore:
         cfg = current_app.config if has_app_context() else {}
         _proposal_store = ORBProposalStore(log_dir=cfg.get("orb_evidence_dir", "logs"))
     return _proposal_store
+
+
+def get_executor() -> ORBPaperExecutor:
+    """Lazily build the singleton ORB paper executor (paper trades only).
+
+    Honors ``orb_evidence_dir`` app config (audit log directory) for test
+    isolation. The exit-manager fallback stays disabled unless explicitly
+    enabled via the ``orb_allow_exit_manager_fallback`` app config so missing
+    broker-visible protection is rejected by default.
+    """
+    global _executor
+    if _executor is None:
+        cfg = current_app.config if has_app_context() else {}
+        _executor = ORBPaperExecutor(
+            get_proposal_store(),
+            log_dir=cfg.get("orb_evidence_dir", "logs"),
+            allow_exit_manager_fallback=bool(
+                cfg.get("orb_allow_exit_manager_fallback", False)
+            ),
+        )
+    return _executor
 
 
 @page_bp.route("/backtest")
@@ -309,6 +338,8 @@ def disable_orb_today(name):
 
 @orb_bp.route("/emergency-stop", methods=["POST"])
 def emergency_stop_orb():
+    # Disarm all sessions and block any in-flight ORB paper execution.
+    get_executor().trip_emergency_stop()
     return jsonify(get_manager().emergency_stop())
 
 
@@ -377,3 +408,83 @@ def expire_orb_proposal(proposal_id):
         return jsonify({"error": "not found"}), 404
     except ProposalError:
         return jsonify({"error": "cannot expire proposal in its current state"}), 400
+
+
+# ---------------------------------------------------------------------------
+# ORB paper-autonomous execution (Phase 2.5, #209)
+# Wires a valid recommend-only proposal into a *paper* trade with mandatory
+# stop/target protection. Paper only: there is no live execution path here.
+# Execution requires the owning strategy to be in paper_autonomous mode; raw
+# market orders are impossible; missing protection is rejected outside the
+# explicitly configured paper fallback; emergency stop and the session cap both
+# block execution; and duplicate execution of a proposal is idempotent.
+# ---------------------------------------------------------------------------
+
+
+def _session_cap_for(rec) -> int:
+    """Per-session ORB paper-trade cap from the strategy config (default 1)."""
+    params = (rec or {}).get("parameters") or {}
+    try:
+        return max(1, int(params.get("max_total_orb_trades_per_session", 1)))
+    except (TypeError, ValueError):
+        return 1
+
+
+@orb_bp.route("/proposals/<proposal_id>/execute-paper", methods=["POST"])
+def execute_orb_proposal_paper(proposal_id):
+    store = get_proposal_store()
+    # Surface any past-cutoff proposals as expired before attempting execution.
+    store.expire_due()
+    proposal = store.get(proposal_id)
+    if proposal is None:
+        return jsonify({"error": "not found"}), 404
+
+    # Recommend-only mode never submits orders: the owning strategy must be in
+    # paper_autonomous mode for any paper trade to be placed.
+    rec = get_manager().get_strategy(proposal.strategy_name)
+    if rec is None:
+        return jsonify({
+            "error": "unknown strategy",
+            "detail": f"no ORB strategy named '{proposal.strategy_name}'",
+        }), 400
+    if str(rec.get("mode")) != ORBMode.PAPER_AUTONOMOUS.value:
+        return jsonify({
+            "error": "paper_autonomous mode required",
+            "detail": (
+                "ORB paper execution requires the strategy to be in "
+                "paper_autonomous mode; recommend-only never submits orders"
+            ),
+            "mode": rec.get("mode"),
+        }), 400
+
+    try:
+        trade = get_executor().execute_paper(
+            proposal,
+            mode=ORBExecutionMode.PAPER_AUTONOMOUS,
+            session_cap=_session_cap_for(rec),
+        )
+        return jsonify(trade.to_dict()), 201
+    except ORBExecutionBlocked as exc:
+        return jsonify({"error": "execution blocked", "reason": exc.reason.value,
+                        "detail": str(exc)}), 409
+    except ORBExecutionError as exc:
+        return jsonify({"error": "cannot execute proposal", "detail": str(exc)}), 400
+
+
+@orb_bp.route("/trades", methods=["GET"])
+def list_orb_trades():
+    args = request.args
+    trades = get_executor().list_trades(
+        symbol=args.get("symbol"),
+        strategy_name=args.get("strategy"),
+        session_date=args.get("session_date"),
+    )
+    return jsonify({"trades": [t.to_dict() for t in trades]})
+
+
+@orb_bp.route("/trades/<trade_id>", methods=["GET"])
+def get_orb_trade(trade_id):
+    trade = get_executor().get_trade(trade_id)
+    if trade is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(trade.to_dict())

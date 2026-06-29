@@ -416,6 +416,35 @@ class ORBProposalStore:
                 self._log("proposal_skipped", proposal, {"reason": proposal.skip_reason})
         return proposal
 
+    def mark_executed(
+        self,
+        proposal_id: str,
+        trade_id: str,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> ORBProposal:
+        """Transition a pending proposal to EXECUTED once a paper trade exists.
+
+        Only a ``PENDING`` proposal may be executed; a skipped or expired
+        proposal can never be turned into a trade, and an already-executed
+        proposal cannot be executed again (idempotency is enforced by the
+        executor, but this guard keeps the store and audit trail honest).
+        The ``trade_id`` linking the proposal to its paper trade is recorded in
+        the audit log so ORB evidence can be reconstructed end to end.
+        """
+        with self._lock:
+            proposal = self._require(proposal_id)
+            if proposal.status != ProposalStatus.PENDING.value:
+                raise ProposalError(
+                    f"cannot execute a proposal in status '{proposal.status}'"
+                )
+            proposal.status = ProposalStatus.EXECUTED.value
+        self._log(
+            "proposal_executed",
+            proposal,
+            {"trade_id": trade_id, **(extra or {})},
+        )
+        return proposal
+
     def expire(
         self,
         proposal_id: str,

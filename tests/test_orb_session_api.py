@@ -14,6 +14,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("web.services.ServiceManager._start_market_events_refresh", lambda self: None)
     api._manager = None  # reset singleton between tests
     api._proposal_store = None  # reset proposal store singleton between tests
+    api._executor = None  # reset paper executor singleton between tests
     app = create_app({
         "TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False,
         "orb_config_dir": str(tmp_path / "config"),
@@ -22,6 +23,7 @@ def client(tmp_path, monkeypatch):
     yield app.test_client()
     api._manager = None
     api._proposal_store = None
+    api._executor = None
 
 
 def _make(client, name="ORB1", symbols=None, mode="recommend_only"):
@@ -152,3 +154,64 @@ def test_proposal_expire_endpoint(client):
 
 def test_proposal_skip_missing_404(client):
     assert client.post("/api/orb/proposals/nope/skip", json={}).status_code == 404
+
+
+# ---- paper-autonomous execution (Phase 2.5, #209) -----------------------
+def _arm_paper(client, strategy="ORB1", symbols=None):
+    """Create a paper_autonomous strategy (execution gates on mode, not arming)."""
+    _make(client, name=strategy, symbols=symbols or ["QQQ"], mode="paper_autonomous")
+
+
+def test_execute_paper_places_bracket_trade(client):
+    _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1")
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert res.status_code == 201
+    body = res.get_json()
+    assert body["protection_status"] == "BRACKET_CONFIRMED"
+    assert body["mode"] == "paper_autonomous"
+    assert body["entry_order_id"] and body["stop_order_id"] and body["target_order_id"]
+    # The trade is retrievable via the trade lookup endpoints.
+    assert client.get("/api/orb/trades").get_json()["trades"][0]["trade_id"] == body["trade_id"]
+    got = client.get(f"/api/orb/trades/{body['trade_id']}")
+    assert got.status_code == 200
+    assert got.get_json()["proposal_id"] == proposal.proposal_id
+
+
+def test_recommend_only_mode_never_executes(client):
+    _make(client, mode="recommend_only")
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1")
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert res.status_code == 400
+    assert client.get("/api/orb/trades").get_json()["trades"] == []
+
+
+def test_execute_paper_unknown_proposal_404(client):
+    assert client.post("/api/orb/proposals/nope/execute-paper").status_code == 404
+
+
+def test_execute_paper_is_idempotent(client):
+    _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1")
+    first = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    second = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert first.status_code == 201 and second.status_code == 201
+    assert first.get_json()["trade_id"] == second.get_json()["trade_id"]
+    assert len(client.get("/api/orb/trades").get_json()["trades"]) == 1
+
+
+def test_emergency_stop_blocks_paper_execution(client):
+    _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1")
+    assert client.post("/api/orb/emergency-stop").get_json()["stopped"] is True
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert res.status_code == 409
+    assert res.get_json()["reason"] == "emergency_stop"
+
+
+def test_trade_lookup_missing_404(client):
+    assert client.get("/api/orb/trades/nope").status_code == 404
