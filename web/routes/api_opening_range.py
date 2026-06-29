@@ -54,7 +54,7 @@ def backtest_page():
     return render_template(
         "opening_range/backtest.html",
         title="ORB Backtest Lab",
-        active_page="opening_range",
+        active_page="opening_range_backtest",
         defaults=OpeningRangeConfig(),
     )
 

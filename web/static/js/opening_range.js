@@ -23,7 +23,9 @@ async function orbApi(url, method, body) {
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
-  return { ok: res.ok, data: await res.json() };
+  let data;
+  try { data = await res.json(); } catch (_) { data = {}; }
+  return { ok: res.ok, data };
 }
 
 function orbName() {
@@ -71,8 +73,9 @@ async function orbAct(action, body) {
 }
 
 async function orbEmergency() {
-  await orbApi('/api/orb/emergency-stop', 'POST', {});
-  document.getElementById('orbActStatus').textContent = 'emergency stop: all disarmed';
+  const { ok, data } = await orbApi('/api/orb/emergency-stop', 'POST', {});
+  const el = document.getElementById('orbActStatus');
+  el.textContent = ok ? 'emergency stop: all disarmed' : 'Error: ' + (data.messages || [data.error || 'Unknown error']).join('; ');
   orbRefresh();
 }
 

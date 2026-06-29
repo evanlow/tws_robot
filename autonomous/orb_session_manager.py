@@ -230,7 +230,10 @@ class ORBSessionManager:
         try:
             self._config_dir.mkdir(parents=True, exist_ok=True)
             payload = {"strategies": self._strategies, "sessions": self._sessions}
-            self._path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            content = json.dumps(payload, indent=2, sort_keys=True)
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(content, encoding="utf-8")
+            os.replace(tmp, self._path)
         except OSError as exc:  # pragma: no cover - defensive
             logger.error("Failed to save ORB strategies: %s", exc)
 
