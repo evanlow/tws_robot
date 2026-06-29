@@ -30,7 +30,7 @@ from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from autonomous.audit import AuditLogger
 from autonomous.opening_range import OpeningRangeConfig
@@ -211,7 +211,7 @@ class ORBSessionManager:
         tz_name = (rec.get("parameters") or {}).get("timezone", "America/New_York")
         try:
             tz = ZoneInfo(tz_name)
-        except Exception:  # pragma: no cover - defensive (validated upstream)
+        except (ZoneInfoNotFoundError, ValueError):  # pragma: no cover - defensive
             tz = ZoneInfo("America/New_York")
         return self._now_fn(tz).date() + timedelta(days=offset_days)
 
