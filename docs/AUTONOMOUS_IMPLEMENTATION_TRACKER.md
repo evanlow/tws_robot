@@ -1037,3 +1037,17 @@ A PR that implements a roadmap phase should update:
 - any new limitations discovered.
 
 If implementation diverges from the spec, update both the spec and this tracker in the same PR or in a documentation follow-up PR.
+
+## Opening Range Breakout (ORB) intraday strategy — Issue #203
+
+| Phase | Status | Notes |
+|---|---|---|
+| Phase 1: Backtest-only MVP | Partial | ORB domain models, conservative `OpeningRangeConfig`, deterministic 1m→5m/15m aggregation, long-only state machine, Model A (displacement/gap) and Model B (break-retest), and a backtest runner (`backtest/opening_range_strategy.py`) are implemented and unit-tested. |
+| Phase 2: Paper runtime strategy | Pending | Runtime `OpeningRangeBreakoutStrategy` + candle provider not yet implemented. |
+| Phase 3: Autonomous adapter | Pending | `OpeningRangeSignalProvider` not yet implemented. |
+| Phase 4: Live-readiness review | Pending | Live disabled; no short entries; bracket protection gating to be added. |
+
+Work completed: `autonomous/opening_range.py`, `backtest/opening_range_strategy.py`, and tests `tests/test_opening_range_*.py` (28 tests passing). Long-only, paper/backtest-only, no broker connection, no raw market orders (marketable-limit prices), one trade per symbol per session. Review fixes: session minutes normalized to NY for timezone-aware (UTC) candles; opening range requires the exact contiguous 9:30–9:44 NY 1m bars (rejects duplicate/missing); Model B retest must occur after 5m confirmation; Model A enters only on a bar after 5m confirmation; backtest force-flat compares NY-normalized time and the per-session cap allocates by earliest `detected_at`. See `docs/OPENING_RANGE_BREAKOUT.md`.
+
+Known limitations / risks: bearish breakouts are diagnostic-only; Model C disabled; runtime/paper/autonomous integration deferred to follow-up PRs; naive timestamps assumed NY-local.
+
