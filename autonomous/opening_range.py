@@ -458,8 +458,9 @@ def aggregate_candles(one_min: List[Candle], factor: int,
         if len(g) != factor:
             continue  # too many or too few bars; not a clean closed group
         mins = [_session_minutes(c.start, tzinfo) for c in g]
-        if len(set(mins)) != factor:
-            continue  # duplicate minute timestamps within the bucket
+        base = (mins[0] // factor) * factor
+        if sorted(mins) != list(range(base, base + factor)):
+            continue  # non-contiguous or duplicate minute timestamps within the bucket
         out.append(
             Candle(
                 symbol=g[0].symbol,

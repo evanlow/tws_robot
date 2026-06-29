@@ -76,3 +76,30 @@ def test_group_with_duplicate_minutes_not_emitted():
     ]
     agg = aggregate_candles(bars, 5)
     assert len(agg) == 0
+
+
+def test_group_with_gap_minutes_not_emitted():
+    """A 5m bucket missing an interior 1m bar (gap in the sequence) must be rejected.
+
+    Bars at 9:30, 9:31, 9:33, 9:34 (skipping 9:32) produce only 4 bars in the
+    9:30 bucket so ``len(g) != factor`` rejects them before the contiguity check.
+    A second full group at 9:35–9:39 is the only valid closed candle emitted.
+    """
+    t = datetime(2026, 6, 1, 9, 30)
+    gap_times = [
+        t,
+        t + timedelta(minutes=1),
+        # 9:32 intentionally missing
+        t + timedelta(minutes=3),
+        t + timedelta(minutes=4),
+    ]
+    gap_bars = [
+        Candle("QQQ", "1m", ts, ts + timedelta(minutes=1), 100, 100.5, 99.5, 100.2, 10.0)
+        for ts in gap_times
+    ]
+    # Full contiguous group 9:35–9:39 to show that valid groups still pass.
+    complete_bars = make_1m(5, start_h=9, start_m=35)
+    agg = aggregate_candles(gap_bars + complete_bars, 5)
+    # Only the 9:35–9:39 group is emitted; the 9:30 bucket is incomplete.
+    assert len(agg) == 1
+    assert agg[0].start.minute == 35
