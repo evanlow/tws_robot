@@ -93,9 +93,14 @@ def closed_aggregates(one_min: List[Candle], factor: int) -> List[Candle]:
     """Aggregate closed 1m candles into closed factor-minute candles.
 
     Forming candles are excluded; only complete, contiguous groups become closed
-    aggregates. NY session boundaries are used for grouping.
+    aggregates. NY session boundaries are used for grouping. If the closed 1m
+    source sequence is degraded (duplicate, missing, or out-of-order bars), no
+    aggregates are emitted so downstream ORB logic never treats a higher
+    timeframe candle built from unreliable data as valid.
     """
     closed = [c for c in one_min if c.is_closed]
+    if assess_one_minute_quality(closed) != CandleDataStatus.HEALTHY:
+        return []
     return aggregate_candles(closed, factor, tzinfo=NY_TZ)
 
 

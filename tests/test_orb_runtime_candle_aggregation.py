@@ -85,6 +85,22 @@ def test_empty_waiting():
     assert assess_one_minute_quality([]) == CandleDataStatus.WAITING_FOR_DATA
 
 
+def test_duplicate_in_full_bucket_no_aggregate():
+    # 5 bars in one 5m bucket but a duplicate minute -> 09:34 NY never arrives
+    start = datetime(2026, 6, 1, 13, 30, tzinfo=timezone.utc)
+    bars = _series("QQQ", start, 4)
+    bars.insert(2, bars[1])  # duplicate 09:31, total 5 bars in same bucket
+    assert closed_aggregates(bars, 5) == []
+
+
+def test_missing_mid_window_no_aggregate():
+    start = datetime(2026, 6, 1, 13, 30, tzinfo=timezone.utc)
+    bars = _series("QQQ", start, 15)
+    del bars[7]  # drop one minute mid-window
+    assert closed_aggregates(bars, 5) == []
+    assert closed_aggregates(bars, 15) == []
+
+
 def test_forming_only():
     c = Candle("QQQ", "1m", datetime(2026, 6, 1, 13, 30, tzinfo=timezone.utc),
                datetime(2026, 6, 1, 13, 31, tzinfo=timezone.utc), 1, 2, 0, 1, 1, is_closed=False)
