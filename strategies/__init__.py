@@ -9,6 +9,11 @@ from .signal import Signal, SignalType, SignalStrength
 from .base_strategy import BaseStrategy, StrategyState, StrategyConfig
 from .strategy_registry import StrategyRegistry
 from .bollinger_bands import BollingerBandsStrategy
+from .opening_range_breakout import (
+    OpeningRangeBreakoutStrategy,
+    ORBRuntimeState,
+    ORBTradeProposal,
+)
 from .inferred_strategies import (
     CoveredCallStrategy,
     ProtectivePutStrategy,
@@ -64,6 +69,9 @@ __all__ = [
     'StrategyConfig',
     'StrategyRegistry',
     'BollingerBandsStrategy',
+    'OpeningRangeBreakoutStrategy',
+    'ORBRuntimeState',
+    'ORBTradeProposal',
     'StrategyOrchestrator',
     'SignalAggregator',
     'ConflictResolver',
