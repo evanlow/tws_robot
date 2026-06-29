@@ -1044,7 +1044,8 @@ If implementation diverges from the spec, update both the spec and this tracker 
 |---|---|---|
 | Phase 1: Backtest-only MVP | Partial | ORB domain models, conservative `OpeningRangeConfig`, deterministic 1m→5m/15m aggregation, long-only state machine, Model A (displacement/gap) and Model B (break-retest), and a backtest runner (`backtest/opening_range_strategy.py`) are implemented and unit-tested. |
 | Phase 1.5: Backtest lab / sweeps / readiness | Complete (Issue #214) | `autonomous/orb_backtest_reports.py` reports (R stats incl. net R after costs, profit factor, drawdown-R, hold time, per-model/symbol/NY-normalized time-of-day, slippage/commission sensitivity in net R, no-trade reasons from session rejections), `run_sweep`, readiness classification (READY_FOR_PAPER/NEEDS_MORE_DATA/DO_NOT_TRADE; net-R gate), evidence saving; `web/routes/api_opening_range.py` API + `/opening-range/backtest` page. Backtest-only, no TWS, evidence required before paper promotion. |
-| Phase 2: Paper runtime strategy | Pending | Runtime `OpeningRangeBreakoutStrategy` + candle provider not yet implemented. |
+| Phase 2.1: Runtime candle provider | Complete (Issue #205) | `autonomous/candle_aggregator.py` (NY normalization, 1m quality detection, closed 5m/15m aggregation) + `autonomous/candle_data_provider.py` (`RuntimeCandleProvider`: closed 1m candles, on-demand 5m/15m, per-symbol health, backfill). Broker-free, no orders; tests `tests/test_orb_runtime_candle_{provider,aggregation}.py` (19 passing). |
+| Phase 2: Paper runtime strategy | Pending | Runtime `OpeningRangeBreakoutStrategy` consuming the Phase 2.1 candle provider not yet implemented. |
 | Phase 3: Autonomous adapter | Pending | `OpeningRangeSignalProvider` not yet implemented. |
 | Phase 4: Live-readiness review | Pending | Live disabled; no short entries; bracket protection gating to be added. |
 
