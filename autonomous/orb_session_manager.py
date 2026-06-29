@@ -29,7 +29,8 @@ from dataclasses import fields
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from autonomous.audit import AuditLogger
 from autonomous.opening_range import OpeningRangeConfig
@@ -50,6 +51,17 @@ class ORBMode(str, Enum):
 
 # Modes that must never arm or execute real money in this phase.
 LOCKED_MODES = frozenset({ORBMode.TINY_LIVE_CANDIDATE, ORBMode.ASSISTED_LIVE})
+
+# Modes that cannot arm a live/paper session (no session state should persist).
+NON_ARMABLE_MODES = LOCKED_MODES | frozenset({ORBMode.OFF, ORBMode.BACKTEST_ONLY})
+
+# Strategy fields whose change invalidates any standing armed session.
+_SESSION_CRITICAL_KEYS = ("mode", "symbols", "symbols_enabled", "parameters")
+
+
+def _is_armable_mode(mode: ORBMode) -> bool:
+    """True if ``mode`` may arm a session (paper-autonomous or recommend-only)."""
+    return mode not in NON_ARMABLE_MODES
 
 
 class ORBValidationError(ValueError):
@@ -177,15 +189,31 @@ class ORBSessionManager:
     """
 
     def __init__(self, config_dir: str = "config", evidence_dir: str = "logs",
-                 audit: Optional[AuditLogger] = None) -> None:
+                 audit: Optional[AuditLogger] = None,
+                 now_fn: Optional[Callable[[ZoneInfo], datetime]] = None) -> None:
         self._config_dir = Path(config_dir)
         self._evidence_dir = Path(evidence_dir)
         self._path = self._config_dir / "orb_strategies.json"
         self._lock = threading.Lock()
         self._audit = audit or AuditLogger(str(evidence_dir))
+        self._now_fn = now_fn or (lambda tz: datetime.now(tz))
         self._strategies: Dict[str, Dict[str, Any]] = {}
         self._sessions: Dict[str, Dict[str, Any]] = {}
         self._load()
+
+    # ---- session-date helper ----------------------------------------
+    def _session_date(self, rec: Dict[str, Any], offset_days: int = 0) -> date:
+        """ORB trading-session date in the strategy timezone (New York by default).
+
+        Using the strategy timezone (not server-local time) keeps "today" aligned
+        with the intended New York session around midnight on UTC/Asia servers.
+        """
+        tz_name = (rec.get("parameters") or {}).get("timezone", "America/New_York")
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:  # pragma: no cover - defensive (validated upstream)
+            tz = ZoneInfo("America/New_York")
+        return self._now_fn(tz).date() + timedelta(days=offset_days)
 
     # ---- persistence -------------------------------------------------
     def _load(self) -> None:
@@ -219,7 +247,20 @@ class ORBSessionManager:
     def upsert_strategy(self, data: Dict[str, Any]) -> Dict[str, Any]:
         rec = validate_strategy(data)
         with self._lock:
-            self._strategies[rec["name"]] = rec
+            name = rec["name"]
+            prev = self._strategies.get(name)
+            self._strategies[name] = rec
+            # Clear any standing session state when the update could invalidate it:
+            # a non-armable new mode must not leave a stale armed session, and any
+            # mode/symbol/session-critical change conservatively disarms.
+            if name in self._sessions:
+                non_armable = not _is_armable_mode(ORBMode(rec["mode"]))
+                critical_change = prev is not None and any(
+                    prev.get(k) != rec.get(k) for k in _SESSION_CRITICAL_KEYS
+                )
+                if non_armable or critical_change:
+                    self._sessions.pop(name, None)
+                    self._log("disarm_on_update", name, {})
             self._save()
             return self._with_status(rec)
 
@@ -239,7 +280,16 @@ class ORBSessionManager:
                 raise ORBValidationError(
                     ["paper readiness gates not met: " + ", ".join(gates["missing"])]
                 )
-            target = date.today() + (timedelta(days=1) if when == "tomorrow" else timedelta(0))
+            target = self._session_date(rec, 1 if when == "tomorrow" else 0)
+            # Do not let arm-for-today override an explicit disable-today for the
+            # same session date; arm-for-tomorrow remains allowed.
+            existing = self._sessions.get(name, {})
+            if (existing.get("disabled_today")
+                    and existing.get("disabled_date") == target.isoformat()):
+                raise ORBValidationError(
+                    [f"strategy '{name}' is disabled for session {target.isoformat()}; "
+                     "arm for tomorrow instead"]
+                )
             self._sessions[name] = {
                 "armed": True, "armed_for": target.isoformat(),
                 "disabled_today": False, "mode": rec["mode"],
@@ -261,7 +311,8 @@ class ORBSessionManager:
             rec = self._require(name)
             self._sessions[name] = {
                 "armed": False, "disabled_today": True,
-                "disabled_date": date.today().isoformat(), "mode": rec["mode"],
+                "disabled_date": self._session_date(rec).isoformat(),
+                "mode": rec["mode"],
             }
             self._save()
             self._log("disable_today", name, {})

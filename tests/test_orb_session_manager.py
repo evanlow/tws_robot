@@ -1,6 +1,7 @@
 """Tests for ORB session manager (autonomous/orb_session_manager.py, #207)."""
 
 import json
+from datetime import timezone
 
 import pytest
 
@@ -112,3 +113,56 @@ def test_arm_audit_logged(tmp_path):
     logs = list((tmp_path / "logs").glob("autonomous_trading_*.jsonl"))
     assert logs
     assert any("orb_session_control" in p.read_text() for p in logs)
+
+
+def test_update_to_non_armable_mode_clears_session(tmp_path):
+    m = _mgr(tmp_path)
+    m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"], "mode": "recommend_only"})
+    m.arm("ORB1")
+    rec = m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"], "mode": "off"})
+    assert rec["session"] == {}
+
+
+def test_update_symbols_disarms_session(tmp_path):
+    m = _mgr(tmp_path)
+    m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"], "mode": "recommend_only"})
+    m.arm("ORB1")
+    rec = m.upsert_strategy({"name": "ORB1", "symbols": ["SPY"], "mode": "recommend_only"})
+    assert rec["session"] == {}
+
+
+def test_arm_uses_strategy_timezone(tmp_path):
+    # 2026-06-01 23:30 UTC is already 2026-06-02 in Asia/Kuala_Lumpur but still
+    # 2026-06-01 (19:30) in New York; arm must use the NY session date.
+    from datetime import datetime as _dt
+
+    fixed_utc = _dt(2026, 6, 1, 23, 30, tzinfo=timezone.utc)
+    m = ORBSessionManager(config_dir=str(tmp_path / "config"),
+                          evidence_dir=str(tmp_path / "logs"),
+                          now_fn=lambda tz: fixed_utc.astimezone(tz))
+    m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"], "mode": "recommend_only"})
+    rec = m.arm("ORB1", when="today")
+    assert rec["session"]["armed_for"] == "2026-06-01"
+
+
+def test_disable_today_blocks_arm_today(tmp_path):
+    m = _mgr(tmp_path)
+    m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"], "mode": "recommend_only"})
+    m.disable_today("ORB1")
+    with pytest.raises(ORBValidationError):
+        m.arm("ORB1", when="today")
+    # arming for tomorrow remains allowed.
+    rec = m.arm("ORB1", when="tomorrow")
+    assert rec["session"]["armed"] is True
+
+
+def test_disable_today_uses_strategy_timezone(tmp_path):
+    from datetime import datetime as _dt
+
+    fixed_utc = _dt(2026, 6, 1, 23, 30, tzinfo=timezone.utc)
+    m = ORBSessionManager(config_dir=str(tmp_path / "config"),
+                          evidence_dir=str(tmp_path / "logs"),
+                          now_fn=lambda tz: fixed_utc.astimezone(tz))
+    m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"], "mode": "recommend_only"})
+    rec = m.disable_today("ORB1")
+    assert rec["session"]["disabled_date"] == "2026-06-01"
