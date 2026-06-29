@@ -137,7 +137,7 @@ class OpeningRangeBacktest:
                     break
 
         def _detected_key(item):
-            setup = item[0]
+            setup, _, _ = item  # item is (setup, entry_idx, bars)
             dt = setup.detected_at
             return dt.astimezone(tz) if dt.tzinfo is not None else dt
 

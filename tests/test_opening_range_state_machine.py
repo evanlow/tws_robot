@@ -181,3 +181,8 @@ def test_model_a_requires_bar_after_confirmation():
     setup = s.on_closed_1m(candle(t, 103.6, 105.0, 103.5, 104.9))  # confirm bar
     assert setup is None
     assert s.state == OpeningRangeState.BREAKOUT_CONFIRMED
+    # The first bar after confirmation may take the Model A entry.
+    t += timedelta(minutes=1)
+    nxt = s.on_closed_1m(candle(t, 105.5, 107.0, 105.3, 106.9))
+    assert nxt is not None
+    assert nxt.model == ORBEntryModel.MODEL_A_DISPLACEMENT_GAP
