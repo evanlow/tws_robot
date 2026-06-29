@@ -58,7 +58,7 @@ async function orbCfgSave() {
   const el = document.getElementById('orbCfgStatus');
   el.textContent = 'Saving…';
   const { ok, data } = await orbApi('/api/orb/strategies', 'POST', orbConfigBody());
-  el.textContent = ok ? 'Saved' : 'Error: ' + (data.messages || [data.error]).join('; ');
+  el.textContent = ok ? 'Saved' : 'Error: ' + (data.messages || [data.error || 'Unknown error']).join('; ');
   orbRefresh();
 }
 
@@ -66,7 +66,7 @@ async function orbAct(action, body) {
   const el = document.getElementById('orbActStatus');
   el.textContent = '…';
   const { ok, data } = await orbApi(`/api/orb/strategies/${encodeURIComponent(orbName())}/${action}`, 'POST', body || {});
-  el.textContent = ok ? action + ' ok' : 'Error: ' + (data.messages || [data.error]).join('; ');
+  el.textContent = ok ? action + ' ok' : 'Error: ' + (data.messages || [data.error || 'Unknown error']).join('; ');
   orbRefresh();
 }
 
