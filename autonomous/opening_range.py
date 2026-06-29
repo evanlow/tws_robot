@@ -259,7 +259,7 @@ class OpeningRangeSession:
 
         self._range_1m: List[Candle] = []
         self._post_range_1m: List[Candle] = []
-        self._seen_bearish_diag_ends: set = set()
+        self._seen_bearish_diag_ends: set = set()  # tracks c5.end datetimes already logged
         self._tz = config.tzinfo()
         self._open = config.parse_time(config.session_open)
         self._cutoff = config.parse_time(config.entry_cutoff_time)
@@ -387,12 +387,11 @@ class OpeningRangeSession:
                     self.state = OpeningRangeState.BREAKOUT_CONFIRMED
                     return
             elif c5.close < self.opening_range.low:
-                end_key = c5.end.isoformat()
-                if end_key not in self._seen_bearish_diag_ends:
-                    self._seen_bearish_diag_ends.add(end_key)
+                if c5.end not in self._seen_bearish_diag_ends:
+                    self._seen_bearish_diag_ends.add(c5.end)
                     self.diagnostics.append(
                         {"type": "bearish_breakout", "rejected": not self.config.short_enabled,
-                         "time": end_key}
+                         "time": c5.end.isoformat()}
                     )
 
     def _scan_entry_models(self) -> Optional[ORBSetup]:

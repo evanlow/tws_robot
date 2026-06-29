@@ -196,7 +196,8 @@ def test_zero_max_trades_per_symbol_blocks_all_setups():
         s.on_closed_1m(b)
     t = _drive_5m_confirm(s)
     assert s.state == OpeningRangeState.BREAKOUT_CONFIRMED
-    s.on_closed_1m(candle(t, 103.1, 103.3, 103.0, 103.2)); t += timedelta(minutes=1)
+    s.on_closed_1m(candle(t, 103.1, 103.3, 103.0, 103.2))
+    t += timedelta(minutes=1)
     setup = s.on_closed_1m(candle(t, 103.6, 105.0, 103.5, 104.9))
     assert setup is None
     assert s.trades_taken == 0
