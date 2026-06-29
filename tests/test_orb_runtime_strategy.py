@@ -69,7 +69,7 @@ def test_normal_model_a_setup_emits_one_signal():
     assert sig.stop_loss is not None and sig.take_profit is not None
     assert sig.stop_loss < sig.target_price < sig.take_profit
     assert len(s.proposals) == 1
-    assert s.runtime_state("QQQ") == ORBRuntimeState.IN_TRADE
+    assert s.runtime_state("QQQ") == ORBRuntimeState.PROPOSAL_READY
 
 
 def test_no_signal_before_range_close():
@@ -152,3 +152,40 @@ def test_proposal_to_dict_includes_stop_and_target():
     assert isinstance(p, ORBTradeProposal)
     d = p.to_dict()
     assert d["stop_price"] < d["entry_price"] < d["target_price"]
+
+
+def test_duplicate_post_range_bars_skip_and_degrade():
+    s = _make()
+    for b in range_bars():
+        s.on_bar("QQQ", b)
+    t = datetime(2026, 6, 1, 9, 45)
+    s.on_bar("QQQ", bar(t, 103.1, 103.3, 103.0, 103.2))
+    # Duplicate the same minute: must not advance the 5m aggregation/setup.
+    assert s.on_bar("QQQ", bar(t, 103.6, 105.0, 103.5, 104.9)) is None
+    assert s.proposals == []
+    assert s.runtime_state("QQQ") == ORBRuntimeState.DATA_DEGRADED
+
+
+def test_missing_post_range_bars_skip_and_degrade():
+    s = _make()
+    for b in range_bars():
+        s.on_bar("QQQ", b)
+    t = datetime(2026, 6, 1, 9, 45)
+    s.on_bar("QQQ", bar(t, 103.1, 103.3, 103.0, 103.2))
+    # Skip a minute (gap): no false 5m confirmation/setup.
+    t += timedelta(minutes=2)
+    assert s.on_bar("QQQ", bar(t, 103.6, 105.0, 103.5, 104.9)) is None
+    assert s.proposals == []
+    assert s.runtime_state("QQQ") == ORBRuntimeState.DATA_DEGRADED
+
+
+def test_out_of_order_post_range_bars_skip_and_degrade():
+    s = _make()
+    for b in range_bars():
+        s.on_bar("QQQ", b)
+    t = datetime(2026, 6, 1, 9, 46)
+    s.on_bar("QQQ", bar(t, 103.1, 103.3, 103.0, 103.2))
+    # Earlier minute arriving after a later one: out of order.
+    assert s.on_bar("QQQ", bar(datetime(2026, 6, 1, 9, 45), 103.6, 105.0, 103.5, 104.9)) is None
+    assert s.proposals == []
+    assert s.runtime_state("QQQ") == ORBRuntimeState.DATA_DEGRADED

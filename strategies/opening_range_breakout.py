@@ -35,8 +35,18 @@ from autonomous.opening_range import (
     OpeningRangeState,
     _session_minutes,
 )
-
 logger = logging.getLogger(__name__)
+
+# A duplicate, out-of-order, or single dropped 1m bar within a forming 5m bucket
+# would corrupt the session's internal 5m aggregation. Step counts the minutes
+# between consecutive closed 1m bars: <= 0 is duplicate/out-of-order, 2..5 is a
+# missing bar within a bucket. Larger gaps are treated as a new (sparse) window.
+_MAX_BUCKET_GAP = 5
+
+
+def _bad_one_minute_step(prev: Candle, nxt: Candle) -> bool:
+    step = _session_minutes(nxt.start) - _session_minutes(prev.start)
+    return step <= 0 or 2 <= step <= _MAX_BUCKET_GAP
 
 # Fixed nominal confidence for ORB proposals. ORB setups are gated by the
 # deterministic state machine (range/confirmation/model rules) rather than a
@@ -59,16 +69,18 @@ class ORBRuntimeState(str, Enum):
     DATA_DEGRADED = "DATA_DEGRADED"
 
 
-# Map ORB state-machine states to runtime states. ENTRY_ARMED/IN_TRADE collapse
-# to PROPOSAL_READY here because the runtime strategy emits a proposal rather
-# than entering a real position.
+# Map ORB state-machine states to runtime states. ENTRY_ARMED and IN_TRADE both
+# collapse to PROPOSAL_READY here because this proposal-only phase emits a
+# proposal/signal rather than entering a real position; the session moves to
+# IN_TRADE immediately after producing a setup. A true IN_TRADE runtime state is
+# owned later by the paper execution / trade lifecycle work (#209/#210).
 _STATE_MAP = {
     OpeningRangeState.WAITING_FOR_SESSION: ORBRuntimeState.WAITING_FOR_SESSION,
     OpeningRangeState.BUILDING_RANGE: ORBRuntimeState.BUILDING_RANGE,
     OpeningRangeState.RANGE_READY: ORBRuntimeState.RANGE_READY,
     OpeningRangeState.BREAKOUT_CONFIRMED: ORBRuntimeState.BREAKOUT_CONFIRMED,
     OpeningRangeState.ENTRY_ARMED: ORBRuntimeState.PROPOSAL_READY,
-    OpeningRangeState.IN_TRADE: ORBRuntimeState.IN_TRADE,
+    OpeningRangeState.IN_TRADE: ORBRuntimeState.PROPOSAL_READY,
     OpeningRangeState.DONE_FOR_SESSION: ORBRuntimeState.DONE_FOR_SESSION,
     OpeningRangeState.INVALIDATED: ORBRuntimeState.INVALIDATED,
 }
@@ -151,6 +163,8 @@ class OpeningRangeBreakoutStrategy(BaseStrategy):
 
         # Per-symbol, per-session sessions keyed by (symbol, session_date).
         self._sessions: Dict[tuple, OpeningRangeSession] = {}
+        # Closed 1m candles seen per (symbol, session_date) for quality checks.
+        self._one_min: Dict[tuple, List[Candle]] = {}
         # Symbols flagged degraded (invalid candle input) per session.
         self._degraded: Dict[tuple, bool] = {}
         # Prevent duplicate proposals/signals per (symbol, session_date).
@@ -190,6 +204,23 @@ class OpeningRangeBreakoutStrategy(BaseStrategy):
         if not candle.is_valid():
             self._degraded[key] = True
             return None
+
+        # Guard the session's internal 5m aggregation against duplicate, missing,
+        # or out-of-order 1m data (the protection added in #218). Compare against
+        # the last accepted closed bar: a duplicate/earlier minute, or a small gap
+        # within a forming 5m bucket, would corrupt the aggregate, so degrade and
+        # skip. Large intentional gaps (next session window) are not flagged.
+        recent = self._one_min.get(key, [])
+        if recent and _bad_one_minute_step(recent[-1], candle):
+            self._degraded[key] = True
+            logger.warning(
+                "ORB: degraded 1m sequence for %s %s; skipping bar at %s",
+                symbol,
+                session_date,
+                candle.start.isoformat(),
+            )
+            return None
+        self._one_min[key] = recent + [candle]
 
         sess = self._get_session(symbol, session_date)
         setup = sess.on_closed_1m(candle)
