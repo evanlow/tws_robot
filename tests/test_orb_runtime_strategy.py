@@ -189,3 +189,22 @@ def test_out_of_order_post_range_bars_skip_and_degrade():
     assert s.on_bar("QQQ", bar(datetime(2026, 6, 1, 9, 45), 103.6, 105.0, 103.5, 104.9)) is None
     assert s.proposals == []
     assert s.runtime_state("QQQ") == ORBRuntimeState.DATA_DEGRADED
+
+
+def test_degradation_is_terminal_no_later_proposal():
+    s = _make()
+    for b in range_bars():
+        s.on_bar("QQQ", b)
+    t = datetime(2026, 6, 1, 9, 45)
+    s.on_bar("QQQ", bar(t, 103.1, 103.3, 103.0, 103.2))
+    # Duplicate the same minute degrades the session.
+    s.on_bar("QQQ", bar(t, 103.6, 105.0, 103.5, 104.9))
+    assert s.runtime_state("QQQ") == ORBRuntimeState.DATA_DEGRADED
+    # Later valid-looking bars in a clean window must not revive the session.
+    t = datetime(2026, 6, 1, 9, 50)
+    for _ in range(6):
+        assert s.on_bar("QQQ", bar(t, 103.6, 105.0, 103.5, 104.9)) is None
+        t += timedelta(minutes=1)
+    assert s.proposals == []
+    assert s.signals_to_emit == []
+    assert s.runtime_state("QQQ") == ORBRuntimeState.DATA_DEGRADED

@@ -198,6 +198,12 @@ class OpeningRangeBreakoutStrategy(BaseStrategy):
         session_date = self._session_date(candle)
         key = (symbol, session_date)
 
+        # Degradation is terminal for a symbol/session: once flagged, do not feed
+        # any further bars to the state machine or emit a proposal/signal, even if
+        # a later sparse window would otherwise produce a setup (#218).
+        if self._degraded.get(key):
+            return None
+
         # Only closed 1m candles advance the ORB state machine.
         if candle.timeframe != "1m" or not candle.is_closed:
             return None
