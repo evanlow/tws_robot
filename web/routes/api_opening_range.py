@@ -44,13 +44,19 @@ def _config_from(data: dict) -> OpeningRangeConfig:
     model = str(data.get("model", "AB")).upper()
     cfg.model_a_enabled = model in ("A", "AB")
     cfg.model_b_enabled = model in ("B", "AB")
+    for key in ("entry_cutoff_time", "force_flat_time"):
+        if data.get(key) is not None:
+            setattr(cfg, key, str(data[key]))
     for key in (
-        "entry_cutoff_time", "force_flat_time", "continuation_rr",
-        "retest_tolerance_bps", "max_entry_slippage_bps",
-        "risk_per_trade_equity_pct", "max_total_orb_trades_per_session",
+        "continuation_rr",
+        "retest_tolerance_bps",
+        "max_entry_slippage_bps",
+        "risk_per_trade_equity_pct",
     ):
         if data.get(key) is not None:
-            setattr(cfg, key, data[key])
+            setattr(cfg, key, float(data[key]))
+    if data.get("max_total_orb_trades_per_session") is not None:
+        cfg.max_total_orb_trades_per_session = int(data["max_total_orb_trades_per_session"])
     if data.get("symbols"):
         cfg.symbols = [str(s).strip().upper() for s in data["symbols"] if str(s).strip()]
     return cfg
@@ -59,7 +65,10 @@ def _config_from(data: dict) -> OpeningRangeConfig:
 def _candles_from_inline(rows: List[dict]) -> List[Candle]:
     out: List[Candle] = []
     for r in rows:
-        start = datetime.fromisoformat(r["start"])
+        start_raw = str(r["start"])
+        start = datetime.fromisoformat(
+            f"{start_raw[:-1]}+00:00" if start_raw.endswith("Z") else start_raw
+        )
         out.append(Candle(
             symbol=str(r["symbol"]).upper(),
             timeframe="1m",
@@ -110,10 +119,12 @@ def _load_candles(data: dict) -> List[Candle]:
 
 def _criteria_from(data: dict) -> ReadinessCriteria:
     c = ReadinessCriteria()
-    for key in ("min_trade_count", "min_avg_r", "max_drawdown_r",
-                "max_slippage_sensitivity_r", "max_no_data_failures"):
+    for key in ("min_trade_count", "max_no_data_failures"):
         if data.get(key) is not None:
-            setattr(c, key, data[key])
+            setattr(c, key, int(data[key]))
+    for key in ("min_avg_r", "max_drawdown_r", "max_slippage_sensitivity_r"):
+        if data.get(key) is not None:
+            setattr(c, key, float(data[key]))
     return c
 
 
@@ -122,15 +133,20 @@ def run():
     data = request.get_json(silent=True) or {}
     try:
         candles = _load_candles(data)
+        cfg = _config_from(data)
+        equity = float(data.get("equity", 100_000.0))
+        commission = float(data.get("commission_per_share", 0.005))
+        report = run_backtest(candles, cfg, equity=equity, commission_per_share=commission)
+        readiness = classify_readiness(report, _criteria_from(data.get("criteria") or {}))
+        return jsonify({"report": report, "readiness": readiness})
     except RuntimeError as exc:
         logger.warning("ORB backtest data load failed: %s", exc)
         return jsonify({"error": "Unable to load candle data; check symbols and date range"}), 400
-    cfg = _config_from(data)
-    equity = float(data.get("equity", 100_000.0))
-    commission = float(data.get("commission_per_share", 0.005))
-    report = run_backtest(candles, cfg, equity=equity, commission_per_share=commission)
-    readiness = classify_readiness(report, _criteria_from(data.get("criteria") or {}))
-    return jsonify({"report": report, "readiness": readiness})
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid request payload"}), 400
+    except Exception:
+        logger.exception("ORB backtest run failed")
+        return jsonify({"error": "Backtest run failed"}), 400
 
 
 @bp.route("/backtest/sweep", methods=["POST"])
@@ -138,25 +154,30 @@ def sweep():
     data = request.get_json(silent=True) or {}
     try:
         candles = _load_candles(data)
+        cfg = _config_from(data)
+        grid = data.get("sweep") or {}
+        results = run_sweep(
+            candles, cfg,
+            entry_cutoff_times=grid.get("entry_cutoff_time"),
+            continuation_rrs=grid.get("continuation_rr"),
+            retest_tolerances_bps=grid.get("retest_tolerance_bps"),
+            max_entry_slippages_bps=grid.get("max_entry_slippage_bps"),
+            models=grid.get("model"),
+            equity=float(data.get("equity", 100_000.0)),
+            commission_per_share=float(data.get("commission_per_share", 0.005)),
+        )
+        crit = _criteria_from(data.get("criteria") or {})
+        for r in results:
+            r["readiness"] = classify_readiness(r["report"], crit)
+        return jsonify({"count": len(results), "results": results})
     except RuntimeError as exc:
         logger.warning("ORB sweep data load failed: %s", exc)
         return jsonify({"error": "Unable to load candle data; check symbols and date range"}), 400
-    cfg = _config_from(data)
-    grid = data.get("sweep") or {}
-    results = run_sweep(
-        candles, cfg,
-        entry_cutoff_times=grid.get("entry_cutoff_time"),
-        continuation_rrs=grid.get("continuation_rr"),
-        retest_tolerances_bps=grid.get("retest_tolerance_bps"),
-        max_entry_slippages_bps=grid.get("max_entry_slippage_bps"),
-        models=grid.get("model"),
-        equity=float(data.get("equity", 100_000.0)),
-        commission_per_share=float(data.get("commission_per_share", 0.005)),
-    )
-    crit = _criteria_from(data.get("criteria") or {})
-    for r in results:
-        r["readiness"] = classify_readiness(r["report"], crit)
-    return jsonify({"count": len(results), "results": results})
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid request payload"}), 400
+    except Exception:
+        logger.exception("ORB backtest sweep failed")
+        return jsonify({"error": "Backtest sweep failed"}), 400
 
 
 @bp.route("/backtest/save-evidence", methods=["POST"])

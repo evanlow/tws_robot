@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import statistics
+import threading
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ SCHEMA_VERSION = 1
 
 # Default per-share commission used as a sensitivity bump floor.
 DEFAULT_COMMISSION_PER_SHARE = 0.005
+EVIDENCE_APPEND_LOCK = threading.Lock()
 
 # Readiness statuses.
 READY_FOR_PAPER = "READY_FOR_PAPER"
@@ -325,6 +327,7 @@ def save_evidence(report: dict, readiness: dict, *, log_dir: str = "logs",
         "report": report,
         "readiness": readiness,
     }
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record) + "\n")
+    with EVIDENCE_APPEND_LOCK:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
     return path

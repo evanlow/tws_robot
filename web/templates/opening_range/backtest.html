@@ -63,32 +63,49 @@ function orbBody() {
     max_total_orb_trades_per_session: parseInt(document.getElementById('orbMaxTrades').value),
   };
 }
-function csrf() { return document.querySelector('meta[name="csrf-token"]').content; }
+function csrf() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.content : '';
+}
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 async function orbPost(url, body) {
-  const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':csrf()}, body:JSON.stringify(body)});
+  const headers = {'Content-Type':'application/json'};
+  const token = csrf();
+  if (token) headers['X-CSRFToken'] = token;
+  const res = await fetch(url, {method:'POST', headers, body:JSON.stringify(body)});
   return res.json();
 }
-function badge(s){const c=s==='READY_FOR_PAPER'?'#48bb78':s==='DO_NOT_TRADE'?'#f56565':'#ecc94b';return `<span style="color:${c};font-weight:bold;">${s}</span>`;}
+function badge(s){const c=s==='READY_FOR_PAPER'?'#48bb78':s==='DO_NOT_TRADE'?'#f56565':'#ecc94b';return `<span style="color:${c};font-weight:bold;">${escapeHtml(s)}</span>`;}
 async function orbRun(){
   document.getElementById('orbStatus').textContent='Running…';
   const d=await orbPost('/api/opening-range/backtest/run', orbBody());
   document.getElementById('orbStatus').textContent='';
-  if(d.error){document.getElementById('orbResults').innerHTML='Error: '+d.error;return;}
+  if(d.error){document.getElementById('orbResults').textContent='Error: '+d.error;return;}
   orbLastReport=d.report; orbLastReadiness=d.readiness;
   const r=d.report;
+  const reasons=(d.readiness.reasons||[]).map(escapeHtml).join('; ');
+  const reportJson=escapeHtml(JSON.stringify(r, null, 2));
   document.getElementById('orbResults').innerHTML=`<h2>Readiness: ${badge(d.readiness.status)}</h2>
-    <p>${(d.readiness.reasons||[]).join('; ')}</p>
+    <p>${reasons}</p>
     <p>Trades ${r.total_trades} · Win ${(r.win_rate*100).toFixed(1)}% · Avg R ${r.avg_r} · Net R ${r.avg_net_r} · Median R ${r.median_r}
     · P&L ${r.total_pnl} · PF ${r.profit_factor_unbounded?'∞':r.profit_factor} · MaxDD ${r.max_drawdown_r}R · Hold ${r.avg_hold_minutes}m</p>
-    <pre style="overflow:auto;">${JSON.stringify(r, null, 2)}</pre>`;
+    <pre style="overflow:auto;">${reportJson}</pre>`;
 }
 async function orbSweep(){
   document.getElementById('orbStatus').textContent='Sweeping…';
   const b=orbBody(); b.sweep={entry_cutoff_time:['10:30','11:00','11:30'],continuation_rr:[1.5,2.0,2.5]};
   const d=await orbPost('/api/opening-range/backtest/sweep', b);
   document.getElementById('orbStatus').textContent='';
-  if(d.error){document.getElementById('orbResults').innerHTML='Error: '+d.error;return;}
-  document.getElementById('orbResults').innerHTML=`<h2>Sweep (${d.count})</h2><pre style="overflow:auto;">${JSON.stringify(d.results,null,2)}</pre>`;
+  if(d.error){document.getElementById('orbResults').textContent='Error: '+d.error;return;}
+  const resultsJson=escapeHtml(JSON.stringify(d.results,null,2));
+  document.getElementById('orbResults').innerHTML=`<h2>Sweep (${d.count})</h2><pre style="overflow:auto;">${resultsJson}</pre>`;
 }
 async function orbSave(){
   if(!orbLastReport){document.getElementById('orbStatus').textContent='Run a backtest first.';return;}
