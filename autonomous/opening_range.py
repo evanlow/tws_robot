@@ -20,7 +20,7 @@ local time.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from enum import Enum
 from typing import List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -511,6 +511,10 @@ def detect_model_a(bars, rng, conf, cfg) -> Optional[ORBSetup]:
     cur = bars[-1]
     prev = bars[-2]
     if not cur.is_closed:
+        return None
+    # Enter only on bars after the 5-minute confirmation (Phase 2 -> 1m entry).
+    min_after = max(cfg.min_bars_after_confirmation, 1)
+    if cur.start < conf.confirmed_at + timedelta(minutes=min_after - 1):
         return None
     if cur.close <= rng.high:
         return None

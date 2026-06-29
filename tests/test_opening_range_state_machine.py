@@ -166,3 +166,18 @@ def test_model_b_rejects_retest_before_confirmation():
     # Strong confirming bar above range high, but the only retest was pre-confirm.
     setup = s.on_closed_1m(candle(t, 102.1, 103.0, 102.0, 102.95))
     assert setup is None
+
+
+def test_model_a_requires_bar_after_confirmation():
+    """Model A must not enter on the same close that completes 5m confirmation."""
+    s = OpeningRangeSession("QQQ", "2026-06-01", OpeningRangeConfig())
+    for b in range_bars():
+        s.on_closed_1m(b)
+    # Drive 5m confirmation where the final bar is itself a strong gap-up; it
+    # completes confirmation but must not also be taken as the Model A entry.
+    t = datetime(2026, 6, 1, 9, 45)
+    for _ in range(4):
+        s.on_closed_1m(candle(t, 103, 103.3, 102.8, 103)); t += timedelta(minutes=1)
+    setup = s.on_closed_1m(candle(t, 103.6, 105.0, 103.5, 104.9))  # confirm bar
+    assert setup is None
+    assert s.state == OpeningRangeState.BREAKOUT_CONFIRMED

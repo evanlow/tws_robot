@@ -121,33 +121,43 @@ class OpeningRangeBacktest:
 
         force_flat = self.config.parse_time(self.config.force_flat_time)
         max_per_session = self.config.max_total_orb_trades_per_session
-        trades_per_date: Dict[object, int] = defaultdict(int)
-        for (symbol, day), bars in sorted(by_day.items(), key=lambda kv: (kv[0][1], kv[0][0])):
-            if max_per_session and trades_per_date[day] >= max_per_session:
-                continue
+        tz = self.config.tzinfo()
+
+        # Collect one candidate setup per (symbol, day), then allocate per-date
+        # by actual setup time so the per-session cap selects the first eligible
+        # ORB rather than the alphabetically-first symbol.
+        candidates: Dict[object, list] = defaultdict(list)
+        for (symbol, day), bars in by_day.items():
             bars.sort(key=lambda b: b.start)
-            session_date = day.isoformat()
-            session = OpeningRangeSession(symbol, session_date, self.config)
-            setup: Optional[ORBSetup] = None
-            entry_idx: Optional[int] = None
+            session = OpeningRangeSession(symbol, day.isoformat(), self.config)
             for i, bar in enumerate(bars):
                 s = session.on_closed_1m(bar)
-                if s is not None and setup is None:
-                    setup = s
-                    entry_idx = i
+                if s is not None:
+                    candidates[day].append((s, i, bars))
                     break
-            if setup is None or entry_idx is None:
-                continue
-            qty = _quantity(self.equity, setup.entry_price, setup.stop_price, self.config)
-            if qty <= 0:
-                continue
-            trade = self._simulate_exit(bars, entry_idx, setup, qty, force_flat)
-            if trade is not None:
-                result.trades.append(trade)
-                trades_per_date[day] += 1
+
+        def _detected_key(item):
+            setup = item[0]
+            dt = setup.detected_at
+            return dt.astimezone(tz) if dt.tzinfo is not None else dt
+
+        for day, items in candidates.items():
+            items.sort(key=_detected_key)
+            taken = 0
+            for setup, entry_idx, bars in items:
+                if max_per_session and taken >= max_per_session:
+                    break
+                qty = _quantity(self.equity, setup.entry_price, setup.stop_price, self.config)
+                if qty <= 0:
+                    continue
+                trade = self._simulate_exit(bars, entry_idx, setup, qty, force_flat)
+                if trade is not None:
+                    result.trades.append(trade)
+                    taken += 1
         return result
 
     def _simulate_exit(self, bars, entry_idx, setup, qty, force_flat) -> Optional[ORBTradeResult]:
+        tz = self.config.tzinfo()
         exit_price = setup.entry_price
         exit_reason = "session_end"
         for j in range(entry_idx + 1, len(bars)):
@@ -160,7 +170,7 @@ class OpeningRangeBacktest:
                 exit_price = setup.target_price
                 exit_reason = "target"
                 break
-            bar_t = b.start.time()
+            bar_t = (b.start.astimezone(tz) if b.start.tzinfo is not None else b.start).time()
             if bar_t >= force_flat:
                 exit_price = b.close
                 exit_reason = "force_flat"

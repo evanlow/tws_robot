@@ -26,6 +26,8 @@ Phase 1 is backtest/paper-only and requires **no broker or TWS connection**.
 - Opening range requires the exact contiguous 9:30–9:44 NY one-minute bars;
   duplicate/missing/out-of-order timestamps invalidate the session.
 - Model B accepts only retests that occur after the 5-minute breakout confirmation.
+- Model A enters only on a bar after the 5-minute confirmation (no same-close entry); honors `min_bars_after_confirmation`.
+- Backtest exits are evaluated in NY time: `force_flat_time` compares timezone-aware (UTC) candles after normalizing to NY; the per-session cap allocates by earliest `detected_at`, not symbol order.
 
 ## Usage
 

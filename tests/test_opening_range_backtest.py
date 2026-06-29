@@ -88,3 +88,37 @@ def test_backtest_allows_two_when_cap_raised():
     cfg = OpeningRangeConfig(max_total_orb_trades_per_session=2)
     res = OpeningRangeBacktest(cfg).run(multi)
     assert res.total_trades == 2
+
+
+def test_backtest_force_flat_normalizes_utc():
+    from datetime import timezone
+    bars = []
+    t = datetime(2026, 6, 1, 13, 30, tzinfo=timezone.utc)  # 09:30 NY
+    for _ in range(15):
+        bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 101, 102, 100, 101, 1000.0)); t += timedelta(minutes=1)
+    for _ in range(5):
+        bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103, 103.3, 102.8, 103, 1000.0)); t += timedelta(minutes=1)
+    bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103.1, 103.3, 103.0, 103.2, 1000.0)); t += timedelta(minutes=1)
+    bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103.6, 104.0, 103.5, 104.0, 1000.0)); t += timedelta(minutes=1)
+    # 18:00 UTC (14:00 NY): not yet force-flat
+    mid = datetime(2026, 6, 1, 18, 0, tzinfo=timezone.utc)
+    bars.append(Candle("QQQ", "1m", mid, mid + timedelta(minutes=1), 104.1, 104.2, 104.0, 104.1, 1000.0))
+    # 19:55 UTC == 15:55 NY: force-flat
+    ff = datetime(2026, 6, 1, 19, 55, tzinfo=timezone.utc)
+    bars.append(Candle("QQQ", "1m", ff, ff + timedelta(minutes=1), 104.1, 104.2, 104.0, 104.1, 1000.0))
+    res = OpeningRangeBacktest(OpeningRangeConfig()).run(bars)
+    assert res.total_trades == 1
+    assert res.trades[0].exit_reason == "force_flat"
+
+
+def test_backtest_cap_picks_earliest_setup_not_alphabetical():
+    # ZZZ triggers earlier (no extra delay); AAA delayed past cutoff allocation.
+    early = build_day_for("ZZZ")
+    late = build_day_for("AAA", day=datetime(2026, 6, 1))
+    # delay AAA setup by shifting its post-range bars later
+    late = late[:20] + [Candle("AAA", c.timeframe, c.start + timedelta(minutes=30),
+                               c.end + timedelta(minutes=30), c.open, c.high, c.low, c.close, c.volume)
+                        for c in late[20:]]
+    res = OpeningRangeBacktest(OpeningRangeConfig()).run(early + late)
+    assert res.total_trades == 1
+    assert res.trades[0].symbol == "ZZZ"
