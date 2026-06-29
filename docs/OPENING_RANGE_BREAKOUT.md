@@ -169,9 +169,52 @@ POST /api/orb/proposals/<proposal_id>/skip
 POST /api/orb/proposals/<proposal_id>/expire
 ```
 
-The `execute-paper` endpoint is intentionally reserved for the later paper
-execution phase. No paper or live order is placed in this phase.
+The `execute-paper` endpoint is wired in Phase 2.5 (see below). In this Phase
+2.4 layer no paper or live order is placed.
 
 ```bash
 python -m pytest tests/test_orb_trade_proposals.py tests/test_orb_session_api.py
+```
+
+## Paper-autonomous execution & protective orders (Phase 2.5, #209)
+
+`autonomous/orb_execution.py` (`ORBPaperExecutor`, `SimulatedPaperBracketAdapter`)
+turns a *valid, recommend-only* `ORBProposal` into a **paper** trade — and only
+ever a paper trade — when the trader has explicitly enabled paper-autonomous
+mode. It preserves the ORB safety posture (Prime Directive):
+
+- **Paper only.** The executor refuses any mode other than `paper_autonomous`;
+  there is no live/real-money execution path. Assisted/live modes are rejected
+  outright rather than tolerating missing broker-visible protection.
+- **No raw market orders.** The entry is always a marketable `LIMIT` order and
+  the protective children are `STOP`/`LIMIT` orders. The adapter refuses to
+  construct anything else, so a market order is impossible.
+- **Stop and target mandatory.** A proposal that is not a recommend-only,
+  long-only `stop < entry < target` card (or has zero quantity) is rejected
+  before any order is submitted.
+- **Protection status.** Bracket submission is preferred when the adapter
+  supports it (`BRACKET_CONFIRMED`). A paper-only `EXIT_MANAGER_FALLBACK` is
+  allowed only when explicitly configured (`orb_allow_exit_manager_fallback`)
+  and is surfaced in the execution result. Otherwise the proposal is rejected as
+  `MISSING_PROTECTION_REJECTED` and no entry is placed.
+- **Idempotent.** Re-executing the same proposal returns the original trade and
+  never places duplicate orders.
+- **Emergency stop & session cap.** `POST /api/orb/emergency-stop` trips the
+  executor and blocks execution; the per-session cap
+  (`max_total_orb_trades_per_session`) blocks execution once consumed.
+- **Evidence linkage.** Every entry/stop/target order carries the ORB strategy,
+  session, setup, and proposal ids, and every execution/rejection is written to
+  the autonomous audit log (`orb_paper_execution`).
+
+Recommend-only mode never submits orders: the owning strategy must be in
+`paper_autonomous` mode for `execute-paper` to place a trade.
+
+```text
+POST /api/orb/proposals/<proposal_id>/execute-paper
+GET  /api/orb/trades
+GET  /api/orb/trades/<trade_id>
+```
+
+```bash
+python -m pytest tests/test_orb_paper_execution.py tests/test_orb_session_api.py
 ```
