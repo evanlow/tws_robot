@@ -223,7 +223,15 @@ class OpeningRangeConfig:
         return time(int(hour), int(minute))
 
 
-def _session_minutes(dt: datetime) -> int:
+def _session_minutes(dt: datetime, tzinfo: Optional[ZoneInfo] = None) -> int:
+    """Minutes-since-midnight in market time.
+
+    Timezone-aware timestamps are normalized to ``tzinfo`` (New York by default)
+    so UTC candles (e.g. 13:30 UTC == 09:30 NY) compare correctly. Naive
+    timestamps are assumed to already be in market local time.
+    """
+    if tzinfo is not None and dt.tzinfo is not None:
+        dt = dt.astimezone(tzinfo)
     return dt.hour * 60 + dt.minute
 
 
@@ -251,6 +259,7 @@ class OpeningRangeSession:
 
         self._range_1m: List[Candle] = []
         self._post_range_1m: List[Candle] = []
+        self._tz = config.tzinfo()
         self._open = config.parse_time(config.session_open)
         self._cutoff = config.parse_time(config.entry_cutoff_time)
         self._range_end_min = (
@@ -262,7 +271,7 @@ class OpeningRangeSession:
         """Process one closed 1-minute candle. Returns an ORBSetup if armed."""
         if not candle.is_closed:
             return None
-        minute = _session_minutes(candle.start)
+        minute = _session_minutes(candle.start, self._tz)
         open_min = self._open.hour * 60 + self._open.minute
 
         if minute < open_min:
@@ -311,6 +320,15 @@ class OpeningRangeSession:
                 f"insufficient_range_bars:{len(bars)}/{cfg.opening_range_minutes}"
             )
             return
+        open_min = self._open.hour * 60 + self._open.minute
+        expected = [open_min + i for i in range(cfg.opening_range_minutes)]
+        actual = [_session_minutes(b.start, self._tz) for b in bars]
+        if actual != expected:
+            self.state = OpeningRangeState.INVALIDATED
+            self.rejections.append(
+                f"non_contiguous_range_bars:{actual}!={expected}"
+            )
+            return
         high = max(b.high for b in bars)
         low = min(b.low for b in bars)
         if high - low <= 0:
@@ -349,7 +367,7 @@ class OpeningRangeSession:
         self.state = OpeningRangeState.RANGE_READY
 
     def _aggregate_5m(self) -> List[Candle]:
-        return aggregate_candles(self._post_range_1m, 5)
+        return aggregate_candles(self._post_range_1m, 5, self._tz)
 
     def _check_confirmation(self) -> None:
         if self.opening_range is None:
@@ -406,7 +424,8 @@ class OpeningRangeSession:
         }
 
 
-def aggregate_candles(one_min: List[Candle], factor: int) -> List[Candle]:
+def aggregate_candles(one_min: List[Candle], factor: int,
+                      tzinfo: Optional[ZoneInfo] = None) -> List[Candle]:
     """Aggregate consecutive 1m candles into closed factor-minute candles.
 
     Candles are grouped by their wall-clock minute aligned to the *factor*
@@ -419,7 +438,7 @@ def aggregate_candles(one_min: List[Candle], factor: int) -> List[Candle]:
     bucket: List[Candle] = []
     current_key: Optional[int] = None
     for c in one_min:
-        key = (_session_minutes(c.start)) // factor
+        key = (_session_minutes(c.start, tzinfo)) // factor
         if current_key is None or key != current_key:
             if bucket:
                 groups.append(bucket)
@@ -517,6 +536,8 @@ def detect_model_b(bars, rng, conf, cfg) -> Optional[ORBSetup]:
     retest_idx = None
     for i in range(len(bars) - 1):
         c = bars[i]
+        if c.start < conf.confirmed_at:
+            continue
         if c.low <= zone_high and c.high >= zone_low:
             retest_idx = i
             break

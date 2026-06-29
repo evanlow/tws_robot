@@ -124,3 +124,45 @@ def test_entry_cutoff_blocks_setup():
     s.on_closed_1m(candle(datetime(2026, 6, 1, 9, 45), 102, 102.5, 101.5, 102))
     s.on_closed_1m(candle(datetime(2026, 6, 1, 12, 0), 103, 103.5, 102.5, 103))
     assert s.state == OpeningRangeState.DONE_FOR_SESSION
+
+
+def test_utc_candles_build_range_in_ny_session():
+    """9:30-9:45 NY arrives as 13:30-13:45 UTC; must build/finalize the range."""
+    from datetime import timezone
+    s = OpeningRangeSession("QQQ", "2026-06-01", OpeningRangeConfig())
+    t = datetime(2026, 6, 1, 13, 30, tzinfo=timezone.utc)  # 09:30 NY (EDT)
+    for _ in range(15):
+        s.on_closed_1m(candle(t, 101, 102, 100, 101))
+        t += timedelta(minutes=1)
+    assert s.state == OpeningRangeState.BUILDING_RANGE
+    s.on_closed_1m(candle(t, 102, 102.5, 101.5, 102))  # 13:45 UTC == 09:45 NY
+    assert s.state == OpeningRangeState.RANGE_READY
+    assert s.opening_range.high == 102.0
+    assert s.opening_range.low == 100.0
+
+
+def test_duplicate_range_bar_invalidates():
+    """15 bars that skip 9:44 but duplicate 9:30 are not the contiguous range."""
+    s = OpeningRangeSession("QQQ", "2026-06-01", OpeningRangeConfig())
+    bars = range_bars()
+    bars[1] = candle(datetime(2026, 6, 1, 9, 30), 101, 102, 100, 101)  # dup 9:30
+    for b in bars:
+        s.on_closed_1m(b)
+    s.on_closed_1m(candle(datetime(2026, 6, 1, 9, 45), 102, 102.5, 101.5, 102))
+    assert s.state == OpeningRangeState.INVALIDATED
+
+
+def test_model_b_rejects_retest_before_confirmation():
+    cfg = OpeningRangeConfig(model_a_enabled=False, retest_tolerance_bps=50)
+    s = OpeningRangeSession("QQQ", "2026-06-01", cfg)
+    for b in range_bars():
+        s.on_closed_1m(b)
+    # First post-range bar touches the range high (102) before 5m confirmation.
+    t = datetime(2026, 6, 1, 9, 45)
+    s.on_closed_1m(candle(t, 102.1, 102.4, 101.95, 102.05)); t += timedelta(minutes=1)
+    for _ in range(4):
+        s.on_closed_1m(candle(t, 103, 103.3, 102.8, 103)); t += timedelta(minutes=1)
+    assert s.state == OpeningRangeState.BREAKOUT_CONFIRMED
+    # Strong confirming bar above range high, but the only retest was pre-confirm.
+    setup = s.on_closed_1m(candle(t, 102.1, 103.0, 102.0, 102.95))
+    assert setup is None

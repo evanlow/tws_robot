@@ -120,7 +120,11 @@ class OpeningRangeBacktest:
             by_day[(c.symbol, c.start.date())].append(c)
 
         force_flat = self.config.parse_time(self.config.force_flat_time)
-        for (symbol, day), bars in by_day.items():
+        max_per_session = self.config.max_total_orb_trades_per_session
+        trades_per_date: Dict[object, int] = defaultdict(int)
+        for (symbol, day), bars in sorted(by_day.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+            if max_per_session and trades_per_date[day] >= max_per_session:
+                continue
             bars.sort(key=lambda b: b.start)
             session_date = day.isoformat()
             session = OpeningRangeSession(symbol, session_date, self.config)
@@ -140,6 +144,7 @@ class OpeningRangeBacktest:
             trade = self._simulate_exit(bars, entry_idx, setup, qty, force_flat)
             if trade is not None:
                 result.trades.append(trade)
+                trades_per_date[day] += 1
         return result
 
     def _simulate_exit(self, bars, entry_idx, setup, qty, force_flat) -> Optional[ORBTradeResult]:

@@ -61,3 +61,30 @@ def test_backtest_summary_keys():
     assert summary["total_trades"] == 1
     assert "by_model" in summary and "by_symbol" in summary
     assert res.win_rate == 1.0
+
+
+def build_day_for(symbol, day=datetime(2026, 6, 1)):
+    bars = []
+    t = day.replace(hour=9, minute=30)
+    for _ in range(15):
+        bars.append(Candle(symbol, "1m", t, t + timedelta(minutes=1), 101, 102, 100, 101, 1000.0)); t += timedelta(minutes=1)
+    for _ in range(5):
+        bars.append(Candle(symbol, "1m", t, t + timedelta(minutes=1), 103, 103.3, 102.8, 103, 1000.0)); t += timedelta(minutes=1)
+    bars.append(Candle(symbol, "1m", t, t + timedelta(minutes=1), 103.1, 103.3, 103.0, 103.2, 1000.0)); t += timedelta(minutes=1)
+    bars.append(Candle(symbol, "1m", t, t + timedelta(minutes=1), 103.6, 105.0, 103.5, 104.9, 1000.0)); t += timedelta(minutes=1)
+    for _ in range(20):
+        bars.append(Candle(symbol, "1m", t, t + timedelta(minutes=1), 105, 110, 105, 110, 1000.0)); t += timedelta(minutes=1)
+    return bars
+
+
+def test_backtest_enforces_total_trades_per_session_cap():
+    multi = build_day_for("QQQ") + build_day_for("SPY")
+    res = OpeningRangeBacktest(OpeningRangeConfig()).run(multi)
+    assert res.total_trades == 1  # default cap is one ORB trade per session
+
+
+def test_backtest_allows_two_when_cap_raised():
+    multi = build_day_for("QQQ") + build_day_for("SPY")
+    cfg = OpeningRangeConfig(max_total_orb_trades_per_session=2)
+    res = OpeningRangeBacktest(cfg).run(multi)
+    assert res.total_trades == 2

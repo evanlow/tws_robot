@@ -19,8 +19,13 @@ Phase 1 is backtest/paper-only and requires **no broker or TWS connection**.
 - No raw market orders: entries use marketable-limit prices capped by
   `max_entry_slippage_bps`.
 - One trade per symbol per session; conservative defaults; `enabled=False`.
+- One ORB trade per session overall: backtests enforce
+  `max_total_orb_trades_per_session` across symbols per date.
 - Setups rejected when stop ≥ entry, risk ≤ 0, target ≤ entry, or range width
   outside `[min_opening_range_width_pct, max_opening_range_width_pct]`.
+- Opening range requires the exact contiguous 9:30–9:44 NY one-minute bars;
+  duplicate/missing/out-of-order timestamps invalidate the session.
+- Model B accepts only retests that occur after the 5-minute breakout confirmation.
 
 ## Usage
 
@@ -33,7 +38,9 @@ print(result.summary())
 ```
 
 `candles_1m` is a list of `autonomous.opening_range.Candle` (timeframe "1m").
-Session windows are evaluated in New York time; persist UTC internally.
+Session windows are evaluated in New York time: timezone-aware timestamps
+(e.g. UTC) are normalized to NY before comparing session minutes; naive
+timestamps are assumed to already be NY local time.
 
 ## Tests
 
