@@ -88,6 +88,14 @@ def _avg(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _net_r(t: ORBTradeResult) -> float:
+    """Net R after costs: realized pnl over per-trade risk (entry-stop)*qty."""
+    risk_capital = (t.entry_price - t.stop_price) * t.quantity
+    if risk_capital <= 0:
+        return 0.0
+    return t.pnl / risk_capital
+
+
 def _bucket(trades: Sequence[ORBTradeResult]) -> dict:
     n = len(trades)
     rs = [t.r_multiple for t in trades]
@@ -123,8 +131,11 @@ def build_report(
 ) -> dict:
     """Build the full ORB backtest report dictionary from a result."""
 
+    cfg = config or OpeningRangeConfig()
+    tz = cfg.tzinfo()
     trades = list(result.trades)
     rs = [t.r_multiple for t in trades]
+    net_rs = [_net_r(t) for t in trades]
     holds = [t.hold_minutes for t in trades if t.hold_minutes is not None]
 
     by_model: Dict[str, List[ORBTradeResult]] = defaultdict(list)
@@ -134,7 +145,9 @@ def build_report(
         by_model[_model_label(t.model)].append(t)
         by_symbol[t.symbol].append(t)
         if t.entry_time is not None:
-            by_hour[t.entry_time.hour].append(t)
+            et = t.entry_time
+            ny = et.astimezone(tz) if et.tzinfo is not None else et
+            by_hour[ny.hour].append(t)
 
     reasons = Counter(no_trade_reasons or [])
 
@@ -143,6 +156,7 @@ def build_report(
         "win_rate": round(result.win_rate, 4),
         "avg_r": round(_avg(rs), 4),
         "median_r": round(_median(rs), 4),
+        "avg_net_r": round(_avg(net_rs), 4),
         "total_pnl": round(result.total_pnl, 2),
         "profit_factor": _profit_factor(trades),
         "max_drawdown_r": _max_drawdown_r(trades),
@@ -168,23 +182,24 @@ def run_backtest(
     cfg = config or OpeningRangeConfig()
     base = OpeningRangeBacktest(cfg, equity=equity, commission_per_share=commission_per_share)
     result = base.run(list(candles_1m))
-    base_avg = _avg([t.r_multiple for t in result.trades])
+    base_net = _avg([_net_r(t) for t in result.trades])
 
-    # Slippage sensitivity: widen entry slippage and measure avg-R degradation.
+    # Slippage sensitivity: widen entry slippage and measure net-R degradation.
     worse_slip = replace(cfg, max_entry_slippage_bps=cfg.max_entry_slippage_bps * 2 + 1)
     slip_res = OpeningRangeBacktest(worse_slip, equity=equity,
                                     commission_per_share=commission_per_share).run(list(candles_1m))
-    slip_sens = base_avg - _avg([t.r_multiple for t in slip_res.trades])
+    slip_sens = base_net - _avg([_net_r(t) for t in slip_res.trades])
 
-    # Commission sensitivity: double commission and measure avg-R degradation.
+    # Commission sensitivity: double commission and measure net-R degradation.
     bumped_commission = commission_per_share * 2 + DEFAULT_COMMISSION_PER_SHARE
     comm_res = OpeningRangeBacktest(cfg, equity=equity,
                                     commission_per_share=bumped_commission).run(list(candles_1m))
-    comm_sens = base_avg - _avg([t.r_multiple for t in comm_res.trades])
+    comm_sens = base_net - _avg([_net_r(t) for t in comm_res.trades])
 
     return build_report(
         result, cfg,
         commission_per_share=commission_per_share,
+        no_trade_reasons=result.no_trade_reasons,
         slippage_sensitivity_r=slip_sens,
         commission_sensitivity_r=comm_sens,
     )
@@ -252,7 +267,7 @@ def classify_readiness(report: dict, criteria: Optional[ReadinessCriteria] = Non
     blocking = False
 
     total = report.get("total_trades", 0)
-    avg_r = report.get("avg_r", 0.0)
+    avg_r = report.get("avg_net_r", report.get("avg_r", 0.0))
     dd = report.get("max_drawdown_r", 0.0)
     slip = report.get("slippage_sensitivity_r", 0.0)
     no_data = sum(
@@ -262,7 +277,7 @@ def classify_readiness(report: dict, criteria: Optional[ReadinessCriteria] = Non
 
     # DO_NOT_TRADE (blocking) conditions.
     if avg_r < c.min_avg_r:
-        reasons.append(f"avg_r {avg_r} below minimum {c.min_avg_r}")
+        reasons.append(f"avg_net_r {avg_r} below minimum {c.min_avg_r}")
         blocking = True
     if dd > c.max_drawdown_r:
         reasons.append(f"max_drawdown_r {dd} above threshold {c.max_drawdown_r}")

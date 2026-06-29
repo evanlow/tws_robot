@@ -61,10 +61,12 @@ A trader can run ORB backtests, parameter sweeps, classify readiness, and save
 evidence without writing Python:
 
 - `autonomous/orb_backtest_reports.py`: full report fields (total trades, win
-  rate, avg/median R, total P&L, profit factor, max drawdown in R, avg hold
-  time, per-model/symbol/time-of-day buckets, slippage/commission sensitivity,
-  no-trade reasons), `run_sweep`, conservative `classify_readiness`
-  (`READY_FOR_PAPER` / `NEEDS_MORE_DATA` / `DO_NOT_TRADE`), and `save_evidence`.
+  rate, avg/median R and net R after costs, total P&L, profit factor, max
+  drawdown in R, avg hold time, per-model/symbol/time-of-day buckets — NY-session
+  normalized, slippage/commission sensitivity in net R, no-trade reasons surfaced
+  from session rejections), `run_sweep`, conservative `classify_readiness`
+  (`READY_FOR_PAPER` / `NEEDS_MORE_DATA` / `DO_NOT_TRADE`; gates on net R), and
+  `save_evidence`.
 - `web/routes/api_opening_range.py`: `POST /api/opening-range/backtest/{run,
   sweep,save-evidence}` plus the `/opening-range/backtest` page. Backtest-only —
   no TWS connection, no live/paper orders. Inline candles allow deterministic

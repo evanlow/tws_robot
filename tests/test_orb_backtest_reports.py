@@ -99,3 +99,47 @@ def test_save_evidence(tmp_path):
     path = save_evidence(report, readiness, log_dir=str(tmp_path), symbols=["QQQ"])
     assert path.endswith(".jsonl")
     assert tmp_path.joinpath(path.split("/")[-1]).read_text().strip()
+
+
+def _winning_day_utc():
+    from datetime import timezone
+    day = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    bars = []
+    t = day.replace(hour=13, minute=30)  # 09:30 NY
+    for _ in range(15):
+        bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 101, 102, 100, 101, 1000.0)); t += timedelta(minutes=1)
+    for _ in range(5):
+        bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103, 103.3, 102.8, 103, 1000.0)); t += timedelta(minutes=1)
+    bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103.1, 103.3, 103.0, 103.2, 1000.0)); t += timedelta(minutes=1)
+    bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 103.6, 105.0, 103.5, 104.9, 1000.0)); t += timedelta(minutes=1)
+    for _ in range(20):
+        bars.append(Candle("QQQ", "1m", t, t + timedelta(minutes=1), 105, 110, 105, 110, 1000.0)); t += timedelta(minutes=1)
+    return bars
+
+
+def _flat_day(symbol="QQQ", day=datetime(2026, 6, 2)):
+    bars = []
+    t = day.replace(hour=9, minute=30)
+    for _ in range(40):
+        bars.append(Candle(symbol, "1m", t, t + timedelta(minutes=1), 100, 100, 100, 100, 1000.0)); t += timedelta(minutes=1)
+    return bars
+
+
+def test_by_hour_normalized_to_ny():
+    report = run_backtest(_winning_day_utc(), OpeningRangeConfig())
+    assert report["total_trades"] == 1
+    # 09:30 NY session: entry hour buckets to NY (9), not UTC (13/14).
+    assert "9" in report["by_hour"]
+    assert "13" not in report["by_hour"] and "14" not in report["by_hour"]
+
+
+def test_commission_sensitivity_uses_net_r():
+    report = run_backtest(_winning_day(), OpeningRangeConfig())
+    assert "avg_net_r" in report
+    assert report["commission_sensitivity_r"] > 0
+
+
+def test_no_trade_reasons_collected():
+    report = run_backtest(_flat_day(), OpeningRangeConfig())
+    assert report["total_trades"] == 0
+    assert sum(report["no_trade_reasons"].values()) > 0
