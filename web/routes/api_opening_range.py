@@ -27,6 +27,7 @@ from autonomous.orb_proposals import (
     ExpiryReason,
     ORBProposalStore,
     ProposalError,
+    ProposalNotFoundError,
 )
 
 logger = logging.getLogger(__name__)
@@ -353,8 +354,10 @@ def skip_orb_proposal(proposal_id):
     try:
         proposal = get_proposal_store().skip(proposal_id, reason=data.get("reason"))
         return jsonify(proposal.to_dict())
-    except ProposalError as exc:
-        return jsonify({"error": str(exc)}), 404 if "not found" in str(exc) else 400
+    except ProposalNotFoundError:
+        return jsonify({"error": "not found"}), 404
+    except ProposalError:
+        return jsonify({"error": "cannot skip proposal in its current state"}), 400
 
 
 @orb_bp.route("/proposals/<proposal_id>/expire", methods=["POST"])
@@ -367,5 +370,7 @@ def expire_orb_proposal(proposal_id):
     try:
         proposal = get_proposal_store().expire(proposal_id, reason=reason)
         return jsonify(proposal.to_dict())
-    except ProposalError as exc:
-        return jsonify({"error": str(exc)}), 404 if "not found" in str(exc) else 400
+    except ProposalNotFoundError:
+        return jsonify({"error": "not found"}), 404
+    except ProposalError:
+        return jsonify({"error": "cannot expire proposal in its current state"}), 400

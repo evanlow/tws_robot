@@ -70,6 +70,10 @@ class ProposalError(ValueError):
     """Raised when a proposal cannot be created or transitioned safely."""
 
 
+class ProposalNotFoundError(ProposalError):
+    """Raised when a referenced proposal id does not exist in the store."""
+
+
 # Gate names that must pass for a proposal to be considered executable later.
 # ``spread_acceptable`` is intentionally excluded because it is only meaningful
 # when live quote data is available (it may be ``None``).
@@ -402,7 +406,7 @@ class ORBProposalStore:
     def _require(self, proposal_id: str) -> ORBProposal:
         proposal = self._proposals.get(proposal_id)
         if proposal is None:
-            raise ProposalError(f"proposal '{proposal_id}' not found")
+            raise ProposalNotFoundError(f"proposal '{proposal_id}' not found")
         return proposal
 
     def _log(self, action: str, proposal: ORBProposal, extra: Dict[str, Any]) -> None:
