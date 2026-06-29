@@ -409,9 +409,11 @@ class ORBProposalStore:
                 raise ProposalError(
                     f"cannot skip a proposal in status '{proposal.status}'"
                 )
+            first_transition = proposal.status != ProposalStatus.SKIPPED.value
             proposal.status = ProposalStatus.SKIPPED.value
             proposal.skip_reason = reason or ""
-        self._log("proposal_skipped", proposal, {"reason": proposal.skip_reason})
+            if first_transition:
+                self._log("proposal_skipped", proposal, {"reason": proposal.skip_reason})
         return proposal
 
     def expire(
@@ -446,7 +448,16 @@ class ORBProposalStore:
                 and _is_past(p.expires_at, moment)
             ]
         for proposal in due:
-            expired.append(self.expire(proposal.proposal_id, ExpiryReason.ENTRY_CUTOFF))
+            try:
+                expired.append(self.expire(proposal.proposal_id, ExpiryReason.ENTRY_CUTOFF))
+            except ProposalError:
+                # Another thread may have already transitioned this proposal
+                # (e.g., to SKIPPED) between the snapshot above and this call.
+                # This is expected under concurrent usage; skip it silently.
+                logger.debug(
+                    "expire_due: skipping proposal %s — already transitioned",
+                    proposal.proposal_id,
+                )
         return expired
 
     # ---- helpers -----------------------------------------------------

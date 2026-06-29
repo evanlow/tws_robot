@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from flask import Blueprint, current_app, jsonify, render_template, request
+from flask import Blueprint, current_app, has_app_context, jsonify, render_template, request
 
 from autonomous.opening_range import Candle, OpeningRangeConfig
 from autonomous.orb_backtest_reports import (
@@ -48,7 +48,7 @@ def get_manager() -> ORBSessionManager:
     """
     global _manager
     if _manager is None:
-        cfg = current_app.config if current_app else {}
+        cfg = current_app.config if has_app_context() else {}
         _manager = ORBSessionManager(
             config_dir=cfg.get("orb_config_dir", "config"),
             evidence_dir=cfg.get("orb_evidence_dir", "logs"),
@@ -64,7 +64,7 @@ def get_proposal_store() -> ORBProposalStore:
     """
     global _proposal_store
     if _proposal_store is None:
-        cfg = current_app.config if current_app else {}
+        cfg = current_app.config if has_app_context() else {}
         _proposal_store = ORBProposalStore(log_dir=cfg.get("orb_evidence_dir", "logs"))
     return _proposal_store
 
