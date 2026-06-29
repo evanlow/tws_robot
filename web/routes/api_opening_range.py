@@ -447,14 +447,15 @@ def execute_orb_proposal_paper(proposal_id):
             "error": "unknown strategy",
             "detail": f"no ORB strategy named '{proposal.strategy_name}'",
         }), 400
-    if str(rec.get("mode")) != ORBMode.PAPER_AUTONOMOUS.value:
+    mode = getattr(rec.get("mode"), "value", rec.get("mode"))
+    if mode != ORBMode.PAPER_AUTONOMOUS.value:
         return jsonify({
             "error": "paper_autonomous mode required",
             "detail": (
                 "ORB paper execution requires the strategy to be in "
                 "paper_autonomous mode; recommend-only never submits orders"
             ),
-            "mode": rec.get("mode"),
+            "mode": mode,
         }), 400
 
     try:
@@ -465,10 +466,14 @@ def execute_orb_proposal_paper(proposal_id):
         )
         return jsonify(trade.to_dict()), 201
     except ORBExecutionBlocked as exc:
-        return jsonify({"error": "execution blocked", "reason": exc.reason.value,
-                        "detail": str(exc)}), 409
+        # Surface the structured block reason only; the exception message is
+        # logged server-side rather than returned to avoid leaking internals.
+        logger.info("ORB paper execution blocked (%s): %s", exc.reason.value, exc)
+        return jsonify({"error": "execution blocked",
+                        "reason": exc.reason.value}), 409
     except ORBExecutionError as exc:
-        return jsonify({"error": "cannot execute proposal", "detail": str(exc)}), 400
+        logger.info("ORB paper execution rejected: %s", exc)
+        return jsonify({"error": "cannot execute proposal"}), 400
 
 
 @orb_bp.route("/trades", methods=["GET"])
