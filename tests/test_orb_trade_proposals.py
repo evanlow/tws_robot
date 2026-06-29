@@ -275,6 +275,7 @@ def test_add_rejects_short_direction(tmp_path):
     p.direction = ORBDirection.SHORT.value
     with pytest.raises(ProposalError):
         store.add(p)
+    assert store.get(p.proposal_id) is None
 
 
 def test_add_rejects_non_pending_status(tmp_path):
@@ -283,6 +284,7 @@ def test_add_rejects_non_pending_status(tmp_path):
     p.status = ProposalStatus.EXECUTED.value
     with pytest.raises(ProposalError):
         store.add(p)
+    assert store.get(p.proposal_id) is None
 
 
 def test_add_rejects_invalid_stop_target(tmp_path):
@@ -296,4 +298,6 @@ def test_add_rejects_invalid_stop_target(tmp_path):
     p2.target_price = 0.0  # missing target
     with pytest.raises(ProposalError):
         store.add(p2)
+    assert store.get(p.proposal_id) is None
+    assert store.get(p2.proposal_id) is None
 

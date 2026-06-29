@@ -72,8 +72,6 @@ def test_status_lists_locked_modes(client):
 # ---- recommend-only proposals (Phase 2.4, #208) -------------------------
 def _seed_proposal(symbol="QQQ", strategy="ORB1", expires_at=None):
     """Build and store a recommend-only proposal in the API singleton store."""
-    from datetime import datetime, timezone
-
     from autonomous.opening_range import (
         BreakoutConfirmation,
         Candle,
