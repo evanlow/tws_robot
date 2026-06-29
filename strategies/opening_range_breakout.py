@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, fields
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -37,6 +37,12 @@ from autonomous.opening_range import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Fixed nominal confidence for ORB proposals. ORB setups are gated by the
+# deterministic state machine (range/confirmation/model rules) rather than a
+# probabilistic score, so a single moderate value is used; downstream sizing
+# and the proposal engine apply their own risk gating.
+ORB_SIGNAL_CONFIDENCE = 0.7
 
 
 class ORBRuntimeState(str, Enum):
@@ -201,11 +207,10 @@ class OpeningRangeBreakoutStrategy(BaseStrategy):
         ts = bar.get("timestamp") or bar.get("start")
         if ts is None:
             return None
-        start = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
-        end = bar.get("end") or bar.get("end_time")
-        from datetime import timedelta
-        end_dt = end if isinstance(end, datetime) else start + timedelta(minutes=1)
         try:
+            start = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
+            end = bar.get("end") or bar.get("end_time")
+            end_dt = end if isinstance(end, datetime) else start + timedelta(minutes=1)
             return Candle(
                 symbol=symbol,
                 timeframe=bar.get("timeframe", "1m"),
@@ -218,7 +223,8 @@ class OpeningRangeBreakoutStrategy(BaseStrategy):
                 volume=float(bar.get("volume", 0.0)),
                 is_closed=bool(bar.get("is_closed", True)),
             )
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.warning("ORB: skipping malformed bar for %s: %s", symbol, exc)
             return None
 
     def _emit_signal(self, setup: ORBSetup, proposal: ORBTradeProposal) -> Signal:
@@ -244,7 +250,7 @@ class OpeningRangeBreakoutStrategy(BaseStrategy):
                 "evidence": proposal.evidence,
             },
             strategy_name=self.config.name,
-            confidence=0.7,
+            confidence=ORB_SIGNAL_CONFIDENCE,
         )
         self.signals_to_emit.append(signal)
         self.generate_signal(signal)
