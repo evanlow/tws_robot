@@ -145,6 +145,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
     from web.routes.api_autonomous_evidence import bp as api_autonomous_evidence_bp
     from web.routes.api_maintenance import bp as api_maintenance_bp
     from web.routes.api_opening_range import bp as api_opening_range_bp
+    from web.routes.api_opening_range import orb_bp as api_orb_bp
 
     # Patch the default autonomous market provider so the existing SPY gate
     # receives VIX values as an additional regime/sizing safeguard. Operator
@@ -160,7 +161,7 @@ def create_app(config_override: dict | None = None) -> "Flask":
         api_market_events_bp, api_stock_analysis_bp, api_sp500_screener_bp,
         api_sti_screener_bp, api_hsi_screener_bp, api_autonomous_bp,
         api_trading_readiness_bp, api_autonomous_evidence_bp,
-        api_maintenance_bp, api_opening_range_bp,
+        api_maintenance_bp, api_opening_range_bp, api_orb_bp,
     ]
     for api_bp in api_blueprints:
         app.register_blueprint(api_bp)

@@ -126,3 +126,18 @@ Model C disabled. Runtime strategy, autonomous adapter, and live-readiness gates
 are follow-up PRs (Phases 2–4). No order execution, dashboard UI, live-readiness
 gate, or forex/futures support in the Phase 2.1 candle layer. No automatic
 parameter optimization.
+
+## Dashboard configuration & session controls (Phase 2.3, #207)
+
+`/opening-range/` is a trader-facing page to create/edit an ORB strategy, pick a
+mode, and arm/disarm a session. Config persists to `config/orb_strategies.json`
+(survives restart). Modes: off, backtest_only, recommend_only, paper_autonomous;
+tiny_live_candidate and assisted_live are **locked** and can never arm. Paper
+autonomous cannot arm unless paper-readiness gates pass (a saved
+`READY_FOR_PAPER` backtest evidence record exists for a symbol); recommend-only
+may arm with missing execution gates, which the dashboard shows. Arm, disarm,
+disable-today, and emergency-stop are audit logged. No orders are placed.
+
+```bash
+python -m pytest tests/test_orb_session_manager.py tests/test_orb_session_api.py
+```
