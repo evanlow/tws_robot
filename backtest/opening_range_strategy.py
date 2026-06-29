@@ -35,6 +35,14 @@ class ORBTradeResult:
     quantity: int
     r_multiple: float
     pnl: float
+    entry_time: Optional[datetime] = None
+    exit_time: Optional[datetime] = None
+
+    @property
+    def hold_minutes(self) -> Optional[float]:
+        if self.entry_time is None or self.exit_time is None:
+            return None
+        return (self.exit_time - self.entry_time).total_seconds() / 60.0
 
 
 @dataclass
@@ -161,23 +169,29 @@ class OpeningRangeBacktest:
         tz = self.config.tzinfo()
         exit_price = setup.entry_price
         exit_reason = "session_end"
+        entry_bar = bars[entry_idx]
+        exit_bar = bars[-1]
         for j in range(entry_idx + 1, len(bars)):
             b = bars[j]
             if b.low <= setup.stop_price:
                 exit_price = setup.stop_price
                 exit_reason = "stop"
+                exit_bar = b
                 break
             if b.high >= setup.target_price:
                 exit_price = setup.target_price
                 exit_reason = "target"
+                exit_bar = b
                 break
             bar_t = (b.start.astimezone(tz) if b.start.tzinfo is not None else b.start).time()
             if bar_t >= force_flat:
                 exit_price = b.close
                 exit_reason = "force_flat"
+                exit_bar = b
                 break
         else:
             exit_price = bars[-1].close
+            exit_bar = bars[-1]
         gross = (exit_price - setup.entry_price) * qty
         commission = self.commission_per_share * qty * 2
         pnl = gross - commission
@@ -196,4 +210,6 @@ class OpeningRangeBacktest:
             quantity=qty,
             r_multiple=round(r, 4),
             pnl=round(pnl, 2),
+            entry_time=entry_bar.start,
+            exit_time=exit_bar.start,
         )

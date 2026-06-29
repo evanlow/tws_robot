@@ -50,10 +50,28 @@ timestamps are assumed to already be NY local time.
 python -m pytest tests/test_opening_range_models.py \
   tests/test_opening_range_aggregation.py \
   tests/test_opening_range_state_machine.py \
-  tests/test_opening_range_backtest.py
+  tests/test_opening_range_backtest.py \
+  tests/test_orb_backtest_reports.py \
+  tests/test_opening_range_api.py
 ```
+
+## Phase 1.5: Backtest lab, sweeps, and readiness (Issue #214)
+
+A trader can run ORB backtests, parameter sweeps, classify readiness, and save
+evidence without writing Python:
+
+- `autonomous/orb_backtest_reports.py`: full report fields (total trades, win
+  rate, avg/median R, total P&L, profit factor, max drawdown in R, avg hold
+  time, per-model/symbol/time-of-day buckets, slippage/commission sensitivity,
+  no-trade reasons), `run_sweep`, conservative `classify_readiness`
+  (`READY_FOR_PAPER` / `NEEDS_MORE_DATA` / `DO_NOT_TRADE`), and `save_evidence`.
+- `web/routes/api_opening_range.py`: `POST /api/opening-range/backtest/{run,
+  sweep,save-evidence}` plus the `/opening-range/backtest` page. Backtest-only —
+  no TWS connection, no live/paper orders. Inline candles allow deterministic
+  runs; yfinance fetch is optional. Promotion to paper requires saved evidence.
 
 ## Limitations
 
 Model C disabled. Runtime strategy, candle provider, autonomous adapter, and
-live-readiness gates are follow-up PRs (Phases 2–4).
+live-readiness gates are follow-up PRs (Phases 2–4). No automatic parameter
+optimization.
