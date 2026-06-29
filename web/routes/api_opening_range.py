@@ -342,7 +342,10 @@ def list_orb_proposals():
 
 @orb_bp.route("/proposals/<proposal_id>", methods=["GET"])
 def get_orb_proposal(proposal_id):
-    proposal = get_proposal_store().get(proposal_id)
+    store = get_proposal_store()
+    # Self-heal: surface a past-cutoff proposal as expired even on a direct read.
+    store.expire_due()
+    proposal = store.get(proposal_id)
     if proposal is None:
         return jsonify({"error": "not found"}), 404
     return jsonify(proposal.to_dict())

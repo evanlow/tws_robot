@@ -293,6 +293,46 @@ def build_proposal(
     )
 
 
+def _validate_proposal(proposal: ORBProposal) -> None:
+    """Re-validate a pre-built proposal's safety invariants before storing.
+
+    Mirrors the guarantees of :func:`build_proposal` so that a proposal can
+    never be stored or audit-logged unless it is a recommend-only, long-only,
+    marketable-limit card with a valid ``stop < entry < target`` relationship
+    and consistent stop/target gates. Raises :class:`ProposalError` otherwise.
+    """
+    if proposal.recommend_only is not True:
+        raise ProposalError("proposal must be recommend-only")
+    if proposal.order_type != ORDER_TYPE_LIMIT:
+        raise ProposalError(
+            f"proposal order_type must be {ORDER_TYPE_LIMIT}, "
+            f"not a raw market order"
+        )
+    if proposal.direction != ORBDirection.LONG.value:
+        raise ProposalError("only long-side ORB proposals are supported")
+    if proposal.status != ProposalStatus.PENDING.value:
+        raise ProposalError(
+            f"a newly added proposal must be PENDING, not '{proposal.status}'"
+        )
+    if not (proposal.stop_price > 0):
+        raise ProposalError("proposal requires a positive stop price")
+    if not (proposal.entry_price > 0):
+        raise ProposalError("proposal requires a positive entry price")
+    if not (proposal.target_price > 0):
+        raise ProposalError("proposal requires a positive target price")
+    if not (proposal.stop_price < proposal.entry_price < proposal.target_price):
+        raise ProposalError(
+            "proposal requires stop < entry < target for a long setup"
+        )
+    # The stop/target gates must not claim a price the proposal does not carry.
+    if proposal.gates.stop_present and not (proposal.stop_price > 0):
+        raise ProposalError("stop_present gate set without a valid stop price")
+    if proposal.gates.target_present and not (proposal.target_price > 0):
+        raise ProposalError(
+            "target_present gate set without a valid target price"
+        )
+
+
 class ORBProposalStore:
     """In-memory store of recommend-only ORB proposals with an audit trail.
 
@@ -322,7 +362,14 @@ class ORBProposalStore:
         return proposal
 
     def add(self, proposal: ORBProposal) -> ORBProposal:
-        """Store a pre-built proposal and audit-log its creation."""
+        """Store a pre-built proposal and audit-log its creation.
+
+        Re-validates the proposal's safety invariants before storing so that
+        integration code can never inject an unsafe card (raw market order,
+        non-recommend-only, short direction, missing/invalid stop/target, or a
+        non-pending status) into the store or audit trail.
+        """
+        _validate_proposal(proposal)
         with self._lock:
             self._proposals[proposal.proposal_id] = proposal
         self._log("proposal_created", proposal, {})

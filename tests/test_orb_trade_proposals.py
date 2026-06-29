@@ -235,3 +235,65 @@ def test_list_filters(tmp_path):
     assert len(store.list(symbol="QQQ")) == 1
     assert len(store.list(strategy_name="ORB2")) == 1
     assert len(store.list(status=ProposalStatus.PENDING.value)) == 2
+
+
+# ---- add() re-validates safety invariants -------------------------------
+def _valid_proposal():
+    return build_proposal(_setup(), strategy_name="ORB1",
+                          session_date="2026-06-01", orb_state="X",
+                          gates=ProposalGates())
+
+
+def test_add_accepts_valid_proposal(tmp_path):
+    store = _store(tmp_path)
+    p = _valid_proposal()
+    assert store.add(p) is p
+    assert store.get(p.proposal_id) is p
+
+
+def test_add_rejects_non_limit_order_type(tmp_path):
+    store = _store(tmp_path)
+    p = _valid_proposal()
+    p.order_type = "MKT"
+    with pytest.raises(ProposalError):
+        store.add(p)
+    assert store.get(p.proposal_id) is None
+
+
+def test_add_rejects_not_recommend_only(tmp_path):
+    store = _store(tmp_path)
+    p = _valid_proposal()
+    p.recommend_only = False
+    with pytest.raises(ProposalError):
+        store.add(p)
+    assert store.get(p.proposal_id) is None
+
+
+def test_add_rejects_short_direction(tmp_path):
+    store = _store(tmp_path)
+    p = _valid_proposal()
+    p.direction = ORBDirection.SHORT.value
+    with pytest.raises(ProposalError):
+        store.add(p)
+
+
+def test_add_rejects_non_pending_status(tmp_path):
+    store = _store(tmp_path)
+    p = _valid_proposal()
+    p.status = ProposalStatus.EXECUTED.value
+    with pytest.raises(ProposalError):
+        store.add(p)
+
+
+def test_add_rejects_invalid_stop_target(tmp_path):
+    store = _store(tmp_path)
+    p = _valid_proposal()
+    p.stop_price = p.entry_price + 1.0  # stop no longer below entry
+    with pytest.raises(ProposalError):
+        store.add(p)
+
+    p2 = _valid_proposal()
+    p2.target_price = 0.0  # missing target
+    with pytest.raises(ProposalError):
+        store.add(p2)
+

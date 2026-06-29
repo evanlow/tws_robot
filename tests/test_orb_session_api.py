@@ -1,6 +1,7 @@
 """Tests for ORB session control API (web/routes/api_opening_range.py, #207)."""
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 
@@ -69,7 +70,7 @@ def test_status_lists_locked_modes(client):
 
 
 # ---- recommend-only proposals (Phase 2.4, #208) -------------------------
-def _seed_proposal(symbol="QQQ", strategy="ORB1"):
+def _seed_proposal(symbol="QQQ", strategy="ORB1", expires_at=None):
     """Build and store a recommend-only proposal in the API singleton store."""
     from datetime import datetime, timezone
 
@@ -97,6 +98,7 @@ def _seed_proposal(symbol="QQQ", strategy="ORB1"):
     return api.get_proposal_store().create_from_setup(
         setup, strategy_name=strategy, session_date="2026-06-01",
         orb_state="PROPOSAL_READY", gates=ProposalGates(),
+        expires_at=expires_at,
     )
 
 
@@ -114,6 +116,19 @@ def test_proposals_list_and_get(client):
 
 def test_proposal_get_missing_404(client):
     assert client.get("/api/orb/proposals/nope").status_code == 404
+
+
+def test_proposal_get_auto_expires_past_cutoff(client):
+    # A proposal whose entry cutoff has already passed must self-heal to EXPIRED
+    # even on a direct single-proposal read, not just via the list endpoint.
+    past = datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat()
+    with client.application.app_context():
+        proposal = _seed_proposal(expires_at=past)
+    got = client.get(f"/api/orb/proposals/{proposal.proposal_id}")
+    assert got.status_code == 200
+    body = got.get_json()
+    assert body["status"] == "EXPIRED"
+    assert body["expiry_reason"] == "entry_cutoff"
 
 
 def test_proposal_skip_endpoint(client):
