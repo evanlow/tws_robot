@@ -9,7 +9,7 @@ explicit, audit-logged override) enforced elsewhere.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from flask import Blueprint, jsonify, render_template, request
@@ -99,11 +99,12 @@ def _fetch_candles(symbols, start, end) -> List[Candle]:
 
 
 def _load_candles(data: dict) -> List[Candle]:
+    candles: List[Candle] = []
     if data.get("candles"):
         return _candles_from_inline(data["candles"])
     symbols = data.get("symbols") or ["QQQ", "SPY"]
-    start = data.get("start") or (datetime.utcnow() - timedelta(days=5)).strftime("%Y-%m-%d")
-    end = data.get("end") or datetime.utcnow().strftime("%Y-%m-%d")
+    start = data.get("start") or (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
+    end = data.get("end") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return _fetch_candles(symbols, start, end)
 
 
@@ -122,7 +123,8 @@ def run():
     try:
         candles = _load_candles(data)
     except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 400
+        logger.warning("ORB backtest data load failed: %s", exc)
+        return jsonify({"error": "could not load candle data"}), 400
     cfg = _config_from(data)
     equity = float(data.get("equity", 100_000.0))
     commission = float(data.get("commission_per_share", 0.005))
@@ -137,7 +139,8 @@ def sweep():
     try:
         candles = _load_candles(data)
     except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 400
+        logger.warning("ORB sweep data load failed: %s", exc)
+        return jsonify({"error": "could not load candle data"}), 400
     cfg = _config_from(data)
     grid = data.get("sweep") or {}
     results = run_sweep(

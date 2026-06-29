@@ -10,6 +10,7 @@ from autonomous.orb_backtest_reports import (
     NEEDS_MORE_DATA,
     READY_FOR_PAPER,
     ReadinessCriteria,
+    _model_label,
     build_report,
     classify_readiness,
     run_backtest,
@@ -52,6 +53,12 @@ def test_run_backtest_report_fields():
     assert report["total_trades"] == 1
     assert "MODEL_A" in report["by_model"]
     assert "QQQ" in report["by_symbol"]
+
+
+def test_model_label_buckets():
+    assert _model_label("MODEL_A_DISPLACEMENT_GAP") == "MODEL_A"
+    assert _model_label("MODEL_B_BREAK_RETEST") == "MODEL_B"
+    assert _model_label("MODEL_C_REVERSAL") == "MODEL_C_REVERSAL"
 
 
 def test_profit_factor_and_drawdown():

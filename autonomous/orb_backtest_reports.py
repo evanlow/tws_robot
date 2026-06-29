@@ -31,6 +31,9 @@ from backtest.opening_range_strategy import (
 
 SCHEMA_VERSION = 1
 
+# Default per-share commission used as a sensitivity bump floor.
+DEFAULT_COMMISSION_PER_SHARE = 0.005
+
 # Readiness statuses.
 READY_FOR_PAPER = "READY_FOR_PAPER"
 NEEDS_MORE_DATA = "NEEDS_MORE_DATA"
@@ -174,8 +177,9 @@ def run_backtest(
     slip_sens = base_avg - _avg([t.r_multiple for t in slip_res.trades])
 
     # Commission sensitivity: double commission and measure avg-R degradation.
+    bumped_commission = commission_per_share * 2 + DEFAULT_COMMISSION_PER_SHARE
     comm_res = OpeningRangeBacktest(cfg, equity=equity,
-                                    commission_per_share=commission_per_share * 2 + 0.005).run(list(candles_1m))
+                                    commission_per_share=bumped_commission).run(list(candles_1m))
     comm_sens = base_avg - _avg([t.r_multiple for t in comm_res.trades])
 
     return build_report(

@@ -10,8 +10,8 @@ from web import create_app
 def _inline_candles(symbol="QQQ", day=datetime(2026, 6, 1)):
     rows = []
     t = day.replace(hour=9, minute=30)
-    def add(o, h, l, c):
-        rows.append({"symbol": symbol, "start": t.isoformat(), "open": o, "high": h, "low": l, "close": c, "volume": 1000})
+    def add(o, h, low, c):
+        rows.append({"symbol": symbol, "start": t.isoformat(), "open": o, "high": h, "low": low, "close": c, "volume": 1000})
     for _ in range(15):
         add(101, 102, 100, 101); t += timedelta(minutes=1)
     for _ in range(5):
