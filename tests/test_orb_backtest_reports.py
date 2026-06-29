@@ -143,3 +143,11 @@ def test_no_trade_reasons_collected():
     report = run_backtest(_flat_day(), OpeningRangeConfig())
     assert report["total_trades"] == 0
     assert sum(report["no_trade_reasons"].values()) > 0
+
+
+def test_profit_factor_unbounded_is_json_safe():
+    import json
+    report = build_report(_fake_result([1] * 5))  # all winners, no losses
+    assert report["profit_factor"] is None
+    assert report["profit_factor_unbounded"] is True
+    json.dumps(report)  # must not raise; no Infinity tokens

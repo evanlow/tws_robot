@@ -79,7 +79,7 @@ async function orbRun(){
   document.getElementById('orbResults').innerHTML=`<h2>Readiness: ${badge(d.readiness.status)}</h2>
     <p>${(d.readiness.reasons||[]).join('; ')}</p>
     <p>Trades ${r.total_trades} · Win ${(r.win_rate*100).toFixed(1)}% · Avg R ${r.avg_r} · Net R ${r.avg_net_r} · Median R ${r.median_r}
-    · P&L ${r.total_pnl} · PF ${r.profit_factor} · MaxDD ${r.max_drawdown_r}R · Hold ${r.avg_hold_minutes}m</p>
+    · P&L ${r.total_pnl} · PF ${r.profit_factor_unbounded?'∞':r.profit_factor} · MaxDD ${r.max_drawdown_r}R · Hold ${r.avg_hold_minutes}m</p>
     <pre style="overflow:auto;">${JSON.stringify(r, null, 2)}</pre>`;
 }
 async function orbSweep(){

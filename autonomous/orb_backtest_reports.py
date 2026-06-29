@@ -60,12 +60,17 @@ class ReadinessCriteria:
         }
 
 
-def _profit_factor(trades: Sequence[ORBTradeResult]) -> float:
+def _profit_factor(trades: Sequence[ORBTradeResult]) -> Optional[float]:
+    """Gross profit / gross loss, JSON-safe.
+
+    Returns ``None`` (serialized as null, paired with ``profit_factor_unbounded``)
+    when there are gains but no losses, so reports stay valid JSON for ``fetch``.
+    """
     gains = sum(t.pnl for t in trades if t.pnl > 0)
     losses = -sum(t.pnl for t in trades if t.pnl < 0)
     if losses <= 0:
-        return float("inf") if gains > 0 else 0.0
-    return gains / losses
+        return None if gains > 0 else 0.0
+    return round(gains / losses, 4)
 
 
 def _max_drawdown_r(trades: Sequence[ORBTradeResult]) -> float:
@@ -100,13 +105,15 @@ def _bucket(trades: Sequence[ORBTradeResult]) -> dict:
     n = len(trades)
     rs = [t.r_multiple for t in trades]
     holds = [t.hold_minutes for t in trades if t.hold_minutes is not None]
+    pf = _profit_factor(trades)
     return {
         "trades": n,
         "win_rate": (sum(1 for t in trades if t.pnl > 0) / n) if n else 0.0,
         "total_pnl": round(sum(t.pnl for t in trades), 2),
         "avg_r": round(_avg(rs), 4),
         "median_r": round(_median(rs), 4),
-        "profit_factor": _profit_factor(trades),
+        "profit_factor": pf,
+        "profit_factor_unbounded": pf is None,
         "max_drawdown_r": _max_drawdown_r(trades),
         "avg_hold_minutes": round(_avg(holds), 2),
     }
@@ -150,6 +157,7 @@ def build_report(
             by_hour[ny.hour].append(t)
 
     reasons = Counter(no_trade_reasons or [])
+    pf = _profit_factor(trades)
 
     return {
         "total_trades": len(trades),
@@ -158,7 +166,8 @@ def build_report(
         "median_r": round(_median(rs), 4),
         "avg_net_r": round(_avg(net_rs), 4),
         "total_pnl": round(result.total_pnl, 2),
-        "profit_factor": _profit_factor(trades),
+        "profit_factor": pf,
+        "profit_factor_unbounded": pf is None,
         "max_drawdown_r": _max_drawdown_r(trades),
         "avg_hold_minutes": round(_avg(holds), 2),
         "by_model": {m: _bucket(ts) for m, ts in by_model.items()},

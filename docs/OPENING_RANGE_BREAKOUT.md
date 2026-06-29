@@ -66,7 +66,8 @@ evidence without writing Python:
   normalized, slippage/commission sensitivity in net R, no-trade reasons surfaced
   from session rejections), `run_sweep`, conservative `classify_readiness`
   (`READY_FOR_PAPER` / `NEEDS_MORE_DATA` / `DO_NOT_TRADE`; gates on net R), and
-  `save_evidence`.
+  `save_evidence`. Profit factor is JSON-safe: `null` + `profit_factor_unbounded`
+  true when there are gains but no losses.
 - `web/routes/api_opening_range.py`: `POST /api/opening-range/backtest/{run,
   sweep,save-evidence}` plus the `/opening-range/backtest` page. Backtest-only —
   no TWS connection, no live/paper orders. Inline candles allow deterministic
