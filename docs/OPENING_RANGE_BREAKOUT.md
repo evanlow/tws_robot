@@ -73,8 +73,33 @@ evidence without writing Python:
   no TWS connection, no live/paper orders. Inline candles allow deterministic
   runs; yfinance fetch is optional. Promotion to paper requires saved evidence.
 
+## Phase 2.1: Runtime candle provider and closed-candle aggregation (Issue #205)
+
+The runtime data layer needed before ORB can run in recommend-only or
+paper-autonomous mode. It is broker-free and places no orders:
+
+- `autonomous/candle_aggregator.py`: `CandleDataStatus` health enum, NY
+  normalization (`normalize_to_ny`, preserving UTC for storage/audit), 1m
+  sequence quality classification (`assess_one_minute_quality` /
+  `is_contiguous` — detects duplicate, out-of-order, and missing bars), and
+  `closed_aggregates` which builds closed 5m/15m candles only from complete,
+  contiguous 1m groups. Forming candles are excluded.
+- `autonomous/candle_data_provider.py`: `CandleDataProvider` protocol and an
+  in-memory `RuntimeCandleProvider` (`subscribe_candles`, `latest_closed_candle`,
+  `recent_closed_candles`, `status`). It produces closed 1m candles for a symbol
+  whitelist, aggregates 5m/15m on demand, marks data degraded when missing,
+  duplicate, out-of-order, stale, or forming-only, supports session `backfill`
+  for restart recovery, and exposes per-symbol health (UTC + NY timestamps) for
+  the future dashboard/API. A forming candle is never returned as closed.
+
+```bash
+python -m pytest tests/test_orb_runtime_candle_aggregation.py \
+  tests/test_orb_runtime_candle_provider.py
+```
+
 ## Limitations
 
-Model C disabled. Runtime strategy, candle provider, autonomous adapter, and
-live-readiness gates are follow-up PRs (Phases 2–4). No automatic parameter
-optimization.
+Model C disabled. Runtime strategy, autonomous adapter, and live-readiness gates
+are follow-up PRs (Phases 2–4). No order execution, dashboard UI, live-readiness
+gate, or forex/futures support in the Phase 2.1 candle layer. No automatic
+parameter optimization.
