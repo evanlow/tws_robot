@@ -35,11 +35,20 @@ class ORBTradeResult:
     quantity: int
     r_multiple: float
     pnl: float
+    entry_time: Optional[datetime] = None
+    exit_time: Optional[datetime] = None
+
+    @property
+    def hold_minutes(self) -> Optional[float]:
+        if self.entry_time is None or self.exit_time is None:
+            return None
+        return (self.exit_time - self.entry_time).total_seconds() / 60.0
 
 
 @dataclass
 class ORBBacktestResult:
     trades: List[ORBTradeResult] = field(default_factory=list)
+    no_trade_reasons: List[str] = field(default_factory=list)
 
     @property
     def total_trades(self) -> int:
@@ -128,24 +137,27 @@ class OpeningRangeBacktest:
         # by actual setup time so the per-session cap selects the first eligible
         # ORB rather than the alphabetically-first symbol.
         candidates: Dict[object, list] = defaultdict(list)
+        sessions: Dict[tuple, OpeningRangeSession] = {}
         for (symbol, day), bars in by_day.items():
             bars.sort(key=lambda b: b.start)
             session = OpeningRangeSession(symbol, day.isoformat(), self.config)
+            sessions[(symbol, day)] = session
             for i, bar in enumerate(bars):
                 s = session.on_closed_1m(bar)
                 if s is not None:
-                    candidates[day].append((s, i, bars))
+                    candidates[day].append((symbol, s, i, bars))
                     break
 
         def _detected_key(item):
-            setup, _, _ = item  # item is (setup, entry_idx, bars)
+            _, setup, _, _ = item  # item is (symbol, setup, entry_idx, bars)
             dt = setup.detected_at
             return dt.astimezone(tz) if dt.tzinfo is not None else dt
 
+        traded: set = set()
         for day, items in candidates.items():
             items.sort(key=_detected_key)
             taken = 0
-            for setup, entry_idx, bars in items:
+            for symbol, setup, entry_idx, bars in items:
                 if max_per_session and taken >= max_per_session:
                     break
                 qty = _quantity(self.equity, setup.entry_price, setup.stop_price, self.config)
@@ -154,30 +166,44 @@ class OpeningRangeBacktest:
                 trade = self._simulate_exit(bars, entry_idx, setup, qty, force_flat)
                 if trade is not None:
                     result.trades.append(trade)
+                    traded.add((symbol, day))
                     taken += 1
+
+        # Surface session rejection/diagnostic reasons for (symbol, day) sessions
+        # that produced no trade so readiness can gate on no-data/invalid failures.
+        for (symbol, day), session in sessions.items():
+            if (symbol, day) in traded:
+                continue
+            result.no_trade_reasons.extend(session.rejections)
         return result
 
     def _simulate_exit(self, bars, entry_idx, setup, qty, force_flat) -> Optional[ORBTradeResult]:
         tz = self.config.tzinfo()
         exit_price = setup.entry_price
         exit_reason = "session_end"
+        entry_bar = bars[entry_idx]
+        exit_bar = bars[-1]
         for j in range(entry_idx + 1, len(bars)):
             b = bars[j]
             if b.low <= setup.stop_price:
                 exit_price = setup.stop_price
                 exit_reason = "stop"
+                exit_bar = b
                 break
             if b.high >= setup.target_price:
                 exit_price = setup.target_price
                 exit_reason = "target"
+                exit_bar = b
                 break
             bar_t = (b.start.astimezone(tz) if b.start.tzinfo is not None else b.start).time()
             if bar_t >= force_flat:
                 exit_price = b.close
                 exit_reason = "force_flat"
+                exit_bar = b
                 break
         else:
             exit_price = bars[-1].close
+            exit_bar = bars[-1]
         gross = (exit_price - setup.entry_price) * qty
         commission = self.commission_per_share * qty * 2
         pnl = gross - commission
@@ -196,4 +222,6 @@ class OpeningRangeBacktest:
             quantity=qty,
             r_multiple=round(r, 4),
             pnl=round(pnl, 2),
+            entry_time=entry_bar.start,
+            exit_time=exit_bar.start,
         )

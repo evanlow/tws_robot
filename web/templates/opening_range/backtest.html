@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p style="color:#a0aec0;font-size:0.85rem;">
+  Backtest-only research lab. No TWS connection and no live/paper orders are
+  placed here. Save evidence before promoting any configuration to paper.
+</p>
+
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;margin-bottom:0.75rem;">🧪 ORB Backtest Controls</h2>
+  <div style="max-width:760px;">
+    <div style="margin-bottom:0.75rem;">
+      <label class="form-label">Symbols (comma-separated)</label>
+      <input id="orbSymbols" class="form-input" value="{{ defaults.symbols|join(', ')|e }}" />
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;"><label class="form-label">Start Date</label><input id="orbStart" class="form-input" type="date" /></div>
+      <div style="flex:1;"><label class="form-label">End Date</label><input id="orbEnd" class="form-input" type="date" /></div>
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;"><label class="form-label">Model</label>
+        <select id="orbModel" class="form-input"><option value="AB">A + B</option><option value="A">Model A only</option><option value="B">Model B only</option></select></div>
+      <div style="flex:1;"><label class="form-label">Entry cutoff</label><input id="orbCutoff" class="form-input" value="{{ defaults.entry_cutoff_time }}" /></div>
+      <div style="flex:1;"><label class="form-label">Force-flat</label><input id="orbForceFlat" class="form-input" value="{{ defaults.force_flat_time }}" /></div>
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;"><label class="form-label">Continuation R/R</label><input id="orbRR" class="form-input" type="number" step="0.1" value="{{ defaults.continuation_rr }}" /></div>
+      <div style="flex:1;"><label class="form-label">Retest tol (bps)</label><input id="orbRetest" class="form-input" type="number" value="{{ defaults.retest_tolerance_bps }}" /></div>
+      <div style="flex:1;"><label class="form-label">Slippage (bps)</label><input id="orbSlip" class="form-input" type="number" value="{{ defaults.max_entry_slippage_bps }}" /></div>
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+      <div style="flex:1;"><label class="form-label">Commission/share</label><input id="orbComm" class="form-input" type="number" step="0.001" value="0.005" /></div>
+      <div style="flex:1;"><label class="form-label">Risk per trade %</label><input id="orbRisk" class="form-input" type="number" step="0.001" value="{{ defaults.risk_per_trade_equity_pct }}" /></div>
+      <div style="flex:1;"><label class="form-label">Max trades/session</label><input id="orbMaxTrades" class="form-input" type="number" value="{{ defaults.max_total_orb_trades_per_session }}" /></div>
+    </div>
+    <button class="btn-primary" onclick="orbRun()">Run Backtest</button>
+    <button class="btn-primary" onclick="orbSweep()">Run Sweep</button>
+    <button class="btn-primary" onclick="orbSave()">Save Evidence</button>
+    <span id="orbStatus" style="margin-left:1rem;color:#a0aec0;font-size:0.85rem;"></span>
+  </div>
+</section>
+
+<section><div id="orbResults"><p class="empty-state">No results yet.</p></div></section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let orbLastReport = null, orbLastReadiness = null;
+function orbBody() {
+  return {
+    symbols: document.getElementById('orbSymbols').value.split(',').map(s=>s.trim()).filter(Boolean),
+    start: document.getElementById('orbStart').value || null,
+    end: document.getElementById('orbEnd').value || null,
+    model: document.getElementById('orbModel').value,
+    entry_cutoff_time: document.getElementById('orbCutoff').value,
+    force_flat_time: document.getElementById('orbForceFlat').value,
+    continuation_rr: parseFloat(document.getElementById('orbRR').value),
+    retest_tolerance_bps: parseFloat(document.getElementById('orbRetest').value),
+    max_entry_slippage_bps: parseFloat(document.getElementById('orbSlip').value),
+    commission_per_share: parseFloat(document.getElementById('orbComm').value),
+    risk_per_trade_equity_pct: parseFloat(document.getElementById('orbRisk').value),
+    max_total_orb_trades_per_session: parseInt(document.getElementById('orbMaxTrades').value),
+  };
+}
+function csrf() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.content : '';
+}
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+async function orbPost(url, body) {
+  const headers = {'Content-Type':'application/json'};
+  const token = csrf();
+  if (token) headers['X-CSRFToken'] = token;
+  const res = await fetch(url, {method:'POST', headers, body:JSON.stringify(body)});
+  return res.json();
+}
+function badge(s){const c=s==='READY_FOR_PAPER'?'#48bb78':s==='DO_NOT_TRADE'?'#f56565':'#ecc94b';return `<span style="color:${c};font-weight:bold;">${escapeHtml(s)}</span>`;}
+async function orbRun(){
+  document.getElementById('orbStatus').textContent='Running…';
+  const d=await orbPost('/api/opening-range/backtest/run', orbBody());
+  document.getElementById('orbStatus').textContent='';
+  if(d.error){document.getElementById('orbResults').textContent='Error: '+d.error;return;}
+  orbLastReport=d.report; orbLastReadiness=d.readiness;
+  const r=d.report;
+  const reasons=(d.readiness.reasons||[]).map(escapeHtml).join('; ');
+  const reportJson=escapeHtml(JSON.stringify(r, null, 2));
+  document.getElementById('orbResults').innerHTML=`<h2>Readiness: ${badge(d.readiness.status)}</h2>
+    <p>${reasons}</p>
+    <p>Trades ${r.total_trades} · Win ${(r.win_rate*100).toFixed(1)}% · Avg R ${r.avg_r} · Net R ${r.avg_net_r} · Median R ${r.median_r}
+    · P&L ${r.total_pnl} · PF ${r.profit_factor_unbounded?'∞':r.profit_factor} · MaxDD ${r.max_drawdown_r}R · Hold ${r.avg_hold_minutes}m</p>
+    <pre style="overflow:auto;">${reportJson}</pre>`;
+}
+async function orbSweep(){
+  document.getElementById('orbStatus').textContent='Sweeping…';
+  const b=orbBody(); b.sweep={entry_cutoff_time:['10:30','11:00','11:30'],continuation_rr:[1.5,2.0,2.5]};
+  const d=await orbPost('/api/opening-range/backtest/sweep', b);
+  document.getElementById('orbStatus').textContent='';
+  if(d.error){document.getElementById('orbResults').textContent='Error: '+d.error;return;}
+  const resultsJson=escapeHtml(JSON.stringify(d.results,null,2));
+  document.getElementById('orbResults').innerHTML=`<h2>Sweep (${d.count})</h2><pre style="overflow:auto;">${resultsJson}</pre>`;
+}
+async function orbSave(){
+  if(!orbLastReport){document.getElementById('orbStatus').textContent='Run a backtest first.';return;}
+  const d=await orbPost('/api/opening-range/backtest/save-evidence', {report:orbLastReport, readiness:orbLastReadiness, symbols:orbBody().symbols});
+  document.getElementById('orbStatus').textContent=d.saved?('Saved: '+d.path):'Save failed';
+}
+</script>
+{% endblock %}
