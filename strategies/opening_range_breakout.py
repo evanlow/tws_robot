@@ -210,7 +210,7 @@ class OpeningRangeBreakoutStrategy(BaseStrategy):
         # the last accepted closed bar: a duplicate/earlier minute, or a small gap
         # within a forming 5m bucket, would corrupt the aggregate, so degrade and
         # skip. Large intentional gaps (next session window) are not flagged.
-        recent = self._one_min.get(key, [])
+        recent = self._one_min.setdefault(key, [])
         if recent and _bad_one_minute_step(recent[-1], candle):
             self._degraded[key] = True
             logger.warning(
@@ -220,7 +220,7 @@ class OpeningRangeBreakoutStrategy(BaseStrategy):
                 candle.start.isoformat(),
             )
             return None
-        self._one_min[key] = recent + [candle]
+        recent.append(candle)
 
         sess = self._get_session(symbol, session_date)
         setup = sess.on_closed_1m(candle)
