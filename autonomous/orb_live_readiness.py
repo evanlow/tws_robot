@@ -26,10 +26,13 @@ Safety posture (Prime Directive):
 
 from __future__ import annotations
 
+import json
 import logging
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from autonomous.audit import AuditLogger
@@ -107,6 +110,36 @@ def compute_r_stats(realized_r_values: Sequence[Optional[float]]) -> Dict[str, A
         "max_drawdown_r": round(max_drawdown_r, 4),
         "max_consecutive_losses": max_consecutive_losses,
     }
+
+
+def compute_avg_entry_slippage_bps(trades: Sequence[Dict[str, Any]]) -> Optional[float]:
+    """Average entry slippage in basis points across trades with pricing data.
+
+    ``trades`` are the per-trade evidence dicts produced by
+    :func:`autonomous.orb_evidence.build_evidence_summary` (or
+    ``TradeEvidence.to_dict``). Entry slippage is stored as an absolute
+    price difference (dollars/share), so it is converted to basis points
+    against the actual fill price (falling back to the planned entry price
+    when the fill price is unavailable) to make the readiness threshold
+    comparable across symbols at different price levels. Trades without
+    slippage or price data are skipped. Returns ``None`` when no trade has
+    usable data.
+    """
+    bps_values: List[float] = []
+    for trade in trades:
+        slippage = trade.get("entry_slippage")
+        if slippage is None:
+            continue
+        price = trade.get("actual_entry_price") or trade.get("entry_price")
+        if not price:
+            continue
+        try:
+            bps_values.append(abs(float(slippage)) / float(price) * 10_000.0)
+        except (TypeError, ValueError, ZeroDivisionError):
+            continue
+    if not bps_values:
+        return None
+    return round(sum(bps_values) / len(bps_values), 4)
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +493,7 @@ def log_operator_decision(
     requested_mode: str = TINY_LIVE_CANDIDATE_MODE,
     operator: Optional[str] = None,
     notes: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
     audit: Optional[AuditLogger] = None,
     log_dir: str = "logs",
 ) -> None:
@@ -468,9 +502,13 @@ def log_operator_decision(
     This never changes any live-trading switch itself; it only records that
     an operator reviewed and accepted/rejected a readiness result (e.g.
     confirming account id and mode before any future promotion step).
+    ``extra`` may carry additional context (e.g. expected/connected account
+    id) and is merged into the audit record without overriding the fixed
+    fields below.
     """
     audit_log = audit or AuditLogger(log_dir)
-    audit_log.log_decision({
+    record: Dict[str, Any] = dict(extra or {})
+    record.update({
         "kind": _AUDIT_KIND,
         "action": "operator_decision",
         "strategy": strategy_name,
@@ -479,3 +517,95 @@ def log_operator_decision(
         "operator": operator,
         "notes": notes,
     })
+    audit_log.log_decision(record)
+
+
+# ---------------------------------------------------------------------------
+# Explicit operator account/mode confirmation (POST-only, never a GET query
+# string). See #213 review feedback: operator confirmations must be a
+# recorded, auditable decision, not a linkable/replayable GET parameter.
+# ---------------------------------------------------------------------------
+
+class ORBLiveReadinessConfirmationStore:
+    """Persists explicit operator confirmations of account id + mode.
+
+    A confirmation is only ever created by an explicit call to
+    :meth:`confirm` (wired to a ``POST`` endpoint by the caller) and is both
+    persisted to disk (so a restart doesn't silently lose it) and
+    audit-logged via :func:`log_operator_decision`. The read-only readiness
+    evaluation (a ``GET`` request) may only *read* a previously recorded
+    confirmation; it can never create one itself.
+    """
+
+    def __init__(self, path: str = "logs/orb_live_readiness_confirmations.json"):
+        self._path = Path(path)
+        self._lock = threading.Lock()
+
+    def _read_all(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _write_all(self, data: Dict[str, Any]) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+    def confirm(
+        self,
+        strategy_name: str,
+        requested_mode: str,
+        *,
+        expected_account_id: Optional[str],
+        connected_account_id: Optional[str],
+        operator: Optional[str] = None,
+        notes: Optional[str] = None,
+        audit: Optional[AuditLogger] = None,
+        log_dir: str = "logs",
+    ) -> Dict[str, Any]:
+        """Record an explicit operator confirmation. Never places an order.
+
+        The confirmation only counts as satisfying the account gate when
+        ``expected_account_id`` and ``connected_account_id`` are both present
+        and match (case-insensitive); a mismatch or missing id fails closed
+        and is still persisted/audit-logged so the attempt is visible.
+        """
+        confirmed = bool(
+            expected_account_id
+            and connected_account_id
+            and str(expected_account_id).strip().upper()
+            == str(connected_account_id).strip().upper()
+        )
+        record = {
+            "strategy_name": strategy_name,
+            "requested_mode": requested_mode,
+            "expected_account_id": expected_account_id,
+            "connected_account_id": connected_account_id,
+            "confirmed": confirmed,
+            "operator": operator,
+            "notes": notes,
+            "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with self._lock:
+            data = self._read_all()
+            data.setdefault(strategy_name, {})[requested_mode] = record
+            self._write_all(data)
+
+        log_operator_decision(
+            strategy_name,
+            "confirmed" if confirmed else "account_mismatch",
+            requested_mode=requested_mode,
+            operator=operator,
+            notes=notes,
+            extra={
+                "expected_account_id": expected_account_id,
+                "connected_account_id": connected_account_id,
+            },
+            audit=audit,
+            log_dir=log_dir,
+        )
+        return record
+
+    def get(self, strategy_name: str, requested_mode: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent confirmation for ``strategy_name``/``requested_mode``, if any."""
+        return self._read_all().get(strategy_name, {}).get(requested_mode)
