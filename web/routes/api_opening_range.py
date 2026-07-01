@@ -39,6 +39,14 @@ from autonomous.orb_execution import (
 from autonomous.orb_session_manager import ORBMode
 from autonomous.orb_exit_manager import ORBExitManager, ORBExitManagerError
 from autonomous.orb_session_review import ORBSessionReviewStore, parse_session_id
+from autonomous.orb_live_readiness import (
+    ASSISTED_LIVE_MODE,
+    TINY_LIVE_CANDIDATE_MODE,
+    ORBLiveReadinessInput,
+    TinyLiveRiskCaps,
+    evaluate_orb_live_readiness,
+)
+from autonomous.runner_config import AutonomousLiveRunnerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -744,6 +752,125 @@ def orb_evidence_export(strategy_name):
             headers={"Content-Disposition": f'attachment; filename="orb_evidence_{strategy_name}.csv"'},
         )
     return current_app.response_class(content, mimetype="application/json")
+
+
+# ---------------------------------------------------------------------------
+# ORB Phase 4 — tiny-live / assisted-live readiness gates (#213)
+# Read-only evaluation of the guarded path from paper ORB evidence to
+# tiny-live / assisted-live review. Never places, routes, or simulates an
+# order, and never flips a live switch itself. Live remains locked unless
+# every readiness gate passes; the result and every request are audit logged.
+# ---------------------------------------------------------------------------
+
+
+def _bool_arg(args, key: str, default: bool = False) -> bool:
+    raw = args.get(key)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _float_arg(args, key: str, default: float) -> float:
+    raw = args.get(key)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_arg(args, key: str, default: int) -> int:
+    raw = args.get(key)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _live_runner_config_for_readiness() -> AutonomousLiveRunnerConfig:
+    """Best-effort live runner config; always fails closed (live disabled)."""
+    cfg = current_app.config.get("autonomous_live_runner_config") if has_app_context() else None
+    if isinstance(cfg, AutonomousLiveRunnerConfig):
+        return cfg
+    try:
+        return AutonomousLiveRunnerConfig.from_env()
+    except Exception:  # pragma: no cover - defensive; never crash the readiness check
+        logger.exception("Failed to build AutonomousLiveRunnerConfig for ORB readiness")
+        return AutonomousLiveRunnerConfig()
+
+
+@orb_bp.route("/strategies/<name>/live-readiness", methods=["GET"])
+def orb_live_readiness(name):
+    """Evaluate tiny-live / assisted-live readiness for a strategy.
+
+    Read-only: gathers paper evidence, connection/account status, the live
+    master switch, and emergency-stop state, then delegates to
+    :func:`autonomous.orb_live_readiness.evaluate_orb_live_readiness`. Every
+    evaluation is audit-logged regardless of outcome. Never places an order
+    and never itself enables live trading.
+    """
+    rec = get_manager().get_strategy(name)
+    if rec is None:
+        return jsonify({"error": "not found", "detail": f"unknown strategy '{name}'"}), 404
+
+    args = request.args
+    requested_mode = args.get("mode", TINY_LIVE_CANDIDATE_MODE)
+    symbols = rec.get("symbols")
+    evidence = get_review_store().evidence_summary(name, symbols=symbols)
+    paper_summary = evidence.get("paper", {}) or {}
+
+    from web.services import get_services
+    svc = get_services()
+    connection_info = getattr(svc, "connection_info", {}) or {}
+    account_id = str(connection_info.get("account") or "").strip() or None
+    connected = bool(getattr(svc, "connected", False))
+
+    from web.routes.api_autonomous import EMERGENCY_STOP_FILE
+    try:
+        emergency_stop_active = EMERGENCY_STOP_FILE.exists()
+    except OSError:
+        emergency_stop_active = True  # fail closed when unreadable
+
+    live_config = _live_runner_config_for_readiness()
+    params = rec.get("parameters") or {}
+
+    tiny_live_caps = TinyLiveRiskCaps(
+        max_deployable_cash_pct=_float_arg(args, "max_deployable_cash_pct", 0.005),
+        max_live_orb_trades_per_day=_int_arg(args, "max_live_orb_trades_per_day", 1),
+    )
+
+    cfg = current_app.config if has_app_context() else {}
+    data = ORBLiveReadinessInput(
+        strategy_name=name,
+        strategy_config=rec,
+        paper_summary=paper_summary,
+        requested_mode=requested_mode,
+        max_drawdown_r=_float_arg(args, "max_drawdown_r", 0.0),
+        max_consecutive_losses=_int_arg(args, "max_consecutive_losses", 0),
+        avg_entry_slippage_bps=paper_summary.get("avg_entry_slippage"),
+        unresolved_protection_failures=_int_arg(args, "unresolved_protection_failures", 0),
+        data_quality_failures=_int_arg(args, "data_quality_failures", 0),
+        emergency_stop_incidents_from_orb=_int_arg(args, "emergency_stop_incidents_from_orb", 0),
+        market_data_provider_healthy=connected,
+        market_data_source=args.get("market_data_source", live_config.live_market_data_provider),
+        broker_connected=connected,
+        broker_account_id=account_id,
+        expected_account_id=args.get("expected_account_id") or live_config.expected_account_id,
+        live_master_switch_enabled=live_config.live_enabled,
+        emergency_stop_available=True,
+        emergency_stop_tested=_bool_arg(args, "emergency_stop_tested", False),
+        emergency_stop_currently_active=emergency_stop_active,
+        operator_confirmed_account=_bool_arg(args, "confirm_account", False),
+        operator_confirmed_mode=_bool_arg(args, "confirm_mode", False),
+        tiny_live_caps=tiny_live_caps,
+        paper_max_trades_per_session=params.get("max_total_orb_trades_per_session"),
+    )
+
+    result = evaluate_orb_live_readiness(data, log_dir=cfg.get("orb_evidence_dir", "logs"))
+    return jsonify(result)
 
 
 @orb_bp.route("/review/<path:review_session_id>/notes", methods=["POST"])
