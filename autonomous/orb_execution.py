@@ -210,10 +210,12 @@ def _links(proposal: ORBProposal, role: ORBOrderRole) -> Dict[str, Any]:
 class SimulatedPaperBracketAdapter:
     """Broker-free paper adapter that mints deterministic simulated order ids.
 
-    Supports native bracket submission (entry + protective stop + target) and a
-    single-entry path used for the explicitly-configured exit-manager fallback.
-    It never constructs a market order: every order is a ``LIMIT`` or ``STOP``
-    order, validated here as a last line of defence.
+    Builds in-memory simulated order records only — no broker connection, no
+    network calls, no side effects outside this process. Supports native bracket
+    construction (entry + protective stop + target) and a single-entry path used
+    for the explicitly-configured exit-manager fallback. It never constructs a
+    market order: every order is a ``LIMIT`` or ``STOP`` order, validated here
+    as a last line of defence.
     """
 
     supports_bracket = True
@@ -254,8 +256,8 @@ class SimulatedPaperBracketAdapter:
             links=_links(proposal, role),
         )
 
-    def submit_bracket(self, proposal: ORBProposal) -> List[ORBPaperOrder]:
-        """Submit a long bracket: BUY LIMIT entry + SELL STOP + SELL LIMIT target."""
+    def build_bracket(self, proposal: ORBProposal) -> List[ORBPaperOrder]:
+        """Build a long bracket: BUY LIMIT entry + SELL STOP + SELL LIMIT target."""
         return [
             self._order(proposal, ORBOrderRole.ENTRY, "BUY", ORDER_TYPE_LIMIT,
                         limit_price=proposal.entry_price),
@@ -265,8 +267,8 @@ class SimulatedPaperBracketAdapter:
                         limit_price=proposal.target_price),
         ]
 
-    def submit_entry_managed(self, proposal: ORBProposal) -> List[ORBPaperOrder]:
-        """Submit only the marketable-limit entry (exit-manager fallback path)."""
+    def build_entry_managed(self, proposal: ORBProposal) -> List[ORBPaperOrder]:
+        """Build only the marketable-limit entry (exit-manager fallback path)."""
         return [
             self._order(proposal, ORBOrderRole.ENTRY, "BUY", ORDER_TYPE_LIMIT,
                         limit_price=proposal.entry_price),
@@ -425,12 +427,48 @@ class ORBPaperExecutor:
                     f"for strategy '{proposal.strategy_name}' on {proposal.session_date}",
                 )
 
-            # Establish broker-visible protection. Bracket is preferred; the
+            # Verify that broker-visible protection is available *before*
+            # touching the store. If protection is missing and no fallback is
+            # configured we must reject here so the proposal stays PENDING;
+            # committing the store transition first and then discovering a
+            # missing adapter would leave the proposal in EXECUTED state with
+            # no associated trade record.
+            if not getattr(self._adapter, "supports_bracket", False) and not self._allow_fallback:
+                self._log_reject(
+                    proposal,
+                    ORBBlockReason.MISSING_PROTECTION,
+                    ORBOrderProtectionStatus.MISSING_PROTECTION_REJECTED,
+                    mode,
+                )
+                raise ORBExecutionBlocked(
+                    ORBBlockReason.MISSING_PROTECTION,
+                    "no broker-visible bracket protection is available and the paper "
+                    "exit-manager fallback is not explicitly enabled",
+                )
+
+            # Commit the PENDING → EXECUTED transition in the store *before*
+            # constructing any simulated orders. If the store rejects (e.g. a
+            # concurrent skip/expire race), no orders are constructed and no
+            # trade is indexed — the adapter is never called.
+            trade_id = uuid.uuid4().hex
+            try:
+                self._store.mark_executed(
+                    proposal.proposal_id,
+                    trade_id,
+                )
+            except ProposalError as exc:
+                self._log_reject(proposal, ORBBlockReason.NOT_EXECUTABLE, None, mode)
+                raise ORBExecutionError(
+                    f"proposal could not be transitioned to executed: {exc}"
+                ) from exc
+
+            # Build simulated protective orders. Bracket is preferred; the
             # exit-manager fallback is allowed only when explicitly configured.
+            # Protection availability was verified before the store commit above.
             protection, orders = self._protect(proposal, mode)
 
             trade = ORBTradeRecord(
-                trade_id=uuid.uuid4().hex,
+                trade_id=trade_id,
                 proposal_id=proposal.proposal_id,
                 strategy_name=proposal.strategy_name,
                 session_date=proposal.session_date,
@@ -448,21 +486,6 @@ class ORBPaperExecutor:
                 created_at=self._now().isoformat(),
             )
 
-            # Mark the proposal EXECUTED in its store (audit-logged there) before
-            # indexing the trade so the store stays the source of truth. If the
-            # store rejects the transition (e.g. a race), do not place orders.
-            try:
-                self._store.mark_executed(
-                    proposal.proposal_id,
-                    trade.trade_id,
-                    extra={"protection_status": protection.value},
-                )
-            except ProposalError as exc:
-                self._log_reject(proposal, ORBBlockReason.NOT_EXECUTABLE, None, mode)
-                raise ORBExecutionError(
-                    f"proposal could not be transitioned to executed: {exc}"
-                ) from exc
-
             self._trades[trade.trade_id] = trade
             self._by_proposal[proposal.proposal_id] = trade.trade_id
             self._log_executed(trade)
@@ -475,11 +498,11 @@ class ORBPaperExecutor:
         mode: ORBExecutionMode,
     ) -> tuple[ORBOrderProtectionStatus, List[ORBPaperOrder]]:
         if getattr(self._adapter, "supports_bracket", False):
-            orders = self._adapter.submit_bracket(proposal)
+            orders = self._adapter.build_bracket(proposal)
             return ORBOrderProtectionStatus.BRACKET_CONFIRMED, orders
 
         if self._allow_fallback:
-            orders = self._adapter.submit_entry_managed(proposal)
+            orders = self._adapter.build_entry_managed(proposal)
             return ORBOrderProtectionStatus.EXIT_MANAGER_FALLBACK, orders
 
         # No broker-visible protection and no explicitly-configured fallback:
