@@ -358,7 +358,7 @@ class ORBSessionManager:
 
     def _readiness(self, rec: Dict[str, Any]) -> Dict[str, Any]:
         missing: List[str] = []
-        paper_ready = self._has_paper_evidence(rec["symbols"])
+        paper_ready = self._has_paper_evidence(rec["symbols"], rec.get("name"))
         if not paper_ready:
             missing.append("paper_backtest_evidence")
         if not rec.get("require_stop", True):
@@ -371,8 +371,8 @@ class ORBSessionManager:
             "execution_ready": paper_ready,
         }
 
-    def _has_paper_evidence(self, symbols: List[str]) -> bool:
-        """True if any saved backtest evidence is READY_FOR_PAPER for a symbol."""
+    def _has_paper_evidence(self, symbols: List[str], strategy_name: Optional[str] = None) -> bool:
+        """True if saved backtest evidence is READY_FOR_PAPER for this strategy/symbol set."""
         want = {s.upper() for s in symbols}
         try:
             files = sorted(self._evidence_dir.glob("orb_backtest_evidence_*.jsonl"))
@@ -386,6 +386,9 @@ class ORBSessionManager:
                         continue
                     rec = json.loads(line)
                     if (rec.get("readiness") or {}).get("status") != "READY_FOR_PAPER":
+                        continue
+                    rec_strategy = rec.get("strategy_name")
+                    if rec_strategy is not None and strategy_name and rec_strategy != strategy_name:
                         continue
                     syms = {str(s).upper() for s in (rec.get("symbols") or [])}
                     if not want or syms & want:

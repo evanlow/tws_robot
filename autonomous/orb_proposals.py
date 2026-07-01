@@ -358,7 +358,7 @@ class ORBProposalStore:
         proposal = build_proposal(setup, **kwargs)
         with self._lock:
             self._proposals[proposal.proposal_id] = proposal
-        self._log("proposal_created", proposal, {})
+        self._log("proposal_created", proposal, {"card": proposal.to_dict()})
         return proposal
 
     def add(self, proposal: ORBProposal) -> ORBProposal:
@@ -372,7 +372,7 @@ class ORBProposalStore:
         _validate_proposal(proposal)
         with self._lock:
             self._proposals[proposal.proposal_id] = proposal
-        self._log("proposal_created", proposal, {})
+        self._log("proposal_created", proposal, {"card": proposal.to_dict()})
         return proposal
 
     # ---- reads -------------------------------------------------------

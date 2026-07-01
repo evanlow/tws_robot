@@ -383,6 +383,10 @@ class ORBExitManager:
             "kind": _AUDIT_KIND, "action": "exit_filled", "trade_id": trade.trade_id,
             "symbol": trade.symbol, "reason": reason.value, "fill_price": price,
             "realized_r": closed.realized_r, "exit_slippage": closed.exit_slippage,
+            # MFE/MAE are only ever tracked in-memory on the intraday trade
+            # record; persist them here so end-of-session evidence review
+            # (#211) can reconstruct them after a process restart.
+            "mfe_r": closed.mfe_r, "mae_r": closed.mae_r,
         })
         return ORBExitDecision(
             trade_id=trade.trade_id, symbol=trade.symbol,

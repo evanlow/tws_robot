@@ -273,3 +273,57 @@ every open ORB trade so nothing is left open behind an emergency stop.
 python -m pytest tests/test_orb_intraday_exit_manager.py tests/test_orb_session_api.py
 ```
 
+## End-of-session review & evidence ledger (Phase 2.7, #211)
+
+`autonomous/orb_evidence.py` is a **read-only** evidence/reporting layer
+reconstructed purely from the durable audit log already written by the
+earlier phases (`orb_proposal`, `orb_paper_execution`, `orb_intraday_exit`
+records). It never places, routes, or simulates an order. Because every
+proposal creation/skip/expiry, execution/rejection, and entry/exit
+fill/failure is already audit-logged, a trader can reconstruct every ORB
+decision — trade **or** no-trade — even after a process restart:
+
+- **Proposal ledger**: full lifecycle (created/skipped/expired/executed) per
+  proposal, with skip/expiry reasons.
+- **Trade ledger**: per-trade evidence joined from the proposal, paper
+  execution, and intraday-exit records — symbol, model, opening range,
+  entry/stop/target, quantity, risk dollars, planned R/R, entry/exit
+  slippage, an estimated commission (consistent with the backtest lab's
+  default), realized R, MFE/MAE, exit reason, and a WIN/LOSS/BREAKEVEN/
+  OPEN/FAILED result classification.
+- **Rejection ledger**: blocked/rejected paper-execution attempts that never
+  became a trade (emergency stop, missing protection, session cap, etc.).
+- **No-trade explanation**: for a session with zero trades, a plain-language
+  explanation reconstructed from skip/expiry reasons and blocked execution
+  attempts (or, if no proposal ever existed, a note that no setup was
+  detected) — a no-trade day is just as explainable as a trade day.
+- **Grouping & promotion**: `group_trades` groups trade evidence by symbol,
+  model, date, or result; `build_evidence_summary` aggregates every trade for
+  a strategy, distinguishes saved backtest evidence
+  (`orb_backtest_evidence_*.jsonl`) from paper evidence, and derives a
+  conservative promotion classification (`READY_FOR_PAPER` /
+  `NEEDS_MORE_DATA` / `DO_NOT_TRADE` / `TINY_LIVE_CANDIDATE`) — never an
+  approval to trade live by itself.
+- **Export**: `export_evidence` renders the full summary as JSON or CSV.
+
+`autonomous/orb_session_review.py` (`ORBSessionReviewStore`) builds the daily
+session review (trade or no-trade), persists operator notes to
+`config/orb_review_notes.json` (survives restarts), lists reviews for every
+configured strategy on a given date, and exposes the evidence summary/export.
+
+`autonomous/orb_exit_manager.py`'s `exit_filled` audit record now also
+includes `mfe_r`/`mae_r` (previously only tracked in-memory) so trade
+evidence can be fully reconstructed from the audit log after a restart.
+
+```text
+GET  /api/orb/review?date=YYYY-MM-DD[&strategy=<name>]
+GET  /api/orb/evidence/<strategy_name>
+GET  /api/orb/evidence/<strategy_name>/export?format=json|csv
+POST /api/orb/review/<strategy_name>:<session_date>/notes
+```
+
+Page: `/opening-range/review`.
+
+```bash
+python -m pytest tests/test_orb_evidence_ledger.py
+```

@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p style="color:#a0aec0;font-size:0.85rem;">
+  Reconstruct every ORB decision for a session — trade or no-trade — from the
+  existing proposal/paper-execution/exit audit trail, and review evidence
+  grouped by symbol, model, date, and result. This page is read-only except
+  for operator notes; no order is placed or affected here.
+</p>
+
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;">Session review</h2>
+  <div style="display:flex;gap:1rem;margin-bottom:0.75rem;max-width:760px;">
+    <div style="flex:1;"><label class="form-label">Strategy name (optional)</label>
+      <input id="reviewStrategy" class="form-input" placeholder="all strategies" /></div>
+    <div style="flex:1;"><label class="form-label">Session date</label>
+      <input id="reviewDate" class="form-input" type="date" /></div>
+    <div style="align-self:flex-end;"><button class="btn" onclick="orbLoadReview()">Load review</button></div>
+  </div>
+  <span id="reviewStatus" style="color:#a0aec0;font-size:0.85rem;"></span>
+  <div id="reviewResults"><p class="empty-state">No review loaded yet.</p></div>
+</section>
+
+<section style="margin-bottom:2rem;">
+  <h2 style="font-size:1.1rem;color:#63b3ed;">Evidence &amp; promotion summary</h2>
+  <div style="display:flex;gap:1rem;margin-bottom:0.75rem;max-width:760px;">
+    <div style="flex:1;"><label class="form-label">Strategy name</label>
+      <input id="evidenceStrategy" class="form-input" /></div>
+    <div style="align-self:flex-end;"><button class="btn" onclick="orbLoadEvidence()">Load evidence</button>
+      <button class="btn" onclick="orbExportEvidence('json')">Export JSON</button>
+      <button class="btn" onclick="orbExportEvidence('csv')">Export CSV</button></div>
+  </div>
+  <span id="evidenceStatus" style="color:#a0aec0;font-size:0.85rem;"></span>
+  <div id="evidenceResults"><p class="empty-state">No evidence loaded yet.</p></div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function csrf() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.content : '';
+}
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+async function orbGet(url) {
+  const res = await fetch(url);
+  return orbReadJson(res);
+}
+async function orbPost(url, body) {
+  const headers = {'Content-Type':'application/json'};
+  const token = csrf();
+  if (token) headers['X-CSRFToken'] = token;
+  const res = await fetch(url, {method:'POST', headers, body:JSON.stringify(body)});
+  return orbReadJson(res);
+}
+async function orbReadJson(res) {
+  const text = await res.text();
+  let payload = null;
+  if (text) {
+    try { payload = JSON.parse(text); }
+    catch {
+      return {error: `HTTP ${res.status}`, detail: text || 'non-JSON response'};
+    }
+  } else {
+    payload = {};
+  }
+  if (!res.ok) {
+    const detail = payload?.detail || payload?.error || res.statusText || 'request failed';
+    return {error: `HTTP ${res.status}`, detail};
+  }
+  return payload;
+}
+function badge(s){
+  const c = s==='READY_FOR_PAPER'||s==='TINY_LIVE_CANDIDATE' ? '#48bb78'
+          : s==='DO_NOT_TRADE' ? '#f56565' : '#ecc94b';
+  return `<span style="color:${c};font-weight:bold;">${escapeHtml(s)}</span>`;
+}
+function renderSession(s) {
+  const noTrade = s.no_trade
+    ? `<p><strong>No trade:</strong> ${escapeHtml(s.no_trade_explanation)}</p>` : '';
+  const notes = escapeHtml(s.operator_notes || '');
+  return `<div style="border:1px solid #2d3748;border-radius:6px;padding:0.75rem;margin-bottom:0.75rem;">
+    <h3 style="margin:0 0 0.5rem 0;">${escapeHtml(s.strategy_name)} — ${escapeHtml(s.session_date)}</h3>
+    <p>Symbols watched: ${escapeHtml((s.symbols_watched||[]).join(', ') || '—')}</p>
+    <p>Proposals: ${s.proposals.total} (created ${s.proposals.created}, skipped ${s.proposals.skipped},
+       expired ${s.proposals.expired}, executed ${s.proposals.executed})</p>
+    <p>Trades: ${s.trades.total} (closed ${s.trades.closed}, failed ${s.trades.failed}, open ${s.trades.open})</p>
+    ${noTrade}
+    <details><summary>Raw evidence</summary><pre style="overflow:auto;">${escapeHtml(JSON.stringify(s, null, 2))}</pre></details>
+    <div style="margin-top:0.5rem;" data-session-id="${escapeHtml(s.session_id)}">
+      <textarea class="form-input notes-input" rows="2" placeholder="Add operator note…">${notes}</textarea>
+      <button class="btn" onclick="orbAddNote(this)">Save note</button>
+    </div>
+  </div>`;
+}
+async function orbLoadReview() {
+  const date = document.getElementById('reviewDate').value;
+  if (!date) { document.getElementById('reviewStatus').textContent = 'Pick a session date.'; return; }
+  const strategy = document.getElementById('reviewStrategy').value.trim();
+  document.getElementById('reviewStatus').textContent = 'Loading…';
+  const qs = strategy ? `?date=${encodeURIComponent(date)}&strategy=${encodeURIComponent(strategy)}`
+                      : `?date=${encodeURIComponent(date)}`;
+  const d = await orbGet(`/api/orb/review${qs}`);
+  document.getElementById('reviewStatus').textContent = '';
+  if (d.error) {
+    const detail = d.detail ? ` (${d.detail})` : '';
+    document.getElementById('reviewResults').textContent = `Error: ${d.error}${detail}`;
+    return;
+  }
+  if (!d.sessions.length) { document.getElementById('reviewResults').innerHTML = '<p class="empty-state">No sessions found.</p>'; return; }
+  document.getElementById('reviewResults').innerHTML = d.sessions.map(renderSession).join('');
+}
+async function orbAddNote(button) {
+  const container = button.closest('[data-session-id]');
+  const sessionId = container ? container.dataset.sessionId : null;
+  const el = container ? container.querySelector('.notes-input') : null;
+  const note = el ? el.value.trim() : '';
+  if (!sessionId || !note) return;
+  await orbPost(`/api/orb/review/${encodeURIComponent(sessionId)}/notes`, {note});
+  orbLoadReview();
+}
+async function orbLoadEvidence() {
+  const strategy = document.getElementById('evidenceStrategy').value.trim();
+  if (!strategy) { document.getElementById('evidenceStatus').textContent = 'Enter a strategy name.'; return; }
+  document.getElementById('evidenceStatus').textContent = 'Loading…';
+  const d = await orbGet(`/api/orb/evidence/${encodeURIComponent(strategy)}`);
+  document.getElementById('evidenceStatus').textContent = '';
+  if (d.error) {
+    const detail = d.detail ? ` (${d.detail})` : '';
+    document.getElementById('evidenceResults').textContent = `Error: ${d.error}${detail}`;
+    return;
+  }
+  const p = d.promotion || {};
+  document.getElementById('evidenceResults').innerHTML = `
+    <h3>Promotion: ${badge(p.status)}</h3>
+    <p>${(p.reasons||[]).map(escapeHtml).join('; ')}</p>
+    <p>Paper trades ${d.paper.total_trades} (closed ${d.paper.closed_trades}, failed ${d.paper.failed_trades},
+       win rate ${d.paper.win_rate}, avg realized R ${d.paper.avg_realized_r})</p>
+    <p>Backtest evidence saved: ${d.backtest.saved_evidence_count}
+       (latest status ${escapeHtml(d.backtest.latest_readiness_status)})</p>
+    <p>By symbol: ${escapeHtml(JSON.stringify(d.by_symbol))}</p>
+    <p>By model: ${escapeHtml(JSON.stringify(d.by_model))}</p>
+    <p>By result: ${escapeHtml(JSON.stringify(d.by_result))}</p>
+    <details><summary>Raw evidence</summary><pre style="overflow:auto;">${escapeHtml(JSON.stringify(d, null, 2))}</pre></details>`;
+}
+function orbExportEvidence(fmt) {
+  const strategy = document.getElementById('evidenceStrategy').value.trim();
+  if (!strategy) { document.getElementById('evidenceStatus').textContent = 'Enter a strategy name.'; return; }
+  window.location = `/api/orb/evidence/${encodeURIComponent(strategy)}/export?format=${fmt}`;
+}
+</script>
+{% endblock %}

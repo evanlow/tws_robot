@@ -312,8 +312,16 @@ def classify_readiness(report: dict, criteria: Optional[ReadinessCriteria] = Non
 
 
 def save_evidence(report: dict, readiness: dict, *, log_dir: str = "logs",
-                  symbols: Optional[Sequence[str]] = None, params: Optional[dict] = None) -> str:
-    """Append a backtest evidence record to ``logs/orb_backtest_evidence_YYYYMMDD.jsonl``."""
+                  symbols: Optional[Sequence[str]] = None, params: Optional[dict] = None,
+                  strategy_name: Optional[str] = None) -> str:
+    """Append a backtest evidence record to ``logs/orb_backtest_evidence_YYYYMMDD.jsonl``.
+
+    ``strategy_name`` is optional (the backtest lab can be run standalone,
+    without an ORB strategy configured yet) but, when supplied, lets evidence
+    consumers (see :mod:`autonomous.orb_evidence`) scope saved evidence to the
+    exact strategy it was produced for instead of falling back to a
+    symbol-overlap heuristic.
+    """
 
     ts = datetime.now(timezone.utc)
     Path(log_dir).mkdir(parents=True, exist_ok=True)
@@ -322,6 +330,7 @@ def save_evidence(report: dict, readiness: dict, *, log_dir: str = "logs",
         "schema_version": SCHEMA_VERSION,
         "kind": "orb_backtest",
         "timestamp": ts.isoformat(),
+        "strategy_name": strategy_name,
         "symbols": list(symbols or []),
         "params": params or {},
         "report": report,
