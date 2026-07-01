@@ -154,6 +154,27 @@ def test_no_trade_session_skipped_and_expired_proposals(tmp_path):
     assert "expired" in explanation
     assert "entry_cutoff" in explanation
 
+    # Even though neither proposal ever became a trade, the review must still
+    # reconstruct the full setup context (model/range/entry/stop/target/gates)
+    # from the audit log alone (#211).
+    skipped_item = next(p for p in ev["proposals"]["items"] if p["proposal_id"] == p1.proposal_id)
+    assert skipped_item["entry_model"] == "MODEL_A_DISPLACEMENT_GAP"
+    assert skipped_item["direction"] == "LONG"
+    assert skipped_item["entry_price"] == pytest.approx(104.0)
+    assert skipped_item["stop_price"] == pytest.approx(103.0)
+    assert skipped_item["target_price"] == pytest.approx(106.0)
+    assert skipped_item["range_high"] == pytest.approx(102.0)
+    assert skipped_item["range_low"] == pytest.approx(100.0)
+    assert skipped_item["confirmation_candle"] is not None
+    assert skipped_item["confirmation_candle"]["direction"] == "LONG"
+    assert skipped_item["evidence"] == {"gap_low": 100.0}
+    assert skipped_item["gates"] is not None
+    assert skipped_item["gates"]["opening_range_valid"] is True
+
+    expired_item = next(p for p in ev["proposals"]["items"] if p["proposal_id"] == p2.proposal_id)
+    assert expired_item["entry_model"] == "MODEL_A_DISPLACEMENT_GAP"
+    assert expired_item["target_price"] == pytest.approx(106.0)
+
 
 def test_rejection_ledger_and_explanation(tmp_path):
     audit = AuditLogger(str(tmp_path))
@@ -244,6 +265,46 @@ def test_losing_trade_result_and_failed_trade(tmp_path):
     assert fte.failure_note == "simulated broker rejection"
 
 
+def test_ledger_force_flat_no_price_reconstructs_exit_reason(tmp_path):
+    """A force-flat-no-price failure must still show a structured exit reason.
+
+    ``_trigger_exit`` logs ``exit_failed_no_price`` with ``would_exit_reason``
+    when a mandatory exit (force-flat/emergency-stop) cannot get a live price;
+    the ledger must surface that as ``trade.exit_reason`` rather than leaving
+    a trader to guess why the trade failed.
+    """
+    audit = AuditLogger(str(tmp_path))
+    store = ORBProposalStore(audit=audit, log_dir=str(tmp_path))
+    proposal = store.create_from_setup(
+        _setup(), strategy_name="ORB1", session_date="2026-06-01",
+        orb_state="PROPOSAL_READY", gates=ProposalGates(),
+    )
+    executor = ORBPaperExecutor(store, audit=audit, log_dir=str(tmp_path))
+    trade = executor.execute_paper(proposal, mode=ORBExecutionMode.PAPER_AUTONOMOUS)
+
+    # Past the 15:55 America/New_York force-flat cutoff for 2026-06-01, and no
+    # live price is ever available (simulates a broker/data outage at flatten
+    # time).
+    clock = _Clock(datetime(2026, 6, 1, 9, 50, tzinfo=timezone.utc))
+
+    def no_price(_sym):
+        return None
+
+    exit_mgr = ORBExitManager(
+        price_provider=no_price, audit=audit, log_dir=str(tmp_path), now_fn=clock,
+    )
+    exit_mgr.register_trade(trade)
+    exit_mgr.mark_entry_filled(trade.trade_id, trade.entry_price)
+    clock.now = datetime(2026, 6, 1, 20, 0, tzinfo=timezone.utc)  # well past 15:55 ET
+    decision = exit_mgr.evaluate_trade(trade.trade_id)
+    assert decision.decision == "NO_PRICE_AVAILABLE"
+
+    ledger = build_trade_ledger(str(tmp_path))
+    te = ledger[trade.trade_id]
+    assert te.status == "FAILED"
+    assert te.exit_reason == "FORCE_FLAT"
+
+
 # ---------------------------------------------------------------------------
 # grouping / summary / promotion classification
 # ---------------------------------------------------------------------------
@@ -280,6 +341,43 @@ def test_evidence_summary_ready_for_paper_from_backtest_when_no_paper_trades(tmp
     summary = build_evidence_summary(str(tmp_path), "ORB1")
     assert summary["backtest"]["latest_readiness_status"] == "READY_FOR_PAPER"
     assert summary["promotion"]["status"] == READY_FOR_PAPER
+
+
+def test_evidence_summary_backtest_evidence_scoped_by_strategy_name(tmp_path):
+    """READY_FOR_PAPER backtest evidence tagged with an explicit strategy_name
+    must never leak into an unrelated strategy's evidence summary, even when
+    the unrelated strategy shares the same symbol."""
+    ev_path = tmp_path / "orb_backtest_evidence_20260601.jsonl"
+    ev_path.write_text(json.dumps({
+        "strategy_name": "ORB1", "symbols": ["QQQ"],
+        "readiness": {"status": "READY_FOR_PAPER"},
+    }) + "\n", encoding="utf-8")
+
+    own = build_evidence_summary(str(tmp_path), "ORB1")
+    assert own["backtest"]["saved_evidence_count"] == 1
+    assert own["backtest"]["latest_readiness_status"] == "READY_FOR_PAPER"
+    assert own["promotion"]["status"] == READY_FOR_PAPER
+
+    other = build_evidence_summary(str(tmp_path), "ORB2", symbols=["QQQ"])
+    assert other["backtest"]["saved_evidence_count"] == 0
+    assert other["backtest"]["latest_readiness_status"] is None
+    assert other["promotion"]["status"] == NEEDS_MORE_DATA
+
+
+def test_evidence_summary_backtest_evidence_symbol_fallback_when_untagged(tmp_path):
+    """Untagged (no strategy_name) legacy evidence falls back to a symbol-
+    overlap match against the caller-supplied watched symbols."""
+    ev_path = tmp_path / "orb_backtest_evidence_20260601.jsonl"
+    ev_path.write_text(json.dumps({
+        "symbols": ["QQQ"], "readiness": {"status": "READY_FOR_PAPER"},
+    }) + "\n", encoding="utf-8")
+
+    matching = build_evidence_summary(str(tmp_path), "ORB1", symbols=["QQQ"])
+    assert matching["backtest"]["saved_evidence_count"] == 1
+
+    non_matching = build_evidence_summary(str(tmp_path), "ORB2", symbols=["SPY"])
+    assert non_matching["backtest"]["saved_evidence_count"] == 0
+    assert non_matching["promotion"]["status"] == NEEDS_MORE_DATA
 
 
 def test_classify_promotion_do_not_trade_on_negative_avg_r():

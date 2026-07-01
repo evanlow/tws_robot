@@ -145,9 +145,11 @@ class ORBSessionReviewStore:
         strategy_name: str,
         *,
         commission_per_share: float = DEFAULT_COMMISSION_PER_SHARE,
+        symbols: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         return build_evidence_summary(
-            str(self._evidence_dir), strategy_name, commission_per_share=commission_per_share,
+            str(self._evidence_dir), strategy_name,
+            commission_per_share=commission_per_share, symbols=symbols,
         )
 
     def export(
@@ -156,7 +158,10 @@ class ORBSessionReviewStore:
         fmt: str = "json",
         *,
         commission_per_share: float = DEFAULT_COMMISSION_PER_SHARE,
+        symbols: Optional[List[str]] = None,
     ) -> str:
         return export_evidence(
-            str(self._evidence_dir), strategy_name, fmt, commission_per_share=commission_per_share,
+            str(self._evidence_dir), strategy_name, fmt,
+            commission_per_share=commission_per_share, symbols=symbols,
         )
+

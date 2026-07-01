@@ -317,7 +317,7 @@ def save():
         return jsonify({"error": "report required"}), 400
     readiness = data.get("readiness") or classify_readiness(report)
     path = save_evidence(report, readiness, symbols=data.get("symbols"),
-                         params=data.get("params"))
+                         params=data.get("params"), strategy_name=data.get("strategy_name"))
     return jsonify({"saved": True, "path": path, "readiness": readiness})
 
 
@@ -714,7 +714,9 @@ def orb_review():
 
 @orb_bp.route("/evidence/<strategy_name>", methods=["GET"])
 def orb_evidence_summary(strategy_name):
-    return jsonify(get_review_store().evidence_summary(strategy_name))
+    rec = get_manager().get_strategy(strategy_name)
+    symbols = rec.get("symbols") if rec else None
+    return jsonify(get_review_store().evidence_summary(strategy_name, symbols=symbols))
 
 
 @orb_bp.route("/evidence/<strategy_name>/export", methods=["GET"])
@@ -725,8 +727,10 @@ def orb_evidence_export(strategy_name):
             "error": "invalid_format",
             "detail": "unsupported export format; expected 'json' or 'csv'",
         }), 400
+    rec = get_manager().get_strategy(strategy_name)
+    symbols = rec.get("symbols") if rec else None
     try:
-        content = get_review_store().export(strategy_name, fmt)
+        content = get_review_store().export(strategy_name, fmt, symbols=symbols)
     except ValueError:
         logger.exception("ORB evidence export failed for %s", strategy_name)
         return jsonify({"error": "export_failed"}), 400

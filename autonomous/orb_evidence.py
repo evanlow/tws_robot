@@ -125,7 +125,15 @@ def _matches(rec: Dict[str, Any], strategy_name: Optional[str], session_date: Op
 
 @dataclass
 class ProposalEvidence:
-    """Full lifecycle of a single recommend-only ORB proposal."""
+    """Full lifecycle of a single recommend-only ORB proposal.
+
+    The setup-context fields (``entry_model`` through ``gates``) are
+    reconstructed from the ``card`` payload persisted on the ``proposal_created``
+    audit record (see :meth:`autonomous.orb_proposals.ORBProposalStore._log`)
+    so a skipped/expired/no-trade proposal still shows the full trade card —
+    entry model, opening range, confirmation candle, gate results, and setup
+    evidence — from the audit log alone, even after a restart.
+    """
 
     proposal_id: str
     strategy_name: str
@@ -138,8 +146,46 @@ class ProposalEvidence:
     trade_id: Optional[str] = None
     created_at: Optional[str] = None
 
+    # Setup/trade-card context reconstructed from the ``proposal_created``
+    # audit record's ``card`` payload (absent for older records predating
+    # this enrichment).
+    entry_model: Optional[str] = None
+    direction: Optional[str] = None
+    entry_price: Optional[float] = None
+    stop_price: Optional[float] = None
+    target_price: Optional[float] = None
+    risk_per_share: Optional[float] = None
+    reward_per_share: Optional[float] = None
+    rr_ratio: Optional[float] = None
+    quantity: Optional[int] = None
+    range_high: Optional[float] = None
+    range_low: Optional[float] = None
+    range_width_pct: Optional[float] = None
+    confirmation_candle: Optional[Dict[str, Any]] = None
+    evidence: Optional[Dict[str, Any]] = None
+    gates: Optional[Dict[str, Any]] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def _apply_proposal_card(item: "ProposalEvidence", card: Dict[str, Any]) -> None:
+    """Populate the setup/trade-card fields of ``item`` from a proposal ``card``."""
+    item.entry_model = card.get("entry_model")
+    item.direction = card.get("direction")
+    item.entry_price = card.get("entry_price")
+    item.stop_price = card.get("stop_price")
+    item.target_price = card.get("target_price")
+    item.risk_per_share = card.get("risk_per_share")
+    item.reward_per_share = card.get("reward_per_share")
+    item.rr_ratio = card.get("rr_ratio")
+    item.quantity = card.get("quantity")
+    item.range_high = card.get("range_high")
+    item.range_low = card.get("range_low")
+    item.range_width_pct = card.get("range_width_pct")
+    item.confirmation_candle = card.get("confirmation_candle")
+    item.evidence = card.get("evidence")
+    item.gates = card.get("gates")
 
 
 def build_proposal_ledger(
@@ -170,6 +216,9 @@ def build_proposal_ledger(
             out[pid] = item
         if action == "proposal_created":
             item.created_at = rec.get("timestamp")
+            card = rec.get("card")
+            if card:
+                _apply_proposal_card(item, card)
         item.status = rec.get("status", item.status)
         if action == "proposal_skipped":
             item.skip_reason = rec.get("reason")
@@ -336,6 +385,7 @@ def build_trade_ledger(
         elif action == "exit_failed_no_price":
             trade.status = "FAILED"
             trade.failure_note = "no live price available to flatten position"
+            trade.exit_reason = rec.get("would_exit_reason")
         elif action == "cancel_entry":
             trade.status = "CLOSED"
             trade.exit_reason = "ENTRY_CANCELLED"
@@ -503,6 +553,7 @@ def build_evidence_summary(
     strategy_name: str,
     *,
     commission_per_share: float = DEFAULT_COMMISSION_PER_SHARE,
+    symbols: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Aggregate every trade/proposal evidence record for a strategy.
 
@@ -510,6 +561,11 @@ def build_evidence_summary(
     written by :mod:`autonomous.orb_backtest_reports`) from paper evidence
     (this module's trade ledger) so a trader can see both stages side by
     side, and derives a promotion classification from the paper evidence.
+
+    ``symbols`` should be the strategy's configured/watched symbols; it is
+    used to scope backtest evidence that predates ``strategy_name`` tagging
+    (see :func:`_load_backtest_evidence`) so an unrelated strategy never
+    inherits another strategy's saved readiness.
     """
     proposal_ledger = build_proposal_ledger(log_dir, strategy_name=strategy_name)
     trade_ledger = build_trade_ledger(log_dir, strategy_name=strategy_name)
@@ -538,7 +594,7 @@ def build_evidence_summary(
         "total_realized_pnl": round(sum(t["realized_pnl"] or 0.0 for t in closed), 2),
     }
 
-    backtest_evidence = _load_backtest_evidence(log_dir, strategy_name)
+    backtest_evidence = _load_backtest_evidence(log_dir, strategy_name, symbols=symbols)
 
     by_symbol = group_trades(trade_dicts, "symbol")
     by_model = group_trades(trade_dicts, "model")
@@ -562,9 +618,36 @@ def build_evidence_summary(
     }
 
 
-def _load_backtest_evidence(log_dir: str, strategy_name: str) -> Dict[str, Any]:
-    """Best-effort summary of saved backtest evidence relevant to this strategy."""
+def _load_backtest_evidence(
+    log_dir: str,
+    strategy_name: str,
+    *,
+    symbols: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Best-effort summary of saved backtest evidence relevant to this strategy.
+
+    Scoping precedence, most to least precise:
+
+    1. Records with an explicit ``strategy_name`` field (written by
+       :func:`autonomous.orb_backtest_reports.save_evidence` when the backtest
+       lab is run against a specific configured strategy) are matched exactly
+       against ``strategy_name`` and never leak into another strategy's
+       summary.
+    2. Older/standalone records have no ``strategy_name`` (the backtest lab
+       can be run before any ORB strategy is configured). For those, if the
+       caller supplies the strategy's configured/watched ``symbols``, a
+       record only counts when its ``symbols`` overlap — mirroring the same
+       symbol-overlap heuristic already used by
+       :meth:`autonomous.orb_session_manager.ORBSessionManager._has_paper_evidence`.
+    3. If neither an explicit ``strategy_name`` match nor ``symbols`` are
+       available (no strategy-scoped records exist and the caller did not
+       supply watched symbols), every record counts. This last resort keeps
+       ad-hoc/standalone backtest evidence visible before any strategy has
+       been configured, at the cost of potentially over-counting; callers
+       that know a strategy's watched symbols should always pass ``symbols``.
+    """
     base = Path(log_dir)
+    want_symbols = {s.upper() for s in (symbols or [])}
     statuses: List[str] = []
     count = 0
     try:
@@ -578,6 +661,14 @@ def _load_backtest_evidence(log_dir: str, strategy_name: str) -> Dict[str, Any]:
                 if not line:
                     continue
                 rec = json.loads(line)
+                rec_strategy = rec.get("strategy_name")
+                if rec_strategy is not None:
+                    if rec_strategy != strategy_name:
+                        continue
+                elif want_symbols:
+                    rec_symbols = {str(s).upper() for s in (rec.get("symbols") or [])}
+                    if not (rec_symbols & want_symbols):
+                        continue
                 count += 1
                 status = (rec.get("readiness") or {}).get("status")
                 if status:
@@ -698,9 +789,12 @@ def export_evidence(
     fmt: str = "json",
     *,
     commission_per_share: float = DEFAULT_COMMISSION_PER_SHARE,
+    symbols: Optional[List[str]] = None,
 ) -> str:
     """Export the full evidence summary for a strategy as JSON or CSV text."""
-    summary = build_evidence_summary(log_dir, strategy_name, commission_per_share=commission_per_share)
+    summary = build_evidence_summary(
+        log_dir, strategy_name, commission_per_share=commission_per_share, symbols=symbols,
+    )
     fmt = (fmt or "json").lower()
     if fmt == "json":
         return json.dumps(summary, indent=2, sort_keys=True)
