@@ -13,10 +13,20 @@ from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
 from autonomous.execution_quality import ExecutionQualityGuard
 from autonomous.market_data_health import MarketDataHealthGuard
-from autonomous.opening_range_signal_provider import STRATEGY_OPENING_RANGE_BREAKOUT
+from autonomous.opening_range_signal_provider import (
+    SIGNAL_LABEL_MODEL_A,
+    SIGNAL_LABEL_MODEL_B,
+    STRATEGY_OPENING_RANGE_BREAKOUT,
+)
 from autonomous.position_sizing import PositionSizer
 
 _OPTION_MULTIPLIER = 100
+
+# Executable ORB setup models — must mirror
+# ``autonomous.opening_range.ORBEntryModel`` Model A/B values exactly.
+# Model C (reversal) is intentionally excluded (non-goal).
+_ORB_MODEL_A = "MODEL_A_DISPLACEMENT_GAP"
+_ORB_MODEL_B = "MODEL_B_BREAK_RETEST"
 
 
 def _add(reasons: Optional[List[str]], msg: str) -> None:
@@ -303,14 +313,39 @@ class TradePlanner:
           are rejected rather than silently patched.
         """
         extras = candidate.extras or {}
-        entry_price, stop_price, target_price, rr_ratio, error = _extract_orb_levels(extras)
-        if error is not None:
-            _add(reasons, f"{candidate.symbol}: malformed ORB extras — {error}")
+
+        # Fail closed: only executable ORB models/labels reach this branch.
+        # ``extras.strategy == STRATEGY_OPENING_RANGE_BREAKOUT`` alone is not
+        # trusted — a malformed or externally-constructed candidate could
+        # carry that marker with an unrelated signal_label (e.g. the rebound
+        # scanner's "Confirmed Rebound") or a non-executable setup_model
+        # (Model C reversal). Both signal_label and setup_model must match
+        # the Model A/B set the provider actually emits.
+        if candidate.signal_label not in (SIGNAL_LABEL_MODEL_A, SIGNAL_LABEL_MODEL_B):
+            _add(
+                reasons,
+                f"{candidate.symbol}: ORB strategy requires signal_label in "
+                f"{{{SIGNAL_LABEL_MODEL_A!r}, {SIGNAL_LABEL_MODEL_B!r}}}, got {candidate.signal_label!r}",
+            )
+            return None
+        if extras.get("setup_model") not in (_ORB_MODEL_A, _ORB_MODEL_B):
+            _add(
+                reasons,
+                f"{candidate.symbol}: ORB strategy requires setup_model in "
+                f"{{{_ORB_MODEL_A!r}, {_ORB_MODEL_B!r}}}, got {extras.get('setup_model')!r}",
+            )
             return None
 
         # Long-only (Prime Directive / ORB non-goals: no short-side entries).
-        if extras.get("direction") not in (None, "LONG"):
+        # ``direction`` must be explicitly "LONG" — a missing direction is no
+        # longer treated as implicitly long.
+        if extras.get("direction") != "LONG":
             _add(reasons, f"{candidate.symbol}: ORB direction {extras.get('direction')!r} not supported (long-only)")
+            return None
+
+        entry_price, stop_price, target_price, rr_ratio, error = _extract_orb_levels(extras)
+        if error is not None:
+            _add(reasons, f"{candidate.symbol}: malformed ORB extras — {error}")
             return None
 
         # Stop and target are always required for paper/autonomous assisted

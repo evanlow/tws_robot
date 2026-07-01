@@ -10,7 +10,7 @@ from autonomous.candidate_scanner import CandidateSignal
 from autonomous.trade_planner import TradePlanner, TradeType
 
 
-def _orb_candidate(**extras_overrides):
+def _orb_candidate(signal_label="ORB_LONG_MODEL_A", **extras_overrides):
     extras = {
         "strategy": "opening_range_breakout",
         "setup_model": "MODEL_A_DISPLACEMENT_GAP",
@@ -30,7 +30,7 @@ def _orb_candidate(**extras_overrides):
     return CandidateSignal(
         symbol="QQQ",
         strength_score=100,
-        signal_label="ORB_LONG_MODEL_A",
+        signal_label=signal_label,
         last_price=101.5,
         support_price=100.5,
         resistance_price=105.5,
@@ -182,6 +182,53 @@ def test_orb_rejects_short_direction():
     )
     assert plan is None
     assert any("long-only" in r for r in reasons)
+
+
+def test_orb_rejects_missing_direction():
+    # Fail closed: a missing direction is no longer treated as implicitly
+    # long — it must be rejected, not silently accepted.
+    cfg = _legacy_cfg()
+    reasons = []
+    plan = TradePlanner(cfg).plan(
+        _orb_candidate(direction=None),
+        deployable_cash=1_000_000.0,
+        equity=1_000_000.0,
+        reasons=reasons,
+    )
+    assert plan is None
+    assert any("long-only" in r for r in reasons)
+
+
+def test_orb_rejects_model_c_reversal():
+    # Model C is out of scope for execution (non-goal); a candidate carrying
+    # extras.strategy == "opening_range_breakout" plus a Model C setup_model
+    # must not receive an ORB share-buy plan even though prices are valid.
+    cfg = _legacy_cfg()
+    reasons = []
+    plan = TradePlanner(cfg).plan(
+        _orb_candidate(setup_model="MODEL_C_REVERSAL"),
+        deployable_cash=1_000_000.0,
+        equity=1_000_000.0,
+        reasons=reasons,
+    )
+    assert plan is None
+    assert any("setup_model" in r for r in reasons)
+
+
+def test_orb_rejects_wrong_signal_label():
+    # A candidate that carries extras.strategy == "opening_range_breakout"
+    # but a non-ORB signal_label (e.g. the rebound scanner's label) must be
+    # rejected rather than trusted based on extras alone.
+    cfg = _legacy_cfg()
+    reasons = []
+    plan = TradePlanner(cfg).plan(
+        _orb_candidate(signal_label="Confirmed Rebound"),
+        deployable_cash=1_000_000.0,
+        equity=1_000_000.0,
+        reasons=reasons,
+    )
+    assert plan is None
+    assert any("signal_label" in r for r in reasons)
 
 
 def test_orb_assisted_live_requires_stop_and_target():
