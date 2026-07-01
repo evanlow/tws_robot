@@ -155,6 +155,18 @@ def validate_strategy(data: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError:
         pass
 
+    # Optional max holding time cap.
+    mhm = params.get("max_holding_minutes")
+    if mhm is not None:
+        try:
+            mhm_int = int(mhm)
+            if mhm_int <= 0:
+                errors.append("max_holding_minutes must be a positive integer")
+            else:
+                params["max_holding_minutes"] = mhm_int
+        except (TypeError, ValueError):
+            errors.append("max_holding_minutes must be a positive integer")
+
     # Reject params that aren't recognised by OpeningRangeConfig to avoid silent drops.
     valid = {f.name for f in fields(OpeningRangeConfig)}
     unknown = [k for k in params if k not in valid]

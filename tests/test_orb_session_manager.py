@@ -51,6 +51,29 @@ def test_validate_cutoff_before_flat():
                            "parameters": {"entry_cutoff_time": "16:00", "force_flat_time": "15:55"}})
 
 
+def test_validate_max_holding_minutes_accepted_and_coerced():
+    rec = validate_strategy({"name": "x", "symbols": ["QQQ"],
+                             "parameters": {"max_holding_minutes": "60"}})
+    assert rec["parameters"]["max_holding_minutes"] == 60
+
+
+def test_validate_max_holding_minutes_none_accepted():
+    rec = validate_strategy({"name": "x", "symbols": ["QQQ"]})
+    assert rec["parameters"].get("max_holding_minutes") is None
+
+
+def test_validate_max_holding_minutes_zero_rejected():
+    with pytest.raises(ORBValidationError):
+        validate_strategy({"name": "x", "symbols": ["QQQ"],
+                           "parameters": {"max_holding_minutes": 0}})
+
+
+def test_validate_max_holding_minutes_non_numeric_rejected():
+    with pytest.raises(ORBValidationError):
+        validate_strategy({"name": "x", "symbols": ["QQQ"],
+                           "parameters": {"max_holding_minutes": "bad"}})
+
+
 def test_persists_across_restart(tmp_path):
     m = _mgr(tmp_path)
     m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"]})

@@ -37,6 +37,7 @@ from autonomous.orb_execution import (
     ORBPaperExecutor,
 )
 from autonomous.orb_session_manager import ORBMode
+from autonomous.orb_exit_manager import ORBExitManager, ORBExitManagerError
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ page_bp = Blueprint("opening_range", __name__, url_prefix="/opening-range")
 _manager: Optional[ORBSessionManager] = None
 _proposal_store: Optional[ORBProposalStore] = None
 _executor: Optional[ORBPaperExecutor] = None
+_exit_manager: Optional[ORBExitManager] = None
 
 
 def get_manager() -> ORBSessionManager:
@@ -76,6 +78,26 @@ def get_proposal_store() -> ORBProposalStore:
         cfg = current_app.config if has_app_context() else {}
         _proposal_store = ORBProposalStore(log_dir=cfg.get("orb_evidence_dir", "logs"))
     return _proposal_store
+
+
+def get_exit_manager() -> ORBExitManager:
+    """Lazily build the singleton ORB intraday exit manager (Phase 2.6, #210).
+
+    Honors ``orb_evidence_dir`` app config (audit log directory) for test
+    isolation. ``orb_price_provider`` may be set in app config to a
+    ``callable(symbol) -> Optional[float]`` for live/backtest price wiring;
+    it defaults to returning ``None`` (no price available) so exits are never
+    guessed from a fabricated source.
+    """
+    global _exit_manager
+    if _exit_manager is None:
+        cfg = current_app.config if has_app_context() else {}
+        price_provider = cfg.get("orb_price_provider")
+        _exit_manager = ORBExitManager(
+            log_dir=cfg.get("orb_evidence_dir", "logs"),
+            price_provider=price_provider if callable(price_provider) else None,
+        )
+    return _exit_manager
 
 
 def get_executor() -> ORBPaperExecutor:
@@ -339,8 +361,12 @@ def disable_orb_today(name):
 
 @orb_bp.route("/emergency-stop", methods=["POST"])
 def emergency_stop_orb():
-    # Disarm all sessions and block any in-flight ORB paper execution.
+    # Disarm all sessions, block any in-flight ORB paper execution, and
+    # flatten every open ORB intraday trade.
     get_executor().trip_emergency_stop()
+    get_exit_manager().trip_emergency_stop()
+    for decision in get_exit_manager().evaluate_all():
+        pass  # side effect: flattens every OPEN trade; decisions are audit-logged.
     return jsonify(get_manager().emergency_stop())
 
 
@@ -489,12 +515,33 @@ def execute_orb_proposal_paper(proposal_id):
     if session.get("disabled_today"):
         return jsonify({"error": "orb disabled for session"}), 400
 
+    # Operator gate (Phase 2.6, #210): new entries can be disabled for a
+    # strategy without touching any already-open trade's exit management.
+    if get_exit_manager().new_entries_disabled(proposal.strategy_name):
+        return jsonify({
+            "error": "new entries disabled",
+            "detail": f"strategy '{proposal.strategy_name}' has new entries disabled",
+        }), 400
+
     try:
         trade = get_executor().execute_paper(
             proposal,
             mode=ORBExecutionMode.PAPER_AUTONOMOUS,
             session_cap=_session_cap_for(rec),
         )
+        params = (rec.get("parameters") or {})
+        get_exit_manager().register_trade(
+            trade,
+            force_flat_time=str(params.get("force_flat_time", "15:55")),
+            max_holding_minutes=params.get("max_holding_minutes"),
+        )
+        # Paper execution is fully simulated (SimulatedPaperBracketAdapter) —
+        # there is no asynchronous broker fill to wait on, so the entry is
+        # immediately reconciled as filled at the simulated entry price. This
+        # is what moves the intraday monitor record from ENTRY_PENDING to
+        # OPEN so the exit manager (which only evaluates OPEN trades) can
+        # actually manage target/stop/force-flat/max-holding for it.
+        get_exit_manager().mark_entry_filled(trade.trade_id, trade.entry_price)
         return jsonify(trade.to_dict()), 201
     except ORBExecutionBlocked as exc:
         # Surface the structured block reason only; the exception message is
@@ -524,3 +571,85 @@ def get_orb_trade(trade_id):
     if trade is None:
         return jsonify({"error": "not found"}), 404
     return jsonify(trade.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# ORB intraday exit lifecycle & in-trade monitor (Phase 2.6, #210)
+# Tracks each paper ORB trade from ENTRY_PENDING through OPEN/EXIT_PENDING to
+# CLOSED/FAILED, evaluates target/stop/force-flat/max-holding exit triggers,
+# and exposes the in-trade monitor plus close-now/cancel-entry/
+# disable-new-entries operator actions. Paper only; every exit only ever
+# reduces exposure and duplicate/oversell attempts are no-ops.
+# ---------------------------------------------------------------------------
+
+
+@orb_bp.route("/intraday-trades", methods=["GET"])
+def list_orb_intraday_trades():
+    args = request.args
+    # Evaluate open trades for exit triggers before listing so the monitor
+    # reflects the latest target/stop/force-flat/max-holding state.
+    get_exit_manager().evaluate_all()
+    trades = get_exit_manager().list_trades(
+        symbol=args.get("symbol"),
+        strategy_name=args.get("strategy"),
+        session_date=args.get("session_date"),
+        state=args.get("state"),
+    )
+    now = datetime.now(timezone.utc)
+    out = []
+    for t in trades:
+        d = t.to_dict()
+        d["force_flat_countdown_seconds"] = get_exit_manager().force_flat_countdown_seconds(
+            t, now=now
+        )
+        out.append(d)
+    return jsonify({"trades": out})
+
+
+@orb_bp.route("/intraday-trades/<trade_id>", methods=["GET"])
+def get_orb_intraday_trade(trade_id):
+    get_exit_manager().evaluate_trade(trade_id)
+    trade = get_exit_manager().get_trade(trade_id)
+    if trade is None:
+        return jsonify({"error": "not found"}), 404
+    d = trade.to_dict()
+    d["force_flat_countdown_seconds"] = get_exit_manager().force_flat_countdown_seconds(trade)
+    return jsonify(d)
+
+
+@orb_bp.route("/trades/<trade_id>/close-now", methods=["POST"])
+def close_orb_trade_now(trade_id):
+    try:
+        decision = get_exit_manager().close_now(trade_id)
+        return jsonify(decision.to_dict())
+    except ORBExitManagerError as exc:
+        logger.info("ORB close-now rejected for %s: %s", trade_id, exc)
+        return jsonify({
+            "error": "cannot close trade",
+            "detail": "trade not found or not currently OPEN",
+        }), 400
+
+
+@orb_bp.route("/trades/<trade_id>/cancel-entry", methods=["POST"])
+def cancel_orb_trade_entry(trade_id):
+    try:
+        trade = get_exit_manager().cancel_entry(trade_id)
+        return jsonify(trade.to_dict())
+    except ORBExitManagerError as exc:
+        logger.info("ORB cancel-entry rejected for %s: %s", trade_id, exc)
+        return jsonify({
+            "error": "cannot cancel entry",
+            "detail": "trade not found or not currently ENTRY_PENDING",
+        }), 400
+
+
+@orb_bp.route("/strategies/<name>/disable-new-entries", methods=["POST"])
+def disable_orb_new_entries(name):
+    get_exit_manager().disable_new_entries(name)
+    return jsonify({"strategy": name, "new_entries_disabled": True})
+
+
+@orb_bp.route("/strategies/<name>/enable-new-entries", methods=["POST"])
+def enable_orb_new_entries(name):
+    get_exit_manager().enable_new_entries(name)
+    return jsonify({"strategy": name, "new_entries_disabled": False})
