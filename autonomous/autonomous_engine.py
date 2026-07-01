@@ -24,6 +24,7 @@ from autonomous.evidence_calibrator import SetupEvidenceSummary
 from autonomous.evidence_store import TradeEvidenceStore
 from autonomous.market_data_provider import MarketDataProvider
 from autonomous.market_regime import evaluate_market_regime
+from autonomous.opening_range_signal_provider import STRATEGY_OPENING_RANGE_BREAKOUT
 from autonomous.profitability_gate import ProfitabilityDecision, ProfitabilityGate
 from autonomous.risk_lifecycle import LossLimitGuard
 from autonomous.trade_planner import OptionChainHint, TradePlan, TradePlanner, TradeType
@@ -615,6 +616,12 @@ class AutonomousTradingEngine:
             decision.status = DecisionStatus.EXECUTION_FAILED
             decision.rejection_reason = "no paper_adapter configured"
             return decision
+        if plan.strategy == STRATEGY_OPENING_RANGE_BREAKOUT:
+            decision.status = DecisionStatus.EXECUTION_FAILED
+            decision.rejection_reason = (
+                "ORB paper execution must use ORBProposal/ORBPaperExecutor protected path"
+            )
+            return decision
         if plan.trade_type != TradeType.BUY_SHARES:
             decision.status = DecisionStatus.EXECUTION_FAILED
             decision.rejection_reason = f"paper execution for {plan.trade_type.value} not implemented in MVP"
@@ -646,6 +653,12 @@ class AutonomousTradingEngine:
         executed_symbols: List[str] = []
         for plan_dict in decision.trade_plans:
             plan = self._dict_to_plan(plan_dict)
+            if plan.strategy == STRATEGY_OPENING_RANGE_BREAKOUT:
+                decision.status = DecisionStatus.EXECUTION_FAILED
+                decision.rejection_reason = (
+                    "ORB paper execution must use ORBProposal/ORBPaperExecutor protected path"
+                )
+                return decision
             if plan.trade_type != TradeType.BUY_SHARES:
                 decision.status = DecisionStatus.EXECUTION_FAILED
                 decision.rejection_reason = f"paper basket execution for {plan.trade_type.value} not implemented"
@@ -686,6 +699,8 @@ class AutonomousTradingEngine:
             sizing=dict(plan_dict.get("sizing") or {}),
             market_data_health=dict(plan_dict.get("market_data_health") or {}),
             execution_quality=dict(plan_dict.get("execution_quality") or {}),
+            strategy=str(plan_dict.get("strategy") or ""),
+            extras=dict(plan_dict.get("extras") or {}),
         )
 
     @staticmethod

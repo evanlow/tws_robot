@@ -100,7 +100,14 @@ class CandidateRanker:
     ) -> Optional[str]:
         if candidate.strength_score < self.config.min_signal_strength:
             return f"strength_score {candidate.strength_score} < min {self.config.min_signal_strength}"
-        if candidate.signal_label != self.config.required_signal_label:
+        allowed_labels = self.config.allowed_signal_labels
+        if allowed_labels:
+            if candidate.signal_label not in allowed_labels:
+                return (
+                    f"signal_label {candidate.signal_label!r} not in allowed_signal_labels "
+                    f"{list(allowed_labels)!r}"
+                )
+        elif candidate.signal_label != self.config.required_signal_label:
             return f"signal_label {candidate.signal_label!r} != required {self.config.required_signal_label!r}"
         if not candidate.volume_ok:
             return "volume_ok=False"

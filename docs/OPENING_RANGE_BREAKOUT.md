@@ -327,3 +327,65 @@ Page: `/opening-range/review`.
 ```bash
 python -m pytest tests/test_orb_evidence_ledger.py
 ```
+
+## Autonomous engine adapter & ORB-aware planner (Phase 3, #212)
+
+`autonomous/opening_range_signal_provider.py` adds an **optional**
+`OpeningRangeSignalProvider` — a `SignalProvider` adapter that lets valid ORB
+setups flow through the existing `AutonomousTradingEngine` orchestration
+(cash checks, ranking, planning, risk gates, evidence logging) alongside the
+`Confirmed Rebound` rebound scanner, without forcing ORB through the
+rebound scanner's `Strong(100)` / `Confirmed Rebound` assumptions.
+
+- The adapter performs **no** ORB detection itself; it wraps a
+  `setup_source` callable that returns the current, still-valid `ORBSetup`
+  for a symbol (e.g. sourced from the runtime candle/strategy layer or the
+  proposal store), and maps it onto a `CandidateSignal`:
+  - `signal_label`: `ORB_LONG_MODEL_A` (Model A / displacement-gap) or
+    `ORB_LONG_MODEL_B` (Model B / break-retest).
+  - `last_price` / `support_price` / `resistance_price`: ORB entry / stop /
+    target prices.
+  - `extras`: `strategy="opening_range_breakout"`, `setup_model`,
+    `direction`, `opening_range_high`/`low`, `confirmation_time`,
+    `entry_price`/`stop_price`/`target_price`, `risk_per_share`,
+    `reward_per_share`, `rr_ratio`, and `orb_evidence`.
+- **Long-only, Model A/B only**: `direction != LONG` and
+  `ORBEntryModel.MODEL_C_REVERSAL` setups are rejected (`analyze` returns
+  `None`) — no short-side entries, no Model C execution.
+- **Malformed setups rejected, never raised**: missing/non-positive entry,
+  stop, or target price; stop/target on the wrong side of entry; missing or
+  non-positive risk/reward/R:R all return `None` rather than propagating an
+  exception, so a single bad setup cannot poison the scan.
+- `MappingOpeningRangeSetupSource` is a simple in-memory `setup_source`
+  helper (symbol → `ORBSetup`) for tests and single-scan wiring.
+
+`AutonomousTradingConfig.allowed_signal_labels` (optional whitelist) lets
+`CandidateRanker` accept ORB labels without requiring
+`required_signal_label == "Confirmed Rebound"`. When unset (the default),
+ranking behavior for the existing rebound scanner is unchanged.
+
+`TradePlanner` gained an ORB-aware branch, triggered when
+`candidate.extras["strategy"] == "opening_range_breakout"`:
+
+- Entry, stop, and target prices are used **exactly** as provided by the
+  ORB setup — they are never overwritten by the resistance/ADR/percent
+  target logic or the support-derived stop heuristic used for the rebound
+  scanner.
+- Malformed ORB extras (missing/invalid entry/stop/target/R:R, or prices out
+  of order) are rejected with a clear reason.
+- Position sizing, market-data-health, and execution-quality guards still
+  apply, same as the rebound scanner path.
+- The resulting `TradePlan.strategy` / `TradePlan.extras` carry the ORB
+  model/direction/opening-range/evidence context forward into the audit log
+  and trade record (via `TradePlan.to_dict()`).
+
+All existing VIX, emergency-stop, execution-quality, market-data, daily-cap,
+and drawdown guards remain active for ORB candidates — this phase is
+additive only.
+
+```bash
+python -m pytest tests/test_opening_range_signal_provider.py tests/test_orb_trade_planner.py tests/test_orb_candidate_ranker_eligibility.py
+```
+
+No live enablement, no shorts, no Model C execution, and the existing
+rebound scanner is untouched by this phase.
