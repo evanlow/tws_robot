@@ -14,14 +14,17 @@ from autonomous.orb_session_manager import (
 )
 
 
-def _ev_ready(tmp_path, symbols=("QQQ",)):
+def _ev_ready(tmp_path, symbols=("QQQ",), strategy_name=None):
     p = tmp_path / "logs"
     p.mkdir(exist_ok=True)
-    f = p / "orb_backtest_evidence_20260601.jsonl"
-    f.write_text(json.dumps({
+    payload = {
         "symbols": list(symbols),
         "readiness": {"status": "READY_FOR_PAPER"},
-    }) + "\n", encoding="utf-8")
+    }
+    if strategy_name is not None:
+        payload["strategy_name"] = strategy_name
+    f = p / "orb_backtest_evidence_20260601.jsonl"
+    f.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
 
 def _mgr(tmp_path):
@@ -102,6 +105,16 @@ def test_paper_arm_ok_with_evidence(tmp_path):
     m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"], "mode": "paper_autonomous"})
     rec = m.arm("ORB1")
     assert rec["session"]["armed"] is True
+
+
+def test_paper_arm_requires_matching_strategy_scoped_evidence(tmp_path):
+    _ev_ready(tmp_path, strategy_name="ORB1")
+    m = _mgr(tmp_path)
+    m.upsert_strategy({"name": "ORB1", "symbols": ["QQQ"], "mode": "paper_autonomous"})
+    m.upsert_strategy({"name": "ORB2", "symbols": ["QQQ"], "mode": "paper_autonomous"})
+    assert m.arm("ORB1")["session"]["armed"] is True
+    with pytest.raises(ORBValidationError):
+        m.arm("ORB2")
 
 
 def test_recommend_only_arms_with_missing_gates(tmp_path):

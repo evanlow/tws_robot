@@ -265,6 +265,28 @@ def test_losing_trade_result_and_failed_trade(tmp_path):
     assert fte.failure_note == "simulated broker rejection"
 
 
+def test_cancelled_entries_excluded_from_closed_and_promotion_counts(tmp_path):
+    audit = AuditLogger(str(tmp_path))
+    store = ORBProposalStore(audit=audit, log_dir=str(tmp_path))
+    proposal = store.create_from_setup(
+        _setup(), strategy_name="ORB1", session_date="2026-06-01",
+        orb_state="PROPOSAL_READY", gates=ProposalGates(),
+    )
+    executor = ORBPaperExecutor(store, audit=audit, log_dir=str(tmp_path))
+    trade = executor.execute_paper(proposal, mode=ORBExecutionMode.PAPER_AUTONOMOUS)
+    exit_mgr = ORBExitManager(audit=audit, log_dir=str(tmp_path))
+    exit_mgr.register_trade(trade)
+    exit_mgr.cancel_entry(trade.trade_id)
+
+    ledger = build_trade_ledger(str(tmp_path))
+    assert ledger[trade.trade_id].status == "CANCELLED"
+
+    summary = build_evidence_summary(str(tmp_path), "ORB1")
+    assert summary["paper"]["closed_trades"] == 0
+    assert summary["paper"]["cancelled_trades"] == 1
+    assert summary["promotion"]["status"] == NEEDS_MORE_DATA
+
+
 def test_ledger_force_flat_no_price_reconstructs_exit_reason(tmp_path):
     """A force-flat-no-price failure must still show a structured exit reason.
 
@@ -543,6 +565,7 @@ def test_review_single_strategy_found(client):
 
 
 def test_evidence_summary_endpoint(client):
+    _make_strategy(client, "ORB1", ["QQQ"])
     res = client.get("/api/orb/evidence/ORB1")
     assert res.status_code == 200
     body = res.get_json()
@@ -551,6 +574,7 @@ def test_evidence_summary_endpoint(client):
 
 
 def test_evidence_export_json_and_csv(client):
+    _make_strategy(client, "ORB1", ["QQQ"])
     js = client.get("/api/orb/evidence/ORB1/export?format=json")
     assert js.status_code == 200
     assert js.mimetype == "application/json"
@@ -566,6 +590,11 @@ def test_evidence_export_json_and_csv(client):
 def test_evidence_export_invalid_format(client):
     res = client.get("/api/orb/evidence/ORB1/export?format=xml")
     assert res.status_code == 400
+
+
+def test_evidence_endpoints_unknown_strategy_404(client):
+    assert client.get("/api/orb/evidence/NOPE").status_code == 404
+    assert client.get("/api/orb/evidence/NOPE/export?format=json").status_code == 404
 
 
 def test_review_notes_endpoint(client):

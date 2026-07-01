@@ -52,14 +52,31 @@ function escapeHtml(value) {
 }
 async function orbGet(url) {
   const res = await fetch(url);
-  return res.json();
+  return orbReadJson(res);
 }
 async function orbPost(url, body) {
   const headers = {'Content-Type':'application/json'};
   const token = csrf();
   if (token) headers['X-CSRFToken'] = token;
   const res = await fetch(url, {method:'POST', headers, body:JSON.stringify(body)});
-  return res.json();
+  return orbReadJson(res);
+}
+async function orbReadJson(res) {
+  const text = await res.text();
+  let payload = null;
+  if (text) {
+    try { payload = JSON.parse(text); }
+    catch {
+      return {error: `HTTP ${res.status}`, detail: text || 'non-JSON response'};
+    }
+  } else {
+    payload = {};
+  }
+  if (!res.ok) {
+    const detail = payload?.detail || payload?.error || res.statusText || 'request failed';
+    return {error: `HTTP ${res.status}`, detail};
+  }
+  return payload;
 }
 function badge(s){
   const c = s==='READY_FOR_PAPER'||s==='TINY_LIVE_CANDIDATE' ? '#48bb78'
@@ -93,7 +110,11 @@ async function orbLoadReview() {
                       : `?date=${encodeURIComponent(date)}`;
   const d = await orbGet(`/api/orb/review${qs}`);
   document.getElementById('reviewStatus').textContent = '';
-  if (d.error) { document.getElementById('reviewResults').textContent = 'Error: ' + d.error; return; }
+  if (d.error) {
+    const detail = d.detail ? ` (${d.detail})` : '';
+    document.getElementById('reviewResults').textContent = `Error: ${d.error}${detail}`;
+    return;
+  }
   if (!d.sessions.length) { document.getElementById('reviewResults').innerHTML = '<p class="empty-state">No sessions found.</p>'; return; }
   document.getElementById('reviewResults').innerHTML = d.sessions.map(renderSession).join('');
 }
@@ -112,6 +133,11 @@ async function orbLoadEvidence() {
   document.getElementById('evidenceStatus').textContent = 'Loading…';
   const d = await orbGet(`/api/orb/evidence/${encodeURIComponent(strategy)}`);
   document.getElementById('evidenceStatus').textContent = '';
+  if (d.error) {
+    const detail = d.detail ? ` (${d.detail})` : '';
+    document.getElementById('evidenceResults').textContent = `Error: ${d.error}${detail}`;
+    return;
+  }
   const p = d.promotion || {};
   document.getElementById('evidenceResults').innerHTML = `
     <h3>Promotion: ${badge(p.status)}</h3>

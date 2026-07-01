@@ -322,19 +322,11 @@ def build_trade_ledger(
     session_date: Optional[str] = None,
 ) -> Dict[str, TradeEvidence]:
     """Reconstruct every paper trade's full evidence, keyed by ``trade_id``."""
-    proposals_by_id: Dict[str, ProposalEvidence] = {}
     trades: Dict[str, TradeEvidence] = {}
 
     for rec in iter_orb_records(log_dir):
         kind = rec.get("kind")
-        if kind == KIND_PROPOSAL and rec.get("action") == "proposal_created":
-            pid = rec.get("proposal_id")
-            if pid:
-                proposals_by_id[pid] = ProposalEvidence(
-                    proposal_id=pid, strategy_name=rec.get("strategy", ""),
-                    symbol=rec.get("symbol", ""), session_date=rec.get("session_date", ""),
-                )
-        elif kind == KIND_PAPER_EXECUTION and rec.get("action") == "orb_paper_executed":
+        if kind == KIND_PAPER_EXECUTION and rec.get("action") == "orb_paper_executed":
             if not _matches(rec, strategy_name, session_date):
                 continue
             tid = rec.get("trade_id")
@@ -363,9 +355,6 @@ def build_trade_ledger(
         trade = trades.get(tid) if tid else None
         if trade is None:
             continue
-        if not _matches(rec, strategy_name, session_date):
-            # trades dict was already filtered on creation; nothing to do.
-            pass
         action = rec.get("action")
         if action == "entry_filled":
             trade.actual_entry_price = rec.get("fill_price")
@@ -387,7 +376,7 @@ def build_trade_ledger(
             trade.failure_note = "no live price available to flatten position"
             trade.exit_reason = rec.get("would_exit_reason")
         elif action == "cancel_entry":
-            trade.status = "CLOSED"
+            trade.status = "CANCELLED"
             trade.exit_reason = "ENTRY_CANCELLED"
 
     return trades
@@ -572,6 +561,7 @@ def build_evidence_summary(
     trade_dicts = [t.to_dict(commission_per_share=commission_per_share) for t in trade_ledger.values()]
 
     closed = [t for t in trade_dicts if t["status"] == "CLOSED"]
+    cancelled = [t for t in trade_dicts if t["status"] == "CANCELLED"]
     wins = [t for t in closed if t["result"] == "WIN"]
     losses = [t for t in closed if t["result"] == "LOSS"]
     failed = [t for t in trade_dicts if t["status"] == "FAILED"]
@@ -579,6 +569,7 @@ def build_evidence_summary(
     paper_summary = {
         "total_trades": len(trade_dicts),
         "closed_trades": len(closed),
+        "cancelled_trades": len(cancelled),
         "failed_trades": len(failed),
         "win_count": len(wins),
         "loss_count": len(losses),

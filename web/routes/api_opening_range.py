@@ -715,7 +715,9 @@ def orb_review():
 @orb_bp.route("/evidence/<strategy_name>", methods=["GET"])
 def orb_evidence_summary(strategy_name):
     rec = get_manager().get_strategy(strategy_name)
-    symbols = rec.get("symbols") if rec else None
+    if rec is None:
+        return jsonify({"error": "not found", "detail": f"unknown strategy '{strategy_name}'"}), 404
+    symbols = rec.get("symbols")
     return jsonify(get_review_store().evidence_summary(strategy_name, symbols=symbols))
 
 
@@ -728,7 +730,9 @@ def orb_evidence_export(strategy_name):
             "detail": "unsupported export format; expected 'json' or 'csv'",
         }), 400
     rec = get_manager().get_strategy(strategy_name)
-    symbols = rec.get("symbols") if rec else None
+    if rec is None:
+        return jsonify({"error": "not found", "detail": f"unknown strategy '{strategy_name}'"}), 404
+    symbols = rec.get("symbols")
     try:
         content = get_review_store().export(strategy_name, fmt, symbols=symbols)
     except ValueError:
