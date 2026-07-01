@@ -139,6 +139,16 @@ def test_assisted_live_candidate_requires_session_confirmation(audit):
     assert "assisted_live_session_confirmed" in result2["failing_gates"]
 
 
+def test_tiny_live_does_not_require_expected_account_id(audit):
+    # Unlike assisted-live, tiny-live candidacy does not require an explicit
+    # expected_account_id session confirmation (just a connected/confirmed
+    # broker account).
+    data = _fully_ready_input(requested_mode=TINY_LIVE_CANDIDATE_MODE, expected_account_id=None)
+    result = evaluate_orb_live_readiness(data, audit=audit)
+    assert result["overall_status"] == TINY_LIVE_CANDIDATE
+    assert result["failing_gates"] == []
+
+
 # ---------------------------------------------------------------------------
 # Individual gate failures -> LOCKED
 # ---------------------------------------------------------------------------

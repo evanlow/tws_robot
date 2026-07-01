@@ -9,8 +9,8 @@ Safety posture (Prime Directive):
 - Live remains locked by default: :func:`evaluate_orb_live_readiness` returns
   :data:`LOCKED` unless *every* required gate passes.
 - Tiny-live is evidence-gated: candidate status is computed from paper
-  evidence thresholds (trade count, average R after costs, drawdown,
-  consecutive losses, entry slippage) — never from manual optimism.
+  evidence thresholds (trade count, average realized R-multiple after costs,
+  drawdown, consecutive losses, entry slippage) — never from manual optimism.
 - Assisted-live additionally requires an explicit account/session
   confirmation from the operator; a mismatched or missing account id always
   fails closed.
@@ -50,6 +50,12 @@ _SUPPORTED_MODES = frozenset({TINY_LIVE_CANDIDATE_MODE, ASSISTED_LIVE_MODE})
 # feeds are never acceptable for live execution (mirrors
 # ``autonomous.runner_config.AutonomousLiveRunnerConfig.live_market_data_provider``).
 DEFAULT_ACCEPTABLE_MARKET_DATA_SOURCES = ("ibkr",)
+
+# Hard ceiling for tiny-live deployable-cash sizing: 1% of deployable cash.
+# Mirrors the "tiny" in tiny-live — anything larger is not a tiny-live
+# experiment and must go through the full live-readiness/fit-for-trading
+# review instead.
+MAX_TINY_LIVE_CASH_PCT = 0.01
 
 
 class ORBLiveReadinessStatus(str, Enum):
@@ -144,9 +150,10 @@ class TinyLiveRiskCaps:
     def validate(self, paper_max_trades_per_session: Optional[int] = None) -> List[str]:
         """Return a list of validation errors (empty means the caps are safe)."""
         errors: List[str] = []
-        if not (0 < self.max_deployable_cash_pct <= 0.01):
+        if not (0 < self.max_deployable_cash_pct <= MAX_TINY_LIVE_CASH_PCT):
             errors.append(
-                "tiny-live max_deployable_cash_pct must be > 0 and <= 0.01 (1%)"
+                "tiny-live max_deployable_cash_pct must be > 0 and <= "
+                f"{MAX_TINY_LIVE_CASH_PCT} ({MAX_TINY_LIVE_CASH_PCT * 100:.0f}%)"
             )
         if self.max_live_orb_trades_per_day < 1:
             errors.append("tiny-live max_live_orb_trades_per_day must be >= 1")

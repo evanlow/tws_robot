@@ -759,7 +759,7 @@ def orb_evidence_export(strategy_name):
 # Read-only evaluation of the guarded path from paper ORB evidence to
 # tiny-live / assisted-live review. Never places, routes, or simulates an
 # order, and never flips a live switch itself. Live remains locked unless
-# every readiness gate passes; the result and every request are audit logged.
+# every readiness gate passes; the result and every request are audit-logged.
 # ---------------------------------------------------------------------------
 
 
