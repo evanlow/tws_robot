@@ -13,6 +13,7 @@ from autonomous.autonomous_config import AutonomousMode, AutonomousTradingConfig
 from autonomous.candidate_scanner import CandidateSignal
 from autonomous.execution_quality import ExecutionQualityGuard
 from autonomous.market_data_health import MarketDataHealthGuard
+from autonomous.opening_range_signal_provider import STRATEGY_OPENING_RANGE_BREAKOUT
 from autonomous.position_sizing import PositionSizer
 
 _OPTION_MULTIPLIER = 100
@@ -168,7 +169,7 @@ class TradePlanner:
             _add(reasons, f"candidate.last_price invalid ({candidate.last_price!r})")
             return None
 
-        if (candidate.extras or {}).get("strategy") == "opening_range_breakout":
+        if (candidate.extras or {}).get("strategy") == STRATEGY_OPENING_RANGE_BREAKOUT:
             return self._plan_orb_breakout(candidate, deployable_cash, equity, reasons=reasons)
 
         if self.config.prefer_cash_secured_put and self.config.allow_short_put and option_hint is not None:
@@ -388,14 +389,14 @@ class TradePlanner:
             target_price=round(target_price, 2),
             stop_price=stop_for_sizing,
             required_cash=required_cash,
-            target_mode="opening_range_breakout",
+            target_mode=STRATEGY_OPENING_RANGE_BREAKOUT,
             sizing=sizing.to_dict(),
             market_data_health=market_data_health,
             execution_quality=quality,
-            strategy="opening_range_breakout",
+            strategy=STRATEGY_OPENING_RANGE_BREAKOUT,
             extras=orb_evidence,
             reason=(
-                f"{candidate.signal_label} (strategy=opening_range_breakout, "
+                f"{candidate.signal_label} (strategy={STRATEGY_OPENING_RANGE_BREAKOUT}, "
                 f"model={extras.get('setup_model')}, rr_ratio={rr_ratio:.2f}); "
                 f"buy {quantity} shares at limit {limit_price}"
             ),

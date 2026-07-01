@@ -47,6 +47,12 @@ logger = logging.getLogger(__name__)
 SIGNAL_LABEL_MODEL_A = "ORB_LONG_MODEL_A"
 SIGNAL_LABEL_MODEL_B = "ORB_LONG_MODEL_B"
 
+# ``CandidateSignal.extras["strategy"]`` marker used by ``TradePlanner`` to
+# route a candidate through the ORB-aware planning branch instead of the
+# rebound-scanner path. Shared as a constant so the provider and planner
+# never drift out of sync.
+STRATEGY_OPENING_RANGE_BREAKOUT = "opening_range_breakout"
+
 # Model C (reversal) is explicitly out of scope for this adapter (non-goal).
 _MODEL_LABELS: Dict[ORBEntryModel, str] = {
     ORBEntryModel.MODEL_A_DISPLACEMENT_GAP: SIGNAL_LABEL_MODEL_A,
@@ -156,7 +162,7 @@ class OpeningRangeSignalProvider:
             volume_ok=True,
             trend_ok=True,
             extras={
-                "strategy": "opening_range_breakout",
+                "strategy": STRATEGY_OPENING_RANGE_BREAKOUT,
                 "setup_model": setup.model.value,
                 "direction": setup.direction.value,
                 "opening_range_high": opening_range.high,
