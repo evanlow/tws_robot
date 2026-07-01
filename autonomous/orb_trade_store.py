@@ -366,12 +366,21 @@ class ORBTradeStore:
             trade.closed_at = _iso(filled_at or _now())
             return trade
 
-    def mark_exit_failed(self, trade_id: str, note: str) -> ORBIntradayTrade:
+    def mark_exit_failed(
+        self,
+        trade_id: str,
+        note: str,
+        *,
+        reason: Optional[ORBExitReason] = None,
+    ) -> ORBIntradayTrade:
         """A broker/order failure while trying to reduce exposure.
 
         The trade is marked ``FAILED`` (never left silently ``OPEN``) so an
         explicit failure record always exists; it is never re-opened or
-        re-sized upward from here.
+        re-sized upward from here. ``reason`` (e.g. ``FORCE_FLAT`` or
+        ``EMERGENCY_STOP``) is preserved on ``exit_reason`` so evidence/session
+        review can query *why* the mandatory flatten attempt failed, even
+        though no exit was actually filled.
         """
         with self._lock:
             trade = self._require(trade_id)
@@ -379,6 +388,8 @@ class ORBTradeStore:
                 return trade
             trade.exit_order_status = "FAILED"
             trade.state = ORBTradeState.FAILED.value
+            if reason is not None:
+                trade.exit_reason = reason.value
             trade.failure_note = note
             trade.closed_at = _iso(_now())
             return trade

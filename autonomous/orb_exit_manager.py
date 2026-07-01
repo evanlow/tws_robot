@@ -327,6 +327,7 @@ class ORBExitManager:
             self._store.mark_exit_failed(
                 trade.trade_id,
                 f"{reason.value}: no live price available to flatten position",
+                reason=reason,
             )
             self._audit.log_decision({
                 "kind": _AUDIT_KIND, "action": "exit_failed_no_price",

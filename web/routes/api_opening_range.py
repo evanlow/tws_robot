@@ -536,6 +536,13 @@ def execute_orb_proposal_paper(proposal_id):
             force_flat_time=str(params.get("force_flat_time", "15:55")),
             max_holding_minutes=params.get("max_holding_minutes"),
         )
+        # Paper execution is fully simulated (SimulatedPaperBracketAdapter) —
+        # there is no asynchronous broker fill to wait on, so the entry is
+        # immediately reconciled as filled at the simulated entry price. This
+        # is what moves the intraday monitor record from ENTRY_PENDING to
+        # OPEN so the exit manager (which only evaluates OPEN trades) can
+        # actually manage target/stop/force-flat/max-holding for it.
+        get_exit_manager().mark_entry_filled(trade.trade_id, trade.entry_price)
         return jsonify(trade.to_dict()), 201
     except ORBExecutionBlocked as exc:
         # Surface the structured block reason only; the exception message is

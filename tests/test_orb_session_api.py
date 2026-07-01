@@ -277,12 +277,17 @@ def test_execute_paper_registers_intraday_monitor_trade(client):
     res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
     trade_id = res.get_json()["trade_id"]
 
+    # Paper execution is fully simulated: execute-paper reconciles the entry
+    # as filled at the simulated entry price immediately, so the intraday
+    # monitor record is OPEN (not left ENTRY_PENDING) once execute-paper
+    # returns — this is what the exit manager (OPEN-only) actually manages.
     got = client.get(f"/api/orb/intraday-trades/{trade_id}")
     assert got.status_code == 200
     body = got.get_json()
-    assert body["state"] == "ENTRY_PENDING"
+    assert body["state"] == "OPEN"
     assert body["strategy_name"] == "ORB1"
     assert body["proposal_id"] == proposal.proposal_id
+    assert body["actual_entry_price"] == res.get_json()["entry_price"]
     assert "force_flat_countdown_seconds" in body
 
     listing = client.get("/api/orb/intraday-trades").get_json()["trades"]
@@ -293,24 +298,44 @@ def test_intraday_trade_lookup_missing_404(client):
     assert client.get("/api/orb/intraday-trades/nope").status_code == 404
 
 
-def test_close_now_requires_open_trade(client):
+def test_close_now_rejected_once_already_closed(client):
     armed_for = _arm_paper(client)
     with client.application.app_context():
         proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
     res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
     trade_id = res.get_json()["trade_id"]
+    entry_price = res.get_json()["entry_price"]
 
-    # Entry has not filled yet (ENTRY_PENDING), so close-now is rejected.
-    close_res = client.post(f"/api/orb/trades/{trade_id}/close-now")
-    assert close_res.status_code == 400
+    # Trade is OPEN immediately after execute-paper (simulated fill). Inject a
+    # live price provider so close-now has a price to fill against.
+    api.get_exit_manager()._price_provider = lambda symbol: entry_price
+    assert api.get_exit_manager().get_trade(trade_id).state == "OPEN"
+
+    first_close = client.post(f"/api/orb/trades/{trade_id}/close-now")
+    assert first_close.status_code == 200
+    assert first_close.get_json()["decision"] == "MANUAL_CLOSE"
+    assert api.get_exit_manager().get_trade(trade_id).state == "CLOSED"
+
+    # close-now requires OPEN; a second attempt on an already-closed trade is
+    # rejected, never issuing a duplicate/larger reducing order.
+    second_close = client.post(f"/api/orb/trades/{trade_id}/close-now")
+    assert second_close.status_code == 400
 
 
 def test_cancel_entry_before_fill(client):
     armed_for = _arm_paper(client)
     with client.application.app_context():
         proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
-    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
-    trade_id = res.get_json()["trade_id"]
+    trade = api.get_executor().execute_paper(
+        proposal,
+        mode=api.ORBExecutionMode.PAPER_AUTONOMOUS,
+    )
+    # Register directly with the exit manager without simulating the entry
+    # fill (unlike the execute-paper API route) so the trade stays
+    # ENTRY_PENDING and cancel-entry can be exercised.
+    api.get_exit_manager().register_trade(trade)
+    trade_id = trade.trade_id
+    assert api.get_exit_manager().get_trade(trade_id).state == "ENTRY_PENDING"
 
     cancel_res = client.post(f"/api/orb/trades/{trade_id}/cancel-entry")
     assert cancel_res.status_code == 200
@@ -347,11 +372,10 @@ def test_emergency_stop_flattens_open_intraday_trades(client):
     res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
     trade_id = res.get_json()["trade_id"]
 
-    # Simulate the entry having filled so the trade is OPEN and eligible for
-    # emergency-stop flattening. Inject a price provider so the flatten has a
-    # live price to fill against (the default returns no price).
+    # execute-paper reconciles the simulated entry as filled immediately, so
+    # the trade is already OPEN. Inject a price provider so the emergency-stop
+    # flatten has a live price to fill against (the default returns no price).
     api.get_exit_manager()._price_provider = lambda symbol: res.get_json()["entry_price"]
-    api.get_exit_manager().mark_entry_filled(trade_id, res.get_json()["entry_price"])
     assert api.get_exit_manager().get_trade(trade_id).state == "OPEN"
 
     stop_res = client.post("/api/orb/emergency-stop")
@@ -359,3 +383,29 @@ def test_emergency_stop_flattens_open_intraday_trades(client):
     trade = client.get(f"/api/orb/intraday-trades/{trade_id}").get_json()
     assert trade["state"] == "CLOSED"
     assert trade["exit_reason"] == "EMERGENCY_STOP"
+
+
+def test_execute_paper_then_target_price_closes_via_intraday_trades_api(client):
+    """Regression: execute-paper + a configured price provider at target price
+    can close a trade end to end through public API routes only — no direct
+    call into the exit manager's internal fill-simulation methods."""
+    armed_for = _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert res.status_code == 201
+    trade_id = res.get_json()["trade_id"]
+    target_price = res.get_json()["target_price"]
+
+    # The API-executed entry is already OPEN (simulated fill reconciled by
+    # execute-paper itself); configure a live price at the target so the
+    # exit manager's evaluate_all (invoked by the intraday-trades listing)
+    # triggers a target exit.
+    api.get_exit_manager()._price_provider = lambda symbol: target_price
+
+    got = client.get(f"/api/orb/intraday-trades/{trade_id}")
+    assert got.status_code == 200
+    body = got.get_json()
+    assert body["state"] == "CLOSED"
+    assert body["exit_reason"] == "TARGET"
+    assert body["exit_price"] == target_price

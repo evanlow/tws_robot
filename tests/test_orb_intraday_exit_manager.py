@@ -307,6 +307,10 @@ def test_force_flat_with_no_price_marks_failed_not_silently_open(tmp_path):
     trade = mgr.get_trade(trade_id)
     assert trade.state == ORBTradeState.FAILED.value
     assert trade.failure_note and "no live price" in trade.failure_note
+    # The attempted exit reason must be preserved on the trade record (not
+    # just embedded in the free-text failure note) so session review/evidence
+    # can query why the trade failed.
+    assert trade.exit_reason == ORBExitReason.FORCE_FLAT.value
 
 
 # ---- duplicate exit / oversell prevention -----------------------------------
