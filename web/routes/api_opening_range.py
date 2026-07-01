@@ -42,6 +42,7 @@ from autonomous.orb_exit_manager import ORBExitManager, ORBExitManagerError
 from autonomous.orb_session_review import ORBSessionReviewStore, parse_session_id
 from autonomous.orb_evidence import build_rejection_ledger
 from autonomous.orb_live_readiness import (
+    ASSISTED_LIVE_CANDIDATE,
     ASSISTED_LIVE_MODE,
     TINY_LIVE_CANDIDATE_MODE,
     ORBLiveReadinessConfirmationStore,
@@ -50,6 +51,11 @@ from autonomous.orb_live_readiness import (
     compute_avg_entry_slippage_bps,
     compute_r_stats,
     evaluate_orb_live_readiness,
+)
+from autonomous.orb_live_order_rehearsal import (
+    ORBAssistedLiveRefusal,
+    ORBAssistedLiveRehearsalStore,
+    build_assisted_live_rehearsal_package,
 )
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 
@@ -65,6 +71,7 @@ _executor: Optional[ORBPaperExecutor] = None
 _exit_manager: Optional[ORBExitManager] = None
 _review_store: Optional[ORBSessionReviewStore] = None
 _live_readiness_confirmations: Optional[ORBLiveReadinessConfirmationStore] = None
+_assisted_live_rehearsals: Optional[ORBAssistedLiveRehearsalStore] = None
 
 
 def get_manager() -> ORBSessionManager:
@@ -168,6 +175,19 @@ def get_live_readiness_confirmation_store() -> ORBLiveReadinessConfirmationStore
             path=str(Path(log_dir) / "orb_live_readiness_confirmations.json"),
         )
     return _live_readiness_confirmations
+
+
+def get_assisted_live_rehearsal_store() -> ORBAssistedLiveRehearsalStore:
+    """Lazily build the singleton assisted-live rehearsal store (Phase 5, #227).
+
+    In-memory only; every rehearsal package it holds was already validated
+    and audit-logged by :func:`build_assisted_live_rehearsal_package` before
+    reaching this store. No order is ever placed here.
+    """
+    global _assisted_live_rehearsals
+    if _assisted_live_rehearsals is None:
+        _assisted_live_rehearsals = ORBAssistedLiveRehearsalStore()
+    return _assisted_live_rehearsals
 
 
 @page_bp.route("/backtest")
@@ -862,41 +882,14 @@ def _evidence_derived_gate_counts(evidence: dict, log_dir: str, strategy_name: s
     }
 
 
-@orb_bp.route("/strategies/<name>/live-readiness", methods=["GET"])
-def orb_live_readiness(name):
-    """Evaluate tiny-live / assisted-live readiness for a strategy.
+def _compute_orb_live_readiness(name, rec, requested_mode, args):
+    """Shared readiness computation for the GET endpoint and the assisted-live
+    rehearsal endpoint below, so both always evaluate the *same* Phase 4
+    readiness result from the same evidence/connection/confirmation sources.
 
-    Read-only: gathers paper evidence, connection/account status, the live
-    master switch, and emergency-stop state, then delegates to
-    :func:`autonomous.orb_live_readiness.evaluate_orb_live_readiness`. Every
-    evaluation is audit-logged regardless of outcome. Never places an order
-    and never itself enables live trading.
-
-    Evidence-derived risk/quality counters (drawdown-R, consecutive losses,
-    entry-slippage bps, protection/data-quality/emergency-stop counts) are
-    reconstructed from the ORB evidence ledger. Query-string overrides may
-    only ever *raise* an observed failure count above the evidence-derived
-    floor (additive diagnostics for testing) — they can never lower it and
-    so can never hide a real evidence-driven failure.
-
-    Tiny-live caps used for the ``tiny_live_caps_valid`` gate are always the
-    *actual* ``AutonomousLiveRunnerConfig`` values -- the real source of
-    truth for what the live runner would enforce. A query-string cap
-    override can never replace or rescue those values in the gate itself;
-    it is only surfaced as a separate ``simulated_tiny_live_caps`` diagnostic
-    in the response, so a caller cannot mask an unsafe actual live-runner
-    cap by supplying a smaller query-string value.
-
-    Operator account/mode confirmation can only come from a prior explicit
-    ``POST .../confirm`` call (see :func:`orb_live_readiness_confirm`); this
-    GET endpoint never accepts a confirmation via query string.
+    Returns ``(result, account_id, expected_account_id, operator_confirmed,
+    live_config, log_dir)``.
     """
-    rec = get_manager().get_strategy(name)
-    if rec is None:
-        return jsonify({"error": "not found", "detail": f"unknown strategy '{name}'"}), 404
-
-    args = request.args
-    requested_mode = args.get("mode", TINY_LIVE_CANDIDATE_MODE)
     symbols = rec.get("symbols")
     evidence = get_review_store().evidence_summary(name, symbols=symbols)
     paper_summary = evidence.get("paper", {}) or {}
@@ -1002,6 +995,47 @@ def orb_live_readiness(name):
     result = evaluate_orb_live_readiness(data, log_dir=log_dir)
     if simulated_tiny_live_caps is not None:
         result["simulated_tiny_live_caps"] = simulated_tiny_live_caps.as_dict()
+    return result, account_id, expected_account_id, operator_confirmed, live_config, log_dir
+
+
+@orb_bp.route("/strategies/<name>/live-readiness", methods=["GET"])
+def orb_live_readiness(name):
+    """Evaluate tiny-live / assisted-live readiness for a strategy.
+
+    Read-only: gathers paper evidence, connection/account status, the live
+    master switch, and emergency-stop state, then delegates to
+    :func:`autonomous.orb_live_readiness.evaluate_orb_live_readiness`. Every
+    evaluation is audit-logged regardless of outcome. Never places an order
+    and never itself enables live trading.
+
+    Evidence-derived risk/quality counters (drawdown-R, consecutive losses,
+    entry-slippage bps, protection/data-quality/emergency-stop counts) are
+    reconstructed from the ORB evidence ledger. Query-string overrides may
+    only ever *raise* an observed failure count above the evidence-derived
+    floor (additive diagnostics for testing) — they can never lower it and
+    so can never hide a real evidence-driven failure.
+
+    Tiny-live caps used for the ``tiny_live_caps_valid`` gate are always the
+    *actual* ``AutonomousLiveRunnerConfig`` values -- the real source of
+    truth for what the live runner would enforce. A query-string cap
+    override can never replace or rescue those values in the gate itself;
+    it is only surfaced as a separate ``simulated_tiny_live_caps`` diagnostic
+    in the response, so a caller cannot mask an unsafe actual live-runner
+    cap by supplying a smaller query-string value.
+
+    Operator account/mode confirmation can only come from a prior explicit
+    ``POST .../confirm`` call (see :func:`orb_live_readiness_confirm`); this
+    GET endpoint never accepts a confirmation via query string.
+    """
+    rec = get_manager().get_strategy(name)
+    if rec is None:
+        return jsonify({"error": "not found", "detail": f"unknown strategy '{name}'"}), 404
+
+    args = request.args
+    requested_mode = args.get("mode", TINY_LIVE_CANDIDATE_MODE)
+    result, _account_id, _expected_account_id, _operator_confirmed, _live_config, _log_dir = (
+        _compute_orb_live_readiness(name, rec, requested_mode, args)
+    )
     return jsonify(result)
 
 
@@ -1045,6 +1079,94 @@ def orb_live_readiness_confirm(name):
         log_dir=cfg.get("orb_evidence_dir", "logs"),
     )
     return jsonify(record), 201
+
+
+# ---------------------------------------------------------------------------
+# ORB Phase 5 — assisted-live protected order-path rehearsal (#227)
+# Builds the exact broker-visible protected order package (entry + stop +
+# target/bracket) that assisted-live would submit for a valid ORB proposal,
+# gated by the Phase 4 (#213) live-readiness result, the live master switch,
+# and an explicit operator confirmation. Dry-run/rehearsal only: no order is
+# ever placed here and there is no live-submit endpoint in this phase.
+# ---------------------------------------------------------------------------
+
+
+@orb_bp.route("/strategies/<name>/assisted-live/rehearse", methods=["POST"])
+def orb_assisted_live_rehearse(name):
+    """Build (and audit-log) an assisted-live rehearsal order package.
+
+    Requires a ``proposal_id`` for a still-``PENDING`` proposal owned by
+    ``name``. Re-evaluates Phase 4 assisted-live readiness from the same
+    evidence/connection/confirmation sources as the ``GET .../live-readiness``
+    endpoint (a caller cannot supply a stale or fabricated readiness result).
+    Never places, routes, or simulates an order; this is rehearsal/dry-run
+    only. Fails closed (400/404/409) on any missing safety condition.
+    """
+    rec = get_manager().get_strategy(name)
+    if rec is None:
+        return jsonify({"error": "not found", "detail": f"unknown strategy '{name}'"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    proposal_id = payload.get("proposal_id")
+    if not proposal_id:
+        return jsonify({"error": "proposal_id is required"}), 400
+
+    store = get_proposal_store()
+    store.expire_due()
+    proposal = store.get(proposal_id)
+    if proposal is None:
+        return jsonify({"error": "not found", "detail": f"unknown proposal '{proposal_id}'"}), 404
+    if proposal.strategy_name != name:
+        return jsonify({
+            "error": "proposal does not belong to strategy",
+            "detail": f"proposal '{proposal_id}' belongs to '{proposal.strategy_name}', not '{name}'",
+        }), 400
+
+    result, account_id, expected_account_id, operator_confirmed, live_config, log_dir = (
+        _compute_orb_live_readiness(name, rec, ASSISTED_LIVE_MODE, request.args)
+    )
+
+    try:
+        package = build_assisted_live_rehearsal_package(
+            proposal,
+            result,
+            account_id=account_id,
+            expected_account_id=expected_account_id,
+            operator_confirmed=operator_confirmed,
+            live_master_switch_enabled=live_config.live_enabled,
+            evidence_id=payload.get("evidence_id"),
+            time_in_force=str(payload.get("time_in_force") or "DAY"),
+            log_dir=log_dir,
+        )
+    except ORBAssistedLiveRefusal as exc:
+        logger.info("ORB assisted-live rehearsal refused (%s): %s", exc.reason.value, exc)
+        return jsonify({
+            "error": "rehearsal refused",
+            "reason": exc.reason.value,
+            "readiness": result,
+        }), 409
+
+    get_assisted_live_rehearsal_store().add(package)
+    return jsonify(package.to_dict()), 201
+
+
+@orb_bp.route("/strategies/<name>/assisted-live/rehearsals", methods=["GET"])
+def list_orb_assisted_live_rehearsals(name):
+    """List assisted-live rehearsal packages previously built for ``name``."""
+    args = request.args
+    rehearsals = get_assisted_live_rehearsal_store().list(
+        strategy_name=name, symbol=args.get("symbol"), proposal_id=args.get("proposal_id"),
+    )
+    return jsonify({"rehearsals": [p.to_dict() for p in rehearsals]})
+
+
+@orb_bp.route("/assisted-live/rehearsals/<rehearsal_id>", methods=["GET"])
+def get_orb_assisted_live_rehearsal(rehearsal_id):
+    """Fetch a single assisted-live rehearsal package by id."""
+    package = get_assisted_live_rehearsal_store().get(rehearsal_id)
+    if package is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(package.to_dict())
 
 
 @orb_bp.route("/review/<path:review_session_id>/notes", methods=["POST"])
