@@ -15,6 +15,7 @@ def client(tmp_path, monkeypatch):
     api._manager = None  # reset singleton between tests
     api._proposal_store = None  # reset proposal store singleton between tests
     api._executor = None  # reset paper executor singleton between tests
+    api._exit_manager = None  # reset intraday exit manager singleton between tests
     app = create_app({
         "TESTING": True, "LOGIN_DISABLED": True, "WTF_CSRF_ENABLED": False,
         "orb_config_dir": str(tmp_path / "config"),
@@ -24,6 +25,7 @@ def client(tmp_path, monkeypatch):
     api._manager = None
     api._proposal_store = None
     api._executor = None
+    api._exit_manager = None
 
 
 def _make(client, name="ORB1", symbols=None, mode="recommend_only"):
@@ -264,3 +266,96 @@ def test_emergency_stop_blocks_paper_execution(client):
 
 def test_trade_lookup_missing_404(client):
     assert client.get("/api/orb/trades/nope").status_code == 404
+
+
+# ---- ORB intraday exit lifecycle & in-trade monitor (Phase 2.6, #210) ------
+
+def test_execute_paper_registers_intraday_monitor_trade(client):
+    armed_for = _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    trade_id = res.get_json()["trade_id"]
+
+    got = client.get(f"/api/orb/intraday-trades/{trade_id}")
+    assert got.status_code == 200
+    body = got.get_json()
+    assert body["state"] == "ENTRY_PENDING"
+    assert body["strategy_name"] == "ORB1"
+    assert body["proposal_id"] == proposal.proposal_id
+    assert "force_flat_countdown_seconds" in body
+
+    listing = client.get("/api/orb/intraday-trades").get_json()["trades"]
+    assert listing[0]["trade_id"] == trade_id
+
+
+def test_intraday_trade_lookup_missing_404(client):
+    assert client.get("/api/orb/intraday-trades/nope").status_code == 404
+
+
+def test_close_now_requires_open_trade(client):
+    armed_for = _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    trade_id = res.get_json()["trade_id"]
+
+    # Entry has not filled yet (ENTRY_PENDING), so close-now is rejected.
+    close_res = client.post(f"/api/orb/trades/{trade_id}/close-now")
+    assert close_res.status_code == 400
+
+
+def test_cancel_entry_before_fill(client):
+    armed_for = _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    trade_id = res.get_json()["trade_id"]
+
+    cancel_res = client.post(f"/api/orb/trades/{trade_id}/cancel-entry")
+    assert cancel_res.status_code == 200
+    body = cancel_res.get_json()
+    assert body["state"] == "CLOSED"
+    assert body["exit_reason"] == "ENTRY_CANCELLED"
+
+    # A second cancel is rejected, never re-opening the trade.
+    assert client.post(f"/api/orb/trades/{trade_id}/cancel-entry").status_code == 400
+
+
+def test_disable_and_enable_new_entries(client):
+    res = client.post("/api/orb/strategies/ORB1/disable-new-entries")
+    assert res.status_code == 200
+    assert res.get_json()["new_entries_disabled"] is True
+
+    armed_for = _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
+    blocked = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert blocked.status_code == 400
+    assert blocked.get_json()["error"] == "new entries disabled"
+
+    enable_res = client.post("/api/orb/strategies/ORB1/enable-new-entries")
+    assert enable_res.get_json()["new_entries_disabled"] is False
+    allowed = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert allowed.status_code == 201
+
+
+def test_emergency_stop_flattens_open_intraday_trades(client):
+    armed_for = _arm_paper(client)
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    trade_id = res.get_json()["trade_id"]
+
+    # Simulate the entry having filled so the trade is OPEN and eligible for
+    # emergency-stop flattening. Inject a price provider so the flatten has a
+    # live price to fill against (the default returns no price).
+    api.get_exit_manager()._price_provider = lambda symbol: res.get_json()["entry_price"]
+    api.get_exit_manager().mark_entry_filled(trade_id, res.get_json()["entry_price"])
+    assert api.get_exit_manager().get_trade(trade_id).state == "OPEN"
+
+    stop_res = client.post("/api/orb/emergency-stop")
+    assert stop_res.get_json()["stopped"] is True
+    trade = client.get(f"/api/orb/intraday-trades/{trade_id}").get_json()
+    assert trade["state"] == "CLOSED"
+    assert trade["exit_reason"] == "EMERGENCY_STOP"

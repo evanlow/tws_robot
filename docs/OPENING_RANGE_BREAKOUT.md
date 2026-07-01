@@ -222,3 +222,54 @@ GET  /api/orb/trades/<trade_id>
 ```bash
 python -m pytest tests/test_orb_paper_execution.py tests/test_orb_session_api.py
 ```
+
+## Intraday exit lifecycle & in-trade monitor (Phase 2.6, #210)
+
+Once `execute-paper` has submitted a trade's entry/protective orders,
+`autonomous/orb_trade_store.py` (`ORBTradeStore`, `ORBIntradayTrade`,
+`ORBTradeState`, `ORBExitReason`) and `autonomous/orb_exit_manager.py`
+(`ORBExitManager`) own its intraday lifecycle and monitoring:
+
+- **Lifecycle states.** `ENTRY_PENDING` → `OPEN` → `EXIT_PENDING` →
+  `CLOSED`/`FAILED`, matching the states used by the existing multi-day
+  autonomous trade store (`autonomous/trade_store.py`).
+- **Exit triggers**, evaluated in priority order: emergency stop, manual close
+  (operator `close-now`), take-profit (last price ≥ target), stop-loss (last
+  price ≤ stop), force-flat time (per-strategy `force_flat_time`), and an
+  optional per-trade max-holding-minutes cap.
+- **In-trade monitor fields**: trade/strategy/symbol/entry model, entry/target/
+  stop/exit order status, protection status, current price, current R, MFE/MAE
+  in R, planned-vs-actual entry slippage, exit slippage, time in trade, and a
+  force-flat countdown.
+- **No fake fills.** Fills are only ever simulated against a live price
+  supplied by the configured `price_provider`; if no price is available when a
+  mandatory flatten boundary (force-flat/emergency-stop/max-holding) is hit,
+  the trade is marked `FAILED` with an explicit note rather than silently
+  remaining `OPEN`.
+- **Exposure can only be reduced.** Every exit — target, stop, force-flat,
+  emergency-stop, or manual close — submits a single SELL sized to the trade's
+  original (never increased) quantity. The trade store makes a second exit
+  request against a trade that is not `OPEN` a no-op, so duplicate exits and
+  oversell/over-close attempts never place a second reducing order.
+- **Operator actions**: `close-now` (requires `OPEN`), `cancel-entry` (only
+  while `ENTRY_PENDING`; never opens/increases exposure), and
+  `disable-new-entries`/`enable-new-entries` per strategy (blocks only *new*
+  paper entries — an already-open trade keeps being evaluated for exit
+  normally).
+
+```text
+GET  /api/orb/intraday-trades
+GET  /api/orb/intraday-trades/<trade_id>
+POST /api/orb/trades/<trade_id>/close-now
+POST /api/orb/trades/<trade_id>/cancel-entry
+POST /api/orb/strategies/<name>/disable-new-entries
+POST /api/orb/strategies/<name>/enable-new-entries
+```
+
+`POST /api/orb/emergency-stop` now also trips the exit manager and evaluates
+every open ORB trade so nothing is left open behind an emergency stop.
+
+```bash
+python -m pytest tests/test_orb_intraday_exit_manager.py tests/test_orb_session_api.py
+```
+
