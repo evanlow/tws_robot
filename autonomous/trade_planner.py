@@ -71,6 +71,8 @@ class TradePlan:
     sizing: Dict[str, Any] = field(default_factory=dict)
     market_data_health: Dict[str, Any] = field(default_factory=dict)
     execution_quality: Dict[str, Any] = field(default_factory=dict)
+    strategy: str = ""
+    extras: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -96,6 +98,8 @@ class TradePlan:
             "sizing": dict(self.sizing or {}),
             "market_data_health": dict(self.market_data_health or {}),
             "execution_quality": dict(self.execution_quality or {}),
+            "strategy": self.strategy,
+            "extras": dict(self.extras or {}),
         }
 
 
@@ -163,6 +167,9 @@ class TradePlanner:
         if candidate.last_price is None or candidate.last_price <= 0:
             _add(reasons, f"candidate.last_price invalid ({candidate.last_price!r})")
             return None
+
+        if (candidate.extras or {}).get("strategy") == "opening_range_breakout":
+            return self._plan_orb_breakout(candidate, deployable_cash, equity, reasons=reasons)
 
         if self.config.prefer_cash_secured_put and self.config.allow_short_put and option_hint is not None:
             put_plan = self._plan_short_put(candidate, deployable_cash, equity, option_hint, reasons=reasons)
@@ -273,6 +280,137 @@ class TradePlanner:
             + [f"market_data_health: {w}" for w in market_data_health.get("warnings", [])]
             + [f"execution_quality: {w}" for w in quality.get("warnings", [])],
             exit_plan=f"Exit on target_price ({target_mode}) or stop_price; review on next Strong(100) re-evaluation.",
+        )
+
+    def _plan_orb_breakout(
+        self,
+        candidate: CandidateSignal,
+        deployable_cash: float,
+        equity: float,
+        reasons: Optional[List[str]] = None,
+    ) -> Optional[TradePlan]:
+        """Plan an Opening Range Breakout (ORB) candidate.
+
+        ORB entry/stop/target levels come directly from the runtime ORB
+        strategy/proposal (see ``autonomous.opening_range_signal_provider``)
+        and must be preserved exactly:
+
+        - The target is *never* overwritten with support/resistance/ADR/
+          percent logic (``_compute_target`` is intentionally not called).
+        - The stop is *never* derived from generic support.
+        - Malformed ORB extras (missing/invalid entry, stop, target, or R/R)
+          are rejected rather than silently patched.
+        """
+        extras = candidate.extras or {}
+        entry_price, stop_price, target_price, rr_ratio, error = _extract_orb_levels(extras)
+        if error is not None:
+            _add(reasons, f"{candidate.symbol}: malformed ORB extras — {error}")
+            return None
+
+        # Long-only (Prime Directive / ORB non-goals: no short-side entries).
+        if extras.get("direction") not in (None, "LONG"):
+            _add(reasons, f"{candidate.symbol}: ORB direction {extras.get('direction')!r} not supported (long-only)")
+            return None
+
+        # Stop and target are always required for paper/autonomous assisted
+        # ORB paths — this is enforced unconditionally, not only in
+        # assisted_live mode, because an ORB candidate without both levels
+        # cannot be a valid bracket.
+        if stop_price <= 0 or stop_price >= entry_price:
+            _add(reasons, f"{candidate.symbol}: ORB requires a valid stop_price below entry")
+            return None
+        if target_price <= 0 or target_price <= entry_price:
+            _add(reasons, f"{candidate.symbol}: ORB requires a valid target_price above entry")
+            return None
+
+        cap, equity_cap, cash_cap, cash_pct, eq_pct = self._position_cap(deployable_cash, equity)
+        limit_price = round(entry_price, 2)
+        if cap < limit_price:
+            equity_str = f", equity_cap=${equity_cap:,.2f} (equity ${equity:,.2f} * {eq_pct:.0%})" if equity_cap is not None else ""
+            _add(
+                reasons,
+                f"{candidate.symbol}: position cap ${cap:,.2f} < ORB entry price ${limit_price:,.2f} "
+                f"[deployable ${deployable_cash:,.2f} * {cash_pct:.0%} = ${cash_cap:,.2f}{equity_str}] — can't afford 1 share within sizing cap"
+            )
+            return None
+
+        market_data_health = self._market_data_health(candidate)
+        if not market_data_health.get("allowed", True):
+            _add(reasons, f"market data health rejected - {market_data_health.get('reason')}")
+            return None
+        quality = self._execution_quality(candidate, limit_price)
+        if not quality.get("allowed", True):
+            _add(reasons, f"execution quality rejected — {quality.get('reason')}")
+            return None
+
+        stop_for_sizing = round(stop_price, 2)
+        sizing = self.sizer.size_buy_shares(
+            symbol=candidate.symbol,
+            entry_price=limit_price,
+            stop_price=stop_for_sizing,
+            base_cap_value=cap,
+            equity=equity,
+            adr_pct=_positive_float(extras.get("adr_pct")),
+            edge_estimate=_dict_or_none(extras.get("edge_estimate")),
+            observed_edge_trades=_int(extras.get("edge_observed_trades"), default=0),
+            setup_eligibility=_dict_or_none(extras.get("setup_eligibility")),
+            strategy_drawdown_pct=_positive_float(extras.get("strategy_drawdown_pct")),
+            avg_slippage_bps=_positive_float(
+                _first(extras, "edge_avg_slippage_bps", "avg_slippage_bps")
+            ),
+        )
+        quantity = sizing.quantity
+        if quantity <= 0:
+            _add(reasons, f"{candidate.symbol}: final sizing cap cannot buy 1 share; binding_cap={sizing.binding_cap}")
+            return None
+
+        required_cash = sizing.required_cash
+        orb_evidence = {
+            "setup_model": extras.get("setup_model"),
+            "direction": extras.get("direction"),
+            "opening_range_high": extras.get("opening_range_high"),
+            "opening_range_low": extras.get("opening_range_low"),
+            "confirmation_time": extras.get("confirmation_time"),
+            "entry_price": entry_price,
+            "stop_price": stop_price,
+            "target_price": target_price,
+            "risk_per_share": extras.get("risk_per_share"),
+            "reward_per_share": extras.get("reward_per_share"),
+            "rr_ratio": rr_ratio,
+            "orb_evidence": extras.get("orb_evidence"),
+        }
+        return TradePlan(
+            symbol=candidate.symbol,
+            trade_type=TradeType.BUY_SHARES,
+            action="BUY",
+            quantity=quantity,
+            limit_price=limit_price,
+            target_price=round(target_price, 2),
+            stop_price=stop_for_sizing,
+            required_cash=required_cash,
+            target_mode="opening_range_breakout",
+            sizing=sizing.to_dict(),
+            market_data_health=market_data_health,
+            execution_quality=quality,
+            strategy="opening_range_breakout",
+            extras=orb_evidence,
+            reason=(
+                f"{candidate.signal_label} (strategy=opening_range_breakout, "
+                f"model={extras.get('setup_model')}, rr_ratio={rr_ratio:.2f}); "
+                f"buy {quantity} shares at limit {limit_price}"
+            ),
+            risk_notes=[
+                "Limit order only; never market.",
+                "ORB entry/stop/target preserved exactly from the ORB setup — "
+                "not derived from generic support/resistance/ADR/percent logic.",
+                f"Sized to <= {self.config.equity_cap_pct():.0%} of equity and <= {self.config.deployable_cash_cap_pct():.0%} of deployable cash.",
+                f"Binding sizing cap: {sizing.binding_cap}.",
+                f"Market-data health: {market_data_health.get('reason')}.",
+                f"Execution quality: {quality.get('reason')}.",
+            ] + list(sizing.notes)
+            + [f"market_data_health: {w}" for w in market_data_health.get("warnings", [])]
+            + [f"execution_quality: {w}" for w in quality.get("warnings", [])],
+            exit_plan=f"Exit on ORB target_price ({round(target_price, 2)}) or ORB stop_price ({stop_for_sizing}); no re-target after entry.",
         )
 
     def _market_data_health(self, candidate: CandidateSignal) -> Dict[str, Any]:
@@ -405,6 +543,35 @@ class TradePlanner:
             risk_notes=["Sell-to-open limit only; never market.", "Strike at-or-below technical support (OTM).", "Cash-secured: full strike * 100 * contracts reserved."],
             exit_plan="Plan buy-to-close at 50% of premium captured or on technical breakdown below support.",
         )
+
+
+def _extract_orb_levels(extras: Dict[str, Any]) -> tuple:
+    """Validate and extract ORB entry/stop/target/R:R from candidate extras.
+
+    Returns ``(entry_price, stop_price, target_price, rr_ratio, error)`` where
+    ``error`` is ``None`` on success or a short human-readable reason string
+    describing why the extras are malformed.
+    """
+    entry_price = _positive_float(extras.get("entry_price"))
+    stop_price = _positive_float(extras.get("stop_price"))
+    target_price = _positive_float(extras.get("target_price"))
+    rr_ratio = _positive_float(extras.get("rr_ratio"))
+
+    if entry_price is None or entry_price <= 0:
+        return None, None, None, None, f"entry_price invalid ({extras.get('entry_price')!r})"
+    if stop_price is None or stop_price <= 0:
+        return None, None, None, None, f"stop_price invalid ({extras.get('stop_price')!r})"
+    if target_price is None or target_price <= 0:
+        return None, None, None, None, f"target_price invalid ({extras.get('target_price')!r})"
+    if rr_ratio is None or rr_ratio <= 0:
+        return None, None, None, None, f"rr_ratio invalid ({extras.get('rr_ratio')!r})"
+    if not (stop_price < entry_price < target_price):
+        return (
+            None, None, None, None,
+            f"prices out of order (stop={stop_price}, entry={entry_price}, target={target_price}); "
+            "expected stop < entry < target",
+        )
+    return entry_price, stop_price, target_price, rr_ratio, None
 
 
 def _positive_float(value: Any) -> Optional[float]:

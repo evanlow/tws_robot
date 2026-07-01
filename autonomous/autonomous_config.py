@@ -104,6 +104,14 @@ class AutonomousTradingConfig:
 
     min_signal_strength: int = 100
     required_signal_label: str = "Confirmed Rebound"
+    # Optional whitelist of acceptable ``signal_label`` values. When set (a
+    # non-empty list), ``required_signal_label`` is ignored and a candidate
+    # passes the label filter if its ``signal_label`` is a member of this
+    # list. This lets alternate strategies (e.g. Opening Range Breakout,
+    # which emits ``ORB_LONG_MODEL_A`` / ``ORB_LONG_MODEL_B`` labels) flow
+    # through the ranker without forcing the ``Confirmed Rebound``
+    # assumption. ``None`` (the default) preserves prior behaviour.
+    allowed_signal_labels: Optional[List[str]] = None
     stock_universe: str = "sp500"
 
     prefer_cash_secured_put: bool = True
@@ -330,6 +338,7 @@ class AutonomousTradingConfig:
             "basket_min_leg_risk_dollars": self.basket_min_leg_risk_dollars,
             "min_signal_strength": self.min_signal_strength,
             "required_signal_label": self.required_signal_label,
+            "allowed_signal_labels": list(self.allowed_signal_labels) if self.allowed_signal_labels else None,
             "stock_universe": self.stock_universe,
             "prefer_cash_secured_put": self.prefer_cash_secured_put,
             "allow_share_buy": self.allow_share_buy,
