@@ -38,6 +38,7 @@ from autonomous.orb_execution import (
 )
 from autonomous.orb_session_manager import ORBMode
 from autonomous.orb_exit_manager import ORBExitManager, ORBExitManagerError
+from autonomous.orb_session_review import ORBSessionReviewStore, parse_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ _manager: Optional[ORBSessionManager] = None
 _proposal_store: Optional[ORBProposalStore] = None
 _executor: Optional[ORBPaperExecutor] = None
 _exit_manager: Optional[ORBExitManager] = None
+_review_store: Optional[ORBSessionReviewStore] = None
 
 
 def get_manager() -> ORBSessionManager:
@@ -121,6 +123,22 @@ def get_executor() -> ORBPaperExecutor:
     return _executor
 
 
+def get_review_store() -> ORBSessionReviewStore:
+    """Lazily build the singleton ORB session-review/evidence store (#211).
+
+    Honors ``orb_config_dir`` (notes persistence) and ``orb_evidence_dir``
+    (audit log source) app config for test isolation.
+    """
+    global _review_store
+    if _review_store is None:
+        cfg = current_app.config if has_app_context() else {}
+        _review_store = ORBSessionReviewStore(
+            config_dir=cfg.get("orb_config_dir", "config"),
+            evidence_dir=cfg.get("orb_evidence_dir", "logs"),
+        )
+    return _review_store
+
+
 @page_bp.route("/backtest")
 def backtest_page():
     return render_template(
@@ -138,6 +156,15 @@ def index():
         title="ORB Autonomous Session",
         active_page="opening_range",
         defaults=OpeningRangeConfig(),
+    )
+
+
+@page_bp.route("/review")
+def review_page():
+    return render_template(
+        "opening_range/review.html",
+        title="ORB Session Review",
+        active_page="opening_range_review",
     )
 
 
@@ -653,3 +680,68 @@ def disable_orb_new_entries(name):
 def enable_orb_new_entries(name):
     get_exit_manager().enable_new_entries(name)
     return jsonify({"strategy": name, "new_entries_disabled": False})
+
+
+# ---------------------------------------------------------------------------
+# ORB end-of-session review & evidence ledger (Phase 2.7, #211)
+# Read-only reporting over the existing proposal/execution/exit audit trail:
+# no order is placed or affected by anything below. Trade and no-trade
+# sessions are both fully explainable from the review. Operator notes are the
+# only mutation, and they never affect trading behavior.
+# ---------------------------------------------------------------------------
+
+
+@orb_bp.route("/review", methods=["GET"])
+def orb_review():
+    args = request.args
+    date_str = args.get("date")
+    if not date_str:
+        return jsonify({"error": "date query parameter (YYYY-MM-DD) is required"}), 400
+    strategy = args.get("strategy")
+    store = get_review_store()
+    if strategy:
+        rec = get_manager().get_strategy(strategy)
+        if rec is None:
+            return jsonify({"error": "not found", "detail": f"unknown strategy '{strategy}'"}), 404
+        return jsonify({"sessions": [store.get_review(
+            strategy, date_str,
+            symbols_watched=rec.get("symbols"),
+            config_snapshot=rec.get("parameters"),
+        )]})
+    strategies = get_manager().list_strategies()
+    return jsonify({"sessions": store.list_reviews_for_date(date_str, strategies)})
+
+
+@orb_bp.route("/evidence/<strategy_name>", methods=["GET"])
+def orb_evidence_summary(strategy_name):
+    return jsonify(get_review_store().evidence_summary(strategy_name))
+
+
+@orb_bp.route("/evidence/<strategy_name>/export", methods=["GET"])
+def orb_evidence_export(strategy_name):
+    fmt = request.args.get("format", "json").lower()
+    try:
+        content = get_review_store().export(strategy_name, fmt)
+    except ValueError as exc:
+        return jsonify({"error": "invalid_format", "detail": str(exc)}), 400
+    if fmt == "csv":
+        return current_app.response_class(
+            content, mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="orb_evidence_{strategy_name}.csv"'},
+        )
+    return current_app.response_class(content, mimetype="application/json")
+
+
+@orb_bp.route("/review/<path:review_session_id>/notes", methods=["POST"])
+def orb_review_add_note(review_session_id):
+    if parse_session_id(review_session_id) is None:
+        return jsonify({
+            "error": "invalid session_id",
+            "detail": "expected '<strategy_name>:<YYYY-MM-DD>'",
+        }), 400
+    data = request.get_json(silent=True) or {}
+    note = str(data.get("note", "")).strip()
+    if not note:
+        return jsonify({"error": "note is required"}), 400
+    combined = get_review_store().add_note(review_session_id, note)
+    return jsonify({"session_id": review_session_id, "operator_notes": combined}), 201
