@@ -617,7 +617,11 @@ def close_orb_trade_now(trade_id):
         decision = get_exit_manager().close_now(trade_id)
         return jsonify(decision.to_dict())
     except ORBExitManagerError as exc:
-        return jsonify({"error": str(exc)}), 400
+        logger.info("ORB close-now rejected for %s: %s", trade_id, exc)
+        return jsonify({
+            "error": "cannot close trade",
+            "detail": "trade not found or not currently OPEN",
+        }), 400
 
 
 @orb_bp.route("/trades/<trade_id>/cancel-entry", methods=["POST"])
@@ -626,7 +630,11 @@ def cancel_orb_trade_entry(trade_id):
         trade = get_exit_manager().cancel_entry(trade_id)
         return jsonify(trade.to_dict())
     except ORBExitManagerError as exc:
-        return jsonify({"error": str(exc)}), 400
+        logger.info("ORB cancel-entry rejected for %s: %s", trade_id, exc)
+        return jsonify({
+            "error": "cannot cancel entry",
+            "detail": "trade not found or not currently ENTRY_PENDING",
+        }), 400
 
 
 @orb_bp.route("/strategies/<name>/disable-new-entries", methods=["POST"])
