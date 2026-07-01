@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import List, Optional
 
 from flask import Blueprint, current_app, has_app_context, jsonify, render_template, request
@@ -39,6 +40,18 @@ from autonomous.orb_execution import (
 from autonomous.orb_session_manager import ORBMode
 from autonomous.orb_exit_manager import ORBExitManager, ORBExitManagerError
 from autonomous.orb_session_review import ORBSessionReviewStore, parse_session_id
+from autonomous.orb_evidence import build_rejection_ledger
+from autonomous.orb_live_readiness import (
+    ASSISTED_LIVE_MODE,
+    TINY_LIVE_CANDIDATE_MODE,
+    ORBLiveReadinessConfirmationStore,
+    ORBLiveReadinessInput,
+    TinyLiveRiskCaps,
+    compute_avg_entry_slippage_bps,
+    compute_r_stats,
+    evaluate_orb_live_readiness,
+)
+from autonomous.runner_config import AutonomousLiveRunnerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +64,7 @@ _proposal_store: Optional[ORBProposalStore] = None
 _executor: Optional[ORBPaperExecutor] = None
 _exit_manager: Optional[ORBExitManager] = None
 _review_store: Optional[ORBSessionReviewStore] = None
+_live_readiness_confirmations: Optional[ORBLiveReadinessConfirmationStore] = None
 
 
 def get_manager() -> ORBSessionManager:
@@ -137,6 +151,23 @@ def get_review_store() -> ORBSessionReviewStore:
             evidence_dir=cfg.get("orb_evidence_dir", "logs"),
         )
     return _review_store
+
+
+def get_live_readiness_confirmation_store() -> ORBLiveReadinessConfirmationStore:
+    """Lazily build the singleton live-readiness confirmation store (#213).
+
+    Honors ``orb_evidence_dir`` app config for test isolation. Confirmations
+    are only ever written via the ``POST`` confirm endpoint below; the
+    read-only ``GET`` readiness endpoint may only read from this store.
+    """
+    global _live_readiness_confirmations
+    if _live_readiness_confirmations is None:
+        cfg = current_app.config if has_app_context() else {}
+        log_dir = cfg.get("orb_evidence_dir", "logs")
+        _live_readiness_confirmations = ORBLiveReadinessConfirmationStore(
+            path=str(Path(log_dir) / "orb_live_readiness_confirmations.json"),
+        )
+    return _live_readiness_confirmations
 
 
 @page_bp.route("/backtest")
@@ -744,6 +775,276 @@ def orb_evidence_export(strategy_name):
             headers={"Content-Disposition": f'attachment; filename="orb_evidence_{strategy_name}.csv"'},
         )
     return current_app.response_class(content, mimetype="application/json")
+
+
+# ---------------------------------------------------------------------------
+# ORB Phase 4 — tiny-live / assisted-live readiness gates (#213)
+# Read-only evaluation of the guarded path from paper ORB evidence to
+# tiny-live / assisted-live review. Never places, routes, or simulates an
+# order, and never flips a live switch itself. Live remains locked unless
+# every readiness gate passes; the result and every request are audit-logged.
+# ---------------------------------------------------------------------------
+
+
+def _bool_arg(args, key: str, default: bool = False) -> bool:
+    raw = args.get(key)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _float_arg(args, key: str, default: float) -> float:
+    raw = args.get(key)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_arg(args, key: str, default: int) -> int:
+    raw = args.get(key)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _live_runner_config_for_readiness() -> AutonomousLiveRunnerConfig:
+    """Best-effort live runner config; always fails closed (live disabled)."""
+    cfg = current_app.config.get("autonomous_live_runner_config") if has_app_context() else None
+    if isinstance(cfg, AutonomousLiveRunnerConfig):
+        return cfg
+    try:
+        return AutonomousLiveRunnerConfig.from_env()
+    except Exception:  # pragma: no cover - defensive; never crash the readiness check
+        logger.exception("Failed to build AutonomousLiveRunnerConfig for ORB readiness")
+        return AutonomousLiveRunnerConfig()
+
+
+def _evidence_derived_gate_counts(evidence: dict, log_dir: str, strategy_name: str) -> dict:
+    """Reconstruct risk/quality readiness counters from the ORB evidence ledger.
+
+    Never relies on caller-supplied optimism: every value here is derived
+    from persisted paper-trade/rejection evidence, not query-string input.
+    """
+    trades = evidence.get("trades") or []
+    closed = [t for t in trades if t.get("status") == "CLOSED"]
+    # Evidence trades carry a session_date (not a precise timestamp); sort by
+    # it (stable) to approximate chronological order for drawdown/streak math.
+    closed_chronological = sorted(closed, key=lambda t: t.get("session_date") or "")
+    r_stats = compute_r_stats([t.get("realized_r") for t in closed_chronological])
+
+    data_quality_failures = sum(
+        1 for t in trades
+        if t.get("status") == "FAILED"
+        and "no live price" in str(t.get("failure_note") or "").lower()
+    )
+    emergency_stop_incidents = sum(
+        1 for t in trades if t.get("exit_reason") == "EMERGENCY_STOP"
+    )
+
+    rejections = build_rejection_ledger(log_dir, strategy_name=strategy_name)
+    unresolved_protection_failures = sum(
+        1 for r in rejections if r.get("reason") == ORBBlockReason.MISSING_PROTECTION.value
+    )
+
+    return {
+        "max_drawdown_r": r_stats["max_drawdown_r"],
+        "max_consecutive_losses": r_stats["max_consecutive_losses"],
+        "avg_entry_slippage_bps": compute_avg_entry_slippage_bps(trades),
+        "unresolved_protection_failures": unresolved_protection_failures,
+        "data_quality_failures": data_quality_failures,
+        "emergency_stop_incidents_from_orb": emergency_stop_incidents,
+    }
+
+
+@orb_bp.route("/strategies/<name>/live-readiness", methods=["GET"])
+def orb_live_readiness(name):
+    """Evaluate tiny-live / assisted-live readiness for a strategy.
+
+    Read-only: gathers paper evidence, connection/account status, the live
+    master switch, and emergency-stop state, then delegates to
+    :func:`autonomous.orb_live_readiness.evaluate_orb_live_readiness`. Every
+    evaluation is audit-logged regardless of outcome. Never places an order
+    and never itself enables live trading.
+
+    Evidence-derived risk/quality counters (drawdown-R, consecutive losses,
+    entry-slippage bps, protection/data-quality/emergency-stop counts) are
+    reconstructed from the ORB evidence ledger. Query-string overrides may
+    only ever *raise* an observed failure count above the evidence-derived
+    floor (additive diagnostics for testing) — they can never lower it and
+    so can never hide a real evidence-driven failure.
+
+    Tiny-live caps used for the ``tiny_live_caps_valid`` gate are always the
+    *actual* ``AutonomousLiveRunnerConfig`` values -- the real source of
+    truth for what the live runner would enforce. A query-string cap
+    override can never replace or rescue those values in the gate itself;
+    it is only surfaced as a separate ``simulated_tiny_live_caps`` diagnostic
+    in the response, so a caller cannot mask an unsafe actual live-runner
+    cap by supplying a smaller query-string value.
+
+    Operator account/mode confirmation can only come from a prior explicit
+    ``POST .../confirm`` call (see :func:`orb_live_readiness_confirm`); this
+    GET endpoint never accepts a confirmation via query string.
+    """
+    rec = get_manager().get_strategy(name)
+    if rec is None:
+        return jsonify({"error": "not found", "detail": f"unknown strategy '{name}'"}), 404
+
+    args = request.args
+    requested_mode = args.get("mode", TINY_LIVE_CANDIDATE_MODE)
+    symbols = rec.get("symbols")
+    evidence = get_review_store().evidence_summary(name, symbols=symbols)
+    paper_summary = evidence.get("paper", {}) or {}
+
+    from web.services import get_services
+    svc = get_services()
+    connection_info = getattr(svc, "connection_info", {}) or {}
+    account_id = str(connection_info.get("account") or "").strip() or None
+    connected = bool(getattr(svc, "connected", False))
+
+    from web.routes.api_autonomous import EMERGENCY_STOP_FILE
+    try:
+        emergency_stop_active = EMERGENCY_STOP_FILE.exists()
+    except OSError:
+        emergency_stop_active = True  # fail closed when unreadable
+
+    live_config = _live_runner_config_for_readiness()
+    params = rec.get("parameters") or {}
+    cfg = current_app.config if has_app_context() else {}
+    log_dir = cfg.get("orb_evidence_dir", "logs")
+
+    evidence_counts = _evidence_derived_gate_counts(evidence, log_dir, name)
+
+    # Query-string values are additive diagnostics only: they may raise an
+    # observed failure above the evidence-derived floor, never lower it.
+    max_drawdown_r = max(
+        _float_arg(args, "max_drawdown_r", evidence_counts["max_drawdown_r"]),
+        evidence_counts["max_drawdown_r"],
+    )
+    max_consecutive_losses = max(
+        _int_arg(args, "max_consecutive_losses", evidence_counts["max_consecutive_losses"]),
+        evidence_counts["max_consecutive_losses"],
+    )
+    unresolved_protection_failures = max(
+        _int_arg(args, "unresolved_protection_failures", evidence_counts["unresolved_protection_failures"]),
+        evidence_counts["unresolved_protection_failures"],
+    )
+    data_quality_failures = max(
+        _int_arg(args, "data_quality_failures", evidence_counts["data_quality_failures"]),
+        evidence_counts["data_quality_failures"],
+    )
+    emergency_stop_incidents_from_orb = max(
+        _int_arg(args, "emergency_stop_incidents_from_orb", evidence_counts["emergency_stop_incidents_from_orb"]),
+        evidence_counts["emergency_stop_incidents_from_orb"],
+    )
+
+    # Tiny-live caps used for the *gate itself* are always the actual
+    # live-runner config values (the real readiness source of truth). A
+    # query-string override can never replace or rescue these values in the
+    # gate evaluation -- it is surfaced separately below as a diagnostic
+    # "simulated_tiny_live_caps" only, so a caller cannot mask an unsafe
+    # actual live-runner cap by supplying a smaller query-string value.
+    tiny_live_caps = TinyLiveRiskCaps(
+        max_deployable_cash_pct=live_config.max_deployable_cash_pct,
+        max_live_orb_trades_per_day=live_config.max_live_trades_per_day,
+    )
+
+    simulated_tiny_live_caps = None
+    if "max_deployable_cash_pct" in args or "max_live_orb_trades_per_day" in args:
+        simulated_tiny_live_caps = TinyLiveRiskCaps(
+            max_deployable_cash_pct=_float_arg(
+                args, "max_deployable_cash_pct", live_config.max_deployable_cash_pct
+            ),
+            max_live_orb_trades_per_day=_int_arg(
+                args, "max_live_orb_trades_per_day", live_config.max_live_trades_per_day
+            ),
+        )
+
+    # Operator account/mode confirmation is only ever satisfied by a prior
+    # explicit POST .../confirm call, never by a GET query string.
+    confirmation = get_live_readiness_confirmation_store().get(name, requested_mode)
+    operator_confirmed = bool(confirmation and confirmation.get("confirmed"))
+    expected_account_id = (
+        (confirmation or {}).get("expected_account_id") or live_config.expected_account_id
+    )
+
+    data = ORBLiveReadinessInput(
+        strategy_name=name,
+        strategy_config=rec,
+        paper_summary=paper_summary,
+        requested_mode=requested_mode,
+        max_drawdown_r=max_drawdown_r,
+        max_consecutive_losses=max_consecutive_losses,
+        avg_entry_slippage_bps=evidence_counts["avg_entry_slippage_bps"],
+        unresolved_protection_failures=unresolved_protection_failures,
+        data_quality_failures=data_quality_failures,
+        emergency_stop_incidents_from_orb=emergency_stop_incidents_from_orb,
+        market_data_provider_healthy=connected,
+        market_data_source=args.get("market_data_source", live_config.live_market_data_provider),
+        broker_connected=connected,
+        broker_account_id=account_id,
+        expected_account_id=expected_account_id,
+        live_master_switch_enabled=live_config.live_enabled,
+        emergency_stop_available=True,
+        emergency_stop_tested=_bool_arg(args, "emergency_stop_tested", False),
+        emergency_stop_currently_active=emergency_stop_active,
+        operator_confirmed_account=operator_confirmed,
+        operator_confirmed_mode=operator_confirmed,
+        tiny_live_caps=tiny_live_caps,
+        paper_max_trades_per_session=params.get("max_total_orb_trades_per_session"),
+    )
+
+    result = evaluate_orb_live_readiness(data, log_dir=log_dir)
+    if simulated_tiny_live_caps is not None:
+        result["simulated_tiny_live_caps"] = simulated_tiny_live_caps.as_dict()
+    return jsonify(result)
+
+
+@orb_bp.route("/strategies/<name>/live-readiness/confirm", methods=["POST"])
+def orb_live_readiness_confirm(name):
+    """Explicit, audit-logged operator confirmation of account id + mode.
+
+    This is the only way to satisfy the readiness ``operator_confirmation``
+    gate: a confirmation must be an explicit ``POST`` action, never a GET
+    query string. Never places an order and never itself enables live
+    trading; it only records (persisted + audit-logged) that an operator
+    confirmed the account id and requested mode for a future readiness
+    evaluation.
+    """
+    rec = get_manager().get_strategy(name)
+    if rec is None:
+        return jsonify({"error": "not found", "detail": f"unknown strategy '{name}'"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    requested_mode = str(payload.get("mode") or TINY_LIVE_CANDIDATE_MODE)
+    if requested_mode not in (TINY_LIVE_CANDIDATE_MODE, ASSISTED_LIVE_MODE):
+        return jsonify({
+            "error": "invalid mode",
+            "detail": f"mode must be one of {[TINY_LIVE_CANDIDATE_MODE, ASSISTED_LIVE_MODE]}",
+        }), 400
+
+    expected_account_id = str(payload.get("expected_account_id") or "").strip() or None
+
+    from web.services import get_services
+    svc = get_services()
+    connection_info = getattr(svc, "connection_info", {}) or {}
+    connected_account_id = str(connection_info.get("account") or "").strip() or None
+
+    cfg = current_app.config if has_app_context() else {}
+    record = get_live_readiness_confirmation_store().confirm(
+        name, requested_mode,
+        expected_account_id=expected_account_id,
+        connected_account_id=connected_account_id,
+        operator=payload.get("operator"),
+        notes=payload.get("notes"),
+        log_dir=cfg.get("orb_evidence_dir", "logs"),
+    )
+    return jsonify(record), 201
 
 
 @orb_bp.route("/review/<path:review_session_id>/notes", methods=["POST"])
