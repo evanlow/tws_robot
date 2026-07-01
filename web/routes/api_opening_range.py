@@ -38,7 +38,6 @@ from autonomous.orb_execution import (
 )
 from autonomous.orb_session_manager import ORBMode
 from autonomous.orb_exit_manager import ORBExitManager, ORBExitManagerError
-from autonomous.orb_trade_store import ORBTradeStoreError
 
 logger = logging.getLogger(__name__)
 

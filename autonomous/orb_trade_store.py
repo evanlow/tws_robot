@@ -193,6 +193,18 @@ class ORBTradeStore:
         force_flat_time: str = "15:55",
         max_holding_minutes: Optional[int] = None,
     ) -> ORBIntradayTrade:
+        # Normalize max_holding_minutes to int or None; reject non-numeric values.
+        if max_holding_minutes is not None:
+            try:
+                max_holding_minutes = int(max_holding_minutes)
+            except (TypeError, ValueError) as exc:
+                raise ORBTradeStoreError(
+                    f"max_holding_minutes must be a positive integer or None, got {max_holding_minutes!r}"
+                ) from exc
+            if max_holding_minutes <= 0:
+                raise ORBTradeStoreError(
+                    f"max_holding_minutes must be positive, got {max_holding_minutes}"
+                )
         with self._lock:
             if trade_id in self._trades:
                 return self._trades[trade_id]

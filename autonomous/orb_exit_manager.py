@@ -286,6 +286,17 @@ class ORBExitManager:
                 f"trade {trade_id} is '{trade.state}'; close-now requires OPEN"
             )
         price = self._safe_price(trade.symbol)
+        if price is None:
+            self._audit.log_decision({
+                "kind": _AUDIT_KIND, "action": "close_now_no_price",
+                "trade_id": trade_id, "symbol": trade.symbol,
+                "decision": "NO_PRICE_AVAILABLE",
+            })
+            return ORBExitDecision(
+                trade_id=trade_id, symbol=trade.symbol,
+                decision="NO_PRICE_AVAILABLE",
+                reason="manual close requested but no live price available; trade remains OPEN for retry",
+            )
         return self._trigger_exit(trade, ORBExitReason.MANUAL_CLOSE, price, self._now())
 
     def cancel_entry(self, trade_id: str) -> ORBIntradayTrade:

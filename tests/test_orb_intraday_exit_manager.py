@@ -313,6 +313,22 @@ def test_force_flat_with_no_price_marks_failed_not_silently_open(tmp_path):
     assert trade.exit_reason == ORBExitReason.FORCE_FLAT.value
 
 
+def test_manual_close_no_price_returns_no_price_available_without_state_change(tmp_path):
+    """close_now with no live price must return NO_PRICE_AVAILABLE and leave
+    the trade OPEN for retry — it must not transition to FAILED (which would
+    permanently disable exit monitoring for this trade)."""
+    clock = _Clock(datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc))
+    prices = {}  # no quote
+    mgr, trade_id = _open_trade(tmp_path, prices, clock)
+
+    decision = mgr.close_now(trade_id)
+
+    assert decision.decision == "NO_PRICE_AVAILABLE"
+    trade = mgr.get_trade(trade_id)
+    assert trade.state == ORBTradeState.OPEN.value  # not FAILED; still monitorable
+
+
+
 # ---- duplicate exit / oversell prevention -----------------------------------
 
 def test_duplicate_exit_evaluation_is_a_no_op(tmp_path):
@@ -430,3 +446,47 @@ def test_disable_new_entries_does_not_affect_existing_open_trade(tmp_path):
 
     mgr.enable_new_entries("ORB1")
     assert not mgr.new_entries_disabled("ORB1")
+
+
+# ---- max_holding_minutes normalization in trade store ----------------------
+
+def test_register_trade_coerces_string_max_holding_minutes(tmp_path):
+    """max_holding_minutes supplied as a string (e.g. from JSON) must be
+    normalized to int at registration time so arithmetic in evaluate_all()
+    never raises a TypeError."""
+    store = _store(tmp_path)
+    proposal = _proposal(store)
+    executor = _executor(tmp_path, store)
+    trade = executor.execute_paper(proposal)
+    clock = _Clock(datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc))
+    mgr = _manager(tmp_path, {"QQQ": 104.0}, clock)
+
+    intraday = mgr.register_trade(trade, max_holding_minutes="45")  # string, not int
+
+    assert intraday.max_holding_minutes == 45
+    assert isinstance(intraday.max_holding_minutes, int)
+
+
+def test_register_trade_rejects_non_numeric_max_holding_minutes(tmp_path):
+    store = _store(tmp_path)
+    proposal = _proposal(store)
+    executor = _executor(tmp_path, store)
+    trade = executor.execute_paper(proposal)
+    clock = _Clock(datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc))
+    mgr = _manager(tmp_path, {"QQQ": 104.0}, clock)
+
+    with pytest.raises(ORBTradeStoreError):
+        mgr.register_trade(trade, max_holding_minutes="bad")
+
+
+def test_register_trade_rejects_zero_max_holding_minutes(tmp_path):
+    store = _store(tmp_path)
+    proposal = _proposal(store)
+    executor = _executor(tmp_path, store)
+    trade = executor.execute_paper(proposal)
+    clock = _Clock(datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc))
+    mgr = _manager(tmp_path, {"QQQ": 104.0}, clock)
+
+    with pytest.raises(ORBTradeStoreError):
+        mgr.register_trade(trade, max_holding_minutes=0)
+

@@ -162,6 +162,7 @@ class OpeningRangeConfig:
     trade_start_after_range_close: bool = True
     entry_cutoff_time: str = "11:30"
     force_flat_time: str = "15:55"
+    max_holding_minutes: Optional[int] = None
     skip_half_days: bool = True
     require_regular_trading_hours: bool = True
 
