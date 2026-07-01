@@ -32,10 +32,14 @@ def session_id(strategy_name: str, session_date: str) -> str:
 
 
 def parse_session_id(sid: str) -> Optional[tuple]:
-    """Split a ``session_id`` back into ``(strategy_name, session_date)``."""
+    """Split a ``session_id`` back into ``(strategy_name, session_date)``.
+
+    Splits at the *first* colon to match the simple f-string join used by
+    :func:`session_id` (``f"{strategy_name}:{session_date}"``).
+    """
     if ":" not in sid:
         return None
-    strategy_name, _, session_date = sid.rpartition(":")
+    strategy_name, _, session_date = sid.partition(":")
     if not strategy_name or not session_date:
         return None
     return strategy_name, session_date

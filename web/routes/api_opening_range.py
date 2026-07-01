@@ -720,10 +720,16 @@ def orb_evidence_summary(strategy_name):
 @orb_bp.route("/evidence/<strategy_name>/export", methods=["GET"])
 def orb_evidence_export(strategy_name):
     fmt = request.args.get("format", "json").lower()
+    if fmt not in ("json", "csv"):
+        return jsonify({
+            "error": "invalid_format",
+            "detail": "unsupported export format; expected 'json' or 'csv'",
+        }), 400
     try:
         content = get_review_store().export(strategy_name, fmt)
-    except ValueError as exc:
-        return jsonify({"error": "invalid_format", "detail": str(exc)}), 400
+    except ValueError:
+        logger.exception("ORB evidence export failed for %s", strategy_name)
+        return jsonify({"error": "export_failed"}), 400
     if fmt == "csv":
         return current_app.response_class(
             content, mimetype="text/csv",

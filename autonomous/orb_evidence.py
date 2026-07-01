@@ -46,7 +46,12 @@ _ORB_KINDS = frozenset({
     KIND_PROPOSAL, KIND_PAPER_EXECUTION, KIND_INTRADAY_EXIT, KIND_SESSION_CONTROL,
 })
 
-_LOG_FILE_RE = re.compile(r"autonomous_trading_(\d{8})\.jsonl$")
+# Matches the exact ``autonomous_trading_YYYYMMDD.jsonl`` naming written by
+# :class:`autonomous.audit.AuditLogger`. This only enforces the 8-digit shape
+# of the date stamp (not calendar validity, e.g. ``99999999`` would match) —
+# malformed-but-8-digit names are harmless here since each file is parsed
+# independently and unreadable/invalid JSON lines are already skipped.
+_LOG_FILE_RE = re.compile(r"autonomous_trading_\d{8}\.jsonl$")
 
 # Estimated per-share commission used when no explicit commission model is
 # wired to a paper trade (paper trades never incur a real commission). This
@@ -66,11 +71,18 @@ TINY_LIVE_CANDIDATE = "TINY_LIVE_CANDIDATE"
 # ---------------------------------------------------------------------------
 
 def _log_files(log_dir: str) -> List[Path]:
+    """Every daily audit log file, validated against the exact date-stamped name.
+
+    ``glob`` alone would also match a malformed name like
+    ``autonomous_trading_abc.jsonl``; the regex enforces the strict
+    ``autonomous_trading_YYYYMMDD.jsonl`` naming written by
+    :class:`autonomous.audit.AuditLogger`.
+    """
     base = Path(log_dir)
     if not base.exists():
         return []
     try:
-        return sorted(p for p in base.glob("autonomous_trading_*.jsonl") if _LOG_FILE_RE.search(p.name))
+        return sorted(p for p in base.iterdir() if _LOG_FILE_RE.match(p.name))
     except OSError:  # pragma: no cover - defensive
         return []
 
@@ -514,6 +526,8 @@ def build_evidence_summary(
         "failed_trades": len(failed),
         "win_count": len(wins),
         "loss_count": len(losses),
+        # Win rate is wins / all closed trades (including breakeven trades in
+        # the denominator), not wins / (wins + losses).
         "win_rate": round(len(wins) / len(closed), 4) if closed else None,
         "avg_realized_r": _avg([t["realized_r"] for t in closed]),
         "avg_mfe_r": _avg([t["mfe_r"] for t in closed]),
@@ -576,7 +590,16 @@ def _load_backtest_evidence(log_dir: str, strategy_name: str) -> Dict[str, Any]:
 
 @dataclass
 class PromotionCriteria:
-    """Conservative thresholds for classifying paper evidence for promotion."""
+    """Conservative thresholds for classifying paper evidence for promotion.
+
+    Promotion classification (:func:`classify_promotion`) is driven by
+    ``avg_realized_r`` rather than ``win_rate`` precisely because win rate
+    (wins / all closed trades, including breakeven trades in the
+    denominator — see ``paper_summary["win_rate"]`` in
+    :func:`build_evidence_summary`) can look healthy while average realized R
+    is flat or negative; a high win rate with a poor average R is not, by
+    itself, evidence of a promotable edge.
+    """
 
     min_trade_count: int = 20
     min_avg_r: float = 0.0

@@ -78,9 +78,9 @@ function renderSession(s) {
     <p>Trades: ${s.trades.total} (closed ${s.trades.closed}, failed ${s.trades.failed}, open ${s.trades.open})</p>
     ${noTrade}
     <details><summary>Raw evidence</summary><pre style="overflow:auto;">${escapeHtml(JSON.stringify(s, null, 2))}</pre></details>
-    <div style="margin-top:0.5rem;">
-      <textarea id="notes-${escapeHtml(s.session_id)}" class="form-input" rows="2" placeholder="Add operator note…">${notes}</textarea>
-      <button class="btn" onclick="orbAddNote('${s.session_id}')">Save note</button>
+    <div style="margin-top:0.5rem;" data-session-id="${escapeHtml(s.session_id)}">
+      <textarea class="form-input notes-input" rows="2" placeholder="Add operator note…">${notes}</textarea>
+      <button class="btn" onclick="orbAddNote(this)">Save note</button>
     </div>
   </div>`;
 }
@@ -97,10 +97,12 @@ async function orbLoadReview() {
   if (!d.sessions.length) { document.getElementById('reviewResults').innerHTML = '<p class="empty-state">No sessions found.</p>'; return; }
   document.getElementById('reviewResults').innerHTML = d.sessions.map(renderSession).join('');
 }
-async function orbAddNote(sessionId) {
-  const el = document.getElementById(`notes-${sessionId}`);
+async function orbAddNote(button) {
+  const container = button.closest('[data-session-id]');
+  const sessionId = container ? container.dataset.sessionId : null;
+  const el = container ? container.querySelector('.notes-input') : null;
   const note = el ? el.value.trim() : '';
-  if (!note) return;
+  if (!sessionId || !note) return;
   await orbPost(`/api/orb/review/${encodeURIComponent(sessionId)}/notes`, {note});
   orbLoadReview();
 }
