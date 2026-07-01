@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -549,7 +551,28 @@ class ORBLiveReadinessConfirmationStore:
 
     def _write_all(self, data: Dict[str, Any]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        payload = json.dumps(data, indent=2, sort_keys=True)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=self._path.parent,
+                prefix=f"{self._path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temp_path = handle.name
+            os.replace(temp_path, self._path)
+        finally:
+            if temp_path:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def confirm(
         self,
@@ -608,4 +631,5 @@ class ORBLiveReadinessConfirmationStore:
 
     def get(self, strategy_name: str, requested_mode: str) -> Optional[Dict[str, Any]]:
         """Return the most recent confirmation for ``strategy_name``/``requested_mode``, if any."""
-        return self._read_all().get(strategy_name, {}).get(requested_mode)
+        with self._lock:
+            return self._read_all().get(strategy_name, {}).get(requested_mode)

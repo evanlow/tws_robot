@@ -6,6 +6,8 @@ written for every readiness evaluation. Never places an order.
 """
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +18,7 @@ from autonomous.orb_live_readiness import (
     LOCKED,
     TINY_LIVE_CANDIDATE,
     TINY_LIVE_CANDIDATE_MODE,
+    ORBLiveReadinessConfirmationStore,
     ORBLiveReadinessCriteria,
     ORBLiveReadinessInput,
     TinyLiveRiskCaps,
@@ -378,3 +381,46 @@ def test_log_operator_decision_writes_audit(tmp_path, audit):
     assert decision_records
     assert decision_records[0]["decision"] == "acknowledged"
     assert decision_records[0]["operator"] == "trader1"
+
+
+def test_confirmation_store_writes_via_atomic_replace(tmp_path, monkeypatch):
+    store = ORBLiveReadinessConfirmationStore(str(tmp_path / "confirmations.json"))
+    replace_calls = []
+    real_replace = os.replace
+
+    def _spy_replace(src, dst):
+        replace_calls.append((src, dst))
+        payload = json.loads(Path(src).read_text(encoding="utf-8"))
+        assert payload["ORB1"][TINY_LIVE_CANDIDATE_MODE]["confirmed"] is True
+        return real_replace(src, dst)
+
+    monkeypatch.setattr("autonomous.orb_live_readiness.os.replace", _spy_replace)
+
+    record = store.confirm(
+        "ORB1",
+        TINY_LIVE_CANDIDATE_MODE,
+        expected_account_id="DU12345",
+        connected_account_id="DU12345",
+    )
+
+    assert record["confirmed"] is True
+    assert replace_calls
+    src, dst = replace_calls[0]
+    assert Path(src).name != "confirmations.json"
+    assert Path(dst) == tmp_path / "confirmations.json"
+    assert json.loads((tmp_path / "confirmations.json").read_text(encoding="utf-8"))["ORB1"][
+        TINY_LIVE_CANDIDATE_MODE
+    ]["confirmed"] is True
+
+
+def test_confirmation_store_get_reads_under_lock(tmp_path):
+    store = ORBLiveReadinessConfirmationStore(str(tmp_path / "confirmations.json"))
+    expected = {"confirmed": True}
+
+    def _fake_read_all():
+        assert store._lock.locked()
+        return {"ORB1": {TINY_LIVE_CANDIDATE_MODE: expected}}
+
+    store._read_all = _fake_read_all
+
+    assert store.get("ORB1", TINY_LIVE_CANDIDATE_MODE) == expected
