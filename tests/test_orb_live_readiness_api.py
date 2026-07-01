@@ -253,6 +253,35 @@ def test_tiny_live_caps_query_override_cannot_mask_unsafe_config(client):
 
 
 # ---------------------------------------------------------------------------
+# Regression: market-data source must reflect the actual live runner config
+# (review feedback #227-1)
+# ---------------------------------------------------------------------------
+
+def test_market_data_source_query_override_cannot_mask_unsafe_config(client):
+    """A ``market_data_source`` query-string value must not rescue an unsafe
+    actual live-runner ``live_market_data_provider``.
+
+    Regression for review feedback: the gate must always evaluate the real
+    live-runner config value, never a query-string value, so an operator
+    cannot mask an unsafe actual market-data source (e.g. "yahoo") behind
+    an acceptable-looking GET parameter (e.g. "ibkr").
+    """
+    _make(client)
+    live_config = AutonomousLiveRunnerConfig()
+    live_config.live_market_data_provider = "yahoo"  # unsafe actual config
+    client.application.config["autonomous_live_runner_config"] = live_config
+    res = client.get(
+        "/api/orb/strategies/ORB1/live-readiness",
+        query_string={"market_data_source": "ibkr"},
+    )
+    body = res.get_json()
+    assert body["overall_status"] == "LOCKED"
+    assert "market_data_source_acceptable" in body["failing_gates"]
+    # The query override is surfaced only as a separate diagnostic.
+    assert body["simulated_market_data_source"] == "ibkr"
+
+
+# ---------------------------------------------------------------------------
 # Regression: operator confirmation must be an explicit POST action
 # (review feedback #3)
 # ---------------------------------------------------------------------------

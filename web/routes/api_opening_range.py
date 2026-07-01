@@ -958,6 +958,16 @@ def _compute_orb_live_readiness(name, rec, requested_mode, args):
             ),
         )
 
+    # The market-data-source gate is always evaluated against the actual
+    # live-runner config value (the real source of truth for what the live
+    # runner would use). A query-string override can never replace or
+    # rescue an unsafe actual live-runner source in the gate evaluation --
+    # it is surfaced separately below as a diagnostic
+    # "simulated_market_data_source" only, so a caller cannot mask an unsafe
+    # actual live-runner market-data source by supplying an acceptable
+    # query-string value.
+    simulated_market_data_source = args.get("market_data_source")
+
     # Operator account/mode confirmation is only ever satisfied by a prior
     # explicit POST .../confirm call, never by a GET query string.
     confirmation = get_live_readiness_confirmation_store().get(name, requested_mode)
@@ -978,7 +988,7 @@ def _compute_orb_live_readiness(name, rec, requested_mode, args):
         data_quality_failures=data_quality_failures,
         emergency_stop_incidents_from_orb=emergency_stop_incidents_from_orb,
         market_data_provider_healthy=connected,
-        market_data_source=args.get("market_data_source", live_config.live_market_data_provider),
+        market_data_source=live_config.live_market_data_provider,
         broker_connected=connected,
         broker_account_id=account_id,
         expected_account_id=expected_account_id,
@@ -995,6 +1005,8 @@ def _compute_orb_live_readiness(name, rec, requested_mode, args):
     result = evaluate_orb_live_readiness(data, log_dir=log_dir)
     if simulated_tiny_live_caps is not None:
         result["simulated_tiny_live_caps"] = simulated_tiny_live_caps.as_dict()
+    if simulated_market_data_source is not None:
+        result["simulated_market_data_source"] = simulated_market_data_source
     return result, account_id, expected_account_id, operator_confirmed, live_config, log_dir
 
 
@@ -1022,6 +1034,14 @@ def orb_live_readiness(name):
     it is only surfaced as a separate ``simulated_tiny_live_caps`` diagnostic
     in the response, so a caller cannot mask an unsafe actual live-runner
     cap by supplying a smaller query-string value.
+
+    Likewise, the ``market_data_source_acceptable`` gate always evaluates
+    the *actual* ``AutonomousLiveRunnerConfig.live_market_data_provider``
+    value. A ``market_data_source`` query-string value can never replace or
+    rescue an unsafe actual live-runner source in the gate itself; it is
+    only surfaced as a separate ``simulated_market_data_source`` diagnostic
+    in the response, so a caller cannot mask an unsafe actual live-runner
+    data source by supplying an acceptable query-string value.
 
     Operator account/mode confirmation can only come from a prior explicit
     ``POST .../confirm`` call (see :func:`orb_live_readiness_confirm`); this

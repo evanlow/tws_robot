@@ -225,3 +225,30 @@ def test_account_mismatch_refused(client, monkeypatch):
     res = _rehearse(client, proposal_id=proposal.proposal_id)
     assert res.status_code == 409
     assert res.get_json()["reason"] == "account_mismatch"
+
+
+def test_market_data_source_query_override_cannot_mask_unsafe_config(client):
+    """Regression for review feedback: the rehearsal endpoint's readiness
+    gate (``_compute_orb_live_readiness``) must always evaluate the real
+    ``AutonomousLiveRunnerConfig.live_market_data_provider`` value, never a
+    ``market_data_source`` query-string value, so a request cannot mask an
+    unsafe actual live-runner data source (e.g. "yahoo") behind an
+    acceptable-looking query parameter (e.g. "ibkr").
+    """
+    from autonomous.runner_config import AutonomousLiveRunnerConfig
+
+    _make(client)
+    with client.application.app_context():
+        proposal = _seed_proposal()
+    live_config = AutonomousLiveRunnerConfig()
+    live_config.live_market_data_provider = "yahoo"  # unsafe actual config
+    client.application.config["autonomous_live_runner_config"] = live_config
+
+    res = client.post(
+        f"/api/orb/strategies/ORB1/assisted-live/rehearse?market_data_source=ibkr",
+        json={"proposal_id": proposal.proposal_id},
+    )
+    assert res.status_code == 409
+    body = res.get_json()
+    assert body["reason"] == "readiness_not_passed"
+    assert "market_data_source_acceptable" in body["readiness"]["failing_gates"]
