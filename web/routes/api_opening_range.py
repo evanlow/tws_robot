@@ -877,10 +877,19 @@ def orb_live_readiness(name):
     reconstructed from the ORB evidence ledger. Query-string overrides may
     only ever *raise* an observed failure count above the evidence-derived
     floor (additive diagnostics for testing) — they can never lower it and
-    so can never hide a real evidence-driven failure. Operator account/mode
-    confirmation can only come from a prior explicit ``POST .../confirm``
-    call (see :func:`orb_live_readiness_confirm`); this GET endpoint never
-    accepts a confirmation via query string.
+    so can never hide a real evidence-driven failure.
+
+    Tiny-live caps used for the ``tiny_live_caps_valid`` gate are always the
+    *actual* ``AutonomousLiveRunnerConfig`` values -- the real source of
+    truth for what the live runner would enforce. A query-string cap
+    override can never replace or rescue those values in the gate itself;
+    it is only surfaced as a separate ``simulated_tiny_live_caps`` diagnostic
+    in the response, so a caller cannot mask an unsafe actual live-runner
+    cap by supplying a smaller query-string value.
+
+    Operator account/mode confirmation can only come from a prior explicit
+    ``POST .../confirm`` call (see :func:`orb_live_readiness_confirm`); this
+    GET endpoint never accepts a confirmation via query string.
     """
     rec = get_manager().get_strategy(name)
     if rec is None:
@@ -934,20 +943,27 @@ def orb_live_readiness(name):
         evidence_counts["emergency_stop_incidents_from_orb"],
     )
 
-    # Tiny-live caps default to the *actual* live-runner config (the real
-    # readiness source of truth); a query-string override may only make the
-    # cap more conservative (smaller/fewer), never loosen it above the real
-    # configured cap.
+    # Tiny-live caps used for the *gate itself* are always the actual
+    # live-runner config values (the real readiness source of truth). A
+    # query-string override can never replace or rescue these values in the
+    # gate evaluation -- it is surfaced separately below as a diagnostic
+    # "simulated_tiny_live_caps" only, so a caller cannot mask an unsafe
+    # actual live-runner cap by supplying a smaller query-string value.
     tiny_live_caps = TinyLiveRiskCaps(
-        max_deployable_cash_pct=min(
-            _float_arg(args, "max_deployable_cash_pct", live_config.max_deployable_cash_pct),
-            live_config.max_deployable_cash_pct,
-        ),
-        max_live_orb_trades_per_day=min(
-            _int_arg(args, "max_live_orb_trades_per_day", live_config.max_live_trades_per_day),
-            live_config.max_live_trades_per_day,
-        ),
+        max_deployable_cash_pct=live_config.max_deployable_cash_pct,
+        max_live_orb_trades_per_day=live_config.max_live_trades_per_day,
     )
+
+    simulated_tiny_live_caps = None
+    if "max_deployable_cash_pct" in args or "max_live_orb_trades_per_day" in args:
+        simulated_tiny_live_caps = TinyLiveRiskCaps(
+            max_deployable_cash_pct=_float_arg(
+                args, "max_deployable_cash_pct", live_config.max_deployable_cash_pct
+            ),
+            max_live_orb_trades_per_day=_int_arg(
+                args, "max_live_orb_trades_per_day", live_config.max_live_trades_per_day
+            ),
+        )
 
     # Operator account/mode confirmation is only ever satisfied by a prior
     # explicit POST .../confirm call, never by a GET query string.
@@ -984,6 +1000,8 @@ def orb_live_readiness(name):
     )
 
     result = evaluate_orb_live_readiness(data, log_dir=log_dir)
+    if simulated_tiny_live_caps is not None:
+        result["simulated_tiny_live_caps"] = simulated_tiny_live_caps.as_dict()
     return jsonify(result)
 
 

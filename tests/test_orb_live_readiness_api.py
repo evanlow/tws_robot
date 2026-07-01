@@ -227,6 +227,31 @@ def test_tiny_live_caps_query_override_cannot_loosen_above_config(client):
     assert body["tiny_live_caps"]["max_deployable_cash_pct"] == 0.05
 
 
+def test_tiny_live_caps_query_override_cannot_mask_unsafe_config(client):
+    """A smaller query-string cap must not rescue an unsafe actual config.
+
+    Regression for review feedback: the gate must always evaluate the real
+    live-runner config cap, never a query-string value -- even one that
+    looks "safer" -- so an operator cannot hide an unsafe actual
+    max_deployable_cash_pct behind a small GET parameter.
+    """
+    _make(client)
+    client.application.config["autonomous_live_runner_config"] = AutonomousLiveRunnerConfig(
+        max_deployable_cash_pct=0.05,
+    )
+    res = client.get(
+        "/api/orb/strategies/ORB1/live-readiness",
+        query_string={"max_deployable_cash_pct": "0.005"},
+    )
+    body = res.get_json()
+    assert body["overall_status"] == "LOCKED"
+    assert "tiny_live_caps_valid" in body["failing_gates"]
+    # The blocking gate cap must reflect the actual (unsafe) config value.
+    assert body["tiny_live_caps"]["max_deployable_cash_pct"] == 0.05
+    # The query override is surfaced only as a separate diagnostic.
+    assert body["simulated_tiny_live_caps"]["max_deployable_cash_pct"] == 0.005
+
+
 # ---------------------------------------------------------------------------
 # Regression: operator confirmation must be an explicit POST action
 # (review feedback #3)
