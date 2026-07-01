@@ -72,7 +72,8 @@ def test_status_lists_locked_modes(client):
 
 
 # ---- recommend-only proposals (Phase 2.4, #208) -------------------------
-def _seed_proposal(symbol="QQQ", strategy="ORB1", expires_at=None):
+def _seed_proposal(symbol="QQQ", strategy="ORB1", expires_at=None,
+                   session_date="2026-06-01"):
     """Build and store a recommend-only proposal in the API singleton store."""
     from autonomous.opening_range import (
         BreakoutConfirmation,
@@ -96,7 +97,7 @@ def _seed_proposal(symbol="QQQ", strategy="ORB1", expires_at=None):
         opening_range=rng, confirmation=conf, evidence={},
     )
     return api.get_proposal_store().create_from_setup(
-        setup, strategy_name=strategy, session_date="2026-06-01",
+        setup, strategy_name=strategy, session_date=session_date,
         orb_state="PROPOSAL_READY", gates=ProposalGates(),
         expires_at=expires_at,
     )
@@ -157,15 +158,39 @@ def test_proposal_skip_missing_404(client):
 
 
 # ---- paper-autonomous execution (Phase 2.5, #209) -----------------------
+def _seed_paper_evidence(client, symbols):
+    """Write a READY_FOR_PAPER backtest evidence file so arming can pass gates."""
+    import os
+
+    ev_dir = client.application.config["orb_evidence_dir"]
+    os.makedirs(ev_dir, exist_ok=True)
+    path = os.path.join(ev_dir, "orb_backtest_evidence_20260601.jsonl")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "symbols": list(symbols),
+            "readiness": {"status": "READY_FOR_PAPER"},
+        }) + "\n")
+
+
 def _arm_paper(client, strategy="ORB1", symbols=None):
-    """Create a paper_autonomous strategy (execution gates on mode, not arming)."""
-    _make(client, name=strategy, symbols=symbols or ["QQQ"], mode="paper_autonomous")
+    """Create, ready, and arm a paper_autonomous strategy for its session.
+
+    Seeds READY_FOR_PAPER evidence, creates the strategy in paper_autonomous
+    mode, and arms the ORB session (execution gates on arming, not just mode).
+    Returns the armed session date so callers can seed a matching proposal.
+    """
+    symbols = symbols or ["QQQ"]
+    _seed_paper_evidence(client, symbols)
+    _make(client, name=strategy, symbols=symbols, mode="paper_autonomous")
+    res = client.post(f"/api/orb/strategies/{strategy}/arm", json={"when": "today"})
+    assert res.status_code == 200, res.get_json()
+    return res.get_json()["session"]["armed_for"]
 
 
 def test_execute_paper_places_bracket_trade(client):
-    _arm_paper(client)
+    armed_for = _arm_paper(client)
     with client.application.app_context():
-        proposal = _seed_proposal(strategy="ORB1")
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
     res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
     assert res.status_code == 201
     body = res.get_json()
@@ -177,6 +202,30 @@ def test_execute_paper_places_bracket_trade(client):
     got = client.get(f"/api/orb/trades/{body['trade_id']}")
     assert got.status_code == 200
     assert got.get_json()["proposal_id"] == proposal.proposal_id
+
+
+def test_execute_paper_requires_armed_session(client):
+    # paper_autonomous mode alone is not enough: an un-armed session is rejected
+    # and no paper trade is placed.
+    _make(client, mode="paper_autonomous")
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1")
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "orb session not armed"
+    assert client.get("/api/orb/trades").get_json()["trades"] == []
+
+
+def test_execute_paper_rejects_session_date_mismatch(client):
+    armed_for = _arm_paper(client)
+    # A proposal for a session other than the armed date must be rejected.
+    other = "2000-01-02" if armed_for != "2000-01-02" else "2000-01-03"
+    with client.application.app_context():
+        proposal = _seed_proposal(strategy="ORB1", session_date=other)
+    res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "orb session date mismatch"
+    assert client.get("/api/orb/trades").get_json()["trades"] == []
 
 
 def test_recommend_only_mode_never_executes(client):
@@ -193,9 +242,9 @@ def test_execute_paper_unknown_proposal_404(client):
 
 
 def test_execute_paper_is_idempotent(client):
-    _arm_paper(client)
+    armed_for = _arm_paper(client)
     with client.application.app_context():
-        proposal = _seed_proposal(strategy="ORB1")
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
     first = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
     second = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
     assert first.status_code == 201 and second.status_code == 201
@@ -204,9 +253,9 @@ def test_execute_paper_is_idempotent(client):
 
 
 def test_emergency_stop_blocks_paper_execution(client):
-    _arm_paper(client)
+    armed_for = _arm_paper(client)
     with client.application.app_context():
-        proposal = _seed_proposal(strategy="ORB1")
+        proposal = _seed_proposal(strategy="ORB1", session_date=armed_for)
     assert client.post("/api/orb/emergency-stop").get_json()["stopped"] is True
     res = client.post(f"/api/orb/proposals/{proposal.proposal_id}/execute-paper")
     assert res.status_code == 409

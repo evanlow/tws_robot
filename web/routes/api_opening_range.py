@@ -30,6 +30,7 @@ from autonomous.orb_proposals import (
     ProposalNotFoundError,
 )
 from autonomous.orb_execution import (
+    ORBBlockReason,
     ORBExecutionBlocked,
     ORBExecutionError,
     ORBExecutionMode,
@@ -439,6 +440,12 @@ def execute_orb_proposal_paper(proposal_id):
     if proposal is None:
         return jsonify({"error": "not found"}), 404
 
+    # Emergency stop is the highest-priority block and takes precedence over the
+    # mode/arming gates below (which would otherwise report the disarmed state).
+    if get_executor().emergency_stopped:
+        return jsonify({"error": "execution blocked",
+                        "reason": ORBBlockReason.EMERGENCY_STOP.value}), 409
+
     # Recommend-only mode never submits orders: the owning strategy must be in
     # paper_autonomous mode for any paper trade to be placed.
     rec = get_manager().get_strategy(proposal.strategy_name)
@@ -457,6 +464,30 @@ def execute_orb_proposal_paper(proposal_id):
             ),
             "mode": mode,
         }), 400
+
+    # Paper-autonomous mode alone is not sufficient: the trader must have armed
+    # the ORB session (where readiness/evidence gates are enforced) for the
+    # proposal's session date. This keeps execution behind the dashboard arming
+    # workflow rather than mode selection.
+    session = rec.get("session") or {}
+    if not session.get("armed"):
+        return jsonify({
+            "error": "orb session not armed",
+            "detail": (
+                "ORB paper execution requires the strategy to be armed for "
+                "the proposal session"
+            ),
+        }), 400
+    if session.get("armed_for") != proposal.session_date:
+        return jsonify({
+            "error": "orb session date mismatch",
+            "detail": (
+                f"strategy is armed for {session.get('armed_for')}, "
+                f"but proposal is for {proposal.session_date}"
+            ),
+        }), 400
+    if session.get("disabled_today"):
+        return jsonify({"error": "orb disabled for session"}), 400
 
     try:
         trade = get_executor().execute_paper(

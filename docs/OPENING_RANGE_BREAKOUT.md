@@ -207,7 +207,11 @@ mode. It preserves the ORB safety posture (Prime Directive):
   the autonomous audit log (`orb_paper_execution`).
 
 Recommend-only mode never submits orders: the owning strategy must be in
-`paper_autonomous` mode for `execute-paper` to place a trade.
+`paper_autonomous` mode **and** actively armed for the proposal's session date
+for `execute-paper` to place a trade. Mode alone is not sufficient — arming is
+where the readiness/evidence gates are enforced (see the arm/disarm workflow
+above). `execute-paper` rejects an un-armed strategy, a strategy armed for a
+different session date, and a session disabled for the day.
 
 ```text
 POST /api/orb/proposals/<proposal_id>/execute-paper
