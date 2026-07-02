@@ -94,6 +94,16 @@ def test_missing_proposal_id_400(client):
     assert res.status_code == 400
 
 
+def test_non_object_json_body_400(client):
+    _make(client)
+    res = client.post(
+        "/api/orb/strategies/ORB1/assisted-live/rehearse",
+        json=["proposal-1"],
+    )
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "request body must be a JSON object"
+
+
 def test_unknown_proposal_404(client):
     _make(client)
     res = _rehearse(client, proposal_id="does-not-exist")

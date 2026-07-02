@@ -1126,7 +1126,11 @@ def orb_assisted_live_rehearse(name):
     if rec is None:
         return jsonify({"error": "not found", "detail": f"unknown strategy '{name}'"}), 404
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    elif not isinstance(payload, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
     proposal_id = payload.get("proposal_id")
     if not proposal_id:
         return jsonify({"error": "proposal_id is required"}), 400

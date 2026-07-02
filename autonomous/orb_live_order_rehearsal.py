@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
@@ -203,166 +203,175 @@ def build_assisted_live_rehearsal_package(
             ORBAssistedLiveRefusalReason.PROPOSAL_MISSING,
             "no ORB proposal was supplied; a rehearsal package requires a valid proposal",
         )
-
-    # A stale/expired/already-executed proposal (or any other unsafe/invalid
-    # proposal) can never be turned into a rehearsal package.
-    if proposal.status != ProposalStatus.PENDING.value:
-        _refuse(
-            ORBAssistedLiveRefusalReason.PROPOSAL_NOT_EXECUTABLE,
-            f"proposal '{proposal.proposal_id}' is '{proposal.status}', not PENDING "
-            "(stale, expired, skipped, or already executed)",
-        )
-
-    if not proposal.stop_price or proposal.stop_price <= 0:
-        _refuse(
-            ORBAssistedLiveRefusalReason.MISSING_STOP,
-            "proposal is missing a positive stop price; stop protection is mandatory",
-        )
-
-    if not proposal.target_price or proposal.target_price <= 0:
-        _refuse(
-            ORBAssistedLiveRefusalReason.MISSING_TARGET,
-            "proposal is missing a positive target price; a target is mandatory",
-        )
-
-    overall_status = (readiness_result or {}).get("overall_status")
-    if overall_status != ASSISTED_LIVE_CANDIDATE:
-        _refuse(
-            ORBAssistedLiveRefusalReason.READINESS_NOT_PASSED,
-            "Phase 4 live-readiness has not passed assisted-live "
-            f"(overall_status={overall_status!r}); assisted-live rehearsal is locked",
-        )
-
-    if not live_master_switch_enabled:
-        _refuse(
-            ORBAssistedLiveRefusalReason.LIVE_MASTER_SWITCH_DISABLED,
-            "live trading master switch is disabled; assisted-live rehearsal requires "
-            "it to be explicitly enabled",
-        )
-
-    if not operator_confirmed:
-        _refuse(
-            ORBAssistedLiveRefusalReason.OPERATOR_CONFIRMATION_MISSING,
-            "operator has not explicitly confirmed this session/account/mode",
-        )
-
-    account_id_norm = str(account_id or "").strip()
-    expected_account_id_norm = str(expected_account_id or "").strip()
-    if (
-        not account_id_norm
-        or not expected_account_id_norm
-        or account_id_norm.upper() != expected_account_id_norm.upper()
-    ):
-        _refuse(
-            ORBAssistedLiveRefusalReason.ACCOUNT_MISMATCH,
-            f"account id {account_id_norm!r} does not match expected "
-            f"{expected_account_id_norm!r} (or either is missing)",
-        )
-
-    if proposal.direction != ELIGIBLE_DIRECTION:
-        _refuse(
-            ORBAssistedLiveRefusalReason.SHORT_DIRECTION,
-            f"direction '{proposal.direction}' is not eligible; only LONG is "
-            "supported for assisted-live rehearsal",
-        )
-
-    if proposal.entry_model not in ELIGIBLE_ENTRY_MODELS:
-        _refuse(
-            _entry_model_reason(proposal.entry_model),
-            f"entry model '{proposal.entry_model}' is not eligible for assisted-live "
-            f"rehearsal; only {ELIGIBLE_ENTRY_MODELS} are supported",
-        )
-
-    if proposal.order_type != ORDER_TYPE_LIMIT:
-        _refuse(
-            ORBAssistedLiveRefusalReason.RAW_MARKET_ORDER,
-            f"proposal order_type must be {ORDER_TYPE_LIMIT}; a raw market order "
-            "can never be represented",
-        )
-
-    if not proposal.symbol or not proposal.session_date or not proposal.strategy_name:
-        _refuse(
-            ORBAssistedLiveRefusalReason.INCOMPLETE_EVIDENCE,
-            "proposal is missing symbol, session date, or strategy name",
-        )
-
-    if int(proposal.quantity) <= 0:
-        _refuse(
-            ORBAssistedLiveRefusalReason.PROTECTION_UNREPRESENTABLE,
-            "proposal has zero/invalid quantity; a bracket cannot be sized/represented",
-        )
-    if not (proposal.stop_price < proposal.entry_price < proposal.target_price):
-        _refuse(
-            ORBAssistedLiveRefusalReason.PROTECTION_UNREPRESENTABLE,
-            "stop/entry/target prices do not form a valid long bracket "
-            "(stop < entry < target)",
-        )
-
-    # Final safety net: re-validate every other invariant a valid, safe,
-    # recommend-only proposal must uphold before any bracket is represented.
     try:
-        _validate_proposal(proposal)
-    except ProposalError as exc:
-        _refuse(
-            ORBAssistedLiveRefusalReason.PROTECTION_UNREPRESENTABLE,
-            f"proposal fails safety validation, protection cannot be represented: {exc}",
+        # A stale/expired/already-executed proposal (or any other unsafe/invalid
+        # proposal) can never be turned into a rehearsal package.
+        if proposal.status != ProposalStatus.PENDING.value:
+            _refuse(
+                ORBAssistedLiveRefusalReason.PROPOSAL_NOT_EXECUTABLE,
+                f"proposal '{proposal.proposal_id}' is '{proposal.status}', not PENDING "
+                "(stale, expired, skipped, or already executed)",
+            )
+
+        if not proposal.stop_price or proposal.stop_price <= 0:
+            _refuse(
+                ORBAssistedLiveRefusalReason.MISSING_STOP,
+                "proposal is missing a positive stop price; stop protection is mandatory",
+            )
+
+        if not proposal.target_price or proposal.target_price <= 0:
+            _refuse(
+                ORBAssistedLiveRefusalReason.MISSING_TARGET,
+                "proposal is missing a positive target price; a target is mandatory",
+            )
+
+        overall_status = (readiness_result or {}).get("overall_status")
+        if overall_status != ASSISTED_LIVE_CANDIDATE:
+            _refuse(
+                ORBAssistedLiveRefusalReason.READINESS_NOT_PASSED,
+                "Phase 4 live-readiness has not passed assisted-live "
+                f"(overall_status={overall_status!r}); assisted-live rehearsal is locked",
+            )
+
+        if not live_master_switch_enabled:
+            _refuse(
+                ORBAssistedLiveRefusalReason.LIVE_MASTER_SWITCH_DISABLED,
+                "live trading master switch is disabled; assisted-live rehearsal requires "
+                "it to be explicitly enabled",
+            )
+
+        if not operator_confirmed:
+            _refuse(
+                ORBAssistedLiveRefusalReason.OPERATOR_CONFIRMATION_MISSING,
+                "operator has not explicitly confirmed this session/account/mode",
+            )
+
+        account_id_norm = str(account_id or "").strip()
+        expected_account_id_norm = str(expected_account_id or "").strip()
+        if (
+            not account_id_norm
+            or not expected_account_id_norm
+            or account_id_norm.upper() != expected_account_id_norm.upper()
+        ):
+            _refuse(
+                ORBAssistedLiveRefusalReason.ACCOUNT_MISMATCH,
+                f"account id {account_id_norm!r} does not match expected "
+                f"{expected_account_id_norm!r} (or either is missing)",
+            )
+
+        if proposal.direction != ELIGIBLE_DIRECTION:
+            _refuse(
+                ORBAssistedLiveRefusalReason.SHORT_DIRECTION,
+                f"direction '{proposal.direction}' is not eligible; only LONG is "
+                "supported for assisted-live rehearsal",
+            )
+
+        if proposal.entry_model not in ELIGIBLE_ENTRY_MODELS:
+            _refuse(
+                _entry_model_reason(proposal.entry_model),
+                f"entry model '{proposal.entry_model}' is not eligible for assisted-live "
+                f"rehearsal; only {ELIGIBLE_ENTRY_MODELS} are supported",
+            )
+
+        if proposal.order_type != ORDER_TYPE_LIMIT:
+            _refuse(
+                ORBAssistedLiveRefusalReason.RAW_MARKET_ORDER,
+                f"proposal order_type must be {ORDER_TYPE_LIMIT}; a raw market order "
+                "can never be represented",
+            )
+
+        if not proposal.symbol or not proposal.session_date or not proposal.strategy_name:
+            _refuse(
+                ORBAssistedLiveRefusalReason.INCOMPLETE_EVIDENCE,
+                "proposal is missing symbol, session date, or strategy name",
+            )
+
+        quantity = int(proposal.quantity)
+        if quantity <= 0:
+            _refuse(
+                ORBAssistedLiveRefusalReason.PROTECTION_UNREPRESENTABLE,
+                "proposal has zero/invalid quantity; a bracket cannot be sized/represented",
+            )
+        if not (proposal.stop_price < proposal.entry_price < proposal.target_price):
+            _refuse(
+                ORBAssistedLiveRefusalReason.PROTECTION_UNREPRESENTABLE,
+                "stop/entry/target prices do not form a valid long bracket "
+                "(stop < entry < target)",
+            )
+
+        # Final safety net: re-validate every other invariant a valid, safe,
+        # recommend-only proposal must uphold before any bracket is represented.
+        try:
+            _validate_proposal(proposal)
+        except ProposalError as exc:
+            _refuse(
+                ORBAssistedLiveRefusalReason.PROTECTION_UNREPRESENTABLE,
+                f"proposal fails safety validation, protection cannot be represented: {exc}",
+            )
+
+        rid = rehearsal_id or uuid.uuid4().hex
+        audit_event_id = uuid.uuid4().hex
+        bracket = ORBAssistedLiveBracketMetadata(oca_group=f"ORB-OCA-{rid}")
+
+        package = ORBAssistedLiveRehearsalPackage(
+            rehearsal_id=rid,
+            strategy_name=proposal.strategy_name,
+            session_date=proposal.session_date,
+            symbol=proposal.symbol,
+            account_id=account_id_norm,
+            proposal_id=proposal.proposal_id,
+            entry_model=proposal.entry_model,
+            direction=proposal.direction,
+            quantity=quantity,
+            entry_order_type=ORDER_TYPE_LIMIT,
+            entry_limit_price=proposal.entry_price,
+            stop_price=proposal.stop_price,
+            target_price=proposal.target_price,
+            bracket=bracket,
+            time_in_force=time_in_force,
+            readiness_snapshot=dict(readiness_result or {}),
+            operator_confirmation_snapshot={
+                "operator_confirmed": operator_confirmed,
+                "account_id": account_id_norm,
+                "expected_account_id": expected_account_id_norm,
+            },
+            audit_event_id=audit_event_id,
+            created_at=now().isoformat(),
+            evidence_id=evidence_id,
         )
 
-    rid = rehearsal_id or uuid.uuid4().hex
-    audit_event_id = uuid.uuid4().hex
-    bracket = ORBAssistedLiveBracketMetadata(oca_group=f"ORB-OCA-{rid}")
-
-    package = ORBAssistedLiveRehearsalPackage(
-        rehearsal_id=rid,
-        strategy_name=proposal.strategy_name,
-        session_date=proposal.session_date,
-        symbol=proposal.symbol,
-        account_id=account_id_norm,
-        proposal_id=proposal.proposal_id,
-        entry_model=proposal.entry_model,
-        direction=proposal.direction,
-        quantity=int(proposal.quantity),
-        entry_order_type=ORDER_TYPE_LIMIT,
-        entry_limit_price=proposal.entry_price,
-        stop_price=proposal.stop_price,
-        target_price=proposal.target_price,
-        bracket=bracket,
-        time_in_force=time_in_force,
-        readiness_snapshot=dict(readiness_result or {}),
-        operator_confirmation_snapshot={
-            "operator_confirmed": operator_confirmed,
+        audit_log.log_decision({
+            "kind": _AUDIT_KIND,
+            "action": "rehearsal_created",
+            "audit_event_id": audit_event_id,
+            "rehearsal_id": rid,
+            "proposal_id": proposal.proposal_id,
+            "strategy": proposal.strategy_name,
+            "session_date": proposal.session_date,
+            "symbol": proposal.symbol,
             "account_id": account_id_norm,
-            "expected_account_id": expected_account_id_norm,
-        },
-        audit_event_id=audit_event_id,
-        created_at=now().isoformat(),
-        evidence_id=evidence_id,
-    )
+            "entry_model": proposal.entry_model,
+            "direction": proposal.direction,
+            "quantity": package.quantity,
+            "entry_order_type": package.entry_order_type,
+            "entry_limit_price": package.entry_limit_price,
+            "stop_price": package.stop_price,
+            "target_price": package.target_price,
+            "bracket": bracket.to_dict(),
+            "time_in_force": time_in_force,
+            "evidence_id": evidence_id,
+            "readiness_overall_status": overall_status,
+        })
 
-    audit_log.log_decision({
-        "kind": _AUDIT_KIND,
-        "action": "rehearsal_created",
-        "audit_event_id": audit_event_id,
-        "rehearsal_id": rid,
-        "proposal_id": proposal.proposal_id,
-        "strategy": proposal.strategy_name,
-        "session_date": proposal.session_date,
-        "symbol": proposal.symbol,
-        "account_id": account_id_norm,
-        "entry_model": proposal.entry_model,
-        "direction": proposal.direction,
-        "quantity": package.quantity,
-        "entry_order_type": package.entry_order_type,
-        "entry_limit_price": package.entry_limit_price,
-        "stop_price": package.stop_price,
-        "target_price": package.target_price,
-        "bracket": bracket.to_dict(),
-        "time_in_force": time_in_force,
-        "evidence_id": evidence_id,
-        "readiness_overall_status": overall_status,
-    })
-
-    return package
+        return package
+    except ORBAssistedLiveRefusal:
+        raise
+    except (AttributeError, TypeError, ValueError) as exc:
+        _refuse(
+            ORBAssistedLiveRefusalReason.PROTECTION_UNREPRESENTABLE,
+            "proposal has invalid or unexpected field values; protection cannot be "
+            f"represented: {exc}",
+        )
 
 
 def _log_refusal(

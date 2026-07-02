@@ -318,6 +318,17 @@ def test_skipped_proposal_refused(audit):
     assert exc.value.reason == ORBAssistedLiveRefusalReason.PROPOSAL_NOT_EXECUTABLE
 
 
+def test_invalid_quantity_type_refused_and_audit_logged(audit, tmp_path):
+    proposal = _proposal()
+    proposal.quantity = "not-a-number"
+    with pytest.raises(ORBAssistedLiveRefusal) as exc:
+        build_assisted_live_rehearsal_package(
+            proposal, _readiness(), audit=audit, **_kwargs()
+        )
+    assert exc.value.reason == ORBAssistedLiveRefusalReason.PROTECTION_UNREPRESENTABLE
+    assert any('"rehearsal_refused"' in line for line in _log_lines(tmp_path))
+
+
 def test_no_live_order_side_effects(audit):
     """Never calls a broker/live path; the package is a plain, inert dict."""
     proposal = _proposal()
