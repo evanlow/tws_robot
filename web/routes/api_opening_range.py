@@ -57,6 +57,12 @@ from autonomous.orb_live_order_rehearsal import (
     ORBAssistedLiveRehearsalStore,
     build_assisted_live_rehearsal_package,
 )
+from autonomous.orb_live_order_adapter import ORBLiveOrderAdapter, RefusingLiveOrderAdapter
+from autonomous.orb_tiny_live_execution import (
+    ORBTinyLiveOrderStore,
+    ORBTinyLiveRefusal,
+    submit_tiny_live_order,
+)
 from autonomous.runner_config import AutonomousLiveRunnerConfig
 
 logger = logging.getLogger(__name__)
@@ -72,6 +78,8 @@ _exit_manager: Optional[ORBExitManager] = None
 _review_store: Optional[ORBSessionReviewStore] = None
 _live_readiness_confirmations: Optional[ORBLiveReadinessConfirmationStore] = None
 _assisted_live_rehearsals: Optional[ORBAssistedLiveRehearsalStore] = None
+_tiny_live_orders: Optional[ORBTinyLiveOrderStore] = None
+_live_order_adapter: Optional[ORBLiveOrderAdapter] = None
 
 
 def get_manager() -> ORBSessionManager:
@@ -188,6 +196,42 @@ def get_assisted_live_rehearsal_store() -> ORBAssistedLiveRehearsalStore:
     if _assisted_live_rehearsals is None:
         _assisted_live_rehearsals = ORBAssistedLiveRehearsalStore()
     return _assisted_live_rehearsals
+
+
+def get_tiny_live_order_store() -> ORBTinyLiveOrderStore:
+    """Lazily build the singleton tiny-live order-group store (Phase 6, #229).
+
+    Durably persists to ``<orb_evidence_dir>/orb_tiny_live_orders.json`` (see
+    :class:`ORBTinyLiveOrderStore`) so duplicate-submit prevention survives a
+    process restart. Honors ``orb_evidence_dir`` app config for test
+    isolation. Every order group it holds was already validated, submitted
+    through the narrow broker adapter, and audit-logged by
+    :func:`autonomous.orb_tiny_live_execution.submit_tiny_live_order` before
+    reaching this store.
+    """
+    global _tiny_live_orders
+    if _tiny_live_orders is None:
+        cfg = current_app.config if has_app_context() else {}
+        _tiny_live_orders = ORBTinyLiveOrderStore(state_dir=cfg.get("orb_evidence_dir", "logs"))
+    return _tiny_live_orders
+
+
+def get_live_order_adapter() -> ORBLiveOrderAdapter:
+    """Return the narrow live broker order adapter (Phase 6, #229).
+
+    Honors an ``orb_live_order_adapter`` app-config override (used by tests
+    to inject a fake broker adapter). Production defaults to
+    :class:`RefusingLiveOrderAdapter`, which fails closed and never places a
+    real order, until a real broker adapter is explicitly wired in.
+    """
+    global _live_order_adapter
+    cfg = current_app.config if has_app_context() else {}
+    override = cfg.get("orb_live_order_adapter")
+    if isinstance(override, ORBLiveOrderAdapter):
+        return override
+    if _live_order_adapter is None:
+        _live_order_adapter = RefusingLiveOrderAdapter()
+    return _live_order_adapter
 
 
 @page_bp.route("/backtest")
@@ -1191,6 +1235,193 @@ def get_orb_assisted_live_rehearsal(rehearsal_id):
     if package is None:
         return jsonify({"error": "not found"}), 404
     return jsonify(package.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# ORB Phase 6 — human-confirmed tiny-live assisted execution (#229)
+# The first ORB phase that may submit a real broker order: only a validated,
+# not-previously-submitted Phase 5 rehearsal package, after an explicit final
+# human confirmation, after every Phase 4 (#213) readiness gate and every
+# other live safety gate is re-checked immediately before submit, and only
+# through the narrow protected long bracket/OCA broker adapter. No fully
+# autonomous live trading and no continuous live loop are added here.
+# ---------------------------------------------------------------------------
+
+
+def _tiny_live_account_equity() -> Optional[float]:
+    """Best-effort verified account equity; ``None`` when unverifiable.
+
+    Never fabricates a value: only returns an equity figure once real account
+    data has actually been received from the broker (mirrors
+    ``ServiceManager.account_data_ready``). Prime Directive: an unverifiable
+    tiny-live cash cap must always fail closed (refused as
+    ``risk_cap_unverifiable``) rather than silently trusting a stale default
+    or an uninitialized equity value that could let an oversized live order
+    through undetected.
+    """
+    from web.services import get_services
+    svc = get_services()
+    try:
+        if not getattr(svc, "account_data_ready", False):
+            return None
+        return float(svc.risk_manager.current_equity)
+    except Exception:  # pragma: no cover - defensive; never crash the submit path
+        logger.exception("Failed to read account equity for ORB tiny-live submit")
+        return None
+
+
+@orb_bp.route(
+    "/assisted-live/rehearsals/<rehearsal_id>/submit-tiny-live", methods=["POST"]
+)
+def orb_submit_tiny_live(rehearsal_id):
+    """Human-confirmed final submit of a Phase 5 rehearsal as a tiny-live order.
+
+    Requires an explicit final confirmation payload
+    (``confirm_live_order``, ``expected_account_id``, ``operator``,
+    ``notes``). Re-evaluates Phase 4 assisted-live readiness and every other
+    live safety gate (master switch, emergency stop, account match, market
+    data, daily cap, tiny-live cash cap, protection) immediately before
+    calling the narrow broker adapter. Fails closed (400/404/409) on any
+    missing safety condition; every attempt (success or refusal) is
+    audit-logged.
+    """
+    rehearsal = get_assisted_live_rehearsal_store().get(rehearsal_id)
+    if rehearsal is None:
+        return jsonify({"error": "not found", "detail": f"unknown rehearsal '{rehearsal_id}'"}), 404
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    elif not isinstance(payload, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+
+    rec = get_manager().get_strategy(rehearsal.strategy_name)
+    if rec is None:
+        return jsonify({
+            "error": "not found",
+            "detail": f"unknown strategy '{rehearsal.strategy_name}'",
+        }), 404
+
+    store = get_proposal_store()
+    store.expire_due()
+    proposal = store.get(rehearsal.proposal_id)
+
+    result, account_id, _confirmed_expected_account_id, _operator_confirmed, live_config, log_dir = (
+        _compute_orb_live_readiness(
+            rehearsal.strategy_name, rec, ASSISTED_LIVE_MODE, request.args,
+        )
+    )
+
+    from web.routes.api_autonomous import EMERGENCY_STOP_FILE
+    try:
+        emergency_stop_active = EMERGENCY_STOP_FILE.exists()
+    except OSError:
+        emergency_stop_active = True  # fail closed when unreadable
+
+    from web.services import get_services
+    svc = get_services()
+    market_data_source = live_config.live_market_data_provider if getattr(svc, "connected", False) else ""
+
+    tiny_live_store = get_tiny_live_order_store()
+    already_submitted = tiny_live_store.is_rehearsal_submitted(rehearsal_id)
+    daily_count = tiny_live_store.daily_count(rehearsal.strategy_name, rehearsal.session_date)
+
+    try:
+        group = submit_tiny_live_order(
+            rehearsal,
+            proposal,
+            result,
+            confirm_live_order=bool(payload.get("confirm_live_order")),
+            operator=payload.get("operator"),
+            expected_account_id=payload.get("expected_account_id"),
+            account_id=account_id,
+            notes=payload.get("notes"),
+            live_master_switch_enabled=live_config.live_enabled,
+            emergency_stop_active=emergency_stop_active,
+            market_data_source=market_data_source,
+            daily_live_orb_trade_count=daily_count,
+            max_live_orb_trades_per_day=live_config.max_live_trades_per_day,
+            account_equity=_tiny_live_account_equity(),
+            max_deployable_cash_pct=live_config.max_deployable_cash_pct,
+            adapter=get_live_order_adapter(),
+            order_store=tiny_live_store,
+            already_submitted=already_submitted,
+            log_dir=log_dir,
+        )
+    except ORBTinyLiveRefusal as exc:
+        logger.info("ORB tiny-live submit refused (%s): %s", exc.reason.value, exc)
+        return jsonify({
+            "error": "tiny-live submit refused",
+            "reason": exc.reason.value,
+            "readiness": result,
+        }), 409
+
+    # `submit_tiny_live_order` already durably persisted `group` (via
+    # `order_store`) before returning, so the reservation written before the
+    # broker call is already closed out here. Marking the source proposal
+    # EXECUTED is the last step; if it fails, the order group is flagged as
+    # needing reconciliation rather than silently left as only a log line —
+    # it stays durably blocked from being resubmitted either way.
+    if proposal is not None:
+        try:
+            store.mark_executed(proposal.proposal_id, group.order_group_id)
+        except ProposalError:
+            logger.exception(
+                "ORB tiny-live order %s submitted but proposal %s could not be "
+                "marked executed; flagging for reconciliation",
+                group.order_group_id, proposal.proposal_id,
+            )
+            reconciled = tiny_live_store.mark_needs_reconciliation(group.order_group_id)
+            if reconciled is not None:
+                group = reconciled
+    return jsonify(group.to_dict()), 201
+
+
+
+@orb_bp.route("/tiny-live/orders", methods=["GET"])
+def list_orb_tiny_live_orders():
+    """List submitted tiny-live order groups."""
+    args = request.args
+    orders = get_tiny_live_order_store().list(
+        strategy_name=args.get("strategy_name"),
+        symbol=args.get("symbol"),
+        session_date=args.get("session_date"),
+    )
+    return jsonify({"orders": [g.to_dict() for g in orders]})
+
+
+@orb_bp.route("/tiny-live/orders/<order_group_id>", methods=["GET"])
+def get_orb_tiny_live_order(order_group_id):
+    """Fetch a single tiny-live order group by id."""
+    group = get_tiny_live_order_store().get(order_group_id)
+    if group is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(group.to_dict())
+
+
+@orb_bp.route("/tiny-live/orders/<order_group_id>/cancel-if-pending", methods=["POST"])
+def cancel_orb_tiny_live_order(order_group_id):
+    """Cancel a tiny-live order group if it is still pending at the broker."""
+    group = get_tiny_live_order_store().get(order_group_id)
+    if group is None:
+        return jsonify({"error": "not found"}), 404
+
+    if group.status != "SUBMITTED":
+        return jsonify(group.to_dict())
+
+    adapter = get_live_order_adapter()
+    try:
+        cancelled = adapter.cancel_if_pending(order_group_id)
+    except Exception:  # noqa: BLE001 - never crash on a cancel failure; fail closed
+        logger.exception("ORB tiny-live cancel-if-pending failed for %s", order_group_id)
+        return jsonify({
+            "error": "cancel failed",
+            "detail": "the broker adapter failed to cancel the pending order group",
+        }), 502
+
+    if cancelled:
+        group = get_tiny_live_order_store().mark_cancelled(order_group_id)
+    return jsonify(group.to_dict())
 
 
 @orb_bp.route("/review/<path:review_session_id>/notes", methods=["POST"])
