@@ -46,7 +46,6 @@ from autonomous.audit import AuditLogger
 from autonomous.orb_live_order_adapter import (
     ORBLiveBracketOrderRequest,
     ORBLiveOrderAdapter,
-    ORBLiveOrderAdapterError,
 )
 from autonomous.orb_live_order_rehearsal import (
     ELIGIBLE_DIRECTION,
@@ -155,8 +154,12 @@ class ORBTinyLiveOrderGroup:
 
 
 def _refusal_from_broker_error(exc: Exception) -> ORBTinyLiveRefusalReason:
-    if isinstance(exc, ORBLiveOrderAdapterError):
-        return ORBTinyLiveRefusalReason.BROKER_SUBMIT_FAILED
+    """Every broker adapter error refuses the same way: fail closed.
+
+    Kept as its own function (rather than inlining the single reason) so a
+    future adapter-specific error type can be distinguished without changing
+    every call site.
+    """
     return ORBTinyLiveRefusalReason.BROKER_SUBMIT_FAILED
 
 
@@ -407,7 +410,10 @@ def submit_tiny_live_order(
 
     try:
         submission = adapter.submit_protected_long_bracket(request)
-    except Exception as exc:  # noqa: BLE001 - any broker error fails closed
+    except Exception as exc:  # noqa: BLE001 - Prime Directive: any broker error
+        # (network failure, rejected order, adapter bug, etc.) must fail
+        # closed rather than silently proceed or crash into an unhandled
+        # 500 that could mask whether an order was actually placed.
         _refuse(
             _refusal_from_broker_error(exc),
             f"broker adapter failed to submit the protected order group: {exc}",
@@ -417,7 +423,10 @@ def submit_tiny_live_order(
     if not submission.protection_broker_visible:
         try:
             adapter.cancel_if_pending(order_group_id)
-        except Exception:  # noqa: BLE001 - never let a cancel failure mask the refusal
+        except Exception:  # noqa: BLE001 - Prime Directive: a cancel failure
+            # must never mask the "protection not broker-visible" refusal
+            # below or otherwise allow an unprotected order to be treated as
+            # successfully submitted.
             logger.exception(
                 "Failed to cancel tiny-live order group %s after unconfirmed "
                 "protection", order_group_id,

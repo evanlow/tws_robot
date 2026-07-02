@@ -1249,8 +1249,11 @@ def _tiny_live_account_equity() -> Optional[float]:
 
     Never fabricates a value: only returns an equity figure once real account
     data has actually been received from the broker (mirrors
-    ``ServiceManager.account_data_ready``), so an unverifiable tiny-live cash
-    cap always fails closed rather than silently trusting a stale default.
+    ``ServiceManager.account_data_ready``). Prime Directive: an unverifiable
+    tiny-live cash cap must always fail closed (refused as
+    ``risk_cap_unverifiable``) rather than silently trusting a stale default
+    or an uninitialized equity value that could let an oversized live order
+    through undetected.
     """
     from web.services import get_services
     svc = get_services()
@@ -1394,9 +1397,12 @@ def cancel_orb_tiny_live_order(order_group_id):
     adapter = get_live_order_adapter()
     try:
         cancelled = adapter.cancel_if_pending(order_group_id)
-    except Exception as exc:  # noqa: BLE001 - never crash on a cancel failure
+    except Exception:  # noqa: BLE001 - never crash on a cancel failure; fail closed
         logger.exception("ORB tiny-live cancel-if-pending failed for %s", order_group_id)
-        return jsonify({"error": "cancel failed", "detail": str(exc)}), 502
+        return jsonify({
+            "error": "cancel failed",
+            "detail": "the broker adapter failed to cancel the pending order group",
+        }), 502
 
     if cancelled:
         group = get_tiny_live_order_store().mark_cancelled(order_group_id)
