@@ -101,7 +101,7 @@ def env(tmp_path):
     rehearsal = _rehearsal(proposal, audit=audit, log_dir=log_dir)
     readiness = {"overall_status": ASSISTED_LIVE_CANDIDATE}
     adapter = FakeORBLiveOrderAdapter()
-    order_store = ORBTinyLiveOrderStore()
+    order_store = ORBTinyLiveOrderStore(state_dir=log_dir)
     return {
         "proposal": proposal,
         "rehearsal": rehearsal,
@@ -120,6 +120,7 @@ def _submit(env, **overrides):
         overrides.pop("proposal", env["proposal"]),
         overrides.pop("readiness", env["readiness"]),
         adapter=overrides.pop("adapter", env["adapter"]),
+        order_store=overrides.pop("order_store", None),
         already_submitted=overrides.pop("already_submitted", False),
         audit=env["audit"],
         log_dir=env["log_dir"],
@@ -379,3 +380,99 @@ def test_order_store_tracks_rehearsal_and_daily_count(env):
 
     cancelled = store.mark_cancelled(group.order_group_id)
     assert cancelled.status == "CANCELLED"
+
+
+# ---- durable idempotency / process-restart safety ------------------------
+
+def test_reservation_written_before_broker_call_blocks_retry_after_memory_loss(env):
+    """A durable PENDING_SUBMIT reservation must survive "process restart".
+
+    Simulates the process losing its in-memory order store (e.g. a crash)
+    right after a successful broker submit by dropping the original store
+    instance and reloading a fresh one from the same on-disk state. The
+    second submit attempt (fresh adapter, fresh store object) must be
+    refused without ever calling the broker adapter again.
+    """
+    store = env["order_store"]
+    group = _submit(env, order_store=store)
+    assert group.status == "SUBMITTED"
+    assert store.is_rehearsal_submitted(env["rehearsal"].rehearsal_id) is True
+
+    # Simulate a fresh process: brand-new store object reloaded from disk,
+    # and a brand-new adapter instance so a call would be unambiguous.
+    reloaded_store = ORBTinyLiveOrderStore(state_dir=env["log_dir"])
+    assert reloaded_store.is_rehearsal_submitted(env["rehearsal"].rehearsal_id) is True
+
+    fresh_adapter = FakeORBLiveOrderAdapter()
+    with pytest.raises(ORBTinyLiveRefusal) as exc:
+        _submit(env, adapter=fresh_adapter, order_store=reloaded_store)
+    assert exc.value.reason == ORBTinyLiveRefusalReason.REHEARSAL_ALREADY_SUBMITTED
+    assert fresh_adapter.submit_calls == 0
+
+
+def test_pending_reservation_alone_blocks_resubmit_even_without_a_finalized_group(env):
+    """A reservation that never reached ``finalize_submitted`` still blocks.
+
+    Simulates a crash strictly between the durable reservation being written
+    and the broker adapter returning (or the finalize step running): the
+    store never receives ``add()``/``finalize_submitted`` for this rehearsal,
+    yet a fresh submit attempt must still be refused and must not call the
+    broker adapter, because the durable in-memory-store-loss scenario cannot
+    distinguish "broker call succeeded but crashed before recording it" from
+    "still in flight".
+    """
+    store = env["order_store"]
+    reserved = store.reserve_pending(
+        "order-group-simulated",
+        rehearsal_id=env["rehearsal"].rehearsal_id,
+        proposal_id=env["proposal"].proposal_id,
+        strategy_name=env["proposal"].strategy_name,
+        session_date=env["proposal"].session_date,
+    )
+    assert reserved is True
+
+    reloaded_store = ORBTinyLiveOrderStore(state_dir=env["log_dir"])
+    assert reloaded_store.is_rehearsal_submitted(env["rehearsal"].rehearsal_id) is True
+
+    fresh_adapter = FakeORBLiveOrderAdapter()
+    with pytest.raises(ORBTinyLiveRefusal) as exc:
+        _submit(env, adapter=fresh_adapter, order_store=reloaded_store)
+    assert exc.value.reason == ORBTinyLiveRefusalReason.REHEARSAL_ALREADY_SUBMITTED
+    assert fresh_adapter.submit_calls == 0
+
+
+def test_broker_failure_releases_reservation_so_retry_is_possible(env):
+    """A genuine broker failure (no order created) must not permanently block."""
+    store = env["order_store"]
+    failing_adapter = FakeORBLiveOrderAdapter(
+        raise_on_submit=ORBLiveOrderAdapterError("simulated outage")
+    )
+    with pytest.raises(ORBTinyLiveRefusal) as exc:
+        _submit(env, adapter=failing_adapter, order_store=store)
+    assert exc.value.reason == ORBTinyLiveRefusalReason.BROKER_SUBMIT_FAILED
+    assert store.is_rehearsal_submitted(env["rehearsal"].rehearsal_id) is False
+
+    working_adapter = FakeORBLiveOrderAdapter()
+    group = _submit(env, adapter=working_adapter, order_store=store)
+    assert group.status == "SUBMITTED"
+    assert working_adapter.submit_calls == 1
+
+
+def test_mark_needs_reconciliation_keeps_order_group_durably_blocking(env):
+    """If the proposal cannot be marked EXECUTED, the group is flagged, not silent."""
+    store = env["order_store"]
+    group = _submit(env, order_store=store)
+    reconciled = store.mark_needs_reconciliation(group.order_group_id)
+    assert reconciled.status == "SUBMITTED_NEEDS_PROPOSAL_RECONCILIATION"
+
+    # Still durably blocking: a fresh store reloaded from disk still refuses
+    # a resubmit for the same rehearsal, and never calls the adapter again.
+    reloaded_store = ORBTinyLiveOrderStore(state_dir=env["log_dir"])
+    assert reloaded_store.get(group.order_group_id).status == (
+        "SUBMITTED_NEEDS_PROPOSAL_RECONCILIATION"
+    )
+    fresh_adapter = FakeORBLiveOrderAdapter()
+    with pytest.raises(ORBTinyLiveRefusal) as exc:
+        _submit(env, adapter=fresh_adapter, order_store=reloaded_store)
+    assert exc.value.reason == ORBTinyLiveRefusalReason.REHEARSAL_ALREADY_SUBMITTED
+    assert fresh_adapter.submit_calls == 0

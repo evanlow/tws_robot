@@ -201,14 +201,18 @@ def get_assisted_live_rehearsal_store() -> ORBAssistedLiveRehearsalStore:
 def get_tiny_live_order_store() -> ORBTinyLiveOrderStore:
     """Lazily build the singleton tiny-live order-group store (Phase 6, #229).
 
-    In-memory only; every order group it holds was already validated,
-    submitted through the narrow broker adapter, and audit-logged by
+    Durably persists to ``<orb_evidence_dir>/orb_tiny_live_orders.json`` (see
+    :class:`ORBTinyLiveOrderStore`) so duplicate-submit prevention survives a
+    process restart. Honors ``orb_evidence_dir`` app config for test
+    isolation. Every order group it holds was already validated, submitted
+    through the narrow broker adapter, and audit-logged by
     :func:`autonomous.orb_tiny_live_execution.submit_tiny_live_order` before
     reaching this store.
     """
     global _tiny_live_orders
     if _tiny_live_orders is None:
-        _tiny_live_orders = ORBTinyLiveOrderStore()
+        cfg = current_app.config if has_app_context() else {}
+        _tiny_live_orders = ORBTinyLiveOrderStore(state_dir=cfg.get("orb_evidence_dir", "logs"))
     return _tiny_live_orders
 
 
@@ -1340,6 +1344,7 @@ def orb_submit_tiny_live(rehearsal_id):
             account_equity=_tiny_live_account_equity(),
             max_deployable_cash_pct=live_config.max_deployable_cash_pct,
             adapter=get_live_order_adapter(),
+            order_store=tiny_live_store,
             already_submitted=already_submitted,
             log_dir=log_dir,
         )
@@ -1351,16 +1356,26 @@ def orb_submit_tiny_live(rehearsal_id):
             "readiness": result,
         }), 409
 
-    tiny_live_store.add(group)
+    # `submit_tiny_live_order` already durably persisted `group` (via
+    # `order_store`) before returning, so the reservation written before the
+    # broker call is already closed out here. Marking the source proposal
+    # EXECUTED is the last step; if it fails, the order group is flagged as
+    # needing reconciliation rather than silently left as only a log line —
+    # it stays durably blocked from being resubmitted either way.
     if proposal is not None:
         try:
             store.mark_executed(proposal.proposal_id, group.order_group_id)
         except ProposalError:
             logger.exception(
                 "ORB tiny-live order %s submitted but proposal %s could not be "
-                "marked executed", group.order_group_id, proposal.proposal_id,
+                "marked executed; flagging for reconciliation",
+                group.order_group_id, proposal.proposal_id,
             )
+            reconciled = tiny_live_store.mark_needs_reconciliation(group.order_group_id)
+            if reconciled is not None:
+                group = reconciled
     return jsonify(group.to_dict()), 201
+
 
 
 @orb_bp.route("/tiny-live/orders", methods=["GET"])

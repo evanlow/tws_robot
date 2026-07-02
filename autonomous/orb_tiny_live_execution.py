@@ -30,16 +30,25 @@ tightly controlled:
   non-equity instruments are always refused.
 - Max live ORB trades per day defaults to 1 and tiny-live cash/risk caps
   from Phase 4 always apply.
+- Duplicate-submit prevention is durable, not just in-memory: a
+  ``PENDING_SUBMIT`` reservation for the rehearsal is written to disk
+  (:class:`ORBTinyLiveOrderStore`) *before* the broker adapter is ever
+  called, so a process crash between a successful broker submit and this
+  process recording that success cannot leave the rehearsal/proposal
+  resubmittable after a restart.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from autonomous.audit import AuditLogger
@@ -183,6 +192,7 @@ def submit_tiny_live_order(
     max_deployable_cash_pct: float = MAX_TINY_LIVE_CASH_PCT,
     asset_class: str = "EQUITY",
     adapter: ORBLiveOrderAdapter,
+    order_store: Optional["ORBTinyLiveOrderStore"] = None,
     already_submitted: bool = False,
     audit: Optional[AuditLogger] = None,
     log_dir: str = "logs",
@@ -195,6 +205,16 @@ def submit_tiny_live_order(
     missing/invalid gate; the refusal is still audit-logged. Only calls the
     broker adapter once every gate has passed, and cancels the order group
     immediately if the adapter cannot confirm broker-visible protection.
+
+    If ``order_store`` is supplied, duplicate-submit prevention is durable:
+    immediately before the broker adapter is called, a ``PENDING_SUBMIT``
+    reservation for the rehearsal is written to disk. This closes the gap
+    between "broker call succeeded" and "this process recorded that success"
+    — even a crash in that window leaves the reservation on disk, so a
+    subsequent submit attempt (in this process or a fresh one after restart)
+    is refused before the adapter is ever called again. On success, the
+    order group is durably finalized (broker order ids, protection status)
+    before this function returns.
     """
     audit_log = audit or AuditLogger(log_dir)
     now = now_fn or (lambda: datetime.now(timezone.utc))
@@ -217,7 +237,12 @@ def submit_tiny_live_order(
             f"'{_REHEARSAL_REQUIRED_STATUS}'",
         )
 
-    if already_submitted:
+    durably_submitted = (
+        order_store.is_rehearsal_submitted(rehearsal.rehearsal_id)
+        if order_store is not None
+        else False
+    )
+    if already_submitted or durably_submitted:
         _refuse(
             ORBTinyLiveRefusalReason.REHEARSAL_ALREADY_SUBMITTED,
             f"rehearsal '{rehearsal.rehearsal_id}' has already been submitted "
@@ -408,12 +433,36 @@ def submit_tiny_live_order(
         "confirmed_at": now().isoformat(),
     }
 
+    if order_store is not None:
+        # Write a durable PENDING_SUBMIT reservation *before* the broker
+        # adapter is ever called. If this process crashes anywhere between
+        # a successful broker call and recording that success below, this
+        # reservation alone (reloaded from disk) keeps the rehearsal
+        # blocked from being resubmitted.
+        if not order_store.reserve_pending(
+            order_group_id,
+            rehearsal_id=rehearsal.rehearsal_id,
+            proposal_id=proposal.proposal_id,
+            strategy_name=proposal.strategy_name,
+            session_date=proposal.session_date,
+            now_fn=now,
+        ):
+            _refuse(
+                ORBTinyLiveRefusalReason.REHEARSAL_ALREADY_SUBMITTED,
+                f"rehearsal '{rehearsal.rehearsal_id}' has already been submitted "
+                "as a tiny-live order group",
+            )
+
     try:
         submission = adapter.submit_protected_long_bracket(request)
     except Exception as exc:  # noqa: BLE001 - Prime Directive: any broker error
         # (network failure, rejected order, adapter bug, etc.) must fail
         # closed rather than silently proceed or crash into an unhandled
-        # 500 that could mask whether an order was actually placed.
+        # 500 that could mask whether an order was actually placed. No
+        # order was created, so the reservation can safely be released to
+        # allow a future legitimate retry.
+        if order_store is not None:
+            order_store.release_pending(order_group_id)
         _refuse(
             _refusal_from_broker_error(exc),
             f"broker adapter failed to submit the protected order group: {exc}",
@@ -431,6 +480,8 @@ def submit_tiny_live_order(
                 "Failed to cancel tiny-live order group %s after unconfirmed "
                 "protection", order_group_id,
             )
+        if order_store is not None:
+            order_store.release_pending(order_group_id)
         _refuse(
             ORBTinyLiveRefusalReason.PROTECTION_NOT_BROKER_VISIBLE,
             f"broker adapter could not confirm broker-visible protection for "
@@ -491,6 +542,12 @@ def submit_tiny_live_order(
         "operator_confirmation": operator_confirmation,
     })
 
+    if order_store is not None:
+        # Durably persist the successful submit (broker order ids, protection
+        # status) before returning success to the caller, closing out the
+        # PENDING_SUBMIT reservation written above.
+        order_store.finalize_submitted(group)
+
     return group
 
 
@@ -514,31 +571,166 @@ def _log_refusal(
     })
 
 
-class ORBTinyLiveOrderStore:
-    """Thread-safe in-memory store of submitted tiny-live order groups.
+# Durable statuses that keep a rehearsal blocked from being (re)submitted,
+# even across a process restart. ``PENDING_SUBMIT`` is written to disk
+# *before* the broker adapter is ever called (see submit_tiny_live_order), so
+# a crash between a successful broker call and this process recording that
+# success still leaves the rehearsal blocked rather than silently reusable.
+_BLOCKING_STATUSES = frozenset({
+    "PENDING_SUBMIT",
+    "SUBMITTED",
+    "SUBMITTED_NEEDS_PROPOSAL_RECONCILIATION",
+})
 
-    Also tracks which rehearsal ids have already been submitted (so a
-    rehearsal can never be submitted twice) and the daily submitted-order
-    count per strategy/session (so the daily live ORB trade cap can be
-    enforced). Order groups only ever reach this store via
+
+class ORBTinyLiveOrderStore:
+    """Thread-safe, durable store of tiny-live order groups and reservations.
+
+    Persists to ``<state_dir>/orb_tiny_live_orders.json`` (atomic
+    write-then-rename) so duplicate-submit prevention survives a process
+    restart. :func:`submit_tiny_live_order` writes a durable
+    ``PENDING_SUBMIT`` reservation here *before* the broker adapter is ever
+    called; a crash any time after that reservation is written — including
+    after a successful broker call but before this process records it —
+    leaves the rehearsal durably blocked from resubmission rather than
+    silently reusable, and never causes a second broker call.
+
+    Order groups only ever reach ``SUBMITTED`` status via
     :func:`submit_tiny_live_order`, which enforces every safety gate and
     audit-logs both success and refusal before a group ever reaches here.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, state_dir: str = "logs") -> None:
         self._lock = threading.Lock()
+        self._state_dir = Path(state_dir)
+        self._path = self._state_dir / "orb_tiny_live_orders.json"
         self._groups: Dict[str, ORBTinyLiveOrderGroup] = {}
+        self._pending: Dict[str, Dict[str, Any]] = {}
         self._by_rehearsal: Dict[str, str] = {}
+        self._load()
 
+    # ---- persistence ---------------------------------------------------
+    def _load(self) -> None:
+        if not self._path.exists():
+            return
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover - defensive
+            logger.error("Failed to load ORB tiny-live order state: %s", exc)
+            return
+        for order_group_id, fields in (data.get("groups") or {}).items():
+            try:
+                self._groups[order_group_id] = ORBTinyLiveOrderGroup(**fields)
+            except TypeError:  # pragma: no cover - defensive against schema drift
+                logger.error("Skipping unreadable tiny-live order group %s", order_group_id)
+        self._pending = dict(data.get("pending") or {})
+        self._by_rehearsal = dict(data.get("by_rehearsal") or {})
+
+    def _save(self) -> None:
+        try:
+            self._state_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "groups": {k: asdict(v) for k, v in self._groups.items()},
+                "pending": self._pending,
+                "by_rehearsal": self._by_rehearsal,
+            }
+            content = json.dumps(payload, indent=2, sort_keys=True)
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(content, encoding="utf-8")
+            os.replace(tmp, self._path)
+        except OSError as exc:  # pragma: no cover - defensive
+            logger.error("Failed to save ORB tiny-live order state: %s", exc)
+
+    def _status_of(self, order_group_id: str) -> Optional[str]:
+        group = self._groups.get(order_group_id)
+        if group is not None:
+            return group.status
+        pending = self._pending.get(order_group_id)
+        return pending.get("status") if pending is not None else None
+
+    # ---- durable idempotency --------------------------------------------
     def is_rehearsal_submitted(self, rehearsal_id: str) -> bool:
         with self._lock:
-            return rehearsal_id in self._by_rehearsal
+            order_group_id = self._by_rehearsal.get(rehearsal_id)
+            if order_group_id is None:
+                return False
+            return self._status_of(order_group_id) in _BLOCKING_STATUSES
 
-    def add(self, group: ORBTinyLiveOrderGroup) -> ORBTinyLiveOrderGroup:
+    def reserve_pending(
+        self,
+        order_group_id: str,
+        *,
+        rehearsal_id: str,
+        proposal_id: str,
+        strategy_name: str,
+        session_date: str,
+        now_fn: Optional[Callable[[], datetime]] = None,
+    ) -> bool:
+        """Durably reserve ``rehearsal_id`` before the broker adapter is called.
+
+        Returns ``False`` if a prior non-terminal reservation/submission
+        already exists for this rehearsal — including one reloaded from disk
+        after a process restart — so the caller must refuse without ever
+        calling the broker adapter.
+        """
+        now = now_fn or (lambda: datetime.now(timezone.utc))
         with self._lock:
+            existing = self._by_rehearsal.get(rehearsal_id)
+            if existing is not None and self._status_of(existing) in _BLOCKING_STATUSES:
+                return False
+            self._pending[order_group_id] = {
+                "order_group_id": order_group_id,
+                "rehearsal_id": rehearsal_id,
+                "proposal_id": proposal_id,
+                "strategy_name": strategy_name,
+                "session_date": session_date,
+                "status": "PENDING_SUBMIT",
+                "created_at": now().isoformat(),
+            }
+            self._by_rehearsal[rehearsal_id] = order_group_id
+            self._save()
+            return True
+
+    def release_pending(self, order_group_id: str) -> None:
+        """Release a reservation that never resulted in a broker order.
+
+        Only safe when the broker adapter itself reported failure (raised,
+        or refused to confirm broker-visible protection) — never after a
+        successful submit, where the reservation must stay durable.
+        """
+        with self._lock:
+            pending = self._pending.pop(order_group_id, None)
+            if pending is not None and self._by_rehearsal.get(pending["rehearsal_id"]) == order_group_id:
+                del self._by_rehearsal[pending["rehearsal_id"]]
+            self._save()
+
+    def finalize_submitted(self, group: ORBTinyLiveOrderGroup) -> ORBTinyLiveOrderGroup:
+        """Durably persist a successful submit, closing out its reservation."""
+        with self._lock:
+            self._pending.pop(group.order_group_id, None)
             self._groups[group.order_group_id] = group
             self._by_rehearsal[group.rehearsal_id] = group.order_group_id
+            self._save()
         return group
+
+    def mark_needs_reconciliation(self, order_group_id: str) -> Optional[ORBTinyLiveOrderGroup]:
+        """Flag a submitted order group as needing proposal reconciliation.
+
+        Used when the broker submit succeeded but the source proposal could
+        not be transitioned to ``EXECUTED`` afterwards. The order group stays
+        durably blocking (it can never be resubmitted) and its status makes
+        the unreconciled condition visible instead of only a log line.
+        """
+        with self._lock:
+            group = self._groups.get(order_group_id)
+            if group is not None:
+                group.status = "SUBMITTED_NEEDS_PROPOSAL_RECONCILIATION"
+                self._save()
+            return group
+
+    def add(self, group: ORBTinyLiveOrderGroup) -> ORBTinyLiveOrderGroup:
+        """Backward-compatible alias for :meth:`finalize_submitted`."""
+        return self.finalize_submitted(group)
 
     def get(self, order_group_id: str) -> Optional[ORBTinyLiveOrderGroup]:
         with self._lock:
@@ -563,16 +755,22 @@ class ORBTinyLiveOrderStore:
         return sorted(items, key=lambda g: g.created_at)
 
     def daily_count(self, strategy_name: str, session_date: str) -> int:
-        """Number of tiny-live order groups already submitted for this session."""
+        """Number of tiny-live order groups already submitted/pending for this session."""
         with self._lock:
-            return sum(
+            groups_count = sum(
                 1 for g in self._groups.values()
                 if g.strategy_name == strategy_name and g.session_date == session_date
             )
+            pending_count = sum(
+                1 for p in self._pending.values()
+                if p.get("strategy_name") == strategy_name and p.get("session_date") == session_date
+            )
+            return groups_count + pending_count
 
     def mark_cancelled(self, order_group_id: str) -> Optional[ORBTinyLiveOrderGroup]:
         with self._lock:
             group = self._groups.get(order_group_id)
             if group is not None:
                 group.status = "CANCELLED"
+                self._save()
             return group

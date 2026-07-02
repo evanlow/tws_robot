@@ -231,6 +231,70 @@ def test_daily_cap_blocks_second_live_trade(client, monkeypatch):
     assert adapter.submit_calls == 1
 
 
+# ---- durable idempotency / process-restart safety -------------------------
+
+def test_second_submit_refused_after_simulated_process_restart(client, monkeypatch):
+    """A successful submit must stay durably blocked across a "process restart".
+
+    Simulates the in-memory tiny-live order store being lost (e.g. a crash)
+    by dropping the process-level singleton and rebuilding it from the
+    durable on-disk state. The resubmit attempt must be refused without
+    calling the broker adapter again.
+    """
+    adapter = FakeORBLiveOrderAdapter()
+    rehearsal_id, _proposal = _build_rehearsal(client, monkeypatch, adapter=adapter)
+
+    first = _submit_tiny_live(client, rehearsal_id)
+    assert first.status_code == 201
+
+    # Simulate process restart: drop the in-memory singleton so the next
+    # access rebuilds it from the durable on-disk state only.
+    with client.application.app_context():
+        api._tiny_live_orders = None
+
+    fresh_adapter = FakeORBLiveOrderAdapter()
+    client.application.config["orb_live_order_adapter"] = fresh_adapter
+
+    second = _submit_tiny_live(client, rehearsal_id)
+    assert second.status_code == 409
+    assert second.get_json()["reason"] == "rehearsal_already_submitted"
+    assert fresh_adapter.submit_calls == 0
+
+
+def test_mark_executed_failure_flags_reconciliation_not_silent(client, monkeypatch):
+    """If marking the proposal EXECUTED fails, the order group must record it.
+
+    The submit still succeeds (the broker order was placed), but the group
+    must be durably flagged as needing reconciliation rather than only
+    logged, and a resubmit for the same rehearsal must still be refused.
+    """
+    from autonomous.orb_proposals import ProposalError
+
+    adapter = FakeORBLiveOrderAdapter()
+    rehearsal_id, _proposal = _build_rehearsal(client, monkeypatch, adapter=adapter)
+
+    def _raise_mark_executed(*args, **kwargs):
+        raise ProposalError("simulated proposal-store failure")
+
+    monkeypatch.setattr(
+        api.get_proposal_store(), "mark_executed", _raise_mark_executed,
+    )
+
+    res = _submit_tiny_live(client, rehearsal_id)
+    assert res.status_code == 201
+    body = res.get_json()
+    assert body["status"] == "SUBMITTED_NEEDS_PROPOSAL_RECONCILIATION"
+    assert adapter.submit_calls == 1
+
+    # Still durably blocked from resubmission.
+    fresh_adapter = FakeORBLiveOrderAdapter()
+    client.application.config["orb_live_order_adapter"] = fresh_adapter
+    second = _submit_tiny_live(client, rehearsal_id)
+    assert second.status_code == 409
+    assert second.get_json()["reason"] == "rehearsal_already_submitted"
+    assert fresh_adapter.submit_calls == 0
+
+
 # ---- fail-closed gates -----------------------------------------------------
 
 def test_account_mismatch_refused(client, monkeypatch):
